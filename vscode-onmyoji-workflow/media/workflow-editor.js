@@ -13,12 +13,13 @@
   const EDGE_KIND_LABELS = { on_success: '成功', on_failure: '失败', on_skip: '跳过' };
   const TOP_KEYS = ['schema_version', 'id', 'version', 'reference_resolution', 'entry', 'limits', 'inputs_schema', 'steps'];
   const STEP_KEYS = ['id', 'action', 'when', 'with', 'retry', 'timeout_seconds', 'on_success', 'on_failure', 'on_skip'];
-  const NODE_W = 280;
-  const NODE_H = 64;
-  const TERMINAL_W = 220;
+  const NODE_W = 300; // 节点卡片宽度（UE 蓝图风格面板）
+  const NODE_H = 108; // 节点卡片高度
+  const HEAD_H = 28; // 彩色标题栏高度
+  const TERMINAL_W = 200;
   const ROW_GAP = 96;
   const MARGIN = 40;
-  const PORT_R = 7;
+  const PORT_R = 6;
   const CONNECT_HIT = 18; // 放线落点命中半径（世界坐标）
 
   // 只改变编辑器中的显示文本；JSON 字段名和 $ref 值仍使用英文。
@@ -251,6 +252,21 @@
     return state.nodePos[layoutPos.id] || { x: layoutPos.x, y: layoutPos.y };
   }
 
+  /** 步骤节点右侧输出引脚（按 EDGE_KINDS 顺序从上到下）。 */
+  function outputPinY(index) {
+    return HEAD_H + 22 + index * 24; // 50 / 74 / 98（相对节点顶部）
+  }
+
+  /** 步骤节点左侧执行输入引脚。 */
+  function stepInputPinY() {
+    return HEAD_H + 22;
+  }
+
+  /** 终态节点左侧执行输入引脚（主体竖直居中）。 */
+  function terminalInputPinY() {
+    return HEAD_H + (NODE_H - HEAD_H) / 2;
+  }
+
   // ---------- SVG 渲染 ----------
   function svgEl(tag, attrs) {
     const el = document.createElementNS(NS, tag);
@@ -277,6 +293,16 @@
     svg.setAttribute('height', viewH);
     const viewport = svgEl('g', { class: 'viewport', transform: `translate(${state.panX},${state.panY}) scale(${state.zoom})` });
     svg.appendChild(viewport);
+    // 蓝图点阵网格（随缩放一起缩放）
+    const defs = svgEl('defs', {});
+    const pattern = svgEl('pattern', { id: 'bp-grid', width: 24, height: 24, patternUnits: 'userSpaceOnUse' });
+    pattern.appendChild(svgEl('circle', { cx: 1.5, cy: 1.5, r: 1.3, fill: '#ffffff', opacity: 0.09 }));
+    defs.appendChild(pattern);
+    svg.appendChild(defs);
+    // 网格矩形铺满可视区（考虑缩放，用户坐标 = 屏幕坐标 / zoom）
+    const gridW = Math.max(layout.width, (wrap.clientWidth || 800) / state.zoom);
+    const gridH = Math.max(layout.height, ((wrap.clientHeight || 600) - 24) / state.zoom);
+    viewport.appendChild(svgEl('rect', { class: 'grid-bg', width: gridW, height: gridH }));
 
     if (!state.raw) {
       const msg = svgEl('text', { x: 24, y: 40, 'font-size': 14, fill: '#e53935' });
@@ -285,25 +311,29 @@
       return;
     }
 
-    // edges
+    // edges（从源节点右侧输出引脚，到目标节点左侧输入引脚）
     for (const edge of layout.edges) {
       const from = effectivePos(layout.positions[edge.from]);
       const to = effectivePos(layout.positions[edge.to]);
-      const fromW = edge.from.startsWith('$') ? TERMINAL_W : NODE_W;
-      const toW = edge.to.startsWith('$') ? TERMINAL_W : NODE_W;
-      const sx = from.x + fromW / 2;
-      const sy = from.y + NODE_H;
-      const tx = to.x + toW / 2;
-      const ty = to.y;
+      const kindIndex = EDGE_KINDS.indexOf(edge.kind);
+      const sx = from.x + NODE_W;
+      const sy = from.y + outputPinY(Math.max(0, kindIndex));
+      const tx = to.x;
+      const toNode = layout.nodes.find((n) => n.id === edge.to);
+      const ty = to.y + (toNode && toNode.kind === 'terminal' ? terminalInputPinY() : stepInputPinY());
+      const bend = Math.max(32, Math.min(160, Math.abs(tx - sx) * 0.4));
       const mx = (sx + tx) / 2;
       const my = (sy + ty) / 2;
-      const d = `M ${sx} ${sy} C ${sx} ${sy + 40}, ${tx} ${ty - 40}, ${tx} ${ty}`;
+      const d = `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`;
       const g = svgEl('g', { class: 'edge ' + edge.kind + (edge.explicit ? '' : ' fallthrough') });
       const path = svgEl('path', { d, class: edge.explicit ? 'line' : '' });
       g.appendChild(path);
-      const label = svgEl('text', { x: mx, y: my - 6, 'text-anchor': 'middle' });
-      label.textContent = edge.label;
-      g.appendChild(label);
+      // 只有默认跳转显示文字标签；显式连线靠引脚颜色识别，中点留给 ✕ 删除手柄
+      if (!edge.explicit) {
+        const label = svgEl('text', { x: mx, y: my - 8, 'text-anchor': 'middle', class: 'edge-label' });
+        label.textContent = edge.label;
+        g.appendChild(label);
+      }
       // 显式连线的删除手柄（悬停显示，点击移除该跳转）
       if (edge.explicit) {
         const del = svgEl('g', { class: 'edge-del', transform: `translate(${mx},${my})` });
@@ -321,13 +351,15 @@
       viewport.appendChild(g);
     }
 
-    // 连线橡皮筋（正在拖拽连线时）
+    // 连线橡皮筋（正在拖拽连线时，从输出引脚开始）
     if (state.drag && state.drag.mode === 'connect') {
       const from = effectivePos(layout.positions[state.drag.fromId]);
-      const sx = from.x + NODE_W / 2;
-      const sy = from.y + NODE_H;
-      const c = state.drag.cursorWorld || { x: sx, y: sy + 80 };
-      const d = `M ${sx} ${sy} C ${sx} ${sy + 40}, ${c.x} ${c.y - 40}, ${c.x} ${c.y}`;
+      const kindIndex = EDGE_KINDS.indexOf(state.drag.edgeKind);
+      const sx = from.x + NODE_W;
+      const sy = from.y + outputPinY(Math.max(0, kindIndex));
+      const c = state.drag.cursorWorld || { x: sx + 100, y: sy };
+      const bend = Math.max(32, Math.min(160, Math.abs(c.x - sx) * 0.4));
+      const d = `M ${sx} ${sy} C ${sx + bend} ${sy}, ${c.x - bend} ${c.y}, ${c.x} ${c.y}`;
       const g = svgEl('g', { class: 'edge connect ' + state.drag.edgeKind });
       g.appendChild(svgEl('path', { d }));
       const label = svgEl('text', { x: (sx + c.x) / 2, y: (sy + c.y) / 2 - 8, 'text-anchor': 'middle' });
@@ -336,69 +368,94 @@
       viewport.appendChild(g);
     }
 
-    // nodes
+    // nodes（UE 蓝图风格卡片：彩色标题栏 + 主体 + 左右执行引脚）
     for (const node of layout.nodes) {
       const pos = effectivePos(layout.positions[node.id]);
       const isTerminal = node.kind === 'terminal';
       const w = isTerminal ? TERMINAL_W : NODE_W;
+      const kindClass = isTerminal ? 'kind-terminal' : node.isEntry ? 'kind-entry' : 'kind-step';
+      const isDrag = state.drag && state.drag.mode === 'node' && state.drag.nodeId === node.id;
+      const isConnectTarget = state.connectHoverId === node.id;
       const g = svgEl('g', {
-        class: 'node' + (isTerminal ? ' terminal' : '') + (state.drag && state.drag.mode === 'node' && state.drag.nodeId === node.id ? ' dragging' : ''),
+        class: 'node ' + kindClass + (isTerminal ? ' terminal' : '') + (isDrag ? ' dragging' : '') + (isConnectTarget ? ' connect-target' : ''),
         transform: `translate(${pos.x},${pos.y})`,
         style: 'cursor: grab',
       });
       g.dataset.id = node.id;
+      const step = stepsOf()[node.index];
       const nodeTitle = svgEl('title', {});
-      nodeTitle.textContent = '拖动卡片调整位置；点击卡片选择步骤';
+      nodeTitle.textContent = isTerminal ? '执行终点：' + node.label : '拖动卡片调整位置；点击卡片选择步骤；从右侧彩色引脚拖出连线';
       g.appendChild(nodeTitle);
-      const rect = svgEl('rect', {
-        class: 'node-box' + (node.isEntry ? ' entry' : '') + (state.selectedId === node.id ? ' selected' : ''),
-        width: w,
-        height: NODE_H,
-        rx: 8,
-        ry: 8,
-      });
-      if (isTerminal) rect.setAttribute('fill', TERMINAL_COLORS[node.id] || '#616161');
-      g.appendChild(rect);
+      // 面板主体
+      const box = svgEl('rect', { class: 'node-box' + (state.selectedId === node.id ? ' selected' : ''), width: w, height: NODE_H, rx: 7, ry: 7 });
+      g.appendChild(box);
+      // 彩色标题栏（底部两角收方）
+      const head = svgEl('rect', { class: 'node-head', width: w, height: HEAD_H, rx: 7, ry: 7 });
+      g.appendChild(head);
+      g.appendChild(svgEl('rect', { class: 'node-head-sq', x: 0, y: HEAD_H - 7, width: w, height: 7 }));
+      // 标题栏文字：Action 名（终态节点为终点名）
+      const headText = svgEl('text', { x: 10, y: HEAD_H / 2 + 4, class: 'node-head-text' });
+      headText.textContent = isTerminal ? (TERMINAL_LABELS[node.id] || node.id) : (node.action || node.label);
+      g.appendChild(headText);
       if (node.isEntry) {
-        const badge = svgEl('text', { x: w - 8, y: 12, 'text-anchor': 'end', class: 'entry-badge' });
+        const badge = svgEl('text', { x: w - 44, y: HEAD_H / 2 + 4, 'text-anchor': 'end', class: 'entry-badge' });
         badge.textContent = '入口';
         g.appendChild(badge);
       }
-      const idText = svgEl('text', { x: 12, y: isTerminal ? NODE_H / 2 + 4 : 26, class: 'node-id' });
-      idText.textContent = node.label;
-      g.appendChild(idText);
-      if (!isTerminal && node.action) {
-        const act = svgEl('text', { x: 12, y: 46, class: 'node-action' });
-        act.textContent = node.action;
-        g.appendChild(act);
+      if (!isTerminal) {
+        // 主体：步骤 id
+        const idText = svgEl('text', { x: 12, y: HEAD_H + 22, class: 'node-id' });
+        idText.textContent = node.label;
+        g.appendChild(idText);
+        // 参数摘要（首个 with 参数）
+        if (step && step.with && typeof step.with === 'object') {
+          const keys = Object.keys(step.with);
+          if (keys.length) {
+            const first = keys[0];
+            const v = step.with[first];
+            const shown = v !== null && typeof v === 'object' ? (v.$ref || JSON.stringify(v)) : String(v);
+            const sum = svgEl('text', { x: 12, y: HEAD_H + 38, class: 'node-params' });
+            sum.textContent = first + ': ' + shown;
+            g.appendChild(sum);
+          }
+        }
+      } else {
+        const idText = svgEl('text', { x: 12, y: terminalInputPinY() + 4, class: 'node-id terminal-id' });
+        idText.textContent = node.label;
+        g.appendChild(idText);
       }
       const issues = stepIssueCount(node.index);
       if (issues > 0) {
-        const mark = svgEl('text', { x: w - 8, y: 28, 'text-anchor': 'end', class: 'issue-mark' });
+        const mark = svgEl('text', { x: w - 132, y: HEAD_H + 20, 'text-anchor': 'end', class: 'issue-mark' });
         mark.textContent = '⚠' + issues;
         g.appendChild(mark);
       }
-      // 输入端口（顶部）：作为连线的落点
-      const inPort = svgEl('circle', {
-        class: 'port port-in' + (state.connectHoverId === node.id ? ' hover' : ''),
-        cx: w / 2,
-        cy: 0,
-        r: PORT_R,
-      });
+      // 执行输入引脚（左侧中部）：作为连线的落点
+      const inY = isTerminal ? terminalInputPinY() : stepInputPinY();
+      const inPort = svgEl('circle', { class: 'port port-in', cx: 0, cy: inY, r: PORT_R });
+      const inTip = svgEl('title', {});
+      inTip.textContent = '执行输入：接收上游步骤的执行流';
+      inPort.appendChild(inTip);
       inPort.addEventListener('mousedown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         selectNode(node.id);
       });
       g.appendChild(inPort);
-      // 输出端口（底部）：拖拽起点（仅步骤有；终点不可再输出）
+      // 执行输出引脚（右侧，仅步骤）：成功 / 失败 / 跳过，各带颜色与标签
       if (!isTerminal) {
-        const outPort = svgEl('circle', { class: 'port port-out', cx: w / 2, cy: NODE_H, r: PORT_R });
-        const title = svgEl('title', {});
-        title.textContent = '拖拽连线：默认=成功；按住 Shift=失败；按住 Alt=跳过';
-        outPort.appendChild(title);
-        outPort.addEventListener('mousedown', (e) => startConnectDrag(e, node.id));
-        g.appendChild(outPort);
+        EDGE_KINDS.forEach((kind, index) => {
+          const py = outputPinY(index);
+          const pin = svgEl('circle', { class: 'port port-out port-out-' + kind.replace('on_', ''), cx: w, cy: py, r: PORT_R });
+          const tip = svgEl('title', {});
+          tip.textContent = '输出：' + (EDGE_KIND_LABELS[kind] || kind) + '（' + kind + '）— 拖到目标节点左侧输入引脚';
+          pin.appendChild(tip);
+          pin.addEventListener('mousedown', (e) => startConnectDrag(e, node.id, kind));
+          g.appendChild(pin);
+          const lab = svgEl('text', { x: w - 14, y: py + 3, 'text-anchor': 'end', class: 'pin-label ' + kind.replace('on_', '') });
+          lab.textContent = EDGE_KIND_LABELS[kind] || kind;
+          g.appendChild(lab);
+        });
       }
       g.addEventListener('mousedown', (e) => startDrag(e, node.id));
       viewport.appendChild(g);
@@ -457,8 +514,8 @@
     };
   }
 
-  /** 从输出端口开始拖拽连线。 */
-  function startConnectDrag(e, fromId) {
+  /** 从右侧输出引脚开始拖拽连线；kind 由引脚决定（on_success / on_failure / on_skip）。 */
+  function startConnectDrag(e, fromId, kind) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -466,7 +523,7 @@
     state.drag = {
       mode: 'connect',
       fromId,
-      edgeKind: 'on_success',
+      edgeKind: kind || 'on_success',
       cursorWorld: screenToWorld(e),
       moved: false,
     };
@@ -491,7 +548,6 @@
       renderAll();
     } else if (state.drag.mode === 'connect') {
       state.drag.cursorWorld = screenToWorld(e);
-      state.drag.edgeKind = e.shiftKey ? 'on_failure' : e.altKey ? 'on_skip' : 'on_success';
       const hit = nodeAtWorld(state.drag.cursorWorld);
       state.connectHoverId = hit && hit !== state.drag.fromId ? hit : null;
       renderAll();
@@ -508,13 +564,8 @@
       const target = wasDrag.cursorWorld ? nodeAtWorld(wasDrag.cursorWorld) : null;
       state.connectHoverId = null;
       if (target && target !== wasDrag.fromId) {
-        // 松开瞬间按住修饰键直接确认类型，否则弹出菜单选择
-        const kindByMods = e && e.shiftKey ? 'on_failure' : e && e.altKey ? 'on_skip' : null;
-        if (kindByMods) {
-          applyConnection(wasDrag.fromId, target, kindByMods);
-        } else {
-          showConnectMenu(e, wasDrag.fromId, target);
-        }
+        // 跳转类型已由起始引脚决定，直接连线
+        applyConnection(wasDrag.fromId, target, wasDrag.edgeKind);
       }
       renderAll();
     }
@@ -1120,8 +1171,16 @@
       }
     });
 
-    $('btn-add').addEventListener('click', () => renderAddModal());
-    $('btn-save').addEventListener('click', () => save());
+   $('btn-add').addEventListener('click', () => renderAddModal());
+   $('btn-new').addEventListener('click', () => vscode.postMessage({ type: 'newWorkflow' }));
+    $('btn-run').addEventListener('click', () => {
+      if (state.dirty) {
+        toast('请先保存工作流，再执行');
+        return;
+      }
+      vscode.postMessage({ type: 'runWorkflow' });
+    });
+   $('btn-save').addEventListener('click', () => save());
     $('btn-open').addEventListener('click', () => vscode.postMessage({ type: 'openFile' }));
     $('btn-reload').addEventListener('click', () => {
       state.dirty = false;

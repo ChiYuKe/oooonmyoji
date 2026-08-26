@@ -108,8 +108,10 @@ export class WebviewManager implements vscode.Disposable {
   <span id="file-label" title=""></span>
   <span id="dirty-badge" class="badge hidden">未保存</span>
   <span id="issue-badge" class="badge"></span>
-  <span class="spacer"></span>
-  <button id="btn-open" title="在编辑器里打开 JSON 文件">打开 JSON</button>
+ <span class="spacer"></span>
+ <button id="btn-new" class="primary" title="创建一个新的工作流 JSON 文件">＋ 新建工作流</button>
+  <button id="btn-run" class="primary" title="执行当前已保存的工作流">▶ 执行工作流</button>
+ <button id="btn-open" title="在编辑器里打开 JSON 文件">打开 JSON</button>
   <button id="btn-reload" title="丢弃未保存修改，重新从文件加载">重新加载</button>
   <button id="btn-add" class="primary" title="新增一个步骤节点">＋ 新增步骤</button>
   <button id="btn-save" class="primary" title="把当前模型写回 JSON 文件">保存到 JSON</button>
@@ -121,9 +123,9 @@ export class WebviewManager implements vscode.Disposable {
       <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
     </div>
     <div id="legend">
-      <span class="lg lg-ok">成功</span><span class="lg lg-err">失败</span><span class="lg lg-skip">跳过</span><span class="lg lg-fall">默认跳转</span>
-      <span class="hint">滚轮缩放 · 拖拽平移 · 拖节点摆位 · 从节点底部 ⚪ 拖到目标连线（默认成功，Shift=失败，Alt=跳过）· 悬停连线点 ✕ 删除</span>
-    </div>
+     <span class="lg lg-ok">成功</span><span class="lg lg-err">失败</span><span class="lg lg-skip">跳过</span><span class="lg lg-fall">默认跳转</span>
+      <span class="hint">滚轮缩放 · 拖拽平移 · 拖卡片摆位 · 从卡片右侧彩色引脚拖到目标左侧 ⚪ 连线（绿=成功 红=失败 橙=跳过）· 悬停连线中点 ✕ 删除</span>
+   </div>
   </section>
   <aside id="inspector">
     <div id="inspector-empty">点击左侧节点查看/编辑；或点击「＋ 新增步骤」。</div>
@@ -190,13 +192,19 @@ export class WebviewManager implements vscode.Disposable {
         vscode.window.setStatusBarMessage('工作流已保存', 3000);
         break;
       }
-      case 'openFile':
-        if (this.docUri) {
-          const doc = await vscode.workspace.openTextDocument(this.docUri);
-          await vscode.window.showTextDocument(doc, { preview: false });
-        }
+     case 'openFile':
+       if (this.docUri) {
+         const doc = await vscode.workspace.openTextDocument(this.docUri);
+         await vscode.window.showTextDocument(doc, { preview: false });
+       }
+       break;
+     case 'newWorkflow':
+       await vscode.commands.executeCommand('onmyoji.createWorkflow');
+       break;
+      case 'runWorkflow':
+        await vscode.commands.executeCommand('onmyoji.runWorkflow', this.docUri);
         break;
-      case 'error':
+    case 'error':
         vscode.window.showErrorMessage(`Onmyoji 工作流编辑器：${String(message.message ?? '')}`);
         break;
       default:

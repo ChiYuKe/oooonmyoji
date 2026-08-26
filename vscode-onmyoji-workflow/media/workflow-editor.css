@@ -120,52 +120,101 @@ main {
 .lg-fall::before { border-color: var(--fall); border-top-style: dashed; }
 .hint { color: var(--vscode-descriptionForeground, #9d9d9d); margin-left: auto; }
 
-/* SVG 图形样式 */
+/* 蓝图画布网格 */
+.grid-bg { fill: url(#bp-grid); }
+
+/* SVG 图形样式（UE 蓝图风格）
+ * 节点：面板 + 彩色标题栏；左侧执行输入引脚，右侧三个彩色输出引脚
+ * （绿=成功 / 红=失败 / 橙=跳过），引脚即连线起点，颜色即跳转类型。
+ */
+.node {
+  cursor: grab;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45));
+}
+.node.dragging { cursor: grabbing; }
+.node:hover { filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.6)) brightness(1.05); }
+
 .node rect.node-box {
   fill: var(--node-bg);
-  stroke: var(--node-border);
-  stroke-width: 1.5;
-  rx: 8;
-  ry: 8;
+  stroke: #0f141a;
+  stroke-width: 2;
 }
 .node rect.node-box.selected { stroke: var(--selected); stroke-width: 2.5; }
-.node rect.node-box.entry { stroke: var(--accent); stroke-width: 2; }
-.node.terminal rect.node-box { stroke-width: 1.5; }
-.node { cursor: grab; }
-.node.dragging { cursor: grabbing; }
-.node.terminal text { font-weight: 600; }
+.node.connect-target rect.node-box { stroke: var(--selected); stroke-width: 2.5; }
+
+/* 标题栏颜色：入口=事件橙，步骤=钢蓝，终态按类型 */
+.node rect.node-head,
+.node rect.node-head-sq { fill: #34597a; }
+.node.kind-entry rect.node-head,
+.node.kind-entry rect.node-head-sq { fill: #b04a1f; }
+.node.kind-step rect.node-head,
+.node.kind-step rect.node-head-sq { fill: #2b5c8a; }
+.node.kind-terminal rect.node-head,
+.node.kind-terminal rect.node-head-sq { fill: #3d434b; }
+.node.kind-terminal[data-id='$success'] rect.node-head,
+.node.kind-terminal[data-id='$success'] rect.node-head-sq { fill: #1e6b31; }
+.node.kind-terminal[data-id='$failure'] rect.node-head,
+.node.kind-terminal[data-id='$failure'] rect.node-head-sq { fill: #8f2626; }
+.node.kind-terminal[data-id='$cancelled'] rect.node-head,
+.node.kind-terminal[data-id='$cancelled'] rect.node-head-sq { fill: #4a4f55; }
+
+.node text.node-head-text { fill: #ffffff; font-size: 11.5px; font-weight: 700; }
 .node text.node-id { fill: var(--node-fg); font-size: 13px; font-weight: 600; }
-.node text.node-action { fill: var(--vscode-descriptionForeground, #9d9d9d); font-size: 11px; }
-.node text.entry-badge { fill: var(--accent-fg); font-size: 9px; }
-.node text.issue-mark { fill: var(--err); font-size: 11px; font-weight: 700; }
-
-.edge path { fill: none; }
-.edge.on_success path { stroke: var(--ok); stroke-width: 2; }
-.edge.on_failure path { stroke: var(--err); stroke-width: 2; }
-.edge.on_skip path { stroke: var(--skip); stroke-width: 2; }
-.edge.fallthrough path { stroke: var(--fall); stroke-width: 1.5; stroke-dasharray: 5 4; }
-.edge text { font-size: 10px; fill: var(--vscode-descriptionForeground, #9d9d9d); }
-.edge.highlight path { filter: brightness(1.4); stroke-width: 3; }
-.edge.on_success path.highlight { stroke: var(--ok); }
-.edge path.arrow { fill: none; stroke: inherit; }
-
-/* 端口 */
-.port {
-  fill: var(--accent);
-  stroke: var(--bg);
-  stroke-width: 2;
-  opacity: 0.9;
-  cursor: crosshair;
+.node text.terminal-id { fill: var(--vscode-descriptionForeground, #9d9d9d); font-size: 11.5px; }
+.node text.node-params {
+  fill: var(--vscode-descriptionForeground, #9d9d9d);
+  font-size: 9.5px;
+  pointer-events: none;
 }
-.port:hover, .port.hover { fill: #ffffff; }
-.port.port-in { cursor: pointer; }
+.node text.entry-badge { fill: #ffd9a0; font-size: 9px; font-weight: 700; }
+.node text.issue-mark { fill: var(--err); font-size: 10.5px; font-weight: 700; }
+
+/* 引脚 */
+.port { stroke: #0c0e11; stroke-width: 1.5; }
+.port.port-in { fill: #e8e8e8; cursor: crosshair; }
+.port.port-in:hover { fill: #ffffff; }
+.node.connect-target .port.port-in { fill: #ffffff; stroke: var(--selected); stroke-width: 2.5; }
+.port.port-out { cursor: crosshair; }
+.port-out-success { fill: var(--ok); }
+.port-out-failure { fill: var(--err); }
+.port-out-skip { fill: var(--skip); }
+.port.port-out:hover { filter: brightness(1.45); }
+
+.node text.pin-label { font-size: 8.5px; font-weight: 600; pointer-events: none; }
+.node text.pin-label.success { fill: var(--ok); }
+.node text.pin-label.failure { fill: var(--err); }
+.node text.pin-label.skip { fill: var(--skip); }
+
+/* 连线（颜色 = 跳转类型，宽度随悬停变化） */
+.edge path { fill: none; stroke-linecap: round; }
+.edge.on_success path { stroke: var(--ok); stroke-width: 2.5; }
+.edge.on_failure path { stroke: var(--err); stroke-width: 2.5; }
+.edge.on_skip path { stroke: var(--skip); stroke-width: 2.5; }
+.edge.fallthrough path { stroke: var(--fall); stroke-width: 1.75; stroke-dasharray: 6 5; }
+.edge:hover path { stroke-width: 4; }
+.edge text.edge-label {
+  font-size: 9px;
+  fill: var(--vscode-descriptionForeground, #bbbbbb);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.edge.highlight path { filter: brightness(1.4); stroke-width: 3; }
 
 /* 连线橡皮筋 */
 .edge.connect path { stroke-dasharray: 6 4; stroke-width: 2.5; fill: none; }
 .edge.connect.on_success path { stroke: var(--ok); }
 .edge.connect.on_failure path { stroke: var(--err); }
 .edge.connect.on_skip path { stroke: var(--skip); }
-.edge.connect text { font-size: 11px; font-weight: 600; }
+.edge.connect text {
+  font-size: 10px;
+  font-weight: 600;
+  fill: var(--vscode-descriptionForeground, #bbbbbb);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+}
 
 /* 连线删除手柄（悬停边时显示） */
 .edge .edge-del { visibility: hidden; cursor: pointer; }

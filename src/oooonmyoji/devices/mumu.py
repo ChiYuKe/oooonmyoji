@@ -13,10 +13,14 @@ import os
 import struct
 import time
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from ..exceptions import DeviceCaptureError, DeviceConnectionError, DeviceError, DeviceInputError
 
 
-class MumuDeviceError(RuntimeError):
+class MumuDeviceError(DeviceError):
     """无法使用 MuMu 原生设备接口时抛出的异常。"""
 
 
@@ -63,7 +67,7 @@ def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     )
 
 
-def write_bgra_png(path: Path, width: int, height: int, pixels: object) -> None:
+def write_bgra_png(path: Path, width: int, height: int, pixels: Any) -> None:
     """将原生 BGRA 画面写成完成垂直校正的 PNG 文件。"""
 
     row_size = width * 4
@@ -103,6 +107,15 @@ class Frame:
         return self.width * self.height * 4
 
 
+@dataclass(frozen=True)
+class CaptureTiming:
+    """Optional timing breakdown for one native capture call."""
+
+    dll_call_ms: float
+    validation_ms: float
+    total_ms: float
+
+
 class MumuDevice:
     """可复用的 MuMu 原生截图和输入连接。"""
 
@@ -111,6 +124,7 @@ class MumuDevice:
         mumu_path: Path | str | None = None,
         instance_index: int = 0,
         package: str | None = None,
+        capture_timing: bool = False,
     ) -> None:
         if os.name != "nt":
             raise MumuDeviceError("MuMu native IPC is supported on Windows only")
@@ -120,9 +134,15 @@ class MumuDevice:
             raise MumuDeviceError("MuMu installation was not found; pass mumu_path")
         self.mumu_path = resolved_path.resolve()
         self.instance_index = instance_index
+        self.instance_id = str(instance_index)
         self.package = package
-        self.dll_path = find_renderer_dll(self.mumu_path)
-        self._dll_dirs: list[object] = []
+        self.capture_timing = capture_timing
+        self.last_capture_timing: CaptureTiming | None = None
+        dll_path = find_renderer_dll(self.mumu_path)
+        if dll_path is None:
+            raise MumuDeviceError("external_renderer_ipc.dll was not found")
+        self.dll_path = dll_path
+        self._dll_dirs: list[Any] = []
         for directory in (
             self.dll_path.parent,
             self.mumu_path / "nx_main",
@@ -179,6 +199,13 @@ class MumuDevice:
         self.width = 0
         self.height = 0
         self._buffer: ctypes.Array[ctypes.c_ubyte] | None = None
+        self._buffer_pointer: Any | None = None
+        self._buffer_size = 0
+        self._frame: Frame | None = None
+        self._capture_width: ctypes.c_int | None = None
+        self._capture_height: ctypes.c_int | None = None
+        self._capture_width_ref: Any | None = None
+        self._capture_height_ref: Any | None = None
 
     def _function(self, name: str, restype: object, argtypes: list[object]):
         try:
@@ -195,7 +222,7 @@ class MumuDevice:
             return self
         self.handle = int(self._connect(str(self.mumu_path), self.instance_index))
         if not self.handle:
-            raise MumuDeviceError(
+            raise DeviceConnectionError(
                 f"nemu_connect failed for path={self.mumu_path}, index={self.instance_index}"
             )
 
@@ -213,36 +240,59 @@ class MumuDevice:
         )
         if result != 0 or width.value < 1 or height.value < 1:
             self.close()
-            raise MumuDeviceError(
+            raise DeviceConnectionError(
                 f"failed to query display size: result={result}, size={width.value}x{height.value}"
             )
         self.width = width.value
         self.height = height.value
         self._buffer = (ctypes.c_ubyte * (self.width * self.height * 4))()
+        self._buffer_pointer = ctypes.cast(self._buffer, ctypes.POINTER(ctypes.c_ubyte))
+        self._buffer_size = len(self._buffer)
+        self._capture_width = ctypes.c_int(self.width)
+        self._capture_height = ctypes.c_int(self.height)
+        self._capture_width_ref = ctypes.byref(self._capture_width)
+        self._capture_height_ref = ctypes.byref(self._capture_height)
+        self._frame = Frame(self.width, self.height, memoryview(self._buffer))
         return self
 
     def capture(self) -> Frame:
         """将画面捕获到复用缓冲区，并返回零拷贝视图。"""
 
         if not self.handle or self._buffer is None:
-            raise MumuDeviceError("device is not connected")
-        width = ctypes.c_int(self.width)
-        height = ctypes.c_int(self.height)
+            raise DeviceCaptureError("device is not connected")
+        if self._frame is None or self._capture_width is None or self._capture_height is None:
+            raise DeviceCaptureError("capture buffers are not initialized")
+        buffer_pointer = self._buffer_pointer
+        buffer_size = self._buffer_size
+        if buffer_pointer is None or buffer_size < 1:
+            raise DeviceCaptureError("capture buffer pointer is not initialized")
+        self._capture_width.value = self.width
+        self._capture_height.value = self.height
+        started_ns = time.perf_counter_ns() if self.capture_timing else 0
         result = self._capture_display(
             self.handle,
             self.display_id,
-            len(self._buffer),
-            ctypes.byref(width),
-            ctypes.byref(height),
-            self._buffer,
+            buffer_size,
+            self._capture_width_ref,
+            self._capture_height_ref,
+            buffer_pointer,
         )
+        dll_finished_ns = time.perf_counter_ns() if self.capture_timing else 0
         if result != 0:
-            raise MumuDeviceError(f"capture failed with result={result}")
-        if (width.value, height.value) != (self.width, self.height):
-            raise MumuDeviceError(
-                f"display size changed to {width.value}x{height.value}; reconnect required"
+            raise DeviceCaptureError(f"capture failed with result={result}")
+        if (self._capture_width.value, self._capture_height.value) != (self.width, self.height):
+            raise DeviceCaptureError(
+                "display size changed to "
+                f"{self._capture_width.value}x{self._capture_height.value}; reconnect required"
             )
-        return Frame(self.width, self.height, memoryview(self._buffer))
+        if self.capture_timing:
+            finished_ns = time.perf_counter_ns()
+            self.last_capture_timing = CaptureTiming(
+                dll_call_ms=(dll_finished_ns - started_ns) / 1_000_000,
+                validation_ms=(finished_ns - dll_finished_ns) / 1_000_000,
+                total_ms=(finished_ns - started_ns) / 1_000_000,
+            )
+        return self._frame
 
     def tap(
         self,
@@ -255,7 +305,7 @@ class MumuDevice:
         """使用可见画面坐标发送一次点击。"""
 
         if not self.handle:
-            raise MumuDeviceError("device is not connected")
+            raise DeviceInputError("device is not connected")
         if not 0 <= x < self.width or not 0 <= y < self.height:
             raise ValueError(f"tap ({x},{y}) is outside {self.width}x{self.height}")
         if hold_ms < 0:
@@ -274,7 +324,12 @@ class MumuDevice:
         else:
             up_result = int(self._finger_up(self.handle, self.display_id, pointer_id))
         if down_result != 0 or up_result != 0:
-            raise MumuDeviceError(f"tap failed: down={down_result}, up={up_result}")
+            raise DeviceInputError(f"tap failed: down={down_result}, up={up_result}")
+
+    def health_check(self) -> bool:
+        """Return whether the native connection still has a live handle."""
+
+        return bool(self.handle)
 
     def capture_png(self, path: Path | str) -> Frame:
         frame = self.capture()
@@ -286,6 +341,14 @@ class MumuDevice:
             self._disconnect(self.handle)
             self.handle = 0
         self._buffer = None
+        self._buffer_pointer = None
+        self._buffer_size = 0
+        self._frame = None
+        self._capture_width = None
+        self._capture_height = None
+        self._capture_width_ref = None
+        self._capture_height_ref = None
+        self.last_capture_timing = None
         self._close_dll_dirs()
 
     def _close_dll_dirs(self) -> None:
@@ -302,6 +365,7 @@ class MumuDevice:
 
 __all__ = [
     "Frame",
+    "CaptureTiming",
     "MumuDevice",
     "MumuDeviceError",
     "discover_mumu_path",

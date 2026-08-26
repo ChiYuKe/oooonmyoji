@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "id": "diagnostic",
+  "version": "1.0.0",
+  "reference_resolution": [1920, 1080],
+  "entry": "capture",
+  "limits": {
+    "timeout_seconds": 300,
+    "max_steps": 200
+  },
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "screenshot_name": {"type": "string", "minLength": 1, "default": "diagnostic.png"},
+      "template": {"type": "string", "minLength": 1},
+      "threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.85},
+      "roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4, "default": [0, 0, 1920, 1080]},
+      "ocr": {"type": "boolean", "default": true},
+      "click": {
+        "type": "object",
+        "properties": {
+          "enabled": {"type": "boolean", "default": false},
+          "revalidate": {"type": "boolean", "default": true},
+          "hold_ms": {"type": "integer", "minimum": 0, "default": 0}
+        },
+        "additionalProperties": false,
+        "default": {"enabled": false, "revalidate": true, "hold_ms": 0}
+      }
+    },
+    "additionalProperties": false
+  },
+  "steps": [
+    {
+      "id": "capture",
+      "action": "core.capture",
+      "on_success": "save_frame"
+    },
+    {
+      "id": "save_frame",
+      "action": "core.save_frame",
+      "with": {"name": {"$ref": "inputs.screenshot_name"}},
+      "on_success": "log_capture"
+    },
+    {
+      "id": "log_capture",
+      "action": "core.log",
+      "with": {"message": "diagnostic screenshot captured"},
+      "on_success": "find_button"
+    },
+    {
+      "id": "find_button",
+      "action": "vision.match_template",
+      "when": {"exists": {"$ref": "inputs.template"}},
+      "with": {
+        "template": {"$ref": "inputs.template"},
+        "roi": {"$ref": "inputs.roi"},
+        "threshold": {"$ref": "inputs.threshold"}
+      },
+      "on_success": "maybe_click",
+      "on_skip": "ocr"
+    },
+    {
+      "id": "maybe_click",
+      "action": "input.tap_match",
+      "when": {
+        "and": [
+          {"exists": {"$ref": "inputs.click.enabled"}},
+          {"eq": [{"$ref": "inputs.click.enabled"}, true]},
+          {"exists": {"$ref": "steps.find_button.output.0"}}
+        ]
+      },
+      "with": {
+        "match": {"$ref": "steps.find_button.output.0"},
+        "revalidate": {"$ref": "inputs.click.revalidate"},
+        "hold_ms": {"$ref": "inputs.click.hold_ms"}
+      },
+      "on_success": "ocr",
+      "on_skip": "ocr"
+    },
+    {
+      "id": "ocr",
+      "action": "vision.ocr",
+      "when": {
+        "and": [
+          {"exists": {"$ref": "inputs.ocr"}},
+          {"eq": [{"$ref": "inputs.ocr"}, true]}
+        ]
+      },
+      "with": {"roi": {"$ref": "inputs.roi"}},
+      "on_skip": "$success",
+      "on_success": "$success"
+    }
+  ]
+}

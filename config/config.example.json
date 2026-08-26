@@ -1,0 +1,107 @@
+{
+  "schema_version": 2,
+  "timezone": "Asia/Shanghai",
+  "mumu_path": null,
+  "adb_path": null,
+  "workflow_dir": "workflows",
+  "action_dir": "plugins/actions",
+  "instances": [
+    {
+      "id": "mumu-0",
+      "backend": "mumu",
+      "mumu_index": 0,
+      "adb_serial": "127.0.0.1:16384",
+      "package": "com.netease.onmyoji.wyzymnqsd_cps"
+    },
+    {
+      "id": "mumu-1",
+      "backend": "adb",
+      "adb_serial": "127.0.0.1:16416",
+      "package": "com.netease.onmyoji.wyzymnqsd_cps"
+    }
+  ],
+  "ocr": {
+    "enabled": true,
+    "language": "ch",
+    "workers": 1,
+    "request_timeout_seconds": 60,
+    "min_confidence": 0.6,
+    "use_gpu": false
+  },
+  "tasks": [
+    {
+      "id": "diagnostic-mumu-0",
+      "workflow": "diagnostic",
+      "instance": "mumu-0",
+      "inputs": {
+        "screenshot_name": "diagnostic.png",
+        "ocr": true
+      },
+      "schedule": {"type": "manual"},
+      "retry_enabled": false
+    },
+    {
+      "id": "onmyoji-smoke-mumu-0",
+      "workflow": "onmyoji_smoke",
+      "instance": "mumu-0",
+      "inputs": {
+        "screenshot_name": "onmyoji-smoke.png",
+        "ocr": true
+      },
+      "schedule": {"type": "manual"},
+      "retry_enabled": false
+    },
+    {
+      "id": "onmyoji-click-test-mumu-0",
+      "workflow": "onmyoji_click_test",
+      "instance": "mumu-0",
+      "inputs": {
+        "screenshot_before": "onmyoji-before-click.png",
+        "screenshot_after": "onmyoji-after-click.png",
+        "x": 960,
+        "y": 895,
+        "hold_ms": 50,
+        "wait_seconds": 1,
+        "ocr": true
+      },
+      "schedule": {"type": "manual"},
+      "retry_enabled": false
+    },
+    {
+      "id": "onmyoji-explore-test-mumu-0",
+      "workflow": "onmyoji_explore_verified",
+      "instance": "mumu-0",
+      "inputs": {
+        "launch_x": 1204,
+        "launch_y": 557,
+        "enter_x": 955,
+        "enter_y": 895,
+        "explore_x": 975,
+        "explore_y": 220,
+        "target_x": 173,
+        "target_y": 54,
+        "hold_ms": 50,
+        "verify_launcher_timeout": 10,
+        "verify_login_timeout": 30,
+        "verify_home_timeout": 30,
+        "verify_map_timeout": 30,
+        "verify_target_gone_timeout": 10
+      },
+      "schedule": {"type": "manual"},
+      "retry_enabled": false
+    }
+  ],
+  "scheduler": {
+    "poll_seconds": 1
+  },
+  "retry": {
+    "connection_attempts": 3,
+    "capture_attempts": 3,
+    "ocr_attempts": 2,
+    "task_attempts": 1,
+    "base_delay_seconds": 0.25,
+    "max_delay_seconds": 3
+  },
+  "log_dir": "logs",
+  "artifact_dir": "artifacts"
+}

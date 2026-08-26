@@ -10,6 +10,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, Log, Static
 
+from ...devices.lock import InstanceLock, InstanceLockError
 from ...devices.mumu import MumuDevice, MumuDeviceError, discover_mumu_path
 
 
@@ -129,13 +130,16 @@ class TuiApp(App):
         instance_index: int,
         package: str | None,
         output_dir: Path,
+        lock_dir: Path | None = None,
     ) -> None:
         super().__init__()
         self.mumu_path = mumu_path
         self.instance_index = instance_index
         self.package = package
         self.output_dir = output_dir
+        self.lock_dir = lock_dir or PROJECT_ROOT / "artifacts" / "locks"
         self.device: MumuDevice | None = None
+        self.instance_lock: InstanceLock | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="home"):
@@ -177,7 +181,7 @@ class TuiApp(App):
 
         self.query_one("#command-input", Input).value = ""
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """退出 TUI 并释放设备连接。"""
 
         self.exit()
@@ -210,14 +214,23 @@ class TuiApp(App):
 
         self.disconnect_device(silent=True)
         self._set_tip("● 正在连接 MuMu...")
+        instance_lock = InstanceLock(self.lock_dir, str(self.instance_index))
+        try:
+            instance_lock.acquire()
+        except InstanceLockError as exc:
+            self._write_log(f"连接失败：实例已被其他任务占用（{exc}）")
+            self._set_tip("● 实例已被占用")
+            return
         try:
             device = MumuDevice(self.mumu_path, self.instance_index, self.package)
             device.connect()
         except (MumuDeviceError, OSError) as exc:
+            instance_lock.release()
             self._write_log(f"连接失败：{exc}")
             self._set_tip("● 连接失败")
             return
         self.device = device
+        self.instance_lock = instance_lock
         self._refresh_status()
         self._write_log(f"已连接，分辨率 {device.width}x{device.height}。")
         self._set_tip("● 已连接，可以执行截图或点击")
@@ -228,6 +241,9 @@ class TuiApp(App):
         if self.device is not None:
             self.device.close()
             self.device = None
+        if self.instance_lock is not None:
+            self.instance_lock.release()
+            self.instance_lock = None
         self._refresh_status()
         if not silent:
             self._write_log("设备已断开。")
@@ -302,9 +318,7 @@ class TuiApp(App):
     def on_unmount(self) -> None:
         """界面退出时释放原生设备连接。"""
 
-        if self.device is not None:
-            self.device.close()
-            self.device = None
+        self.disconnect_device(silent=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -320,6 +334,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROJECT_ROOT / "tests" / "artifacts" / "screenshots",
         help="截图输出目录",
     )
+    parser.add_argument(
+        "--lock-dir",
+        type=Path,
+        default=PROJECT_ROOT / "artifacts" / "locks",
+        help="实例锁目录",
+    )
     return parser
 
 
@@ -330,5 +350,5 @@ def main() -> int:
     if args.mumu_path is None:
         print("未找到 MuMu，请使用 --mumu-path 指定安装目录。", file=sys.stderr)
         return 2
-    TuiApp(args.mumu_path, args.index, args.package, args.output_dir).run()
+    TuiApp(args.mumu_path, args.index, args.package, args.output_dir, args.lock_dir).run()
     return 0

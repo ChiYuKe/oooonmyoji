@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "id": "onmyoji_click_test",
+  "version": "1.0.0",
+  "reference_resolution": [1920, 1080],
+  "entry": "capture_before",
+  "limits": {
+    "timeout_seconds": 180,
+    "max_steps": 20
+  },
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "screenshot_before": {
+        "type": "string",
+        "minLength": 1,
+        "default": "onmyoji-before-click.png"
+      },
+      "screenshot_after": {
+        "type": "string",
+        "minLength": 1,
+        "default": "onmyoji-after-click.png"
+      },
+      "x": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 960
+      },
+      "y": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 895
+      },
+      "hold_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 50
+      },
+      "wait_seconds": {
+        "type": "number",
+        "minimum": 0,
+        "default": 1
+      },
+      "roi": {
+        "type": "array",
+        "items": {"type": "integer"},
+        "minItems": 4,
+        "maxItems": 4,
+        "default": [0, 0, 1920, 1080]
+      },
+      "ocr": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "additionalProperties": false
+  },
+  "steps": [
+    {
+      "id": "capture_before",
+      "action": "core.capture",
+      "on_success": "save_before"
+    },
+    {
+      "id": "save_before",
+      "action": "core.save_frame",
+      "with": {
+        "name": {"$ref": "inputs.screenshot_before"}
+      },
+      "on_success": "log_before"
+    },
+    {
+      "id": "log_before",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师点击测试：已保存点击前截图"
+      },
+      "on_success": "tap"
+    },
+    {
+      "id": "tap",
+      "action": "input.tap",
+      "with": {
+        "x": {"$ref": "inputs.x"},
+        "y": {"$ref": "inputs.y"},
+        "hold_ms": {"$ref": "inputs.hold_ms"}
+      },
+      "on_success": "wait_after_click"
+    },
+    {
+      "id": "wait_after_click",
+      "action": "core.sleep",
+      "with": {
+        "seconds": {"$ref": "inputs.wait_seconds"}
+      },
+      "on_success": "capture_after"
+    },
+    {
+      "id": "capture_after",
+      "action": "core.capture",
+      "on_success": "save_after"
+    },
+    {
+      "id": "save_after",
+      "action": "core.save_frame",
+      "with": {
+        "name": {"$ref": "inputs.screenshot_after"}
+      },
+      "on_success": "log_after"
+    },
+    {
+      "id": "log_after",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师点击测试：已保存点击后截图",
+        "fields": {
+          "x": {"$ref": "inputs.x"},
+          "y": {"$ref": "inputs.y"},
+          "wait_seconds": {"$ref": "inputs.wait_seconds"}
+        }
+      },
+      "on_success": "ocr_after"
+    },
+    {
+      "id": "ocr_after",
+      "action": "vision.ocr",
+      "when": {
+        "and": [
+          {"exists": {"$ref": "inputs.ocr"}},
+          {"eq": [{"$ref": "inputs.ocr"}, true]}
+        ]
+      },
+      "with": {
+        "roi": {"$ref": "inputs.roi"}
+      },
+      "on_success": "log_ocr",
+      "on_skip": "$success"
+    },
+    {
+      "id": "log_ocr",
+      "action": "core.log",
+      "when": {
+        "exists": {"$ref": "steps.ocr_after.output.0.text"}
+      },
+      "with": {
+        "message": "阴阳师点击后 OCR 已完成",
+        "fields": {
+          "first_text": {"$ref": "steps.ocr_after.output.0.text"}
+        }
+      },
+      "on_success": "$success",
+      "on_skip": "log_ocr_empty"
+    },
+    {
+      "id": "log_ocr_empty",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师点击后 OCR 未识别到文字，但点击后截图已保存"
+      },
+      "on_success": "$success"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "id": "onmyoji_explore_verified",
+  "version": "1.0.0",
+  "reference_resolution": [1920, 1080],
+  "entry": "capture_launcher",
+  "limits": {
+    "timeout_seconds": 180,
+    "max_steps": 50
+  },
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "launch_x": {"type": "integer", "minimum": 0, "default": 1204},
+      "launch_y": {"type": "integer", "minimum": 0, "default": 557},
+      "enter_x": {"type": "integer", "minimum": 0, "default": 955},
+      "enter_y": {"type": "integer", "minimum": 0, "default": 895},
+      "explore_x": {"type": "integer", "minimum": 0, "default": 975},
+      "explore_y": {"type": "integer", "minimum": 0, "default": 220},
+      "target_x": {"type": "integer", "minimum": 0, "default": 173},
+      "target_y": {"type": "integer", "minimum": 0, "default": 54},
+      "hold_ms": {"type": "integer", "minimum": 0, "default": 50},
+      "verify_launcher_timeout": {"type": "number", "minimum": 0.1, "default": 10},
+      "verify_login_timeout": {"type": "number", "minimum": 0.1, "default": 30},
+      "verify_home_timeout": {"type": "number", "minimum": 0.1, "default": 30},
+      "verify_map_timeout": {"type": "number", "minimum": 0.1, "default": 30},
+      "verify_target_gone_timeout": {"type": "number", "minimum": 0.1, "default": 10}
+    },
+    "additionalProperties": false
+  },
+  "steps": [
+    {
+      "id": "capture_launcher",
+      "action": "core.capture",
+      "on_success": "save_launcher"
+    },
+    {
+      "id": "save_launcher",
+      "action": "core.save_frame",
+      "with": {"name": "01-launcher-before.png"},
+      "on_success": "verify_launcher"
+    },
+    {
+      "id": "verify_launcher",
+      "action": "vision.wait_template",
+      "with": {
+        "template": "assets/templates/onmyoji-launcher-icon.png",
+        "timeout_seconds": {"$ref": "inputs.verify_launcher_timeout"},
+        "roi": [1080, 450, 300, 250],
+        "threshold": 0.7
+      },
+      "on_success": "tap_launch"
+    },
+    {
+      "id": "tap_launch",
+      "action": "input.tap",
+      "with": {
+        "x": {"$ref": "inputs.launch_x"},
+        "y": {"$ref": "inputs.launch_y"},
+        "hold_ms": {"$ref": "inputs.hold_ms"}
+      },
+      "on_success": "verify_login"
+    },
+    {
+      "id": "verify_login",
+      "action": "vision.wait_template",
+      "with": {
+        "template": "assets/templates/onmyoji-enter-game.png",
+        "timeout_seconds": {"$ref": "inputs.verify_login_timeout"},
+        "roi": [700, 700, 550, 300],
+        "threshold": 0.65
+      },
+      "on_success": "capture_login"
+    },
+    {
+      "id": "capture_login",
+      "action": "core.capture",
+      "on_success": "save_login"
+    },
+    {
+      "id": "save_login",
+      "action": "core.save_frame",
+      "with": {"name": "02-login-before-enter.png"},
+      "on_success": "tap_enter"
+    },
+    {
+      "id": "tap_enter",
+      "action": "input.tap",
+      "with": {
+        "x": {"$ref": "inputs.enter_x"},
+        "y": {"$ref": "inputs.enter_y"},
+        "hold_ms": {"$ref": "inputs.hold_ms"}
+      },
+      "on_success": "verify_home"
+    },
+    {
+      "id": "verify_home",
+      "action": "vision.wait_template",
+      "with": {
+        "template": "assets/templates/onmyoji-explore.png",
+        "timeout_seconds": {"$ref": "inputs.verify_home_timeout"},
+        "roi": [800, 60, 400, 300],
+        "threshold": 0.65
+      },
+      "on_success": "capture_home"
+    },
+    {
+      "id": "capture_home",
+      "action": "core.capture",
+      "on_success": "save_home"
+    },
+    {
+      "id": "save_home",
+      "action": "core.save_frame",
+      "with": {"name": "03-home-before-explore.png"},
+      "on_success": "tap_explore"
+    },
+    {
+      "id": "tap_explore",
+      "action": "input.tap",
+      "with": {
+        "x": {"$ref": "inputs.explore_x"},
+        "y": {"$ref": "inputs.explore_y"},
+        "hold_ms": {"$ref": "inputs.hold_ms"}
+      },
+      "on_success": "verify_map"
+    },
+    {
+      "id": "verify_map",
+      "action": "vision.wait_template",
+      "with": {
+        "template": "assets/templates/onmyoji-explore-target.png",
+        "timeout_seconds": {"$ref": "inputs.verify_map_timeout"},
+        "roi": [0, 0, 300, 180],
+        "threshold": 0.65
+      },
+      "on_success": "capture_map"
+    },
+    {
+      "id": "capture_map",
+      "action": "core.capture",
+      "on_success": "save_map"
+    },
+    {
+      "id": "save_map",
+      "action": "core.save_frame",
+      "with": {"name": "04-explore-before-target.png"},
+      "on_success": "tap_target"
+    },
+    {
+      "id": "tap_target",
+      "action": "input.tap",
+      "with": {
+        "x": {"$ref": "inputs.target_x"},
+        "y": {"$ref": "inputs.target_y"},
+        "hold_ms": {"$ref": "inputs.hold_ms"}
+      },
+      "on_success": "verify_target_gone"
+    },
+    {
+      "id": "verify_target_gone",
+      "action": "vision.wait_template",
+      "with": {
+        "template": "assets/templates/onmyoji-explore-target.png",
+        "timeout_seconds": {"$ref": "inputs.verify_target_gone_timeout"},
+        "present": false,
+        "roi": [0, 0, 300, 180],
+        "threshold": 0.65
+      },
+      "on_success": "capture_result"
+    },
+    {
+      "id": "capture_result",
+      "action": "core.capture",
+      "on_success": "save_result"
+    },
+    {
+      "id": "save_result",
+      "action": "core.save_frame",
+      "with": {"name": "05-after-target.png"},
+      "on_success": "log_result"
+    },
+    {
+      "id": "log_result",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师点击流程验证完成：每一步目标均已确认"
+      },
+      "on_success": "$success"
+    }
+  ]
+}

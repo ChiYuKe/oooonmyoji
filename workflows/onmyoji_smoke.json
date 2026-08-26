@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "id": "onmyoji_smoke",
+  "version": "1.0.0",
+  "reference_resolution": [1920, 1080],
+  "entry": "capture",
+  "limits": {
+    "timeout_seconds": 180,
+    "max_steps": 20
+  },
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "screenshot_name": {
+        "type": "string",
+        "minLength": 1,
+        "default": "onmyoji-smoke.png"
+      },
+      "expected_width": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 1920
+      },
+      "expected_height": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 1080
+      },
+      "roi": {
+        "type": "array",
+        "items": {"type": "integer"},
+        "minItems": 4,
+        "maxItems": 4,
+        "default": [0, 0, 1920, 1080]
+      },
+      "ocr": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "additionalProperties": false
+  },
+  "steps": [
+    {
+      "id": "capture",
+      "action": "core.capture",
+      "on_success": "check_resolution"
+    },
+    {
+      "id": "check_resolution",
+      "action": "core.assert",
+      "when": {
+        "and": [
+          {"eq": [{"$ref": "steps.capture.output.width"}, {"$ref": "inputs.expected_width"}]},
+          {"eq": [{"$ref": "steps.capture.output.height"}, {"$ref": "inputs.expected_height"}]}
+        ]
+      },
+      "with": {
+        "value": true,
+        "message": "阴阳师模拟器分辨率与测试配置不一致"
+      },
+      "on_success": "save_frame",
+      "on_skip": "log_resolution_failure"
+    },
+    {
+      "id": "log_resolution_failure",
+      "action": "core.log",
+      "with": {
+        "message": "分辨率检查失败",
+        "fields": {
+          "actual_width": {"$ref": "steps.capture.output.width"},
+          "actual_height": {"$ref": "steps.capture.output.height"},
+          "expected_width": {"$ref": "inputs.expected_width"},
+          "expected_height": {"$ref": "inputs.expected_height"}
+        }
+      },
+      "on_success": "$failure"
+    },
+    {
+      "id": "save_frame",
+      "action": "core.save_frame",
+      "with": {
+        "name": {"$ref": "inputs.screenshot_name"}
+      },
+      "on_success": "log_capture"
+    },
+    {
+      "id": "log_capture",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师截图和分辨率检查通过"
+      },
+      "on_success": "ocr"
+    },
+    {
+      "id": "ocr",
+      "action": "vision.ocr",
+      "when": {
+        "and": [
+          {"exists": {"$ref": "inputs.ocr"}},
+          {"eq": [{"$ref": "inputs.ocr"}, true]}
+        ]
+      },
+      "with": {
+        "roi": {"$ref": "inputs.roi"}
+      },
+      "on_success": "check_ocr",
+      "on_skip": "$success"
+    },
+    {
+      "id": "check_ocr",
+      "action": "core.assert",
+      "when": {
+        "exists": {"$ref": "steps.ocr.output.0"}
+      },
+      "with": {
+        "value": {"$ref": "steps.ocr.output.0"},
+        "message": "阴阳师画面未识别到文字"
+      },
+      "on_success": "log_ocr_success",
+      "on_skip": "log_ocr_failure"
+    },
+    {
+      "id": "log_ocr_success",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师 OCR 检查通过",
+        "fields": {
+          "first_text": {"$ref": "steps.ocr.output.0.text"}
+        }
+      },
+      "on_success": "$success"
+    },
+    {
+      "id": "log_ocr_failure",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师 OCR 未识别到文字"
+      },
+      "on_success": "$failure"
+    }
+  ]
+}

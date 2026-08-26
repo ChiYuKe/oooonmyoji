@@ -28,7 +28,8 @@ def frame_to_bgr(frame: object):
     if isinstance(value.pixels, np.ndarray):
         array = value.pixels
         if array.ndim == 3 and array.shape[2] == 4:
-            image = cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
+            conversion = cv2.COLOR_RGBA2BGR if value.format == "rgba" else cv2.COLOR_BGRA2BGR
+            image = cv2.cvtColor(array, conversion)
         elif array.ndim == 3 and array.shape[2] == 3:
             image = array
         else:
@@ -42,8 +43,9 @@ def frame_to_bgr(frame: object):
             raise VisionError("frame pixels are not a byte buffer") from exc
         expected = value.width * value.height * 4
         if array.size != expected:
-            raise VisionError(f"BGRA buffer has {array.size} bytes, expected {expected}")
-        image = cv2.cvtColor(array.reshape(value.height, value.width, 4), cv2.COLOR_BGRA2BGR)
+            raise VisionError(f"raw {value.format} buffer has {array.size} bytes, expected {expected}")
+        conversion = cv2.COLOR_RGBA2BGR if value.format == "rgba" else cv2.COLOR_BGRA2BGR
+        image = cv2.cvtColor(array.reshape(value.height, value.width, 4), conversion)
         image = np.flipud(image)
     return image
 
@@ -84,9 +86,19 @@ def write_frame(path: Path | str, frame: object) -> Path:
         write_bgra_png(destination, value.width, value.height, value.pixels)
         return destination
     # flipud() in frame_to_bgr returns a negative-stride view; make it
-    # contiguous before passing it to OpenCV's Windows encoder.
-    if not cv2.imwrite(str(destination), frame_to_bgr(value).copy()):
-        raise VisionError(f"unable to write frame: {destination}")
+    # contiguous before passing it to OpenCV's encoder. Writing the encoded
+    # bytes with pathlib keeps non-ASCII Windows paths working reliably.
+    extension = destination.suffix.lower() or ".png"
+    try:
+        encoded, payload = cv2.imencode(extension, frame_to_bgr(value).copy())
+    except cv2.error as exc:
+        raise VisionError(f"unable to encode frame: {destination}") from exc
+    if not encoded:
+        raise VisionError(f"unable to encode frame: {destination}")
+    try:
+        destination.write_bytes(payload.tobytes())
+    except OSError as exc:
+        raise VisionError(f"unable to write frame: {destination}") from exc
     return destination
 
 

@@ -34,15 +34,69 @@ def _config_path(value: str | None) -> Path:
 
 
 def _load_validated(path: Path) -> tuple[Any, ActionRegistry, WorkflowLoader, dict[str, Any]]:
-    config = load_config(path)
-    registry = build_action_registry(config.action_dir)
-    loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
+    config, registry, loader = _load_runtime(path)
     workflows = loader.discover()
     for job in config.jobs:
         workflow = loader.load(job.workflow)
         inputs = loader.normalize_inputs(workflow, job.inputs)
         loader.validate_input_paths(workflow, inputs)
     return config, registry, loader, workflows
+
+
+def _load_runtime(path: Path) -> tuple[Any, ActionRegistry, WorkflowLoader]:
+    config = load_config(path)
+    registry = build_action_registry(config.action_dir)
+    loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
+    return config, registry, loader
+
+
+def _workflow_reference(config: Any, value: str) -> str:
+    """Accept a workflow ID, workflow filename, or path below workflows/."""
+
+    requested = Path(value)
+    candidates = [requested]
+    if not requested.is_absolute():
+        candidates.extend((config.root_dir / requested, config.workflow_dir / requested))
+    for candidate in candidates:
+        with_suffix = candidate if candidate.suffix.lower() == ".json" else candidate.with_suffix(".json")
+        if not with_suffix.is_file():
+            continue
+        try:
+            relative = with_suffix.resolve().relative_to(config.workflow_dir.resolve())
+        except ValueError as exc:
+            raise ConfigError(f"workflow must stay below the workflow directory: {value}") from exc
+        return relative.as_posix()
+    return value
+
+
+def _workflow_inputs(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"unable to read workflow inputs {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ConfigError(f"workflow inputs must be a JSON object: {path}")
+    return value
+
+
+def _prepare_workflow_run(
+    config_path: Path,
+    workflow_value: str,
+    instance_id: str,
+    inputs_path: Path | None,
+) -> tuple[str, dict[str, Any]]:
+    config, _, loader = _load_runtime(config_path)
+    try:
+        config.instance(instance_id)
+    except StopIteration as exc:
+        raise ConfigError(f"instance does not exist: {instance_id}") from exc
+    workflow_reference = _workflow_reference(config, workflow_value)
+    workflow = loader.load(workflow_reference)
+    inputs = loader.normalize_inputs(workflow, _workflow_inputs(inputs_path))
+    loader.validate_input_paths(workflow, inputs)
+    return workflow_reference, inputs
 
 
 def _print(value: Any) -> None:
@@ -160,6 +214,18 @@ def _run_local(config_path: Path, job_id: str) -> int:
         supervisor.stop()
 
 
+def _run_workflow_local(config_path: Path, workflow: str, instance: str, inputs: dict[str, Any]) -> int:
+    config = load_config(config_path)
+    supervisor = Supervisor(config)
+    try:
+        run_id = supervisor.run_workflow(workflow, instance, inputs, wait=True)
+        record = AtomicJsonStore(config.artifact_dir / "runs" / f"{run_id}.json").read(default={})
+        _print({"run_id": run_id, "status": record.get("status") if isinstance(record, dict) else None})
+        return 0 if isinstance(record, dict) and record.get("status") == "succeeded" else 1
+    finally:
+        supervisor.stop()
+
+
 def command_run(args: argparse.Namespace) -> int:
     path = _config_path(args.config)
     try:
@@ -168,6 +234,22 @@ def command_run(args: argparse.Namespace) -> int:
         return 0 if response.get("ok", False) else 2
     except (OSError, EOFError, TimeoutError):
         return _run_local(path, args.job)
+
+
+def command_run_workflow(args: argparse.Namespace) -> int:
+    path = _config_path(args.config)
+    workflow, inputs = _prepare_workflow_run(path, args.workflow, args.instance, args.inputs)
+    try:
+        response = send_control({
+            "command": "run-workflow",
+            "workflow": workflow,
+            "instance": args.instance,
+            "inputs": inputs,
+        })
+        _print(response)
+        return 0 if response.get("ok", False) else 2
+    except (OSError, EOFError, TimeoutError):
+        return _run_workflow_local(path, workflow, args.instance, inputs)
 
 
 def command_cancel(args: argparse.Namespace) -> int:
@@ -209,6 +291,14 @@ def command_serve(args: argparse.Namespace) -> int:
         if command == "run":
             run_id = supervisor.run(str(request["job_id"]), wait=False)
             pending[run_id] = str(request["job_id"])
+            return {"ok": True, "run_id": run_id}
+        if command == "run-workflow":
+            run_id = supervisor.run_workflow(
+                str(request["workflow"]),
+                str(request["instance"]),
+                request.get("inputs", {}),
+                wait=False,
+            )
             return {"ok": True, "run_id": run_id}
         if command == "cancel":
             supervisor.cancel(str(request["run_id"]))
@@ -260,6 +350,14 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run")
     run.add_argument("job")
     run.set_defaults(function=command_run)
+    run_workflow = subparsers.add_parser(
+        "run-workflow",
+        help="直接运行 workflows/ 下的 JSON，不需要在 config.tasks 中注册",
+    )
+    run_workflow.add_argument("workflow", help="工作流 ID、JSON 文件名或 workflows/ 下的路径")
+    run_workflow.add_argument("--instance", default="mumu-0", help="实例 ID，默认 mumu-0")
+    run_workflow.add_argument("--inputs", type=Path, help="可选的工作流输入 JSON 文件")
+    run_workflow.set_defaults(function=command_run_workflow)
     cancel = subparsers.add_parser("cancel")
     cancel.add_argument("run_id")
     cancel.set_defaults(function=command_cancel)

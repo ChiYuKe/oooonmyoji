@@ -1,0 +1,154 @@
+{
+  "Onmyoji 工作流骨架": {
+    "prefix": "owf-workflow",
+    "body": [
+      "{",
+      "  \"schema_version\": 1,",
+      "  \"id\": \"${1:my_workflow}\",",
+      "  \"version\": \"1.0.0\",",
+      "  \"reference_resolution\": [1920, 1080],",
+      "  \"entry\": \"${2:capture}\",",
+      "  \"limits\": {",
+      "    \"timeout_seconds\": 300,",
+      "    \"max_steps\": 200",
+      "  },",
+      "  \"steps\": [",
+      "    {",
+      "      \"id\": \"${2:capture}\",",
+      "      \"action\": \"core.capture\",",
+      "      \"on_success\": \"$3\"",
+      "    }",
+      "  ]",
+      "}"
+    ],
+    "description": "生成一个完整的工作流 JSON 骨架"
+  },
+  "步骤：截图 (core.capture)": {
+    "prefix": "owf-step-capture",
+    "body": [
+      "{",
+      "  \"id\": \"${1:capture}\",",
+      "  \"action\": \"core.capture\",",
+      "  \"on_success\": \"$2\"",
+      "}"
+    ],
+    "description": "插入 core.capture 步骤（截取一帧）"
+  },
+  "步骤：保存帧 (core.save_frame)": {
+    "prefix": "owf-step-save",
+    "body": [
+      "{",
+      "  \"id\": \"${1:save_frame}\",",
+      "  \"action\": \"core.save_frame\",",
+      "  \"with\": {",
+      "    \"name\": \"${2:01-frame.png}\"",
+      "  },",
+      "  \"on_success\": \"$3\"",
+      "}"
+    ],
+    "description": "插入 core.save_frame 步骤（保存最近一帧）"
+  },
+  "步骤：等待模板 (vision.wait_template)": {
+    "prefix": "owf-step-wait",
+    "body": [
+      "{",
+      "  \"id\": \"${1:wait}\",",
+      "  \"action\": \"vision.wait_template\",",
+      "  \"with\": {",
+      "    \"template\": \"assets/templates/${2:target}.png\",",
+      "    \"timeout_seconds\": 10,",
+      "    \"threshold\": 0.7",
+      "  },",
+      "  \"on_success\": \"$3\"",
+      "}"
+    ],
+    "description": "插入 vision.wait_template 步骤（等待模板出现）"
+  },
+  "步骤：匹配模板 (vision.match_template)": {
+    "prefix": "owf-step-match",
+    "body": [
+      "{",
+      "  \"id\": \"${1:find}\",",
+      "  \"action\": \"vision.match_template\",",
+      "  \"with\": {",
+      "    \"template\": \"assets/templates/${2:target}.png\",",
+      "    \"threshold\": 0.7",
+      "  },",
+      "  \"on_success\": \"$3\"",
+      "}"
+    ],
+    "description": "插入 vision.match_template 步骤（匹配并输出匹配列表）"
+  },
+  "步骤：点击坐标 (input.tap)": {
+    "prefix": "owf-step-tap",
+    "body": [
+      "{",
+      "  \"id\": \"${1:tap}\",",
+      "  \"action\": \"input.tap\",",
+      "  \"with\": {",
+      "    \"x\": ${2:960},",
+      "    \"y\": ${3:895},",
+      "    \"hold_ms\": 50",
+      "  },",
+      "  \"on_success\": \"$4\"",
+      "}"
+    ],
+    "description": "插入 input.tap 步骤（点击固定坐标）"
+  },
+  "步骤：点击匹配结果 (input.tap_match)": {
+    "prefix": "owf-step-tapmatch",
+    "body": [
+      "{",
+      "  \"id\": \"${1:click}\",",
+      "  \"action\": \"input.tap_match\",",
+      "  \"with\": {",
+      "    \"match\": {\"$ref\": \"steps.${2:find}.output.0\"}",
+      "  },",
+      "  \"on_success\": \"$3\"",
+      "}"
+    ],
+    "description": "插入 input.tap_match 步骤（点击模板匹配到的目标）"
+  },
+  "步骤：OCR (vision.ocr)": {
+    "prefix": "owf-step-ocr",
+    "body": [
+      "{",
+      "  \"id\": \"${1:ocr}\",",
+      "  \"action\": \"vision.ocr\",",
+      "  \"with\": {",
+      "    \"roi\": [0, 0, 1920, 1080]",
+      "  },",
+      "  \"on_success\": \"$2\"",
+      "}"
+    ],
+    "description": "插入 vision.ocr 步骤（对画面做 OCR）"
+  },
+  "步骤：记录日志 (core.log)": {
+    "prefix": "owf-step-log",
+    "body": [
+      "{",
+      "  \"id\": \"${1:log}\",",
+      "  \"action\": \"core.log\",",
+      "  \"with\": {",
+      "    \"message\": \"${2:流程完成}\"",
+      "  },",
+      "  \"on_success\": \"$success\"",
+      "}"
+    ],
+    "description": "插入 core.log 步骤（记录日志）"
+  },
+  "步骤：等待 (core.sleep)": {
+    "prefix": "owf-step-sleep",
+    "body": [
+      "{",
+      "  \"id\": \"${1:sleep}\",",
+      "  \"action\": \"core.sleep\",",
+      "  \"with\": {",
+      "    \"seconds\": 1",
+      "  },",
+      "  \"on_success\": \"$2\"",
+      "}"
+    ],
+    "description": "插入 core.sleep 步骤（等待指定秒数）"
+  }
+}

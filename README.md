@@ -50,6 +50,38 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 
 ## CLI
 
+也可以直接运行项目根目录下的 `run_cli.bat`，例如：
+
+```powershell
+.\run_cli.bat validate
+.\run_cli.bat list-workflows
+.\run_cli.bat run-workflow onmyoji_start_icon_click --instance mumu-0
+```
+
+`run-workflow` 会直接按 `workflows/` 下指定 JSON 的步骤运行，不需要先在
+`config.json` 的 `tasks` 中注册。工作流中的 `inputs_schema.default` 会自动生效；
+需要覆盖输入时可传入 JSON 文件：
+
+```powershell
+.\run_cli.bat run-workflow onmyoji_start_icon_click --instance mumu-0 --inputs .\inputs.json
+```
+
+`tasks` 仍用于定时调度和为同一工作流保存多个固定任务配置。
+
+点击 Action 支持两个可选参数：`random_offset` 为像素最大偏移量，点击坐标
+会在 X/Y 轴分别随机偏移 `-N` 到 `N`；`random_interval` 为点击前的随机等待
+范围，单位是秒，格式为 `[最小值, 最大值]`。例如：
+
+```json
+{
+  "random_offset": 8,
+  "random_interval": [0.2, 0.6]
+}
+```
+
+这两个参数可用于 `input.tap` 和 `input.tap_match`，默认值为 `0` 和
+`[0, 0]`。
+
 ```powershell
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json validate
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json doctor
@@ -130,7 +162,8 @@ python -m venv .venv
 
 连接 MuMu 时工具默认以 250 毫秒间隔实时刷新画面；工具栏中的“实时捕获”可以
 暂停或恢复，刷新间隔也可以直接调整。需要只捕获一次时添加 `--no-live`，或将
-间隔通过 `--interval-ms 500` 设置为 500 毫秒。
+间隔通过 `--interval-ms 500` 设置为 500 毫秒。拖动框选时实时捕获不会暂停，
+临时框会在刷新后继续显示。
 
 也可以直接双击项目根目录的 `run_roi_editor.bat` 启动工具。批处理文件会优先
 读取 `config/config.json`，不存在时回退到 `config/config.example.json`。
@@ -142,9 +175,10 @@ python -m venv .venv
   --image .\artifacts\manual-mumu-current.png
 ```
 
-在画面上拖动鼠标即可新增标注。工具支持保存标注图、裁剪当前选区和导出
-`roi.json`；JSON 同时保存原图坐标与 `1920×1080` 参考坐标，后续可直接用于
-工作流的 `roi` 或模板制作。默认输出目录为 `artifacts/roi-editor/`。
+在“ROI 标注”模式下拖动鼠标即可新增运行时 ROI；切换到“截取区”模式后拖动
+鼠标设置独立的截图裁剪区域。工具支持分别保存标注图、裁剪截取区和导出
+`roi.json`；JSON 同时保存原图坐标与 `1920×1080` 参考坐标，`capture_rect` 与
+`regions` 分开记录。默认输出目录为 `artifacts/roi-editor/`。
 
 ## Python 调用
 

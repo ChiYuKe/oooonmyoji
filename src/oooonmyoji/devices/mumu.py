@@ -68,7 +68,7 @@ def _png_chunk(kind: bytes, payload: bytes) -> bytes:
 
 
 def write_bgra_png(path: Path, width: int, height: int, pixels: Any) -> None:
-    """将原生 BGRA 画面写成完成垂直校正的 PNG 文件。"""
+    """将 MuMu 原生 RGBA 画面写成完成垂直校正的 PNG 文件。"""
 
     row_size = width * 4
     raw = bytearray((height * (row_size + 1)))
@@ -89,13 +89,14 @@ def write_bgra_png(path: Path, width: int, height: int, pixels: Any) -> None:
 
 
 class Frame:
-    """设备可复用 BGRA 截图缓冲区的视图。
+    """设备可复用 RGBA 截图缓冲区的视图。
 
     下一次调用 :meth:`MumuDevice.capture` 后，该视图中的内容会被覆盖。
     如果需要保留当前画面，请先复制数据。
     """
 
     __slots__ = ("width", "height", "pixels")
+    format = "rgba"
 
     def __init__(self, width: int, height: int, pixels: memoryview) -> None:
         self.width = width

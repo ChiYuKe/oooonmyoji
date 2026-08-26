@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..config.loader import load_config
-from ..config.model import AppConfig, InstanceConfig
+from ..config.model import AppConfig, InstanceConfig, JobConfig
 from ..actions import build_action_registry
 from ..vision.ocr import SharedOcrPool
 from ..workflows.loader import WorkflowLoader
@@ -94,7 +94,8 @@ def _instance_worker(
             return
         if command.get("type") != "run":
             continue
-        job = config.job(command["job_id"])
+        command_job = command.get("job")
+        job = command_job if isinstance(command_job, JobConfig) else config.job(command["job_id"])
         with state_lock:
             current_run_id = command["run_id"]
             current_cancel = _activate_run_cancel(current_run_id, pending_cancels)
@@ -170,6 +171,47 @@ class Supervisor:
         run_id = f"{job_id}-{uuid.uuid4().hex[:12]}"
         worker.command_queue.put({"type": "run", "job_id": job_id, "run_id": run_id})
         self._runs[run_id] = job.instance
+        if wait:
+            self.wait_for(run_id)
+        return run_id
+
+    def run_workflow(
+        self,
+        workflow: str,
+        instance_id: str,
+        inputs: dict[str, Any] | None = None,
+        *,
+        wait: bool = True,
+    ) -> str:
+        """Run one workflow directly without registering a config task."""
+
+        self.start()
+        self.check_workers()
+        try:
+            instance = self.config.instance(instance_id)
+        except StopIteration as exc:
+            raise RuntimeError(f"instance does not exist: {instance_id}") from exc
+        worker = self.workers.get(instance_id)
+        if worker is None:
+            raise RuntimeError(f"instance is disabled or not started: {instance_id}")
+        if any(active_instance == instance_id for active_instance in self._runs.values()):
+            raise RuntimeError(f"instance already has a queued or running task: {instance_id}")
+        if inputs is not None and not isinstance(inputs, dict):
+            raise ValueError("workflow inputs must be a JSON object")
+
+        job_id = f"workflow-{uuid.uuid4().hex[:12]}"
+        job = JobConfig(
+            id=job_id,
+            workflow=workflow,
+            instance=instance.id,
+            inputs=dict(inputs or {}),
+            schedule={"type": "manual"},
+            enabled=True,
+            retry_enabled=False,
+        )
+        run_id = f"{job_id}-{uuid.uuid4().hex[:12]}"
+        worker.command_queue.put({"type": "run", "job_id": job_id, "job": job, "run_id": run_id})
+        self._runs[run_id] = instance_id
         if wait:
             self.wait_for(run_id)
         return run_id

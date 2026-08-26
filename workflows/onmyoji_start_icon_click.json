@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "id": "onmyoji_start_icon_click",
+  "version": "1.0.0",
+  "reference_resolution": [1920, 1080],
+  "entry": "capture_before",
+  "limits": {
+    "timeout_seconds": 60,
+    "max_steps": 20
+  },
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "template": {
+        "type": "string",
+        "minLength": 1,
+        "default": "assets/templates/start/omg_icon.png"
+      },
+      "threshold": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.85
+      },
+      "roi": {
+        "type": "array",
+        "items": {"type": "integer"},
+        "minItems": 4,
+        "maxItems": 4,
+        "default": [0, 0, 1920, 1080]
+      },
+      "hold_ms": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 50
+      },
+      "random_offset": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0
+      },
+      "random_interval": {
+        "type": "array",
+        "prefixItems": [
+          {"type": "number", "minimum": 0},
+          {"type": "number", "minimum": 0}
+        ],
+        "minItems": 2,
+        "maxItems": 2,
+        "default": [0, 0]
+      },
+      "wait_seconds": {
+        "type": "number",
+        "minimum": 0,
+        "default": 1
+      },
+      "screenshot_before": {
+        "type": "string",
+        "minLength": 1,
+        "default": "onmyoji-start-icon-before.png"
+      },
+      "screenshot_after": {
+        "type": "string",
+        "minLength": 1,
+        "default": "onmyoji-start-icon-after.png"
+      }
+    },
+    "additionalProperties": false
+  },
+  "steps": [
+    {
+      "id": "capture_before",
+      "action": "core.capture",
+      "on_success": "save_before"
+    },
+    {
+      "id": "save_before",
+      "action": "core.save_frame",
+      "with": {
+        "name": {"$ref": "inputs.screenshot_before"}
+      },
+      "on_success": "find_icon"
+    },
+    {
+      "id": "find_icon",
+      "action": "vision.match_template",
+      "with": {
+        "template": {"$ref": "inputs.template"},
+        "roi": {"$ref": "inputs.roi"},
+        "threshold": {"$ref": "inputs.threshold"},
+        "max_results": 1
+      },
+      "on_success": "click_if_found"
+    },
+    {
+      "id": "click_if_found",
+      "action": "input.tap_match",
+      "when": {
+        "exists": {"$ref": "steps.find_icon.output.0"}
+      },
+      "with": {
+        "match": {"$ref": "steps.find_icon.output.0"},
+        "revalidate": true,
+        "hold_ms": {"$ref": "inputs.hold_ms"},
+        "random_offset": {"$ref": "inputs.random_offset"},
+        "random_interval": {"$ref": "inputs.random_interval"}
+      },
+      "on_success": "wait_after_click",
+      "on_failure": "log_click_failed",
+      "on_skip": "log_icon_missing"
+    },
+    {
+      "id": "wait_after_click",
+      "action": "core.sleep",
+      "with": {
+        "seconds": {"$ref": "inputs.wait_seconds"}
+      },
+      "on_success": "capture_after"
+    },
+    {
+      "id": "capture_after",
+      "action": "core.capture",
+      "on_success": "save_after"
+    },
+    {
+      "id": "save_after",
+      "action": "core.save_frame",
+      "with": {
+        "name": {"$ref": "inputs.screenshot_after"}
+      },
+      "on_success": "log_clicked"
+    },
+    {
+      "id": "log_clicked",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师启动图标已找到并点击",
+        "fields": {
+          "x": {"$ref": "steps.click_if_found.output.x"},
+          "y": {"$ref": "steps.click_if_found.output.y"},
+          "confidence": {"$ref": "steps.find_icon.output.0.confidence"},
+          "screenshot_after": {"$ref": "steps.save_after.output.path"}
+        }
+      },
+      "on_success": "$success"
+    },
+    {
+      "id": "log_icon_missing",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师启动图标未找到，未执行点击",
+        "fields": {
+          "screenshot_before": {"$ref": "steps.save_before.output.path"}
+        }
+      },
+      "on_success": "$success"
+    },
+    {
+      "id": "log_click_failed",
+      "action": "core.log",
+      "with": {
+        "message": "阴阳师启动图标匹配后复核失败，未执行点击"
+      },
+      "on_success": "$failure"
+    }
+  ]
+}

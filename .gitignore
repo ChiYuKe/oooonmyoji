@@ -4,3 +4,8 @@ __pycache__/
 tests/artifacts/
 artifacts/
 logs/
+
+# VS Code extension
+vscode-onmyoji-workflow/node_modules/
+vscode-onmyoji-workflow/out/
+vscode-onmyoji-workflow/*.vsix

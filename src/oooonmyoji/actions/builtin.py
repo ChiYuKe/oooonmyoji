@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import random
 import time
 from typing import Any
 
@@ -103,8 +105,16 @@ class TapAction(Action):
     name = "input.tap"
 
     def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
-        context.tap(int(arguments["x"]), int(arguments["y"]), hold_ms=int(arguments.get("hold_ms", 0)))
-        return ActionResult.succeeded({"x": int(arguments["x"]), "y": int(arguments["y"])})
+        x = int(arguments["x"])
+        y = int(arguments["y"])
+        clicked_x, clicked_y, interval_seconds = _tap_with_variation(context, x, y, arguments)
+        return ActionResult.succeeded({
+            "x": clicked_x,
+            "y": clicked_y,
+            "offset_x": clicked_x - x,
+            "offset_y": clicked_y - y,
+            "interval_seconds": interval_seconds,
+        })
 
 
 class TapMatchAction(Action):
@@ -129,8 +139,46 @@ class TapMatchAction(Action):
             return ActionResult.failed("match.reference is invalid", category="workflow")
         x = int(round(float(reference[0]) + float(reference[2]) / 2))
         y = int(round(float(reference[1]) + float(reference[3]) / 2))
-        context.tap(x, y, hold_ms=int(arguments.get("hold_ms", 0)))
-        return ActionResult.succeeded({"x": x, "y": y, "revalidated": bool(arguments.get("revalidate", True))})
+        clicked_x, clicked_y, interval_seconds = _tap_with_variation(context, x, y, arguments)
+        return ActionResult.succeeded({
+            "x": clicked_x,
+            "y": clicked_y,
+            "offset_x": clicked_x - x,
+            "offset_y": clicked_y - y,
+            "interval_seconds": interval_seconds,
+            "revalidated": bool(arguments.get("revalidate", True)),
+        })
+
+
+def _tap_with_variation(context: Any, x: int, y: int, arguments: dict[str, Any]) -> tuple[int, int, float]:
+    offset_limit = arguments.get("random_offset", 0)
+    if isinstance(offset_limit, bool) or not isinstance(offset_limit, int) or offset_limit < 0:
+        raise ValueError("random_offset must be a non-negative integer")
+    if offset_limit:
+        offset_x = random.randint(-offset_limit, offset_limit)
+        offset_y = random.randint(-offset_limit, offset_limit)
+    else:
+        offset_x = offset_y = 0
+
+    interval = arguments.get("random_interval", [0.0, 0.0])
+    if not isinstance(interval, (list, tuple)) or len(interval) != 2:
+        raise ValueError("random_interval must contain [minimum_seconds, maximum_seconds]")
+    minimum, maximum = float(interval[0]), float(interval[1])
+    if not all(math.isfinite(value) and value >= 0 for value in (minimum, maximum)) or minimum > maximum:
+        raise ValueError("random_interval must contain two finite seconds with minimum <= maximum")
+    interval_seconds = random.uniform(minimum, maximum) if minimum != maximum else minimum
+    deadline = time.monotonic() + interval_seconds
+    while True:
+        context.check_cancelled()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.1, remaining))
+
+    clicked_x = x + offset_x
+    clicked_y = y + offset_y
+    context.tap(clicked_x, clicked_y, hold_ms=int(arguments.get("hold_ms", 0)))
+    return clicked_x, clicked_y, round(interval_seconds, 6)
 
 
 BUILTIN_ACTIONS: tuple[tuple[Action, dict[str, Any], dict[str, Any], bool, bool], ...] = (
@@ -142,8 +190,8 @@ BUILTIN_ACTIONS: tuple[tuple[Action, dict[str, Any], dict[str, Any], bool, bool]
     (MatchTemplateAction(), {"type": "object", "required": ["template"], "properties": {"template": {"type": "string"}, "roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}, "max_results": {"type": "integer", "minimum": 1}}, "additionalProperties": False}, {"type": "array"}, True, False),
     (OcrAction(), {"type": "object", "properties": {"roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}}, "additionalProperties": False}, {"type": "array"}, True, False),
     (WaitTemplateAction(), {"type": "object", "required": ["template", "timeout_seconds"], "properties": {"template": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0}, "present": {"type": "boolean"}, "roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}}, "additionalProperties": False}, {"type": "array"}, True, False),
-    (TapAction(), {"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "hold_ms": {"type": "integer", "minimum": 0}}, "additionalProperties": False}, {"type": "object"}, False, True),
-    (TapMatchAction(), {"type": "object", "required": ["match"], "properties": {"match": {"type": "object"}, "revalidate": {"type": "boolean"}, "hold_ms": {"type": "integer", "minimum": 0}}, "additionalProperties": False}, {"type": "object"}, False, True),
+    (TapAction(), {"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "hold_ms": {"type": "integer", "minimum": 0}, "random_offset": {"type": "integer", "minimum": 0}, "random_interval": {"type": "array", "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}}, "additionalProperties": False}, {"type": "object"}, False, True),
+    (TapMatchAction(), {"type": "object", "required": ["match"], "properties": {"match": {"type": "object"}, "revalidate": {"type": "boolean"}, "hold_ms": {"type": "integer", "minimum": 0}, "random_offset": {"type": "integer", "minimum": 0}, "random_interval": {"type": "array", "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}}, "additionalProperties": False}, {"type": "object"}, False, True),
 )
 
 

@@ -4,11 +4,35 @@ import os
 
 import pytest
 
-from src.oooonmyoji.devices.mumu import MumuDevice, discover_mumu_path
+from src.oooonmyoji.devices.mumu import Frame, MumuDevice, discover_mumu_path
+from src.oooonmyoji.devices.protocol import DeviceFrame
 from src.oooonmyoji.exceptions import DeviceError
-from src.oooonmyoji.vision.image import frame_to_bgr
+from src.oooonmyoji.vision.image import frame_to_bgr, write_frame
 from src.oooonmyoji.vision.ocr import normalize_ocr_result
 from src.oooonmyoji.vision.ocr import SharedOcrPool
+
+
+def test_mumu_rgba_frame_is_converted_to_correct_bgr_colors() -> None:
+    frame = Frame(1, 1, memoryview(bytes([30, 20, 10, 255])))
+
+    image = frame_to_bgr(frame)
+
+    assert image[0, 0].tolist() == [10, 20, 30]
+
+
+def test_write_frame_handles_non_ascii_png_paths(tmp_path) -> None:
+    import cv2
+    import numpy as np
+
+    image = np.array([[[10, 20, 30]]], dtype=np.uint8)
+    destination = tmp_path / "中文目录" / "截图.png"
+
+    write_frame(destination, DeviceFrame(1, 1, image))
+
+    encoded = np.frombuffer(destination.read_bytes(), dtype=np.uint8)
+    decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert decoded[0, 0].tolist() == [10, 20, 30]
 
 
 def test_normalize_paddle_dictionary_and_confidence_filter() -> None:

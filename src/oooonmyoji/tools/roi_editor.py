@@ -115,14 +115,13 @@ def write_png(path: Path, image: Any) -> Path:
 
 
 def encode_tk_png(image: Any) -> bytes:
-    """Encode a BGR image as RGB PNG bytes for Tk PhotoImage."""
+    """Encode a BGR image as PNG bytes for Tk PhotoImage."""
 
     try:
         import cv2
     except ImportError as exc:  # pragma: no cover - dependencies are installed by requirements.txt
         raise VisionError("OpenCV is required for the ROI editor") from exc
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    encoded, payload = cv2.imencode(".png", rgb_image)
+    encoded, payload = cv2.imencode(".png", image)
     if not encoded:
         raise VisionError("unable to encode rendered PNG")
     return payload.tobytes()
@@ -135,14 +134,28 @@ def export_payload(
     regions: list[RoiRegion],
     reference_width: int,
     reference_height: int,
+    capture_rect: tuple[int, int, int, int] | None = None,
 ) -> dict[str, Any]:
     """Build the stable JSON representation used by later workflow authoring."""
 
+    capture_payload = None
+    if capture_rect is not None:
+        capture = RoiRegion("capture", "截取区", *capture_rect)
+        capture_payload = {
+            "image_rect": capture.image_rect(),
+            "reference_rect": capture.reference_rect(
+                image_width,
+                image_height,
+                reference_width,
+                reference_height,
+            ),
+        }
     return {
         "schema_version": 1,
         "source": str(source_path) if source_path is not None else None,
         "image_size": [image_width, image_height],
         "reference_resolution": [reference_width, reference_height],
+        "capture_rect": capture_payload,
         "regions": [
             {
                 "id": region.region_id,
@@ -197,13 +210,15 @@ class RoiEditor:
         self.source_path: Path | None = None
         self.regions: list[RoiRegion] = []
         self.selected_index: int | None = None
+        self.capture_rect: tuple[int, int, int, int] | None = None
+        self.selection_mode = "roi"
         self.photo: Any | None = None
         self.image_origin = (0, 0)
         self.display_size = (0, 0)
         self.display_scale = 1.0
         self.drag_start: tuple[int, int] | None = None
+        self.drag_current: tuple[int, int] | None = None
         self.drag_item: int | None = None
-        self.live_paused_for_drag = False
         self.status = tk.StringVar(value="正在准备画面...")
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -219,13 +234,33 @@ class RoiEditor:
             ("重新截图", self.capture_current),
             ("打开图片", self.open_image),
             ("保存标注图", self.save_annotated),
-            ("裁剪当前选区", self.crop_selected),
+            ("截取区域为 PNG", self.crop_selected),
             ("导出 ROI JSON", self.export_json),
-            ("删除选区", self.delete_selected),
-            ("清空标注", self.clear_regions),
+            ("删除 ROI", self.delete_selected),
+            ("清空 ROI", self.clear_regions),
         )
         for label, command in buttons:
             tk.Button(toolbar, text=label, command=command, padx=8).pack(side="left", padx=3)
+        tk.Label(toolbar, text="框选模式").pack(side="left", padx=(12, 2))
+        self.mode_var = tk.StringVar(value=self.selection_mode)
+        tk.Radiobutton(
+            toolbar,
+            text="ROI 标注",
+            value="roi",
+            variable=self.mode_var,
+            command=self.on_mode_change,
+            indicatoron=False,
+            padx=6,
+        ).pack(side="left")
+        tk.Radiobutton(
+            toolbar,
+            text="截取区",
+            value="capture",
+            variable=self.mode_var,
+            command=self.on_mode_change,
+            indicatoron=False,
+            padx=6,
+        ).pack(side="left")
         self.live_var = tk.BooleanVar(value=self.live_enabled)
         tk.Checkbutton(
             toolbar,
@@ -265,13 +300,20 @@ class RoiEditor:
         side = tk.Frame(body, width=300, padx=8, pady=8)
         side.grid(row=0, column=1, sticky="ns")
         side.grid_propagate(False)
-        tk.Label(side, text="ROI 标注").pack(anchor="w")
+        tk.Label(side, text="ROI 标注（运行时区域）").pack(anchor="w")
         self.region_list = tk.Listbox(side, width=36, height=25, exportselection=False)
         self.region_list.pack(fill="both", expand=True, pady=(6, 8))
         self.region_list.bind("<<ListboxSelect>>", self.on_list_select)
+        self.capture_info = tk.StringVar(value="截取区：未设置")
+        tk.Label(side, textvariable=self.capture_info, justify="left", fg="#008c99").pack(
+            anchor="w", pady=(0, 8)
+        )
+        tk.Button(side, text="清除截取区", command=self.clear_capture_rect, padx=8).pack(
+            anchor="w", pady=(0, 8)
+        )
         tk.Label(
             side,
-            text="在画面上拖动鼠标框选区域，松开后填写名称。\n双击列表项不会修改坐标；重新框选即可新增区域。",
+            text="ROI 标注模式：框选后填写名称并加入 ROI 列表。\n截取区模式：框选一个独立区域，用于裁剪 PNG。",
             justify="left",
             fg="#666666",
         ).pack(anchor="w", pady=(0, 8))
@@ -299,10 +341,33 @@ class RoiEditor:
         if reset_regions or previous_shape != self.image.shape[:2]:
             self.regions.clear()
             self.selected_index = None
-        self.refresh_region_list()
+            self.capture_rect = None
+            self.refresh_region_list()
+        else:
+            self._update_capture_info()
         height, width = self.image.shape[:2]
         self.status.set(f"已载入 {width}×{height} 画面。拖动鼠标框选 ROI。")
         self.render()
+
+    def on_mode_change(self) -> None:
+        self.selection_mode = self.mode_var.get()
+        if self.selection_mode == "capture":
+            self.status.set("截取区模式：拖动框选一个独立的截图区域。")
+        else:
+            self.status.set("ROI 标注模式：拖动框选后填写区域名称。")
+
+    def _update_capture_info(self) -> None:
+        if self.capture_rect is None or self.image is None:
+            self.capture_info.set("截取区：未设置")
+            return
+        image_height, image_width = self.image.shape[:2]
+        reference = RoiRegion("capture", "截取区", *self.capture_rect).reference_rect(
+            image_width,
+            image_height,
+            self.reference_width,
+            self.reference_height,
+        )
+        self.capture_info.set(f"截取区：{list(self.capture_rect)}\n参考：{reference}")
 
     def load_image(self, path: Path) -> None:
         try:
@@ -393,17 +458,6 @@ class RoiEditor:
             self.root.after_cancel(self.live_job)
             self.live_job = None
 
-    def _pause_live_for_drag(self) -> None:
-        self.live_paused_for_drag = self.live_enabled
-        if self.live_paused_for_drag:
-            self._stop_live_capture()
-
-    def _resume_live_after_drag(self) -> None:
-        was_paused = self.live_paused_for_drag
-        self.live_paused_for_drag = False
-        if was_paused and self.live_enabled:
-            self._schedule_live_capture(delay_ms=0)
-
     def close(self) -> None:
         self.live_enabled = False
         self._stop_live_capture()
@@ -442,8 +496,8 @@ class RoiEditor:
         if point is None:
             self.drag_start = None
             return
-        self._pause_live_for_drag()
         self.drag_start = point
+        self.drag_current = point
         if self.drag_item is not None:
             self.canvas.delete(self.drag_item)
         self.drag_item = self.canvas.create_rectangle(
@@ -462,6 +516,7 @@ class RoiEditor:
         point = self._image_point(event)
         if point is None:
             return
+        self.drag_current = point
         canvas_x, canvas_y = self._canvas_point(*point)
         start_x, start_y = self._canvas_point(*self.drag_start)
         self.canvas.coords(self.drag_item, start_x, start_y, canvas_x, canvas_y)
@@ -471,7 +526,7 @@ class RoiEditor:
             return
         point = self._image_point(event)
         if point is None:
-            point = self.drag_start
+            point = self.drag_current or self.drag_start
         image_height, image_width = self.image.shape[:2]
         rect = normalize_rect(
             self.drag_start[0],
@@ -485,9 +540,19 @@ class RoiEditor:
             self.canvas.delete(self.drag_item)
         self.drag_item = None
         self.drag_start = None
+        self.drag_current = None
+        if self.selection_mode == "capture":
+            self.capture_rect = rect
+            self.status.set(
+                "已清除截取区。"
+                if rect is None
+                else f"已设置截取区：{list(rect)}，点击“截取区域为 PNG”保存。"
+            )
+            self.refresh_region_list()
+            self.render()
+            return
         if rect is None or simpledialog is None:
             self.render()
-            self._resume_live_after_drag()
             return
         default_label = f"roi_{len(self.regions) + 1}"
         label = simpledialog.askstring(
@@ -498,7 +563,6 @@ class RoiEditor:
         )
         if label is None:
             self.render()
-            self._resume_live_after_drag()
             return
         x, y, width, height = rect
         region = RoiRegion(default_label, label.strip() or default_label, x, y, width, height)
@@ -507,7 +571,6 @@ class RoiEditor:
         self.refresh_region_list()
         self.status.set(f"已添加 {region.region_id}：{region.label}")
         self.render()
-        self._resume_live_after_drag()
 
     def _canvas_point(self, x: int, y: int) -> tuple[int, int]:
         return (
@@ -517,6 +580,7 @@ class RoiEditor:
 
     def render(self) -> None:
         self.canvas.delete("all")
+        self.drag_item = None
         if self.image is None:
             self.canvas.create_text(
                 max(1, self.canvas.winfo_width() // 2),
@@ -549,6 +613,21 @@ class RoiEditor:
                 display = cv2.resize(self.image, (display_width, display_height), interpolation=cv2.INTER_AREA)
             self.photo = tk.PhotoImage(data=encode_tk_png(display), format="png")
             self.canvas.create_image(*self.image_origin, image=self.photo, anchor="nw")
+            if self.capture_rect is not None:
+                left, top = self._canvas_point(self.capture_rect[0], self.capture_rect[1])
+                right, bottom = self._canvas_point(
+                    self.capture_rect[0] + self.capture_rect[2],
+                    self.capture_rect[1] + self.capture_rect[3],
+                )
+                self.canvas.create_rectangle(left, top, right, bottom, outline="#4dd0e1", width=2)
+                self.canvas.create_text(
+                    left + 4,
+                    top + 4,
+                    text="截取区",
+                    anchor="nw",
+                    fill="#4dd0e1",
+                    font=("Segoe UI", 10, "bold"),
+                )
             for index, region in enumerate(self.regions):
                 left, top = self._canvas_point(region.x, region.y)
                 right, bottom = self._canvas_point(region.x + region.width, region.y + region.height)
@@ -562,11 +641,24 @@ class RoiEditor:
                     fill=color,
                     font=("Segoe UI", 10, "bold"),
                 )
+            if self.drag_start is not None and self.drag_current is not None:
+                start_x, start_y = self._canvas_point(*self.drag_start)
+                current_x, current_y = self._canvas_point(*self.drag_current)
+                self.drag_item = self.canvas.create_rectangle(
+                    start_x,
+                    start_y,
+                    current_x,
+                    current_y,
+                    outline="#ffd166",
+                    width=2,
+                    dash=(4, 2),
+                )
         except (ImportError, VisionError, ValueError) as exc:
             self.status.set(f"画面渲染失败：{exc}")
 
     def refresh_region_list(self) -> None:
         self.region_list.delete(0, tk.END)
+        self._update_capture_info()
         if self.image is None:
             return
         image_height, image_width = self.image.shape[:2]
@@ -610,16 +702,21 @@ class RoiEditor:
         self.status.set("已清空标注")
         self.render()
 
+    def clear_capture_rect(self) -> None:
+        self.capture_rect = None
+        self.status.set("已清除截取区")
+        self.refresh_region_list()
+        self.render()
+
     def crop_selected(self) -> None:
-        if self.image is None or self.selected_index is None:
-            self.show_error("请先在右侧列表选择一个 ROI。")
+        if self.image is None or self.capture_rect is None:
+            self.show_error("请切换到“截取区”模式并先框选截取区域。")
             return
         if filedialog is None:
             return
-        region = self.regions[self.selected_index]
-        default_name = safe_filename(f"{region.region_id}_{region.label}", region.region_id) + ".png"
+        default_name = "capture_rect.png"
         selected = filedialog.asksaveasfilename(
-            title="保存 ROI 裁剪",
+            title="保存截取区",
             initialdir=str(self.output_dir / "crops"),
             initialfile=default_name,
             defaultextension=".png",
@@ -627,10 +724,10 @@ class RoiEditor:
         )
         if not selected:
             return
-        x, y, width, height = region.x, region.y, region.width, region.height
+        x, y, width, height = self.capture_rect
         try:
             path = write_png(Path(selected), self.image[y : y + height, x : x + width])
-            self.status.set(f"ROI 已裁剪：{path}")
+            self.status.set(f"截取区已保存：{path}")
         except (AutomationError, OSError, ValueError) as exc:
             self.show_error(f"裁剪失败：{exc}")
 
@@ -654,6 +751,25 @@ class RoiEditor:
             import cv2
 
             annotated = self.image.copy()
+            if self.capture_rect is not None:
+                x, y, width, height = self.capture_rect
+                cv2.rectangle(
+                    annotated,
+                    (x, y),
+                    (x + width - 1, y + height - 1),
+                    (255, 200, 0),
+                    3,
+                )
+                cv2.putText(
+                    annotated,
+                    "CAPTURE",
+                    (x + 4, max(20, y + 22)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (255, 200, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
             for index, region in enumerate(self.regions, start=1):
                 cv2.rectangle(
                     annotated,
@@ -700,6 +816,7 @@ class RoiEditor:
             self.regions,
             self.reference_width,
             self.reference_height,
+            self.capture_rect,
         )
         try:
             path = Path(selected)

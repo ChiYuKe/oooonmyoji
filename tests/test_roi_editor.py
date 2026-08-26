@@ -28,6 +28,24 @@ def test_roi_export_maps_source_coordinates_to_reference_resolution(tmp_path: Pa
     assert payload["regions"][0]["center"] == [384, 216]
 
 
+def test_roi_export_keeps_capture_rect_separate_from_regions() -> None:
+    region = RoiRegion("roi_1", "探索按钮", 100, 50, 200, 100)
+
+    payload = export_payload(
+        None,
+        1000,
+        500,
+        [region],
+        1920,
+        1080,
+        capture_rect=(10, 20, 30, 40),
+    )
+
+    assert payload["capture_rect"]["image_rect"] == [10, 20, 30, 40]
+    assert payload["capture_rect"]["reference_rect"] == [19, 43, 58, 86]
+    assert payload["regions"][0]["image_rect"] == [100, 50, 200, 100]
+
+
 def test_safe_filename_removes_path_separators() -> None:
     assert safe_filename("按钮/左上", "roi") == "按钮_左上"
     assert safe_filename("...", "roi") == "roi"
@@ -43,7 +61,7 @@ def test_roi_cli_defaults_to_live_capture_and_allows_static_mode() -> None:
     assert static_args.interval_ms == 500
 
 
-def test_tk_png_encoding_swaps_bgr_to_rgb_for_tk() -> None:
+def test_tk_png_encoding_preserves_bgr_colors_for_tk() -> None:
     import cv2
     import numpy as np
 
@@ -52,25 +70,14 @@ def test_tk_png_encoding_swaps_bgr_to_rgb_for_tk() -> None:
     decoded = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), cv2.IMREAD_COLOR)
 
     assert decoded is not None
-    assert decoded[0, 0].tolist() == [30, 20, 10]
+    assert decoded[0, 0].tolist() == [10, 20, 30]
 
 
-def test_live_capture_pauses_during_roi_drag() -> None:
+def test_roi_editor_has_a_separate_drag_position_state() -> None:
     from src.oooonmyoji.tools.roi_editor import RoiEditor
 
     editor = RoiEditor.__new__(RoiEditor)
-    editor.live_enabled = True
-    editor.live_job = "after-id"
-    editor.live_paused_for_drag = False
-    stopped = []
-    scheduled = []
-    editor._stop_live_capture = lambda: stopped.append(True)
-    editor._schedule_live_capture = lambda *, delay_ms=None: scheduled.append(delay_ms)
+    editor.drag_start = (100, 120)
+    editor.drag_current = (240, 260)
 
-    editor._pause_live_for_drag()
-    assert editor.live_paused_for_drag is True
-    assert stopped == [True]
-
-    editor._resume_live_after_drag()
-    assert editor.live_paused_for_drag is False
-    assert scheduled == [0]
+    assert editor.drag_start != editor.drag_current

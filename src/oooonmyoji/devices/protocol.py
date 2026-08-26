@@ -9,7 +9,7 @@ from typing import Protocol, Self, runtime_checkable
 
 @dataclass(frozen=True)
 class DeviceFrame:
-    """A frame with either raw BGRA pixels or an encoded PNG payload."""
+    """A frame with raw BGRA/RGBA pixels or an encoded PNG payload."""
 
     width: int
     height: int
@@ -52,7 +52,10 @@ def frame_from_backend(frame: object) -> DeviceFrame:
     pixels = getattr(frame, "pixels", None)
     if not isinstance(width, int) or not isinstance(height, int) or pixels is None:
         raise TypeError("backend capture did not return a frame-like object")
-    return DeviceFrame(width, height, pixels)
+    frame_format = getattr(frame, "format", "bgra")
+    if not isinstance(frame_format, str):
+        frame_format = "bgra"
+    return DeviceFrame(width, height, pixels, format=frame_format)
 
 
 __all__ = ["DeviceBackend", "DeviceFrame", "frame_from_backend"]

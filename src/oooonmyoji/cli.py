@@ -214,11 +214,17 @@ def _run_local(config_path: Path, job_id: str) -> int:
         supervisor.stop()
 
 
-def _run_workflow_local(config_path: Path, workflow: str, instance: str, inputs: dict[str, Any]) -> int:
+def _run_workflow_local(
+    config_path: Path,
+    workflow: str,
+    instance: str,
+    inputs: dict[str, Any],
+    events_file: Path | None = None,
+) -> int:
     config = load_config(config_path)
     supervisor = Supervisor(config)
     try:
-        run_id = supervisor.run_workflow(workflow, instance, inputs, wait=True)
+        run_id = supervisor.run_workflow(workflow, instance, inputs, wait=True, events_file=str(events_file) if events_file else None)
         record = AtomicJsonStore(config.artifact_dir / "runs" / f"{run_id}.json").read(default={})
         _print({"run_id": run_id, "status": record.get("status") if isinstance(record, dict) else None})
         return 0 if isinstance(record, dict) and record.get("status") == "succeeded" else 1
@@ -239,17 +245,19 @@ def command_run(args: argparse.Namespace) -> int:
 def command_run_workflow(args: argparse.Namespace) -> int:
     path = _config_path(args.config)
     workflow, inputs = _prepare_workflow_run(path, args.workflow, args.instance, args.inputs)
+    event_file_value = str(args.events_file) if args.events_file is not None else None
     try:
         response = send_control({
             "command": "run-workflow",
             "workflow": workflow,
             "instance": args.instance,
             "inputs": inputs,
+            "events_file": event_file_value,
         })
         _print(response)
         return 0 if response.get("ok", False) else 2
     except (OSError, EOFError, TimeoutError):
-        return _run_workflow_local(path, workflow, args.instance, inputs)
+        return _run_workflow_local(path, workflow, args.instance, inputs, args.events_file)
 
 
 def command_cancel(args: argparse.Namespace) -> int:
@@ -298,6 +306,7 @@ def command_serve(args: argparse.Namespace) -> int:
                 str(request["instance"]),
                 request.get("inputs", {}),
                 wait=False,
+                events_file=request.get("events_file"),
             )
             return {"ok": True, "run_id": run_id}
         if command == "cancel":
@@ -357,6 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_workflow.add_argument("workflow", help="工作流 ID、JSON 文件名或 workflows/ 下的路径")
     run_workflow.add_argument("--instance", default="mumu-0", help="实例 ID，默认 mumu-0")
     run_workflow.add_argument("--inputs", type=Path, help="可选的工作流输入 JSON 文件")
+    run_workflow.add_argument("--events-file", type=Path, help="可选的运行事件 JSONL 输出文件（编辑器用它显示步骤缩略图）")
     run_workflow.set_defaults(function=command_run_workflow)
     cancel = subparsers.add_parser("cancel")
     cancel.add_argument("run_id")

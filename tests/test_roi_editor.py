@@ -9,6 +9,7 @@ from src.oooonmyoji.tools.roi_editor import (
     export_payload,
     normalize_rect,
     safe_filename,
+    selection_payload,
 )
 
 
@@ -51,6 +52,14 @@ def test_safe_filename_removes_path_separators() -> None:
     assert safe_filename("...", "roi") == "roi"
 
 
+def test_selection_payload_maps_capture_coordinates_to_reference_resolution() -> None:
+    payload = selection_payload((100, 50, 200, 100), 1000, 500, 1920, 1080)
+
+    assert payload["image_rect"] == [100, 50, 200, 100]
+    assert payload["reference_rect"] == [192, 108, 384, 216]
+    assert payload["image_size"] == [1000, 500]
+
+
 def test_roi_cli_defaults_to_live_capture_and_allows_static_mode() -> None:
     args = build_parser().parse_args([])
     assert args.interval_ms == 250
@@ -59,6 +68,10 @@ def test_roi_cli_defaults_to_live_capture_and_allows_static_mode() -> None:
     static_args = build_parser().parse_args(["--no-live", "--interval-ms", "500"])
     assert static_args.no_live is True
     assert static_args.interval_ms == 500
+
+    picker_args = build_parser().parse_args(["--select-roi", "--result-file", "selection.json"])
+    assert picker_args.select_roi is True
+    assert picker_args.result_file == Path("selection.json")
 
 
 def test_tk_png_encoding_preserves_bgr_colors_for_tk() -> None:

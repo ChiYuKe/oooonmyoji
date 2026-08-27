@@ -108,6 +108,7 @@ def _instance_worker(
                 ocr_engine=ocr_engine,
                 cancel_event=current_cancel,
                 event_queue=event_queue,
+                events_file=command.get("events_file"),
             )
         finally:
             with state_lock:
@@ -159,7 +160,7 @@ class Supervisor:
             self.workers[instance.id] = _Worker(instance, process, command_queue, response_queue, control_queue)
             self.logger.emit("worker.started", instance_id=instance.id, pid=process.pid)
 
-    def run(self, job_id: str, *, wait: bool = True) -> str:
+    def run(self, job_id: str, *, wait: bool = True, events_file: str | None = None) -> str:
         self.start()
         self.check_workers()
         job = self.config.job(job_id)
@@ -169,7 +170,7 @@ class Supervisor:
         if any(instance_id == job.instance for instance_id in self._runs.values()):
             raise RuntimeError(f"instance already has a queued or running task: {job.instance}")
         run_id = f"{job_id}-{uuid.uuid4().hex[:12]}"
-        worker.command_queue.put({"type": "run", "job_id": job_id, "run_id": run_id})
+        worker.command_queue.put({"type": "run", "job_id": job_id, "run_id": run_id, "events_file": events_file})
         self._runs[run_id] = job.instance
         if wait:
             self.wait_for(run_id)
@@ -182,6 +183,7 @@ class Supervisor:
         inputs: dict[str, Any] | None = None,
         *,
         wait: bool = True,
+        events_file: str | None = None,
     ) -> str:
         """Run one workflow directly without registering a config task."""
 
@@ -210,7 +212,7 @@ class Supervisor:
             retry_enabled=False,
         )
         run_id = f"{job_id}-{uuid.uuid4().hex[:12]}"
-        worker.command_queue.put({"type": "run", "job_id": job_id, "job": job, "run_id": run_id})
+        worker.command_queue.put({"type": "run", "job_id": job_id, "job": job, "run_id": run_id, "events_file": events_file})
         self._runs[run_id] = instance_id
         if wait:
             self.wait_for(run_id)
@@ -272,10 +274,11 @@ class Supervisor:
                     record["finished_at"] = datetime.now(timezone.utc).isoformat()
                     record["error"] = "instance worker exited unexpectedly"
                     record["error_category"] = "internal"
-                    last_frame = self.config.artifact_dir / run_id / "last-frame.png"
                     artifacts = record.setdefault("artifacts", [])
-                    if last_frame.is_file() and str(last_frame) not in artifacts:
-                        artifacts.append(str(last_frame))
+                    if self.config.save_screenshots:
+                        last_frame = self.config.artifact_dir / run_id / "last-frame.png"
+                        if last_frame.is_file() and str(last_frame) not in artifacts:
+                            artifacts.append(str(last_frame))
                     interrupted_metadata = self.config.artifact_dir / run_id / "interrupted.json"
                     interrupted_metadata.parent.mkdir(parents=True, exist_ok=True)
                     interrupted_metadata.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

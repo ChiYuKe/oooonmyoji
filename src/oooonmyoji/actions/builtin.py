@@ -7,7 +7,7 @@ import random
 import time
 from typing import Any
 
-from ..exceptions import CancelledError, VisionError
+from ..exceptions import CancelledError, VisionError, WorkflowError
 from .base import Action, ActionResult
 
 
@@ -181,6 +181,34 @@ def _tap_with_variation(context: Any, x: int, y: int, arguments: dict[str, Any])
     return clicked_x, clicked_y, round(interval_seconds, 6)
 
 
+class RunWorkflowAction(Action):
+    """运行另一个工作流（脚本嵌套调用），并把子脚本的“回执”作为步骤输出返回。"""
+
+    name = "workflow.run"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        reference = arguments.get("workflow")
+        if not isinstance(reference, str) or not reference.strip():
+            return ActionResult.failed("workflow must be a workflow id or path below workflows/", category="workflow")
+        inputs = arguments.get("inputs", {})
+        if not isinstance(inputs, dict):
+            return ActionResult.failed("inputs must be an object", category="workflow")
+        try:
+            status, output, error, error_category = context.run_subworkflow(reference, inputs)
+        except WorkflowError as exc:
+            return ActionResult.failed(str(exc), category=exc.category.value, output={"workflow": reference, "status": "failed"})
+        receipt = {"workflow": reference, "status": status, "output": output}
+        if status == "succeeded":
+            return ActionResult.succeeded(receipt)
+        if status == "cancelled":
+            return ActionResult.cancelled(error or "subworkflow cancelled")
+        return ActionResult.failed(
+            f"subworkflow {reference} failed: {error or 'unknown error'}",
+            category=error_category or "subworkflow",
+            output=receipt,
+        )
+
+
 BUILTIN_ACTIONS: tuple[tuple[Action, dict[str, Any], dict[str, Any], bool, bool], ...] = (
     (CaptureAction(), {"type": "object", "additionalProperties": False}, {"type": "object"}, True, False),
     (SaveFrameAction(), {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}, "additionalProperties": False}, {"type": "object"}, True, False),
@@ -192,6 +220,7 @@ BUILTIN_ACTIONS: tuple[tuple[Action, dict[str, Any], dict[str, Any], bool, bool]
     (WaitTemplateAction(), {"type": "object", "required": ["template", "timeout_seconds"], "properties": {"template": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0}, "present": {"type": "boolean"}, "roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}}, "additionalProperties": False}, {"type": "array"}, True, False),
     (TapAction(), {"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "hold_ms": {"type": "integer", "minimum": 0}, "random_offset": {"type": "integer", "minimum": 0}, "random_interval": {"type": "array", "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}}, "additionalProperties": False}, {"type": "object"}, False, True),
     (TapMatchAction(), {"type": "object", "required": ["match"], "properties": {"match": {"type": "object"}, "revalidate": {"type": "boolean"}, "hold_ms": {"type": "integer", "minimum": 0}, "random_offset": {"type": "integer", "minimum": 0}, "random_interval": {"type": "array", "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}}, "additionalProperties": False}, {"type": "object"}, False, True),
+    (RunWorkflowAction(), {"type": "object", "required": ["workflow"], "properties": {"workflow": {"type": "string", "minLength": 1}, "inputs": {"type": "object"}}, "additionalProperties": False}, {"type": "object"}, False, True),
 )
 
 

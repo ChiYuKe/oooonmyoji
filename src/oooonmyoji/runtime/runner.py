@@ -7,6 +7,7 @@ import queue
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from ..actions import ActionRegistry, ActionStatus, build_action_registry
@@ -14,7 +15,8 @@ from ..config.model import AppConfig, InstanceConfig, JobConfig
 from ..devices.coordinates import CoordinateMapper
 from ..devices.factory import connect_at_task_boundary
 from ..devices.lock import InstanceLock
-from ..exceptions import CancelledError, OcrError
+from ..exceptions import CancelledError, OcrError, WorkflowError
+from ..vision.image import make_thumbnail_base64
 from ..vision.ocr import OcrEngine
 from ..vision.template import TemplateMatcher
 from ..workflows.engine import WorkflowEngine
@@ -57,6 +59,59 @@ class RemoteOcrEngine:
         return None
 
 
+class RunEventWriter:
+    """Truncate-once JSONL stream for per-step run events and optional images.
+
+    The first write opens the file in "w" mode so each run starts with a clean
+    stream; later lines are appended. Consumers (e.g. the VS Code extension)
+    tail this file and watch for the run_started marker.
+    """
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self._started = False
+
+    def write(self, payload: dict[str, Any]) -> None:
+        line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        mode = "w" if not self._started else "a"
+        with self.path.open(mode, encoding="utf-8", newline="\n") as stream:
+            stream.write(line)
+        self._started = True
+
+
+def _safe_artifact_name(value: str) -> str:
+    import re
+
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value) or "unknown"
+
+
+def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, save_screenshots: bool = False) -> dict[str, Any]:
+    """Build a run-event line for one step, optionally attaching frame data."""
+    import time
+
+    payload: dict[str, Any] = {
+        "type": "step",
+        "run_id": run_id,
+        "step_id": str(event.get("step_id")) if event.get("step_id") is not None else None,
+        "step": dict(event),
+        "ts": time.time(),
+    }
+    if save_screenshots and context is not None and context.last_frame is not None:
+        try:
+            saved = context.save_frame(context.last_frame, f"step-{_safe_artifact_name(payload['step_id'] or 'unknown')}.png")
+            payload["screenshot"] = str(saved)
+        except Exception as artifact_error:
+            payload["screenshot_error"] = str(artifact_error)
+        try:
+            thumbnail = make_thumbnail_base64(context.last_frame)
+            if thumbnail:
+                payload["thumbnail"] = thumbnail
+        except Exception:
+            pass
+    return payload
+
+
 class TaskRunner:
     def __init__(
         self,
@@ -80,8 +135,10 @@ class TaskRunner:
         ocr_engine: OcrEngine | None = None,
         cancel_event: Any | None = None,
         event_queue: Any | None = None,
+        events_file: Path | str | None = None,
     ) -> RunRecord:
         run_id = run_id or uuid.uuid4().hex
+        writer = RunEventWriter(events_file) if events_file is not None else None
         record = RunRecord(
             run_id=run_id,
             job_id=job.id,
@@ -112,6 +169,15 @@ class TaskRunner:
             record.started_at = datetime.now(timezone.utc).isoformat()
             record_store.write(record.to_dict())
             self._emit(event_queue, {"type": "status", "run_id": run_id, "status": RunStatus.RUNNING.value})
+            if writer is not None:
+                writer.write({
+                    "type": "run_started",
+                    "run_id": run_id,
+                    "instance_id": instance.id,
+                    "workflow_id": record.workflow_id,
+                    "status": RunStatus.RUNNING.value,
+                    "ts": time.time(),
+                })
 
             attempts = self.config.retry.task_attempts if job.retry_enabled and workflow.retry_safe else 1
             result: Any = None
@@ -131,6 +197,36 @@ class TaskRunner:
                 )
                 self.logger.emit("run.device_connected", run_id=run_id, instance_id=instance.id, backend="adb" if used_adb else "mumu")
                 mapper = CoordinateMapper(workflow.reference_resolution[0], workflow.reference_resolution[1], device.width, device.height)
+                # 脚本嵌套调用：workflow.run 动作经由 context.run_subworkflow 到这里执行子工作流
+                # 栈初始包含当前工作流自身，任何形式的自调用/跨层递归都会立即被拦截
+                subworkflow_stack: list[str] = [workflow.workflow_id]
+                subworkflow_limit = 4
+
+                def run_subworkflow(reference: str, inputs: dict[str, Any]) -> tuple[str, Any, str | None, str | None]:
+                    workflow_reference = reference if "/" not in reference else reference.replace("\\", "/")
+                    sub = self.workflow_loader.load(workflow_reference)
+                    sub_id = sub.workflow_id
+                    if sub_id in subworkflow_stack:
+                        raise WorkflowError(f"recursive subworkflow call: {sub_id}")
+                    if len(subworkflow_stack) >= subworkflow_limit:
+                        raise WorkflowError(f"subworkflow nesting exceeds the limit ({subworkflow_limit})")
+                    normalized = self.workflow_loader.normalize_inputs(sub, inputs)
+                    subworkflow_stack.append(sub_id)
+                    try:
+                        sub_engine = WorkflowEngine(
+                            sub,
+                            self.registry,
+                            context,
+                            normalized,
+                            on_step=on_step,
+                            on_step_start=on_step_start,
+                            cancel_event=cancel_event,
+                        )
+                        result = sub_engine.run()
+                    finally:
+                        subworkflow_stack.pop()
+                    return result.status.value, result.output, result.error, result.error_category
+
                 context = TaskContextImpl(
                     device=device,
                     mapper=mapper,
@@ -144,20 +240,35 @@ class TaskRunner:
                     ocr_attempts=self.config.retry.ocr_attempts,
                     retry_base_delay=self.config.retry.base_delay_seconds,
                     retry_max_delay=self.config.retry.max_delay_seconds,
+                    subworkflow_runner=run_subworkflow,
                 )
 
                 def on_step(event: dict[str, Any]) -> None:
                     record.current_step = str(event.get("step_id")) if event.get("step_id") is not None else None
                     record.step_history.append(dict(event))
-                    if context is not None and context.last_frame is not None:
+                    if self.config.save_screenshots and context is not None and context.last_frame is not None:
                         try:
                             record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
                         except Exception as artifact_error:
                             record.details["last_frame_error"] = str(artifact_error)
+                    if writer is not None:
+                        writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
                     record_store.write(record.to_dict())
                     self._emit(event_queue, {"type": "step", "run_id": run_id, "step": dict(event)})
 
-                engine = WorkflowEngine(workflow, self.registry, context, inputs, on_step=on_step, cancel_event=cancel_event)
+                def on_step_start(event: dict[str, Any]) -> None:
+                    if writer is not None:
+                        writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
+
+                engine = WorkflowEngine(
+                    workflow,
+                    self.registry,
+                    context,
+                    inputs,
+                    on_step=on_step,
+                    on_step_start=on_step_start,
+                    cancel_event=cancel_event,
+                )
                 result = engine.run()
                 if result.requires_worker_restart:
                     record.details["worker_restart_required"] = True
@@ -196,7 +307,7 @@ class TaskRunner:
                     record.details["device_close_error"] = str(close_error)
             lock.release()
             if record.status in {RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.INTERRUPTED}:
-                if context is not None and context.last_frame is not None:
+                if self.config.save_screenshots and context is not None and context.last_frame is not None:
                     try:
                         record.artifacts.append(str(context.save_frame(context.last_frame, "failure-last-frame.png")))
                     except Exception as artifact_error:
@@ -207,6 +318,16 @@ class TaskRunner:
                 failure_metadata.write_text(json.dumps(record.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             record_store.write(record.to_dict())
             self.logger.emit("run.finished", run_id=run_id, instance_id=instance.id, workflow_id=record.workflow_id, status=record.status.value, duration_ms=record.duration_ms)
+            if writer is not None:
+                writer.write({
+                    "type": "run_finished",
+                    "run_id": run_id,
+                    "workflow_id": record.workflow_id,
+                    "status": record.status.value,
+                    "error": record.error,
+                    "error_category": record.error_category,
+                    "ts": time.time(),
+                })
             self._emit(event_queue, {"type": "result", "run_id": run_id, "status": record.status.value, "record": record.to_dict()})
         return record
 
@@ -220,4 +341,4 @@ def run_job(config: AppConfig, job: JobConfig, *, ocr_engine: OcrEngine | None =
     return TaskRunner(config).execute(job, config.instance(job.instance), ocr_engine=ocr_engine)
 
 
-__all__ = ["RemoteOcrEngine", "TaskRunner", "run_job"]
+__all__ = ["RemoteOcrEngine", "RunEventWriter", "TaskRunner", "run_job"]

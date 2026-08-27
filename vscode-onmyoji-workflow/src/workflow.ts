@@ -529,6 +529,8 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog):
       inputs_schema: { type: 'object', description: '任务输入参数 JSON Schema（可选）；其 properties 用于 inputs.<字段> 引用补全' },
       steps: { type: 'array', minItems: 1, items: stepSchema, description: '步骤列表' },
     },
+    // 允许下划线前缀的元数据字段（如 _layout 卡片位置布局），与引擎 validator 一致
+    patternProperties: { '^_': { description: '编辑器/工具私有元数据（引擎忽略）' } },
     additionalProperties: false,
     definitions: {
       refObject: {

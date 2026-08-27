@@ -36,6 +36,8 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
             "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
         }, "additionalProperties": False}},
     },
+    # 允许下划线前缀的元数据字段（如 _layout 卡片位置布局），其余未知顶层字段仍拒绝
+    "patternProperties": {"^_": {}},
     "additionalProperties": False,
 }
 

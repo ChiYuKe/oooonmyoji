@@ -93,6 +93,7 @@ APP_CONFIG_SCHEMA: dict[str, Any] = {
         },
         "log_dir": {"type": "string", "minLength": 1},
         "artifact_dir": {"type": "string", "minLength": 1},
+        "save_screenshots": {"type": "boolean"},
     },
     "additionalProperties": False,
 }
@@ -325,6 +326,7 @@ def load_config(path: Path | str) -> AppConfig:
         retry=retry,
         log_dir=log_dir,
         artifact_dir=artifact_dir,
+        save_screenshots=_bool(raw.get("save_screenshots"), "save_screenshots", False),
         raw=raw,
     )
 

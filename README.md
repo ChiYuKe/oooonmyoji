@@ -244,8 +244,10 @@ Action 代码属于可信本地扩展；更新代码后需要重启监督器，�
 开启 `retry_enabled` 时，才会使用配置中的安全任务重试。
 
 事件写入 `logs/events-YYYY-MM-DD.jsonl`，同时输出控制台文本，默认保留
-14 天。失败或中断运行写入 `artifacts/<run-id>/`，包括最后一帧、失败元数据
-和 OCR/模板结果。
+14 天。运行器默认不保存步骤截图、缩略图或自动 `last-frame.png`；需要调试
+截图时，在配置中设置 `"save_screenshots": true`。工作流显式使用
+`core.save_frame` 时仍会保存指定截图。失败或中断运行写入
+`artifacts/<run-id>/`，包括失败元数据和 OCR/模板结果。
 
 单元测试：
 

@@ -21,6 +21,8 @@ export interface GraphEdge {
   kind: EdgeKind;
   explicit: boolean;
   label: string;
+  /** 默认失败终点保留在布局数据中，但由画布选择不显示长连线。 */
+  visible?: boolean;
 }
 
 export interface Point {
@@ -60,9 +62,9 @@ export function computeLayout(info: WorkflowInfo): GraphLayout {
   info.steps.forEach((step, index) => {
     if (!step.id) return;
     const next = index + 1 < info.steps.length ? info.steps[index + 1].id : '$success';
-    const pushEdge = (kind: EdgeKind, target: string, explicit: boolean, label: string) => {
+    const pushEdge = (kind: EdgeKind, target: string, explicit: boolean, label: string, visible = true) => {
       if (!idToIndex.has(target) || target === step.id) return;
-      edges.push({ from: step.id, to: target, kind, explicit, label });
+      edges.push({ from: step.id, to: target, kind, explicit, label, visible });
     };
     if (step.onSuccess) {
       pushEdge('on_success', step.onSuccess, true, '成功');
@@ -72,12 +74,12 @@ export function computeLayout(info: WorkflowInfo): GraphLayout {
     if (step.onFailure) {
       pushEdge('on_failure', step.onFailure, true, '失败');
     } else {
-      pushEdge('on_failure', '$failure', false, '失败(默认)');
+      pushEdge('on_failure', '$failure', false, '失败(默认)', false);
     }
     if (step.onSkip) {
       pushEdge('on_skip', step.onSkip, true, '跳过');
-    } else if (next !== step.id) {
-      pushEdge('on_skip', next, false, '跳过(默认)');
+    } else if (step.hasWhen && next !== step.id) {
+      pushEdge('on_skip', next, false, '跳过(默认)', false);
     }
   });
 

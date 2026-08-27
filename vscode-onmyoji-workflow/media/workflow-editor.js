@@ -13,14 +13,15 @@
   const EDGE_KIND_LABELS = { on_success: '成功', on_failure: '失败', on_skip: '跳过' };
   const TOP_KEYS = ['schema_version', 'id', 'version', 'reference_resolution', 'entry', 'limits', 'inputs_schema', 'steps'];
   const STEP_KEYS = ['id', 'action', 'when', 'with', 'retry', 'timeout_seconds', 'on_success', 'on_failure', 'on_skip'];
-  const NODE_W = 300; // 节点卡片宽度（UE 蓝图风格面板）
-  const NODE_H = 108; // 节点卡片高度
+  const NODE_W = 260; // 节点卡片宽度（UE 蓝图风格面板）
+  const NODE_H = 140; // 节点卡片高度
   const HEAD_H = 28; // 彩色标题栏高度
   const TERMINAL_W = 200;
   const ROW_GAP = 96;
   const MARGIN = 40;
   const PORT_R = 6;
   const CONNECT_HIT = 18; // 放线落点命中半径（世界坐标）
+  const SNAP = 12; // 拖拽节点时的网格吸附步长（UE 风格；按住 Ctrl+Alt 拖动可临时取消吸附）
 
   // 只改变编辑器中的显示文本；JSON 字段名和 $ref 值仍使用英文。
   const ACTION_LABELS = {
@@ -54,6 +55,8 @@
     message: '日志信息',
     fields: '附加字段',
     value: '断言值',
+    workflow: '子工作流',
+    inputs: '传入参数',
   };
   const OUTPUT_LABELS = {
     x: 'X 坐标',
@@ -70,6 +73,19 @@
     center: '匹配中心',
     asserted: '断言结果',
   };
+  const STATUS_LABELS = {
+    running: '运行中',
+    succeeded: '已成功',
+    failed: '已失败',
+    skipped: '已跳过',
+    cancelled: '已取消',
+  };
+
+  function clipText(text, max) {
+    const value = String(text);
+    if (value.length <= max) return value;
+    return value.slice(0, max - 1) + '…';
+  }
 
   const state = {
     raw: null,
@@ -79,6 +95,9 @@
     issues: [],
     document: null,
     selectedId: null,
+    selectedIds: new Set(), // 多选（UE 风格框选 / Shift 点选）
+    selectedEdge: null, // { from, kind } 当前选中的连线
+    run: { session: null, running: false, byStep: {} }, // 最近一次运行的步骤状态与截图缩略图
     dirty: false,
     zoom: 1,
     panX: 20,
@@ -87,6 +106,9 @@
     drag: null,
     connectHoverId: null,
     addOpen: false,
+    paramModes: {},
+    roiPickPending: null,
+    roiPicker: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -127,6 +149,158 @@
     toast.timer = setTimeout(() => el.classList.add('hidden'), ms || 2600);
   }
 
+  // ---------- 运行事件 ----------
+  function applyRunEvent(event) {
+    if (!event || typeof event !== 'object') return;
+    if (event.type === 'run_started') {
+      state.run = { session: event.run_id || null, running: true, byStep: {} };
+      renderAll();
+    } else if (event.type === 'step') {
+      if (state.run && event.run_id && state.run.session === event.run_id) {
+        const st = event.step || {};
+        state.run.byStep[event.step_id] = {
+          status: st.status || 'running',
+          thumbnail: event.thumbnail || null,
+          screenshot: event.screenshot || null,
+          durationMs: typeof st.duration_ms === 'number' ? st.duration_ms : null,
+          error: st.error ? String(st.error) : null,
+        };
+        renderAll();
+      }
+    } else if (event.type === 'run_finished') {
+      if (state.run && event.run_id && state.run.session === event.run_id) {
+        state.run.running = false;
+        renderAll();
+        const label = event.status === 'succeeded' ? '成功' : event.status === 'failed' ? '失败' : event.status;
+        toast('工作流执行完成：' + label, 4200);
+      }
+    }
+  }
+
+  /** 重放最近一次运行的完整事件序列（刷新面板后缩略图仍在）。 */
+  function applyRunEvents(events) {
+    state.run = { session: null, running: false, byStep: {} };
+    let sessionSnapshot = true;
+    for (const event of events) {
+      if (!event || typeof event !== 'object') continue;
+      if (event.type === 'run_started') {
+        state.run = { session: event.run_id || null, running: true, byStep: {} };
+        sessionSnapshot = true;
+      } else if (event.type === 'step') {
+        if (!sessionSnapshot || state.run.session !== event.run_id) continue;
+        const st = event.step || {};
+        state.run.byStep[event.step_id] = {
+          status: st.status || 'running',
+          thumbnail: event.thumbnail || null,
+          screenshot: event.screenshot || null,
+          durationMs: typeof st.duration_ms === 'number' ? st.duration_ms : null,
+          error: st.error ? String(st.error) : null,
+        };
+      } else if (event.type === 'run_finished' && sessionSnapshot) {
+        state.run.running = false;
+      }
+    }
+    renderAll();
+  }
+
+  // ---------- 截图大图查看（点击卡片内缩略图） ----------
+  function lightboxEl() {
+    let overlay = document.getElementById('lightbox');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'lightbox';
+      overlay.className = 'hidden';
+      overlay.addEventListener('mousedown', (e) => {
+        if (e.target === overlay) closeLightbox();
+      });
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  function openLightbox(stepId) {
+    const info = state.run && state.run.byStep[stepId];
+    if (!info) return;
+    hideThumbPreview();
+    const overlay = lightboxEl();
+    overlay.innerHTML = '';
+    const frame = document.createElement('div');
+    frame.className = 'lightbox-frame';
+    const title = document.createElement('div');
+    title.className = 'lightbox-title';
+    const statusLabel = STATUS_LABELS[info.status] || info.status || '';
+    const dur = info.durationMs != null ? ' · ' + info.durationMs + 'ms' : '';
+    title.textContent = '步骤「' + stepId + '」' + (statusLabel ? ' · ' + statusLabel : '') + dur;
+    frame.appendChild(title);
+    if (info.error) {
+      const err = document.createElement('div');
+      err.className = 'lightbox-error';
+      err.textContent = '✗ ' + info.error;
+      frame.appendChild(err);
+    }
+    const img = document.createElement('img');
+    img.src = info.screenshot || (info.thumbnail ? 'data:image/png;base64,' + info.thumbnail : '');
+    img.alt = '步骤 ' + stepId + ' 截图';
+    frame.appendChild(img);
+    const close = document.createElement('button');
+    close.className = 'primary';
+    close.textContent = '关闭';
+    close.addEventListener('click', () => closeLightbox());
+    frame.appendChild(close);
+    overlay.appendChild(frame);
+    overlay.classList.remove('hidden');
+  }
+
+  /** 缩略图悬停：浮动大预览（跟随鼠标，不阻碍点击）。 */
+  function thumbPreviewEl() {
+    let el = document.getElementById('thumb-preview');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'thumb-preview';
+      el.className = 'hidden';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function showThumbPreview(e, stepId) {
+    const info = state.run && state.run.byStep[stepId];
+    if (!info) return;
+    const src = info.screenshot || (info.thumbnail ? 'data:image/png;base64,' + info.thumbnail : null);
+    if (!src) return;
+    const el = thumbPreviewEl();
+    el.textContent = '';
+    const img = document.createElement('img');
+    img.src = src;
+    el.appendChild(img);
+    const label = document.createElement('div');
+    label.className = 'thumb-preview-label';
+    label.textContent = '步骤「' + stepId + '」' + (STATUS_LABELS[info.status] || '');
+    el.appendChild(label);
+    el.classList.remove('hidden');
+    let x = e.clientX + 14;
+    let y = e.clientY + 10;
+    if (x > window.innerWidth - 340) x = e.clientX - 340;
+    if (y > window.innerHeight - 230) y = e.clientY - 220;
+    el.style.left = Math.max(4, x) + 'px';
+    el.style.top = Math.max(4, y) + 'px';
+  }
+
+  function hideThumbPreview() {
+    const el = document.getElementById('thumb-preview');
+    if (el) el.classList.add('hidden');
+  }
+
+  function closeLightbox() {
+    const overlay = document.getElementById('lightbox');
+    if (overlay) overlay.classList.add('hidden');
+  }
+
+  function lightboxOpen() {
+    const overlay = document.getElementById('lightbox');
+    return !!overlay && !overlay.classList.contains('hidden');
+  }
+
   // ---------- 消息 ----------
   window.addEventListener('message', (event) => {
     const msg = event.data;
@@ -142,6 +316,33 @@
         state.externalNotice = true;
         $('external-banner').classList.remove('hidden');
         $('external-banner').textContent = msg.notice || 'JSON 已在外部修改';
+        break;
+      case 'runEvent':
+        applyRunEvent(msg.event);
+        break;
+      case 'runReplay':
+        applyRunEvents(Array.isArray(msg.events) ? msg.events : []);
+        break;
+      case 'roiSelected':
+        applyPickedRoi(msg);
+        break;
+      case 'roiPickerImage':
+        openRoiPicker(msg);
+        break;
+      case 'roiPickerCancelled':
+        if (!msg.requestId || msg.requestId === state.roiPickPending) {
+          closeRoiPicker();
+          state.roiPickPending = null;
+          renderInspector();
+        }
+        break;
+      case 'roiPickerError':
+        if (!state.roiPickPending || !msg.requestId || msg.requestId === state.roiPickPending) {
+          closeRoiPicker();
+          state.roiPickPending = null;
+          toast('ROI 选择失败：' + (msg.message || '未知错误'), 4200);
+          renderInspector();
+        }
         break;
       case 'saved':
         state.dirty = false;
@@ -178,7 +379,28 @@
     state.externalNotice = false;
     state.drag = null;
     state.connectHoverId = null;
+    state.paramModes = {};
+    state.roiPickPending = null;
     state.selectedId = state.raw && state.raw.entry ? state.raw.entry : (Array.isArray(state.raw && state.raw.steps) && state.raw.steps[0] ? state.raw.steps[0].id : null);
+    state.selectedIds = new Set(state.selectedId ? [state.selectedId] : []);
+    state.selectedEdge = null;
+    // 卡片位置持久化：从原脚本的 _layout 元数据字段恢复
+    state.nodePos = {};
+    {
+      const layoutRaw = state.raw && state.raw._layout;
+      if (layoutRaw && typeof layoutRaw === 'object') {
+        const valid = new Set(Array.isArray(state.raw.steps) ? state.raw.steps.map((s) => s && s.id).filter(Boolean) : []);
+        const next = {};
+        for (const key of Object.keys(layoutRaw)) {
+          const p = layoutRaw[key];
+          if (!valid.has(key) || !p || typeof p !== 'object') continue;
+          const x = Number(p.x);
+          const y = Number(p.y);
+          if (Number.isFinite(x) && Number.isFinite(y)) next[key] = { x, y };
+        }
+        state.nodePos = next;
+      }
+    }
     $('external-banner').classList.add('hidden');
     $('file-label').textContent = state.document ? state.document.name : '';
     $('file-label').title = state.document ? state.document.uri : '';
@@ -222,16 +444,16 @@
     steps.forEach((s, index) => {
       if (!s || typeof s.id !== 'string' || !validIds.has(s.id)) return;
       const next = index + 1 < steps.length && steps[index + 1] && typeof steps[index + 1].id === 'string' ? steps[index + 1].id : '$success';
-      const pushEdge = (kind, target, explicit, label) => {
+      const pushEdge = (kind, target, explicit, label, visible = true) => {
         if (!target || target === s.id || !validIds.has(target)) return;
-        edges.push({ from: s.id, to: target, kind, explicit, label });
+        edges.push({ from: s.id, to: target, kind, explicit, label, visible });
       };
       if (typeof s.on_success === 'string') pushEdge('on_success', s.on_success, true, '成功');
       else if (next !== s.id) pushEdge('on_success', next, false, '成功(默认)');
       if (typeof s.on_failure === 'string') pushEdge('on_failure', s.on_failure, true, '失败');
-      else pushEdge('on_failure', '$failure', false, '失败(默认)');
+      else pushEdge('on_failure', '$failure', false, '失败(默认)', false);
       if (typeof s.on_skip === 'string') pushEdge('on_skip', s.on_skip, true, '跳过');
-      else if (next !== s.id) pushEdge('on_skip', next, false, '跳过(默认)');
+      else if (s.when !== undefined && s.when !== null && next !== s.id) pushEdge('on_skip', next, false, '跳过(默认)', false);
     });
     const positions = {};
     steps.forEach((s, index) => {
@@ -282,6 +504,28 @@
     return count;
   }
 
+  /** UE 蓝图式连线张力：水平/垂直位移各自钳制后相加；目标在左（回连）时弯度更大。 */
+  function connectionTension(sx, sy, tx, ty) {
+    const dx = tx - sx;
+    const dy = ty - sy;
+    let tension;
+    if (dx >= 0) {
+      tension = Math.min(Math.abs(dx), 1000) + Math.min(Math.abs(dy), 1000);
+    } else {
+      tension = 2 * Math.min(Math.abs(dx), 220) + 1.5 * Math.min(Math.abs(dy), 220);
+    }
+    return Math.max(24, Math.min(tension, 360));
+  }
+
+  /**
+   * UE 的 MakeDrawSpaceSpline 接收 Hermite 切线；SVG C 命令接收 Bezier 控制点。
+   * 三次曲线的控制点是 P0 + tangent / 3 与 P1 - tangent / 3。
+   */
+  function connectionPath(sx, sy, tx, ty) {
+    const controlOffset = connectionTension(sx, sy, tx, ty) / 3;
+    return `M ${sx} ${sy} C ${sx + controlOffset} ${sy}, ${tx - controlOffset} ${ty}, ${tx} ${ty}`;
+  }
+
   function renderAll() {
     const svg = $('graph');
     const wrap = $('canvas-wrap');
@@ -313,6 +557,7 @@
 
     // edges（从源节点右侧输出引脚，到目标节点左侧输入引脚）
     for (const edge of layout.edges) {
+      if (edge.visible === false) continue;
       const from = effectivePos(layout.positions[edge.from]);
       const to = effectivePos(layout.positions[edge.to]);
       const kindIndex = EDGE_KINDS.indexOf(edge.kind);
@@ -321,13 +566,19 @@
       const tx = to.x;
       const toNode = layout.nodes.find((n) => n.id === edge.to);
       const ty = to.y + (toNode && toNode.kind === 'terminal' ? terminalInputPinY() : stepInputPinY());
-      const bend = Math.max(32, Math.min(160, Math.abs(tx - sx) * 0.4));
       const mx = (sx + tx) / 2;
       const my = (sy + ty) / 2;
-      const d = `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`;
-      const g = svgEl('g', { class: 'edge ' + edge.kind + (edge.explicit ? '' : ' fallthrough') });
+      const d = connectionPath(sx, sy, tx, ty);
+      const g = svgEl('g', { class: 'edge ' + edge.kind + (edge.explicit ? '' : ' fallthrough') + (state.selectedEdge && state.selectedEdge.from === edge.from && state.selectedEdge.kind === edge.kind ? ' selected' : '') });
       const path = svgEl('path', { d, class: edge.explicit ? 'line' : '' });
       g.appendChild(path);
+      // 点击连线选中（UE 风格：选中后按 Delete 删除该连线）
+      g.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        selectEdge(edge.from, edge.kind);
+      });
       // 只有默认跳转显示文字标签；显式连线靠引脚颜色识别，中点留给 ✕ 删除手柄
       if (!edge.explicit) {
         const label = svgEl('text', { x: mx, y: my - 8, 'text-anchor': 'middle', class: 'edge-label' });
@@ -351,21 +602,38 @@
       viewport.appendChild(g);
     }
 
-    // 连线橡皮筋（正在拖拽连线时，从输出引脚开始）
+    // 连线橡皮筋（正在拖拽连线时，从输出引脚开始；吸附到目标引脚时线尾贴住引脚）
     if (state.drag && state.drag.mode === 'connect') {
       const from = effectivePos(layout.positions[state.drag.fromId]);
       const kindIndex = EDGE_KINDS.indexOf(state.drag.edgeKind);
       const sx = from.x + NODE_W;
       const sy = from.y + outputPinY(Math.max(0, kindIndex));
-      const c = state.drag.cursorWorld || { x: sx + 100, y: sy };
-      const bend = Math.max(32, Math.min(160, Math.abs(c.x - sx) * 0.4));
-      const d = `M ${sx} ${sy} C ${sx + bend} ${sy}, ${c.x - bend} ${c.y}, ${c.x} ${c.y}`;
-      const g = svgEl('g', { class: 'edge connect ' + state.drag.edgeKind });
+      const snapped = !!state.drag.snap;
+      const c = snapped ? state.drag.snap : (state.drag.cursorWorld || { x: sx + 100, y: sy });
+      const d = connectionPath(sx, sy, c.x, c.y);
+      const g = svgEl('g', { class: 'edge connect ' + state.drag.edgeKind + (snapped ? ' snapped' : '') });
       g.appendChild(svgEl('path', { d }));
+      // 吸附时在目标引脚上画一个明显的接收点
+      if (snapped) {
+        g.appendChild(svgEl('circle', { class: 'connect-snap-ring', cx: c.x, cy: c.y, r: PORT_R + 5 }));
+      }
       const label = svgEl('text', { x: (sx + c.x) / 2, y: (sy + c.y) / 2 - 8, 'text-anchor': 'middle' });
       label.textContent = EDGE_KIND_LABELS[state.drag.edgeKind] || state.drag.edgeKind;
       g.appendChild(label);
       viewport.appendChild(g);
+    }
+
+    // 框选矩形（UE 风格 marquee selection）
+    if (state.drag && state.drag.mode === 'marquee') {
+      const a = state.drag.startWorld;
+      const b = state.drag.endWorld;
+      viewport.appendChild(svgEl('rect', {
+        class: 'marquee',
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y),
+      }));
     }
 
     // nodes（UE 蓝图风格卡片：彩色标题栏 + 主体 + 左右执行引脚）
@@ -376,8 +644,9 @@
       const kindClass = isTerminal ? 'kind-terminal' : node.isEntry ? 'kind-entry' : 'kind-step';
       const isDrag = state.drag && state.drag.mode === 'node' && state.drag.nodeId === node.id;
       const isConnectTarget = state.connectHoverId === node.id;
+      const runInfo = !isTerminal ? (state.run && state.run.byStep[node.id]) || null : null;
       const g = svgEl('g', {
-        class: 'node ' + kindClass + (isTerminal ? ' terminal' : '') + (isDrag ? ' dragging' : '') + (isConnectTarget ? ' connect-target' : ''),
+        class: 'node ' + kindClass + (isTerminal ? ' terminal' : '') + (isDrag ? ' dragging' : '') + (isConnectTarget ? ' connect-target' : '') + (runInfo ? ' run-' + runInfo.status : ''),
         transform: `translate(${pos.x},${pos.y})`,
         style: 'cursor: grab',
       });
@@ -387,7 +656,7 @@
       nodeTitle.textContent = isTerminal ? '执行终点：' + node.label : '拖动卡片调整位置；点击卡片选择步骤；从右侧彩色引脚拖出连线';
       g.appendChild(nodeTitle);
       // 面板主体
-      const box = svgEl('rect', { class: 'node-box' + (state.selectedId === node.id ? ' selected' : ''), width: w, height: NODE_H, rx: 7, ry: 7 });
+      const box = svgEl('rect', { class: 'node-box' + (state.selectedIds.has(node.id) ? ' selected' : ''), width: w, height: NODE_H, rx: 7, ry: 7 });
       g.appendChild(box);
       // 彩色标题栏（底部两角收方）
       const head = svgEl('rect', { class: 'node-head', width: w, height: HEAD_H, rx: 7, ry: 7 });
@@ -402,22 +671,108 @@
         badge.textContent = '入口';
         g.appendChild(badge);
       }
+      // 运行状态点（标题栏右上角，tooltip 带状态与耗时）
+      if (runInfo) {
+        const dot = svgEl('circle', { class: 'run-dot run-' + runInfo.status, cx: w - 8, cy: HEAD_H / 2, r: 4 });
+        const dotTip = svgEl('title', {});
+        const dur = runInfo.durationMs != null ? ' · ' + runInfo.durationMs + 'ms' : '';
+        dotTip.textContent = (STATUS_LABELS[runInfo.status] || runInfo.status) + dur;
+        dot.appendChild(dotTip);
+        g.appendChild(dot);
+      }
       if (!isTerminal) {
-        // 主体：步骤 id
-        const idText = svgEl('text', { x: 12, y: HEAD_H + 22, class: 'node-id' });
+        const hasThumb = !!(runInfo && runInfo.thumbnail);
+        const textX = hasThumb ? 84 : 12;
+        // 序号徽章（有运行缩略图时省略，让位给截图）
+        if (!hasThumb && node.index >= 0) {
+          g.appendChild(svgEl('rect', { class: 'node-seq', x: 6, y: HEAD_H + 10, width: 16, height: 16, rx: 3 }));
+          const seqText = svgEl('text', { x: 14, y: HEAD_H + 21, 'text-anchor': 'middle', class: 'node-seq-text' });
+          seqText.textContent = String(node.index + 1);
+          g.appendChild(seqText);
+        }
+        // 主体：步骤 id（有缩略图/序号徽章时右移）
+        const idText = svgEl('text', { x: hasThumb ? 84 : 28, y: HEAD_H + 22, class: 'node-id' });
         idText.textContent = node.label;
         g.appendChild(idText);
-        // 参数摘要（首个 with 参数）
+        // when 条件标记（id 行右侧）
+        if (step && step.when !== undefined && step.when !== null) {
+          const whenText = svgEl('text', { x: w - 44, y: HEAD_H + 21, 'text-anchor': 'end', class: 'node-when' });
+          whenText.textContent = 'when';
+          const whenTip = svgEl('title', {});
+          whenTip.textContent = '仅当条件成立时执行：' + JSON.stringify(step.when);
+          whenText.appendChild(whenTip);
+          g.appendChild(whenText);
+        }
+        // 参数摘要（最多两行，超长截断）
         if (step && step.with && typeof step.with === 'object') {
-          const keys = Object.keys(step.with);
-          if (keys.length) {
-            const first = keys[0];
-            const v = step.with[first];
+          Object.keys(step.with).slice(0, 2).forEach((key, row) => {
+            const v = step.with[key];
             const shown = v !== null && typeof v === 'object' ? (v.$ref || JSON.stringify(v)) : String(v);
-            const sum = svgEl('text', { x: 12, y: HEAD_H + 38, class: 'node-params' });
-            sum.textContent = first + ': ' + shown;
+            const sum = svgEl('text', { x: textX, y: HEAD_H + 38 + row * 16, class: 'node-params' });
+            sum.textContent = clipText(key + ': ' + shown, 36);
             g.appendChild(sum);
-          }
+          });
+        }
+        // 失败错误摘要（主体底部红字）
+        if (runInfo && runInfo.status === 'failed' && runInfo.error) {
+          const errText = svgEl('text', { x: textX, y: HEAD_H + 72, class: 'node-error' });
+          errText.textContent = clipText('✗ ' + runInfo.error, 42);
+          const errTip = svgEl('title', {});
+          errTip.textContent = runInfo.error;
+          errText.appendChild(errTip);
+          g.appendChild(errText);
+        }
+        // 运行耗时 / 状态行（主体底部）：成功显示耗时，运行中/跳过/取消显示状态
+        if (runInfo && runInfo.status === 'succeeded') {
+          const durText = svgEl('text', { x: textX, y: HEAD_H + 72, class: 'node-duration' });
+          durText.textContent = '✓ ' + (runInfo.durationMs != null ? runInfo.durationMs + ' ms' : '完成');
+          g.appendChild(durText);
+        } else if (runInfo && runInfo.status === 'running') {
+          const runText = svgEl('text', { x: textX, y: HEAD_H + 72, class: 'node-duration running' });
+          runText.textContent = '运行中…';
+          g.appendChild(runText);
+        } else if (runInfo && (runInfo.status === 'skipped' || runInfo.status === 'cancelled')) {
+          const skipText = svgEl('text', { x: textX, y: HEAD_H + 72, class: 'node-duration muted' });
+          skipText.textContent = runInfo.status === 'skipped' ? '已跳过' : '已取消';
+          g.appendChild(skipText);
+        } else if (!runInfo && (!step || typeof step.on_failure !== 'string')) {
+          const defaultFailure = svgEl('text', { x: textX, y: HEAD_H + 72, class: 'node-default' });
+          defaultFailure.textContent = '失败 → 终止';
+          const defaultFailureTip = svgEl('title', {});
+          defaultFailureTip.textContent = '未配置失败跳转，默认进入失败终点';
+          defaultFailure.appendChild(defaultFailureTip);
+          g.appendChild(defaultFailure);
+        }
+        if (!runInfo && step && step.when !== undefined && step.when !== null && typeof step.on_skip !== 'string') {
+          const defaultSkip = svgEl('text', { x: textX, y: HEAD_H + 88, class: 'node-default' });
+          defaultSkip.textContent = '跳过 → 下一步';
+          const defaultSkipTip = svgEl('title', {});
+          defaultSkipTip.textContent = '条件不满足时默认进入下一步';
+          defaultSkip.appendChild(defaultSkipTip);
+          g.appendChild(defaultSkip);
+        }
+        // 运行截图缩略图：悬停浮动预览，点击放大查看
+        if (runInfo && runInfo.thumbnail) {
+          const img = svgEl('image', {
+            x: 10,
+            y: HEAD_H + 14,
+            width: 64,
+            height: 72,
+            preserveAspectRatio: 'xMidYMid slice',
+            href: 'data:image/png;base64,' + runInfo.thumbnail,
+            class: 'step-thumb',
+          });
+          const imgTip = svgEl('title', {});
+          imgTip.textContent = '悬停预览 · 点击查看大图（' + node.id + '）';
+          img.appendChild(imgTip);
+          img.addEventListener('mousemove', (e) => showThumbPreview(e, node.id));
+          img.addEventListener('mouseleave', () => hideThumbPreview());
+          img.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openLightbox(node.id);
+          });
+          g.appendChild(img);
         }
       } else {
         const idText = svgEl('text', { x: 12, y: terminalInputPinY() + 4, class: 'node-id terminal-id' });
@@ -432,7 +787,7 @@
       }
       // 执行输入引脚（左侧中部）：作为连线的落点
       const inY = isTerminal ? terminalInputPinY() : stepInputPinY();
-      const inPort = svgEl('circle', { class: 'port port-in', cx: 0, cy: inY, r: PORT_R });
+      const inPort = svgEl('circle', { class: 'port port-in' + (state.connectHoverId === node.id ? ' pin-hover' : ''), cx: 0, cy: inY, r: PORT_R });
       const inTip = svgEl('title', {});
       inTip.textContent = '执行输入：接收上游步骤的执行流';
       inPort.appendChild(inTip);
@@ -498,20 +853,66 @@
   }
 
   function startDrag(e, nodeId) {
+    // UE 操作习惯：右键 / 中键拖拽 = 平移画布；左键拖节点 = 移动；左键拖空白 = 框选
+    if (e.button === 1 || e.button === 2) {
+      e.preventDefault();
+      if (nodeId) e.stopPropagation();
+      removeConnectMenu();
+      state.drag = {
+        mode: 'pan',
+        button: e.button,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startPanX: state.panX,
+        startPanY: state.panY,
+        moved: false,
+      };
+      return;
+    }
     if (e.button !== 0) return;
     e.preventDefault();
     removeConnectMenu();
-    if (nodeId) e.stopPropagation(); // 防止冒泡到 svg 被当成平移
-    state.drag = {
-      mode: nodeId ? 'node' : 'pan',
-      nodeId: nodeId || null,
-      startClientX: e.clientX,
-      startClientY: e.clientY,
-      startPanX: state.panX,
-      startPanY: state.panY,
-      startPos: nodeId && state.nodePos[nodeId] ? { ...state.nodePos[nodeId] } : null,
-      moved: false,
-    };
+    if (nodeId) {
+      e.stopPropagation(); // 防止冒泡到 svg 被当成框选
+      state.selectedEdge = null;
+      if (!state.selectedIds.has(nodeId)) {
+        if (e.shiftKey) {
+          state.selectedIds.add(nodeId);
+        } else {
+          state.selectedIds = new Set([nodeId]);
+        }
+        state.selectedId = nodeId;
+        renderAll();
+        renderInspector();
+      }
+      // 记录所有已选中节点的起始位置，拖动时整组随动（用 effectivePos 保留已拖过的手动位置）
+      const layout = computeLayout();
+      const startPositions = {};
+      for (const id of state.selectedIds) {
+        const bp = layout.positions[id];
+        startPositions[id] = bp ? effectivePos(bp) : { x: 0, y: 0 };
+      }
+      state.drag = {
+        mode: 'node',
+        nodeId,
+        dragIds: [...state.selectedIds],
+        startPositions,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startPanX: state.panX,
+        startPanY: state.panY,
+        moved: false,
+      };
+    } else {
+      state.drag = {
+        mode: 'marquee',
+        startWorld: screenToWorld(e),
+        endWorld: screenToWorld(e),
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        moved: false,
+      };
+    }
   }
 
   /** 从右侧输出引脚开始拖拽连线；kind 由引脚决定（on_success / on_failure / on_skip）。 */
@@ -541,15 +942,38 @@
       state.panY = state.drag.startPanY + dy;
       renderAll();
     } else if (state.drag.mode === 'node') {
-      const base = computeLayout().positions[state.drag.nodeId];
-      if (!base) return;
-      const cur = state.drag.startPos || base;
-      state.nodePos[state.drag.nodeId] = { x: cur.x + dx / state.zoom, y: cur.y + dy / state.zoom };
+      // UE 风格：整组选中节点一起移动；默认吸附网格，按住 Ctrl+Alt 拖动临时取消吸附
+      const dxw = dx / state.zoom;
+      const dyw = dy / state.zoom;
+      const noSnap = !!(e.ctrlKey && e.altKey);
+      for (const id of state.drag.dragIds) {
+        const base = state.drag.startPositions[id];
+        if (!base) continue;
+        let nx = base.x + dxw;
+        let ny = base.y + dyw;
+        if (!noSnap) {
+          nx = Math.round(nx / SNAP) * SNAP;
+          ny = Math.round(ny / SNAP) * SNAP;
+        }
+        state.nodePos[id] = { x: nx, y: ny };
+      }
+      renderAll();
+    } else if (state.drag.mode === 'marquee') {
+      state.drag.endWorld = screenToWorld(e);
       renderAll();
     } else if (state.drag.mode === 'connect') {
       state.drag.cursorWorld = screenToWorld(e);
-      const hit = nodeAtWorld(state.drag.cursorWorld);
-      state.connectHoverId = hit && hit !== state.drag.fromId ? hit : null;
+      // UE 风格：磁吸——进入目标输入引脚命中区时，线尾吸到引脚中心
+      const hit = pinAtWorld(state.drag.cursorWorld);
+      state.connectHoverId = hit ? hit.nodeId : null;
+      state.drag.snap = null;
+      if (hit && hit.nodeId !== state.drag.fromId) {
+        const layout = computeLayout();
+        const pos = effectivePos(layout.positions[hit.nodeId]);
+        const targetNode = layout.nodes.find((n) => n.id === hit.nodeId);
+        const inY = targetNode && targetNode.kind === 'terminal' ? terminalInputPinY() : stepInputPinY();
+        state.drag.snap = { x: pos.x, y: pos.y + inY };
+      }
       renderAll();
     }
   }
@@ -558,14 +982,42 @@
     if (!state.drag) return;
     const wasDrag = state.drag;
     state.drag = null;
-    if (wasDrag.mode === 'node' && wasDrag.nodeId && !wasDrag.moved) {
-      selectNode(wasDrag.nodeId);
-    } else if (wasDrag.mode === 'connect') {
-      const target = wasDrag.cursorWorld ? nodeAtWorld(wasDrag.cursorWorld) : null;
+    if (wasDrag.mode === 'marquee') {
       state.connectHoverId = null;
-      if (target && target !== wasDrag.fromId) {
-        // 跳转类型已由起始引脚决定，直接连线
-        applyConnection(wasDrag.fromId, target, wasDrag.edgeKind);
+      if (wasDrag.moved) {
+        const sel = new Set(nodesInRect(wasDrag.startWorld, wasDrag.endWorld));
+        state.selectedIds = sel;
+        state.selectedId = sel.size ? [...sel][0] : null;
+        state.selectedEdge = null;
+        renderAll();
+        renderInspector();
+      } else {
+        // 点击空白处：取消选中
+        state.selectedIds = new Set();
+        state.selectedId = null;
+        state.selectedEdge = null;
+        renderAll();
+        renderInspector();
+      }
+    } else if (wasDrag.mode === 'node') {
+      // 位置已在移动中实时更新；mousedown 时已完成选中
+      renderAll();
+      renderInspector();
+      if (wasDrag.moved) markDirty();
+    } else if (wasDrag.mode === 'connect') {
+      // UE 风格：必须释放到目标输入引脚上才连线，否则取消
+      const target = wasDrag.cursorWorld ? pinAtWorld(wasDrag.cursorWorld) : null;
+      state.connectHoverId = null;
+      if (target && target.nodeId !== wasDrag.fromId) {
+        applyConnection(wasDrag.fromId, target.nodeId, wasDrag.edgeKind);
+        state.selectedEdge = { from: wasDrag.fromId, kind: wasDrag.edgeKind };
+      }
+      renderAll();
+    } else if (wasDrag.mode === 'pan') {
+      state.connectHoverId = null;
+      // 右键单击（无位移）＝ UE 节点面板：添加步骤菜单
+      if (!wasDrag.moved && wasDrag.button === 2) {
+        showAddMenu({ clientX: wasDrag.startClientX, clientY: wasDrag.startClientY });
       }
       renderAll();
     }
@@ -576,6 +1028,206 @@
     state.drag = null;
     state.connectHoverId = null;
     renderAll();
+  }
+
+  /** 命中检测（UE 风格）：只有悬停在节点左侧输入引脚附近才算连线落点；半径按缩放归一，屏幕手感触感恒定。 */
+  function pinAtWorld(p) {
+    const layout = computeLayout();
+    const hitRadius = 12 / (state.zoom || 1);
+    for (const node of layout.nodes) {
+      const pos = effectivePos(layout.positions[node.id]);
+      const inY = node.kind === 'terminal' ? terminalInputPinY() : stepInputPinY();
+      const ddx = Math.abs(p.x - pos.x);
+      const ddy = Math.abs(p.y - (pos.y + inY));
+      if (ddx <= hitRadius && ddy <= hitRadius) return { nodeId: node.id };
+    }
+    return null;
+  }
+
+  /** 框选：返回与矩形相交的节点 id。 */
+  function nodesInRect(a, b) {
+    const x0 = Math.min(a.x, b.x);
+    const x1 = Math.max(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const y1 = Math.max(a.y, b.y);
+    const layout = computeLayout();
+    const result = [];
+    for (const node of layout.nodes) {
+      const pos = effectivePos(layout.positions[node.id]);
+      const w = node.kind === 'terminal' ? TERMINAL_W : NODE_W;
+      if (pos.x < x1 && pos.x + w > x0 && pos.y < y1 && pos.y + NODE_H > y0) result.push(node.id);
+    }
+    return result;
+  }
+
+  /** 选中一条连线（点击连线，Delete 删除）。 */
+  function selectEdge(fromId, kind) {
+    state.selectedEdge = { from: fromId, kind };
+    state.selectedIds = new Set();
+    state.selectedId = null;
+    renderAll();
+    renderInspector();
+  }
+
+  /** 单选一个节点。 */
+  function selectOnly(id) {
+    state.selectedIds = new Set(id ? [id] : []);
+    state.selectedId = id || null;
+    state.selectedEdge = null;
+    renderAll();
+    renderInspector();
+  }
+
+  const DELETE_REF = {};
+
+  function referencesDeletedStep(value, ids) {
+    if (typeof value !== 'string') return false;
+    const match = /^steps\.([^.]+)\.output(?:\.|$)/.exec(value);
+    return !!match && ids.has(match[1]);
+  }
+
+  /** 删除指向已删除步骤的嵌套 $ref，同时保留其余工作流内容。 */
+  function cleanDeletedReferences(value, ids) {
+    if (Array.isArray(value)) {
+      for (let i = value.length - 1; i >= 0; i--) {
+        if (cleanDeletedReferences(value[i], ids) === DELETE_REF) value.splice(i, 1);
+      }
+      return value;
+    }
+    if (!value || typeof value !== 'object') return value;
+    if (Object.keys(value).length === 1 && typeof value.$ref === 'string' && referencesDeletedStep(value.$ref, ids)) {
+      return DELETE_REF;
+    }
+    for (const key of Object.keys(value)) {
+      if (cleanDeletedReferences(value[key], ids) === DELETE_REF) delete value[key];
+    }
+    return value;
+  }
+
+  function cleanupDeletedStepReferences(ids) {
+    for (const step of stepsOf()) {
+      if (!step || typeof step !== 'object') continue;
+      for (const key of EDGE_KINDS) {
+        if (step[key] && ids.has(step[key])) delete step[key];
+      }
+      if (cleanDeletedReferences(step.with, ids) === DELETE_REF) delete step.with;
+      if (cleanDeletedReferences(step.when, ids) === DELETE_REF) delete step.when;
+      if (cleanDeletedReferences(step.retry, ids) === DELETE_REF) delete step.retry;
+      if (step.when && typeof step.when === 'object' && !Array.isArray(step.when) && Object.keys(step.when).length === 0) {
+        delete step.when;
+      }
+    }
+  }
+
+  /** 删除所有选中的步骤（UE：选中后按 Delete），并清理指向它们的跳转。 */
+  function deleteSelectedSteps() {
+    if (state.selectedIds.size === 0) return;
+    const steps = stepsOf();
+    const ids = new Set(steps.filter((s) => s && state.selectedIds.has(s.id)).map((s) => s.id));
+    if (ids.size === 0) return;
+    state.raw.steps = steps.filter((s) => !(s && ids.has(s.id)));
+    state.origOrders = state.raw.steps.map((s) => (s && typeof s === 'object' ? Object.keys(s) : []));
+    cleanupDeletedStepReferences(ids);
+    if (state.raw.entry && ids.has(state.raw.entry)) {
+      state.raw.entry = (state.raw.steps[0] && state.raw.steps[0].id) || '';
+    }
+    void (ids.forEach((removedId) => delete state.nodePos[removedId]));
+    state.selectedIds = new Set();
+    state.selectedId = null;
+    state.selectedEdge = null;
+    markDirty();
+    renderAll();
+    renderInspector();
+    toast('已删除 ' + ids.size + ' 个步骤');
+  }
+
+  /** UE 风格视图适应：F 聚焦选中（或全部），Home 适应全部。 */
+  function fitView(ids) {
+    const layout = computeLayout();
+    const wrap = $('canvas-wrap');
+    const nodes = layout.nodes.filter((n) => !ids || ids.includes(n.id));
+    if (!nodes.length) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of nodes) {
+      const pos = effectivePos(layout.positions[n.id]);
+      const w = n.kind === 'terminal' ? TERMINAL_W : NODE_W;
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + w);
+      maxY = Math.max(maxY, pos.y + NODE_H);
+    }
+    const pad = 80;
+    const cw = wrap.clientWidth || 800;
+    const ch = (wrap.clientHeight || 600) - 24;
+    const zoom = Math.min(3, Math.max(0.2, Math.min((cw - pad * 2) / (maxX - minX || 1), (ch - pad * 2) / (maxY - minY || 1))));
+    state.zoom = zoom;
+    state.panX = (cw - (maxX - minX) * zoom) / 2 - minX * zoom;
+    state.panY = (ch - (maxY - minY) * zoom) / 2 - minY * zoom;
+    renderAll();
+  }
+
+  /** 右键单击空白处弹出 UE 风格节点面板：选择要添加的 Action。 */
+  function showAddMenu(e) {
+    removeConnectMenu();
+    const menu = document.createElement('div');
+    menu.className = 'connect-menu palette-menu';
+    const rect = $('canvas-wrap').getBoundingClientRect();
+    const left = Math.max(4, Math.min(e.clientX - rect.left, rect.width - 230));
+    const top = Math.max(4, Math.min(e.clientY - rect.top, rect.height - 260));
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    const header = document.createElement('div');
+    header.className = 'connect-menu-title';
+    header.textContent = '添加步骤';
+    menu.appendChild(header);
+    const world = screenToWorld(e);
+    for (const spec of state.catalog) {
+      const btn = document.createElement('button');
+      btn.textContent = actionLabel(spec.name) + '（' + spec.name + '）';
+      btn.style.textAlign = 'left';
+      btn.style.width = '100%';
+      btn.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+      });
+      btn.addEventListener('click', () => {
+        removeConnectMenu();
+        addStepAt(spec.name, world);
+      });
+      menu.appendChild(btn);
+    }
+    const cancel = document.createElement('button');
+    cancel.textContent = '取消';
+    cancel.style.width = '100%';
+    cancel.addEventListener('click', removeConnectMenu);
+    menu.appendChild(cancel);
+    $('canvas-wrap').appendChild(menu);
+  }
+
+  /** 在指定世界坐标处（吸附网格）添加一个步骤并选中它。 */
+  function addStepAt(action, world) {
+    const existing = new Set(stepsOf().map((s) => s && s.id).filter(Boolean));
+    let n = 1;
+    while (existing.has('step_' + n)) n++;
+    const id = 'step_' + n;
+    const step = { id, action };
+    state.raw.steps.push(step);
+    state.origOrders.push(Object.keys(step));
+    if (!state.raw.entry) state.raw.entry = id;
+    state.nodePos[id] = {
+      x: Math.round(world.x / SNAP) * SNAP,
+      y: Math.round(world.y / SNAP) * SNAP,
+    };
+    state.selectedIds = new Set([id]);
+    state.selectedId = id;
+    state.selectedEdge = null;
+    markDirty();
+    renderAll();
+    renderInspector();
+    toast('已添加步骤 ' + id + '（' + action + '）');
   }
 
   /** 写入跳转：source.on_<kind> = targetId */
@@ -598,6 +1250,9 @@
     const source = stepsOf().find((s) => s && s.id === fromId);
     if (!source || !(kind in source)) return;
     delete source[kind];
+    if (state.selectedEdge && state.selectedEdge.from === fromId && state.selectedEdge.kind === kind) {
+      state.selectedEdge = null;
+    }
     markDirty();
     renderAll();
     renderInspector();
@@ -692,11 +1347,756 @@
     return buildField(`${labelText} <span style="color:var(--vscode-descriptionForeground,#9d9d9d)">(可选)</span>`, sel, key + ' 指向的步骤或终点');
   }
 
+  function isRefValue(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value) && typeof value.$ref === 'string';
+  }
+
+  function refChoices() {
+    const refs = [...((state.refs && state.refs.inputs) || []), ...((state.refs && state.refs.steps) || [])];
+    return [...new Set(refs.filter((ref) => typeof ref === 'string' && ref))];
+  }
+
+  function refSelect(currentRef, onChange) {
+    const select = document.createElement('select');
+    select.className = 'param-ref-select';
+    const choices = refChoices();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = choices.length ? '请选择一个引用…' : '暂无可用引用';
+    select.appendChild(placeholder);
+    if (currentRef && !choices.includes(currentRef)) choices.unshift(currentRef);
+    for (const ref of choices) {
+      const option = document.createElement('option');
+      option.value = ref;
+      option.textContent = refLabel(ref);
+      select.appendChild(option);
+    }
+    select.value = currentRef || '';
+    select.disabled = choices.length === 0;
+    select.addEventListener('change', () => onChange(select.value));
+    return select;
+  }
+
+  function inputText(value) {
+    if (value === undefined || value === null) return '';
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  function itemSchema(schema, index) {
+    if (!schema || typeof schema !== 'object') return {};
+    if (Array.isArray(schema.prefixItems) && schema.prefixItems[index]) return schema.prefixItems[index];
+    if (Array.isArray(schema.items) && schema.items[index]) return schema.items[index];
+    return schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items) ? schema.items : {};
+  }
+
+  function itemLabel(key, index) {
+    const labels = {
+      roi: ['X', 'Y', '宽度', '高度'],
+      random_interval: ['最小秒数', '最大秒数'],
+    };
+    return labels[key] && labels[key][index] ? labels[key][index] : `第 ${index + 1} 项`;
+  }
+
+  function parseTypedValue(text, schema) {
+    const type = schemaType(schema);
+    if (type === 'number') {
+      if (String(text).trim() === '') throw new Error('不能为空');
+      const value = Number(text);
+      if (!Number.isFinite(value) || (schema.type === 'integer' && !Number.isInteger(value))) throw new Error('必须是数字');
+      return value;
+    }
+    if (type === 'boolean') return String(text) === 'true';
+    if (type === 'object' || type === 'any') return JSON.parse(text);
+    return String(text);
+  }
+
+  function buildArrayEditor(key, pSchema, step, cur) {
+    const editor = document.createElement('div');
+    editor.className = 'array-editor';
+    const rows = document.createElement('div');
+    rows.className = 'array-rows';
+    editor.appendChild(rows);
+    const status = document.createElement('span');
+    status.className = 'array-status hint';
+    editor.appendChild(status);
+    const fixedCount = pSchema && pSchema.minItems !== undefined && pSchema.minItems === pSchema.maxItems
+      ? Number(pSchema.minItems)
+      : 0;
+    const minItems = pSchema && pSchema.minItems !== undefined ? Number(pSchema.minItems) : 0;
+    const maxItems = pSchema && pSchema.maxItems !== undefined ? Number(pSchema.maxItems) : Infinity;
+
+    function currentValues() {
+      const value = step.with && Array.isArray(step.with[key]) ? step.with[key] : [];
+      return value.slice();
+    }
+
+    function writeValues(values) {
+      if (values.length === 0) {
+        if (step.with) delete step.with[key];
+      } else {
+        step.with = step.with || {};
+        step.with[key] = values;
+      }
+      markDirty();
+    }
+
+    function commit(controls) {
+      const texts = controls.map((control) => String(control.value || '').trim());
+      if (texts.every((text) => text === '')) {
+        writeValues([]);
+        status.textContent = '';
+        return;
+      }
+      if (texts.some((text) => text === '')) {
+        status.textContent = fixedCount ? `请填写 ${fixedCount} 项后保存` : '数组项不能为空';
+        return;
+      }
+      if (texts.length < minItems || texts.length > maxItems) {
+        status.textContent = `需要 ${minItems}${maxItems !== Infinity ? `-${maxItems}` : ''} 项`;
+        return;
+      }
+      try {
+        writeValues(texts.map((text, index) => parseTypedValue(text, itemSchema(pSchema, index))));
+        status.textContent = '';
+      } catch (e) {
+        status.textContent = e.message;
+      }
+    }
+
+    function renderRows() {
+      rows.innerHTML = '';
+      const values = currentValues();
+      const count = Math.max(fixedCount, values.length);
+      const controls = [];
+      for (let index = 0; index < count; index++) {
+        const row = document.createElement('div');
+        row.className = 'array-row';
+        const input = document.createElement('input');
+        const schema = itemSchema(pSchema, index);
+        input.type = schemaType(schema) === 'number' ? 'number' : 'text';
+        if (input.type === 'number') {
+          if (schema.minimum !== undefined) input.min = schema.minimum;
+          if (schema.maximum !== undefined) input.max = schema.maximum;
+          input.step = schema.type === 'integer' ? 1 : 'any';
+        }
+        input.placeholder = itemLabel(key, index);
+        input.value = inputText(values[index]);
+        controls.push(input);
+        row.appendChild(input);
+        const label = document.createElement('span');
+        label.className = 'array-index';
+        label.textContent = itemLabel(key, index);
+        row.appendChild(label);
+        if (!fixedCount) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'icon-button';
+          remove.textContent = '×';
+          remove.title = '删除这一项';
+          remove.setAttribute('aria-label', '删除这一项');
+          remove.disabled = count <= minItems;
+          remove.addEventListener('click', () => {
+            const next = currentValues();
+            next.splice(index, 1);
+            writeValues(next);
+            renderRows();
+          });
+          row.appendChild(remove);
+        }
+        input.addEventListener('change', () => commit(controls));
+        rows.appendChild(row);
+      }
+      if (!fixedCount) {
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'array-add';
+        add.textContent = '+ 添加一项';
+        add.disabled = count >= maxItems;
+        add.addEventListener('click', () => {
+          const next = currentValues();
+          next.push('');
+          step.with = step.with || {};
+          step.with[key] = next;
+          markDirty();
+          renderRows();
+        });
+        editor.appendChild(add);
+      }
+      if (fixedCount) status.textContent = `共 ${fixedCount} 项`;
+      else if (minItems) status.textContent = `至少 ${minItems} 项`;
+    }
+    renderRows();
+    return editor;
+  }
+
+  function objectValueMode(value) {
+    if (isRefValue(value)) return 'ref';
+    if (typeof value === 'boolean') return 'boolean';
+    if (typeof value === 'number') return 'number';
+    if (value !== null && typeof value === 'object') return 'json';
+    return 'text';
+  }
+
+  function objectEditor(key, step) {
+    const editor = document.createElement('div');
+    editor.className = 'object-editor';
+    const rows = document.createElement('div');
+    rows.className = 'object-rows';
+    editor.appendChild(rows);
+    const empty = document.createElement('span');
+    empty.className = 'object-empty hint';
+    empty.textContent = '暂无字段';
+    editor.appendChild(empty);
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'object-add';
+    add.textContent = '+ 添加字段';
+    add.addEventListener('click', () => {
+      const value = step.with && step.with[key] && typeof step.with[key] === 'object' && !Array.isArray(step.with[key]) ? step.with[key] : {};
+      let name = 'field_1';
+      let index = 1;
+      while (Object.prototype.hasOwnProperty.call(value, name)) name = `field_${++index}`;
+      const next = { ...value, [name]: '' };
+      step.with = step.with || {};
+      step.with[key] = next;
+      markDirty();
+      renderRows();
+    });
+    editor.appendChild(add);
+
+    function currentObject() {
+      const value = step.with && step.with[key];
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    }
+
+    function writeObject(value) {
+      if (Object.keys(value).length === 0) {
+        if (step.with) delete step.with[key];
+      } else {
+        step.with = step.with || {};
+        step.with[key] = value;
+      }
+      markDirty();
+    }
+
+    function writeProperty(row, mode, control) {
+      const name = row.key;
+      if (!name) return;
+      let value;
+      try {
+        if (mode === 'ref') {
+          if (!control.value) return;
+          value = { $ref: control.value };
+        } else if (mode === 'text') {
+          value = String(control.value);
+        } else if (mode === 'number') {
+          if (String(control.value).trim() === '') throw new Error('数字不能为空');
+          value = Number(control.value);
+          if (!Number.isFinite(value)) throw new Error('必须是数字');
+        } else if (mode === 'boolean') {
+          value = control.value === 'true';
+        } else {
+          value = JSON.parse(control.value);
+        }
+      } catch (e) {
+        toast('字段 ' + name + ' 的值格式不正确：' + e.message, 3200);
+        return;
+      }
+      const next = { ...currentObject(), [name]: value };
+      writeObject(next);
+    }
+
+    function renderValue(row, valueWrap, modeSelect) {
+      valueWrap.innerHTML = '';
+      const value = currentObject()[row.key];
+      const mode = modeSelect.value;
+      let control;
+      if (mode === 'ref') {
+        control = refSelect(isRefValue(value) ? value.$ref : '', (ref) => writeProperty(row, mode, { value: ref }));
+      } else if (mode === 'boolean') {
+        control = document.createElement('select');
+        for (const [v, text] of [['true', 'true'], ['false', 'false']]) {
+          const option = document.createElement('option');
+          option.value = v;
+          option.textContent = text;
+          control.appendChild(option);
+        }
+        control.value = String(value) === 'false' ? 'false' : 'true';
+        control.addEventListener('change', () => writeProperty(row, mode, control));
+      } else if (mode === 'json') {
+        control = document.createElement('input');
+        control.type = 'text';
+        control.placeholder = '{...} 或 [...]';
+        control.value = value === undefined ? '' : inputText(value);
+        control.addEventListener('change', () => writeProperty(row, mode, control));
+      } else if (mode === 'number') {
+        control = document.createElement('input');
+        control.type = 'number';
+        control.value = value === undefined || value === null ? '' : String(value);
+        control.addEventListener('change', () => writeProperty(row, mode, control));
+      } else {
+        control = document.createElement('input');
+        control.type = 'text';
+        control.placeholder = '值';
+        control.value = value === undefined || value === null || isRefValue(value) ? '' : String(value);
+        control.addEventListener('change', () => writeProperty(row, mode, control));
+      }
+      valueWrap.appendChild(control);
+    }
+
+    function renderRows() {
+      rows.innerHTML = '';
+      const value = currentObject();
+      const keys = Object.keys(value);
+      empty.classList.toggle('hidden', keys.length > 0);
+      for (const keyName of keys) {
+        const row = document.createElement('div');
+        row.className = 'object-row';
+        row.key = keyName;
+        const keyInput = document.createElement('input');
+        keyInput.type = 'text';
+        keyInput.className = 'object-key';
+        keyInput.value = keyName;
+        keyInput.placeholder = '字段名';
+        keyInput.addEventListener('change', () => {
+          const nextName = keyInput.value.trim();
+          const current = currentObject();
+          if (!nextName || (nextName !== row.key && Object.prototype.hasOwnProperty.call(current, nextName))) {
+            toast('字段名不能为空且不能重复', 2600);
+            keyInput.value = row.key;
+            return;
+          }
+          if (nextName === row.key) return;
+          const next = {};
+          for (const [name, item] of Object.entries(current)) next[name === row.key ? nextName : name] = item;
+          row.key = nextName;
+          writeObject(next);
+        });
+        row.appendChild(keyInput);
+        const modeSelect = document.createElement('select');
+        modeSelect.className = 'object-mode';
+        for (const [mode, text] of [['text', '文本'], ['number', '数字'], ['boolean', '布尔'], ['json', 'JSON'], ['ref', '引用']]) {
+          const option = document.createElement('option');
+          option.value = mode;
+          option.textContent = text;
+          modeSelect.appendChild(option);
+        }
+        modeSelect.value = objectValueMode(value[keyName]);
+        row.appendChild(modeSelect);
+        const valueWrap = document.createElement('div');
+        valueWrap.className = 'object-value';
+        row.appendChild(valueWrap);
+        renderValue(row, valueWrap, modeSelect);
+        modeSelect.addEventListener('change', () => renderValue(row, valueWrap, modeSelect));
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'icon-button';
+        remove.textContent = '×';
+        remove.title = '删除字段';
+        remove.setAttribute('aria-label', '删除字段');
+        remove.addEventListener('click', () => {
+          const next = { ...currentObject() };
+          delete next[row.key];
+          writeObject(next);
+          renderRows();
+        });
+        row.appendChild(remove);
+        rows.appendChild(row);
+      }
+    }
+    renderRows();
+    return editor;
+  }
+
+  function buildLiteralEditor(key, pSchema, step, cur) {
+    const type = schemaType(pSchema);
+    if (type === 'array') return buildArrayEditor(key, pSchema, step, cur);
+    if (type === 'object' || (type === 'any' && cur && typeof cur === 'object' && !Array.isArray(cur))) return objectEditor(key, step);
+
+    const control = document.createElement('input');
+    const defaultText = pSchema && pSchema.default !== undefined ? inputText(pSchema.default) : '';
+    if (pSchema && Array.isArray(pSchema.enum)) {
+      const select = document.createElement('select');
+      if (cur === undefined) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '使用默认值';
+        select.appendChild(option);
+      }
+      for (const item of pSchema.enum) {
+        const option = document.createElement('option');
+        option.value = String(item);
+        option.textContent = String(item);
+        select.appendChild(option);
+      }
+      select.value = cur === undefined ? '' : String(cur);
+      select.addEventListener('change', () => {
+        if (select.value === '') {
+          if (step.with) delete step.with[key];
+        } else {
+          step.with = step.with || {};
+          step.with[key] = select.value;
+        }
+        markDirty();
+      });
+      return select;
+    }
+    if (type === 'boolean') {
+      const select = document.createElement('select');
+      const unset = document.createElement('option');
+      unset.value = '';
+      unset.textContent = '使用默认值';
+      select.appendChild(unset);
+      for (const [value, text] of [['true', '是 / true'], ['false', '否 / false']]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        select.appendChild(option);
+      }
+      select.value = cur === undefined || cur === null ? '' : String(cur);
+      select.addEventListener('change', () => {
+        if (select.value === '') {
+          if (step.with) delete step.with[key];
+        } else {
+          step.with = step.with || {};
+          step.with[key] = select.value === 'true';
+        }
+        markDirty();
+      });
+      return select;
+    }
+    control.type = type === 'number' ? 'number' : 'text';
+    if (type === 'number') {
+      if (pSchema && pSchema.minimum !== undefined) control.min = pSchema.minimum;
+      if (pSchema && pSchema.maximum !== undefined) control.max = pSchema.maximum;
+      control.step = pSchema && pSchema.type === 'integer' ? 1 : 'any';
+    }
+    if (key === 'workflow') control.placeholder = '例如 workflows/demo.json';
+    else if (defaultText) control.placeholder = `默认：${defaultText}`;
+    else control.placeholder = type === 'number' ? '请输入数字' : '请输入文本';
+    control.value = cur === undefined || cur === null ? '' : inputText(cur);
+    control.addEventListener('change', () => {
+      const text = String(control.value);
+      if (text.trim() === '') {
+        if (step.with) delete step.with[key];
+        markDirty();
+        return;
+      }
+      try {
+        const value = type === 'number' ? parseTypedValue(text, pSchema) : text;
+        step.with = step.with || {};
+        step.with[key] = value;
+        markDirty();
+      } catch (e) {
+        toast('参数 ' + key + ' 格式不正确：' + e.message, 3200);
+      }
+    });
+    return control;
+  }
+
+  function workflowReferenceResolution() {
+    const value = state.raw && state.raw.reference_resolution;
+    if (Array.isArray(value) && value.length === 2
+      && value.every((item) => Number.isInteger(item) && item > 0)) {
+      return value;
+    }
+    return [1920, 1080];
+  }
+
+  function postRoiPicker(requestId, stepId, key, referenceResolution, notice) {
+    state.roiPickPending = requestId;
+    vscode.postMessage({
+      type: 'pickRoi',
+      requestId,
+      stepId,
+      key,
+      referenceResolution,
+    });
+    toast(notice || '正在从 MuMu 获取截图…', 4200);
+    renderInspector();
+  }
+
+  function requestRoiPicker(stepId, key) {
+    if (state.roiPickPending) {
+      toast('已有一个 ROI 选择器正在打开', 2600);
+      return;
+    }
+    const requestId = 'roi-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    postRoiPicker(requestId, stepId, key, workflowReferenceResolution(), '正在从 MuMu 获取截图…');
+  }
+
+  function roiPickerEl() {
+    let overlay = document.getElementById('roi-picker');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'roi-picker';
+      overlay.className = 'hidden';
+      overlay.addEventListener('mousedown', (event) => {
+        if (event.target === overlay) cancelRoiPicker();
+      });
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  function openRoiPicker(message) {
+    if (!state.roiPickPending || message.requestId !== state.roiPickPending) return;
+    const width = Number(message.width);
+    const height = Number(message.height);
+    if (typeof message.dataUrl !== 'string' || !message.dataUrl
+      || !Number.isInteger(width) || width < 1
+      || !Number.isInteger(height) || height < 1) {
+      state.roiPickPending = null;
+      toast('MuMu 截图返回了无效数据', 4200);
+      renderInspector();
+      return;
+    }
+    closeRoiPicker();
+    const overlay = roiPickerEl();
+    overlay.textContent = '';
+
+    const frame = document.createElement('div');
+    frame.className = 'roi-picker-frame';
+    const title = document.createElement('div');
+    title.className = 'roi-picker-title';
+    title.textContent = '选择识别区域';
+    frame.appendChild(title);
+
+    const stage = document.createElement('div');
+    stage.className = 'roi-picker-stage';
+    const image = document.createElement('img');
+    image.src = message.dataUrl;
+    image.alt = 'MuMu 当前画面';
+    stage.appendChild(image);
+    const selection = document.createElement('div');
+    selection.className = 'roi-picker-selection hidden';
+    stage.appendChild(selection);
+    frame.appendChild(stage);
+
+    const footer = document.createElement('div');
+    footer.className = 'roi-picker-footer';
+    const info = document.createElement('span');
+    info.className = 'roi-picker-info';
+    footer.appendChild(info);
+    const actions = document.createElement('div');
+    actions.className = 'roi-picker-actions';
+    const recapture = document.createElement('button');
+    recapture.type = 'button';
+    recapture.textContent = '重新截图';
+    recapture.addEventListener('click', () => recaptureRoi());
+    actions.appendChild(recapture);
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = '取消';
+    cancel.addEventListener('click', () => cancelRoiPicker());
+    actions.appendChild(cancel);
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'primary';
+    confirm.textContent = '确认选择';
+    confirm.disabled = true;
+    confirm.addEventListener('click', () => confirmRoiSelection());
+    actions.appendChild(confirm);
+    footer.appendChild(actions);
+    frame.appendChild(footer);
+    overlay.appendChild(frame);
+    overlay.classList.remove('hidden');
+
+    const rawReference = message.referenceResolution;
+    const referenceResolution = Array.isArray(rawReference) && rawReference.length === 2
+      && rawReference.every((item) => Number.isInteger(item) && item > 0)
+      ? [rawReference[0], rawReference[1]]
+      : workflowReferenceResolution();
+    state.roiPicker = {
+      requestId: message.requestId,
+      stepId: message.stepId,
+      key: message.key,
+      width,
+      height,
+      referenceResolution,
+      image,
+      stage,
+      selection,
+      info,
+      confirm,
+      drag: null,
+    };
+    image.addEventListener('load', () => renderRoiSelection());
+    stage.addEventListener('mousedown', (event) => beginRoiSelection(event));
+    renderRoiSelection();
+  }
+
+  function closeRoiPicker() {
+    const overlay = document.getElementById('roi-picker');
+    if (overlay) overlay.classList.add('hidden');
+    state.roiPicker = null;
+  }
+
+  function roiImagePoint(event) {
+    const picker = state.roiPicker;
+    if (!picker) return null;
+    const rect = picker.image.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: Math.max(0, Math.min(picker.width, (event.clientX - rect.left) * picker.width / rect.width)),
+      y: Math.max(0, Math.min(picker.height, (event.clientY - rect.top) * picker.height / rect.height)),
+    };
+  }
+
+  function pickerRect(first, second) {
+    const picker = state.roiPicker;
+    if (!picker) return null;
+    const x = Math.max(0, Math.min(picker.width, Math.round(Math.min(first.x, second.x))));
+    const y = Math.max(0, Math.min(picker.height, Math.round(Math.min(first.y, second.y))));
+    const right = Math.max(0, Math.min(picker.width, Math.round(Math.max(first.x, second.x))));
+    const bottom = Math.max(0, Math.min(picker.height, Math.round(Math.max(first.y, second.y))));
+    return { x, y, width: right - x, height: bottom - y };
+  }
+
+  function beginRoiSelection(event) {
+    if (!state.roiPicker || event.button !== 0) return;
+    const point = roiImagePoint(event);
+    if (!point) return;
+    state.roiPicker.drag = { start: point };
+    state.roiPicker.selection = { x: Math.round(point.x), y: Math.round(point.y), width: 0, height: 0 };
+    renderRoiSelection();
+    event.preventDefault();
+  }
+
+  function moveRoiSelection(event) {
+    const picker = state.roiPicker;
+    if (!picker || !picker.drag) return;
+    const point = roiImagePoint(event);
+    if (!point) return;
+    picker.selection = pickerRect(picker.drag.start, point);
+    renderRoiSelection();
+  }
+
+  function endRoiSelection(event) {
+    const picker = state.roiPicker;
+    if (!picker || !picker.drag) return;
+    const point = roiImagePoint(event);
+    if (point) picker.selection = pickerRect(picker.drag.start, point);
+    picker.drag = null;
+    renderRoiSelection();
+  }
+
+  function renderRoiSelection() {
+    const picker = state.roiPicker;
+    if (!picker) return;
+    const selected = picker.selection;
+    const stageRect = picker.stage.getBoundingClientRect();
+    const imageRect = picker.image.getBoundingClientRect();
+    if (!selected || !imageRect.width || !imageRect.height) {
+      picker.selection.classList.add('hidden');
+      picker.confirm.disabled = true;
+      picker.info.textContent = picker.width + '×' + picker.height;
+      return;
+    }
+    const scaleX = imageRect.width / picker.width;
+    const scaleY = imageRect.height / picker.height;
+    picker.selection.style.left = (imageRect.left - stageRect.left + selected.x * scaleX) + 'px';
+    picker.selection.style.top = (imageRect.top - stageRect.top + selected.y * scaleY) + 'px';
+    picker.selection.style.width = Math.max(0, selected.width * scaleX) + 'px';
+    picker.selection.style.height = Math.max(0, selected.height * scaleY) + 'px';
+    picker.selection.classList.remove('hidden');
+    picker.confirm.disabled = selected.width < 2 || selected.height < 2;
+    picker.info.textContent = selected.width >= 2 && selected.height >= 2
+      ? '选择区：' + selected.x + ',' + selected.y + ' ' + selected.width + '×' + selected.height
+      : picker.width + '×' + picker.height;
+  }
+
+  function recaptureRoi() {
+    const picker = state.roiPicker;
+    if (!picker || state.roiPickPending !== picker.requestId) return;
+    const context = {
+      requestId: picker.requestId,
+      stepId: picker.stepId,
+      key: picker.key,
+      referenceResolution: picker.referenceResolution,
+    };
+    closeRoiPicker();
+    postRoiPicker(context.requestId, context.stepId, context.key, context.referenceResolution, '正在重新获取 MuMu 截图…');
+  }
+
+  function cancelRoiPicker() {
+    if (!state.roiPickPending && !state.roiPicker) return;
+    closeRoiPicker();
+    state.roiPickPending = null;
+    renderInspector();
+    toast('已取消 ROI 选择', 2600);
+  }
+
+  function confirmRoiSelection() {
+    const picker = state.roiPicker;
+    if (!picker || !picker.selection || picker.selection.width < 2 || picker.selection.height < 2) {
+      toast('请先框选一个有效区域', 2600);
+      return;
+    }
+    const selected = picker.selection;
+    const referenceWidth = picker.referenceResolution[0];
+    const referenceHeight = picker.referenceResolution[1];
+    const roi = [
+      Math.round(selected.x * referenceWidth / picker.width),
+      Math.round(selected.y * referenceHeight / picker.height),
+      Math.round(selected.width * referenceWidth / picker.width),
+      Math.round(selected.height * referenceHeight / picker.height),
+    ];
+    const message = {
+      requestId: picker.requestId,
+      stepId: picker.stepId,
+      key: picker.key,
+      roi,
+    };
+    closeRoiPicker();
+    applyPickedRoi(message);
+  }
+
+  function applyPickedRoi(message) {
+    if (!state.roiPickPending || message.requestId !== state.roiPickPending) return;
+    closeRoiPicker();
+    state.roiPickPending = null;
+    const roi = message.roi;
+    if (!Array.isArray(roi) || roi.length !== 4
+      || !roi.every((item) => Number.isInteger(item))
+      || roi[0] < 0 || roi[1] < 0 || roi[2] <= 0 || roi[3] <= 0) {
+      toast('ROI 选择器返回了无效坐标', 4200);
+      return;
+    }
+    const step = stepsOf().find((item) => item && item.id === message.stepId);
+    if (!step) {
+      toast('ROI 已选择，但原步骤已不存在', 4200);
+      return;
+    }
+    step.with = step.with && typeof step.with === 'object' && !Array.isArray(step.with) ? step.with : {};
+    const current = step.with[message.key];
+    const inputRef = isRefValue(current) && /^inputs\.([^\.]+)$/.exec(current.$ref || '');
+    let keptReference = false;
+    if (inputRef && state.raw && state.raw.inputs_schema && typeof state.raw.inputs_schema === 'object') {
+      const schema = state.raw.inputs_schema;
+      const properties = schema.properties;
+      const inputName = inputRef[1];
+      const inputSchema = properties && typeof properties === 'object' && !Array.isArray(properties)
+        ? properties[inputName]
+        : null;
+      if (inputSchema && typeof inputSchema === 'object' && !Array.isArray(inputSchema)) {
+        inputSchema.default = roi.slice();
+        keptReference = true;
+      }
+    }
+    if (!keptReference) {
+      step.with[message.key] = roi.slice();
+      delete state.paramModes[`${step.id || ''}:${message.key}`];
+    }
+    markDirty();
+    renderAll();
+    renderInspector();
+    toast(keptReference ? '已更新输入参数的 ROI 默认值' : '已写入 ROI 坐标：[' + roi.join(', ') + ']', 4200);
+  }
+
   function paramControl(key, pSchema, step) {
     const wrap = document.createElement('div');
     wrap.className = 'field';
-    const required = Array.isArray(pSchema ? pSchema.required : undefined);
-    const req = (pSchema && Array.isArray((step && step.with) ? undefined : undefined)) || false;
     const spec = state.catalog.find((a) => a.name === step.action);
     const requiredKeys = new Set((spec && spec.inputSchema && spec.inputSchema.required) || []);
     const isRequired = requiredKeys.has(key);
@@ -705,104 +2105,72 @@
     wrap.appendChild(label);
 
     const cur = step.with && typeof step.with === 'object' && step.with[key] !== undefined ? step.with[key] : undefined;
-    const isRef = cur !== null && typeof cur === 'object' && '$ref' in cur;
-
-    if (isRef) {
-      const refSel = document.createElement('select');
-      const choices = [['__literal__', '（改为字面量）'], ...state.refs.inputs.map((p) => [p, refLabel(p)]), ...state.refs.steps.map((p) => [p, refLabel(p)])];
-      for (const [value, text] of choices) {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = text;
-        refSel.appendChild(opt);
-      }
-      refSel.value = cur.$ref;
-      refSel.addEventListener('change', () => {
-        if (refSel.value === '__literal__') {
-          delete step.with[key];
-        } else {
-          step.with = step.with || {};
-          step.with[key] = { $ref: refSel.value };
-        }
+    const isRef = isRefValue(cur);
+    const modeKey = `${step.id || ''}:${key}`;
+    const mode = state.paramModes[modeKey] || (isRef ? 'ref' : 'literal');
+    const controlRow = document.createElement('div');
+    controlRow.className = 'param-control-row';
+    if (mode === 'ref') {
+      const ref = refSelect(isRef ? cur.$ref : '', (value) => {
+        if (!value) return;
+        step.with = step.with || {};
+        step.with[key] = { $ref: value };
         markDirty();
         renderInspector();
       });
-      wrap.appendChild(refSel);
+      controlRow.appendChild(ref);
     } else {
-      const type = schemaType(pSchema);
-      let control;
-      if (type === 'boolean') {
-        control = document.createElement('select');
-        for (const [value, text] of [['true', 'true'], ['false', 'false']]) {
-          const opt = document.createElement('option');
-          opt.value = value;
-          opt.textContent = text;
-          control.appendChild(opt);
-        }
-        control.value = cur === undefined || cur === null ? 'false' : String(cur);
-        control.addEventListener('change', () => {
-          step.with = step.with || {};
-          step.with[key] = control.value === 'true';
-          markDirty();
-        });
-      } else if (type === 'number') {
-        control = document.createElement('input');
-        control.type = 'number';
-        if (pSchema.minimum !== undefined) control.min = pSchema.minimum;
-        if (pSchema.maximum !== undefined) control.max = pSchema.maximum;
-        control.step = pSchema.type === 'integer' ? 1 : 'any';
-        control.value = cur === undefined || cur === null ? '' : String(cur);
-        control.addEventListener('change', () => {
-          if (control.value === '') {
-            if (step.with) delete step.with[key];
-          } else {
-            step.with = step.with || {};
-            step.with[key] = pSchema.type === 'integer' ? parseInt(control.value, 10) : Number(control.value);
-          }
-          markDirty();
-        });
-      } else if (type === 'array') {
-        control = document.createElement('input');
-        control.type = 'text';
-        control.placeholder = '逗号分隔，如 0,0,300,180';
-        control.value = Array.isArray(cur) ? cur.join(', ') : '';
-        control.addEventListener('change', () => {
-          const items = control.value.split(',').map((s) => s.trim()).filter(Boolean);
-          if (items.length === 0) {
-            if (step.with) delete step.with[key];
-          } else {
-            step.with = step.with || {};
-            step.with[key] = items.map((s) => (pSchema.items && pSchema.items.type === 'string' ? s : Number(s)));
-          }
-          markDirty();
-        });
-      } else {
-        control = document.createElement('textarea');
-        control.placeholder = type === 'object' ? 'JSON 对象，如 {"a": 1}' : '文本';
-        control.value = cur === undefined || cur === null ? '' : typeof cur === 'string' ? cur : JSON.stringify(cur, null, 2);
-        control.addEventListener('change', () => {
-          const text = control.value.trim();
-          if (text === '') {
-            if (step.with) delete step.with[key];
-            markDirty();
-            return;
-          }
-          let value = text;
-          if (type === 'object' || type === 'any') {
-            try {
-              value = JSON.parse(text);
-            } catch (e) {
-              toast('参数 ' + key + ' 不是合法 JSON：' + e.message, 3200);
-              return;
-            }
-          }
-          step.with = step.with || {};
-          step.with[key] = value;
-          markDirty();
-        });
-      }
-      wrap.appendChild(control);
+      controlRow.appendChild(buildLiteralEditor(key, pSchema, step, cur));
     }
+
+    const canPickRoi = key === 'roi' && schemaType(pSchema) === 'array'
+      && Number(pSchema.minItems) === 4 && Number(pSchema.maxItems) === 4;
+    if (canPickRoi) {
+      const pickBtn = document.createElement('button');
+      pickBtn.type = 'button';
+      pickBtn.className = 'param-icon-button roi-pick-button';
+      pickBtn.textContent = '▣';
+      pickBtn.title = '从 MuMu 截图框选 ROI';
+      pickBtn.setAttribute('aria-label', pickBtn.title);
+      pickBtn.disabled = !!state.roiPickPending;
+      pickBtn.addEventListener('click', () => requestRoiPicker(step.id, key));
+      controlRow.appendChild(pickBtn);
+    }
+
+    const refBtn = document.createElement('button');
+    refBtn.type = 'button';
+    refBtn.className = 'param-icon-button';
+    refBtn.textContent = mode === 'ref' ? '⌨' : '🔗';
+    refBtn.title = mode === 'ref' ? '改为直接填写' : '引用已有值';
+    refBtn.setAttribute('aria-label', refBtn.title);
+    refBtn.disabled = mode !== 'ref' && refChoices().length === 0;
+    refBtn.addEventListener('click', () => {
+      if (mode === 'ref') {
+        delete state.paramModes[modeKey];
+        if (isRef && step.with) delete step.with[key];
+      } else {
+        state.paramModes[modeKey] = 'ref';
+      }
+      markDirty();
+      renderInspector();
+    });
+    controlRow.appendChild(refBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'param-icon-button clear-param';
+    clearBtn.textContent = '×';
+    clearBtn.title = '清除参数';
+    clearBtn.setAttribute('aria-label', '清除参数');
+    clearBtn.disabled = cur === undefined;
+    clearBtn.addEventListener('click', () => {
+      if (step.with) delete step.with[key];
+      delete state.paramModes[modeKey];
+      markDirty();
+      renderInspector();
+    });
+    controlRow.appendChild(clearBtn);
+    wrap.appendChild(controlRow);
 
     if (pSchema && typeof pSchema.description === 'string') {
       const hint = document.createElement('span');
@@ -810,44 +2178,18 @@
       hint.textContent = pSchema.description;
       wrap.appendChild(hint);
     }
-
-    const tools = document.createElement('div');
-    tools.className = 'param-tools';
-    const refBtn = document.createElement('button');
-    refBtn.textContent = isRef ? '取消引用' : '🔗 引用';
-    refBtn.classList.toggle('ref-on', isRef);
-    refBtn.addEventListener('click', () => {
-      if (isRef) {
-        delete step.with[key];
-      } else {
-        step.with = step.with || {};
-        step.with[key] = { $ref: state.refs.inputs[0] || state.refs.steps[0] || 'inputs.template' };
-      }
-      markDirty();
-      renderInspector();
-    });
-    tools.appendChild(refBtn);
-    const clearBtn = document.createElement('button');
-    clearBtn.textContent = '✕ 清除';
-    clearBtn.addEventListener('click', () => {
-      if (step.with) delete step.with[key];
-      markDirty();
-      renderInspector();
-    });
-    tools.appendChild(clearBtn);
-    wrap.appendChild(tools);
     return wrap;
   }
 
   function selectNode(id) {
-    state.selectedId = id;
-    renderAll();
-    renderInspector();
+    selectOnly(id);
   }
 
   function selectedStep() {
     if (!state.raw || !Array.isArray(state.raw.steps)) return null;
-    return state.raw.steps.find((s) => s && s.id === state.selectedId) || null;
+    if (state.selectedIds.size !== 1) return null;
+    const id = [...state.selectedIds][0];
+    return state.raw.steps.find((s) => s && s.id === id) || null;
   }
 
   function renderInspector() {
@@ -857,6 +2199,9 @@
     if (!step) {
       body.classList.add('hidden');
       empty.classList.remove('hidden');
+      empty.textContent = state.selectedIds.size > 1
+        ? `已选择 ${state.selectedIds.size} 个节点：拖动同移 · Delete 删除`
+        : '点击左侧节点查看/编辑；或点击「＋ 新增步骤」。';
       return;
     }
     empty.classList.add('hidden');
@@ -899,6 +2244,7 @@
 
     // Action
     const actionSel = document.createElement('select');
+    actionSel.className = 'action-select';
     for (const spec of state.catalog) {
       const opt = document.createElement('option');
       opt.value = spec.name;
@@ -1024,10 +2370,13 @@
       const idx = state.raw.steps.indexOf(step);
       if (idx >= 0) state.raw.steps.splice(idx, 1);
       state.origOrders.splice(idx, 1);
+      cleanupDeletedStepReferences(new Set([step.id]));
       if (state.raw.entry === step.id) {
         state.raw.entry = stepsOf()[0] ? stepsOf()[0].id : '';
       }
+      state.selectedIds = new Set();
       state.selectedId = null;
+      state.selectedEdge = null;
       markDirty();
       renderAll();
       renderInspector();
@@ -1119,6 +2468,10 @@
     if (Array.isArray(out.steps)) {
       out.steps = out.steps.map((s, i) => serializeStep(s, i));
     }
+    // 卡片位置布局写入原脚本（_layout 元数据字段，引擎已允许下划线前缀字段）
+    if (Object.keys(state.nodePos).length > 0) {
+      out._layout = state.nodePos;
+    }
     return JSON.stringify(out, null, 2) + '\n';
   }
 
@@ -1159,17 +2512,47 @@
     // 用 window 级鼠标事件，保证拖到画布外也能移动/收线/取消
     window.addEventListener('mousemove', (e) => moveDrag(e));
     window.addEventListener('mouseup', (e) => endDrag(e));
+    window.addEventListener('mousemove', (e) => moveRoiSelection(e));
+    window.addEventListener('mouseup', (e) => endRoiSelection(e));
     window.addEventListener('blur', () => cancelDrag());
     window.addEventListener('keydown', (e) => {
+      const tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'Escape' && lightboxOpen()) {
+        closeLightbox();
+        return;
+      }
+      if (e.key === 'Escape' && state.roiPicker) {
+        cancelRoiPicker();
+        return;
+      }
       if (e.key === 'Escape') {
         removeConnectMenu();
-        if (state.drag && state.drag.mode === 'connect') {
-          state.drag = null;
-          state.connectHoverId = null;
+        state.selectedEdge = null;
+        state.selectedIds = new Set();
+        state.selectedId = null;
+        state.drag = null;
+        state.connectHoverId = null;
+        renderAll();
+        renderInspector();
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (state.selectedEdge) {
+          const edge = state.selectedEdge;
+          state.selectedEdge = null;
+          removeTransition(edge.from, edge.kind);
           renderAll();
+          toast('已删除连线');
+        } else if (state.selectedIds.size > 0) {
+          deleteSelectedSteps();
         }
+      } else if (e.key === 'f' || e.key === 'F') {
+        fitView(state.selectedIds.size ? [...state.selectedIds] : null);
+      } else if (e.key === 'Home') {
+        fitView(null);
       }
     });
+    // 屏蔽原生右键菜单（右键平移 / 右键单击弹出添加节点面板由上面处理）
+    svg.addEventListener('contextmenu', (e) => e.preventDefault());
 
    $('btn-add').addEventListener('click', () => renderAddModal());
    $('btn-new').addEventListener('click', () => vscode.postMessage({ type: 'newWorkflow' }));

@@ -202,11 +202,12 @@ main {
 }
 .edge.highlight path { filter: brightness(1.4); stroke-width: 3; }
 
-/* 连线橡皮筋 */
+/* 连线橡皮筋（吸附态：实线加粗 + 引脚发光环，提示松手即连接） */
 .edge.connect path { stroke-dasharray: 6 4; stroke-width: 2.5; fill: none; }
 .edge.connect.on_success path { stroke: var(--ok); }
 .edge.connect.on_failure path { stroke: var(--err); }
 .edge.connect.on_skip path { stroke: var(--skip); }
+.edge.connect.snapped path { stroke-dasharray: none; stroke-width: 3.5; filter: brightness(1.25); }
 .edge.connect text {
   font-size: 10px;
   font-weight: 600;
@@ -215,12 +216,189 @@ main {
   stroke: var(--bg);
   stroke-width: 3px;
 }
+.connect-snap-ring {
+  fill: none;
+  stroke: var(--selected);
+  stroke-width: 2;
+  animation: run-pulse 0.6s ease-in-out infinite;
+}
 
 /* 连线删除手柄（悬停边时显示） */
 .edge .edge-del { visibility: hidden; cursor: pointer; }
 .edge:hover .edge-del { visibility: visible; }
 .edge-del-bg { fill: var(--bg); stroke: var(--fg); stroke-width: 1; }
 .edge-del-x { fill: var(--err); font-size: 12px; font-weight: 700; }
+
+/* UE 风格交互：连线选中 / 框选 / 引脚悬停 / 右键节点面板 */
+.edge.selected path { stroke-width: 4.5; filter: brightness(1.6); }
+.marquee {
+  fill: rgba(0, 122, 204, 0.10);
+  stroke: rgba(0, 122, 204, 0.75);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+.port.port-in.pin-hover {
+  fill: #ffffff;
+  stroke: var(--selected);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px rgba(0, 122, 204, 0.9));
+}
+.palette-menu { max-height: 300px; overflow-y: auto; min-width: 220px; }
+.palette-menu button { display: block; white-space: nowrap; }
+
+/* 运行状态：卡片描边着色 + 标题栏状态点 + 截图缩略图 */
+.node.run-running .node-box { stroke: #ffc107; }
+.node.run-succeeded .node-box { stroke: var(--ok); }
+.node.run-failed .node-box { stroke: var(--err); }
+.node.run-skipped .node-box,
+.node.run-cancelled .node-box { stroke: var(--fall); }
+.run-dot { fill: #888888; }
+.run-dot.run-running { fill: #ffc107; animation: run-pulse 1s ease-in-out infinite; }
+.run-dot.run-succeeded { fill: var(--ok); }
+.run-dot.run-failed { fill: var(--err); }
+.run-dot.run-skipped,
+.run-dot.run-cancelled { fill: var(--fall); }
+@keyframes run-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.step-thumb { cursor: zoom-in; }
+
+/* 卡片信息增强：序号徽章 / when 标记 / 失败错误 / 运行头部脉冲 */
+.node-seq { fill: var(--accent); }
+.node-seq-text { fill: #ffffff; font-size: 10px; font-weight: 700; }
+.node-when { fill: var(--skip); font-size: 8.5px; font-weight: 600; }
+.node-error { fill: var(--err); font-size: 9px; font-weight: 600; }
+.node-duration { fill: var(--ok); font-size: 9.5px; font-weight: 700; }
+.node-duration.running { fill: #ffc107; animation: run-pulse 1s ease-in-out infinite; }
+.node-duration.muted { fill: var(--fall); }
+.node-default { fill: var(--vscode-descriptionForeground, #9d9d9d); font-size: 9.5px; }
+.node.run-running rect.node-head,
+.node.run-running rect.node-head-sq { animation: run-head-pulse 1s ease-in-out infinite; }
+@keyframes run-head-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.45); }
+}
+
+/* 缩略图悬停浮动预览 */
+#thumb-preview {
+  position: fixed;
+  z-index: 75;
+  pointer-events: none;
+  background: rgba(20, 22, 26, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+#thumb-preview.hidden { display: none; }
+#thumb-preview img { max-width: 320px; max-height: 200px; border-radius: 3px; }
+.thumb-preview-label { font-size: 10px; color: var(--vscode-descriptionForeground, #bbbbbb); }
+
+/* 截图大图查看（点击卡片内缩略图弹出） */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#lightbox.hidden { display: none; }
+.lightbox-frame {
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-width: 92vw;
+  max-height: 90vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.lightbox-frame img { max-width: 86vw; max-height: 72vh; border-radius: 4px; }
+.lightbox-title { font-size: 12px; color: var(--fg); }
+.lightbox-error { font-size: 11px; color: var(--err); max-width: 70vw; white-space: pre-wrap; }
+
+/* VS Code 内嵌 ROI 选择器 */
+#roi-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+#roi-picker.hidden { display: none; }
+.roi-picker-frame {
+  width: min(1120px, 96vw);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.roi-picker-title { font-size: 13px; font-weight: 600; }
+.roi-picker-stage {
+  position: relative;
+  min-height: 120px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111111;
+  border: 1px solid var(--border);
+}
+.roi-picker-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(94vh - 150px);
+  width: auto;
+  height: auto;
+  user-select: none;
+  cursor: crosshair;
+}
+.roi-picker-selection {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid #40c4ff;
+  background: rgba(64, 196, 255, 0.16);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+}
+.roi-picker-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.roi-picker-info {
+  flex: 1;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+.roi-picker-actions { display: flex; gap: 6px; }
+
+@media (max-width: 640px) {
+  #roi-picker { padding: 8px; }
+  .roi-picker-frame { width: 100%; max-height: 98vh; padding: 8px; }
+  .roi-picker-footer { align-items: flex-end; flex-wrap: wrap; }
+  .roi-picker-info { min-width: 100%; }
+  .roi-picker-actions { margin-left: auto; }
+}
 
 /* 连线类型菜单 */
 .connect-menu {
@@ -280,12 +458,73 @@ input[type="text"], input[type="number"], select, textarea {
 }
 textarea { min-height: 60px; resize: vertical; }
 
+.param-control-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.param-control-row > :first-child { flex: 1 1 auto; min-width: 0; }
+.param-icon-button {
+  width: 26px;
+  min-width: 26px;
+  height: 27px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+.param-icon-button:disabled { opacity: 0.4; cursor: default; }
+.roi-pick-button:not(:disabled) { color: var(--accent); }
+.param-icon-button.clear-param { color: var(--vscode-descriptionForeground, #9d9d9d); }
+.param-icon-button.clear-param:not(:disabled):hover { color: var(--err); }
+
+.array-editor,
+.object-editor {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.array-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.array-row input { min-width: 0; }
+.array-index {
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.array-status { margin: 0 0 3px; }
+.array-add,
+.object-add { width: 100%; margin-top: 2px; }
+.icon-button {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+.icon-button:disabled { opacity: 0.45; cursor: default; }
+.object-rows { display: flex; flex-direction: column; gap: 5px; }
+.object-row {
+  display: grid;
+  grid-template-columns: minmax(62px, .78fr) minmax(54px, .65fr) minmax(78px, 1.35fr) 26px;
+  align-items: center;
+  gap: 4px;
+}
+.object-row input,
+.object-row select { min-width: 0; }
+.object-value { min-width: 0; }
+.object-value > input,
+.object-value > select { width: 100%; }
+.object-empty { display: block; margin-bottom: 5px; }
+
 .row { display: flex; gap: 8px; }
 .row > .field { flex: 1; }
-
-.param-tools { display: flex; gap: 4px; margin-top: 3px; }
-.param-tools button { font-size: 10px; padding: 1px 6px; }
-.param-tools .ref-on { background: var(--accent); color: var(--accent-fg); }
 
 .section-title {
   font-weight: 600;

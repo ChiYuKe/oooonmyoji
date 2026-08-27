@@ -9,7 +9,7 @@ from typing import Any, Callable, Sequence
 
 from ..devices.coordinates import CoordinateMapper, Rect
 from ..devices.protocol import DeviceBackend, DeviceFrame, frame_from_backend
-from ..exceptions import CancelledError, DeviceError
+from ..exceptions import CancelledError, DeviceError, WorkflowError
 from ..vision.image import crop_frame, write_frame
 from ..vision.ocr import OcrEngine, OcrResult
 from ..vision.template import TemplateMatch, TemplateMatcher
@@ -33,6 +33,7 @@ class TaskContextImpl:
         ocr_attempts: int = 2,
         retry_base_delay: float = 0.25,
         retry_max_delay: float = 3.0,
+        subworkflow_runner: Callable[..., Any] | None = None,
     ) -> None:
         self.device = device
         self.mapper = mapper
@@ -46,6 +47,7 @@ class TaskContextImpl:
         self.ocr_attempts = ocr_attempts
         self.retry_base_delay = retry_base_delay
         self.retry_max_delay = retry_max_delay
+        self.subworkflow_runner = subworkflow_runner
         self._last_frame: DeviceFrame | None = None
         self._action_cancel_event = threading.Event()
         self._deadline: float | None = None
@@ -114,6 +116,17 @@ class TaskContextImpl:
         if actual_roi is None:
             return results
         return [result.translated(actual_roi[0], actual_roi[1]) for result in results]
+
+    def run_subworkflow(self, workflow: Path | str, inputs: dict[str, Any]) -> tuple[str, Any, str | None, str | None]:
+        """运行另一个工作流（由 runner 注入执行器），返回其状态回执。
+
+        Returns: (status, output, error, error_category) —— status 为
+        succeeded / failed / cancelled，作为“回执”给调用方步骤使用。
+        """
+
+        if self.subworkflow_runner is None:
+            raise WorkflowError("subworkflow execution is unavailable")
+        return self.subworkflow_runner(workflow, inputs)
 
     def tap(self, x: int, y: int, *, hold_ms: int = 0) -> None:
         self.check_cancelled()

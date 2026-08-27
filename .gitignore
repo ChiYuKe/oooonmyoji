@@ -1,11 +1,16 @@
 __pycache__/
 *.py[cod]
 .venv/
+.mypy_cache/
+.pytest_cache/
 tests/artifacts/
 artifacts/
 logs/
 
+# Local VS Code settings and packaged extension artifacts
+.vscode/
+*.vsix
+
 # VS Code extension
 vscode-onmyoji-workflow/node_modules/
 vscode-onmyoji-workflow/out/
-vscode-onmyoji-workflow/*.vsix

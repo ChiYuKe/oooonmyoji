@@ -231,6 +231,23 @@ export function defaultBuiltinActions(): ActionSpecInfo[] {
       '点击匹配结果中心，可配置随机偏移和随机点击前等待。有输入副作用，默认不可自动重试。输出实际点击坐标、偏移量和等待间隔。',
       ['x', 'y', 'offset_x', 'offset_y', 'interval_seconds', 'revalidated'],
     ),
+    spec(
+      'workflow.run',
+      {
+        type: 'object',
+        required: ['workflow'],
+        properties: {
+          workflow: { type: 'string', minLength: 1, description: '子工作流 ID、JSON 文件名或 workflows/ 下的路径' },
+          inputs: { type: 'object', description: '传给子工作流的输入（按子工作流 inputs_schema 校验），可含 $ref 引用' },
+        },
+        additionalProperties: false,
+      },
+      { type: 'object' },
+      false,
+      true,
+      '运行另一个工作流（脚本嵌套调用）。子脚本完成后返回“回执”输出 { workflow, status, output }：status 为 succeeded/failed/cancelled，供 on_success/on_failure 分支与后续步骤 $ref 判断。递归调用会被拦截。',
+      ['workflow', 'status', 'output'],
+    ),
   ];
 }
 

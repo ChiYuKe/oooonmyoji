@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "new_workflow",
+  "version": "1.0.0",
+  "reference_resolution": [
+    1920,
+    1080
+  ],
+  "entry": "截图",
+  "limits": {
+    "timeout_seconds": 60,
+    "max_steps": 20
+  },
+  "inputs_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "steps": [
+    {
+      "id": "截图",
+      "action": "core.capture",
+      "on_success": "step_1",
+      "on_failure": "$failure",
+      "on_skip": "$cancelled"
+    },
+    {
+      "id": "step_1",
+      "action": "input.tap_match",
+      "with": {
+        "revalidate": true
+      }
+    }
+  ]
+}

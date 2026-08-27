@@ -334,11 +334,15 @@ async function main() {
     for (let i = 1; i < info.steps.length; i++) {
       assert(layout.positions[info.steps[i].id].y > layout.positions[info.steps[i - 1].id].y);
     }
-    // 成功(显式)、失败(默认)、跳过(默认) 边都存在
+    // 成功(显式)、失败(默认)、跳过(默认) 边都存在于布局语义中
     const kinds = new Set(layout.edges.map((e) => e.kind));
     assert(kinds.has('on_success'));
     assert(kinds.has('on_failure'));
     assert(kinds.has('fallthrough') || kinds.has('on_skip'));
+    const defaultFailureEdges = layout.edges.filter((e) => e.kind === 'on_failure' && !e.explicit);
+    assert(defaultFailureEdges.length > 0 && defaultFailureEdges.every((e) => e.visible === false), '默认失败终点边应保留语义但标记为隐藏');
+    const defaultSkipEdges = layout.edges.filter((e) => e.kind === 'on_skip' && !e.explicit);
+    assert(defaultSkipEdges.length > 0 && defaultSkipEdges.every((e) => e.visible === false), '默认跳过边应保留语义但标记为隐藏');
   });
 
   console.log('== 7. 自定义 Action 合并 ==');
@@ -372,4 +376,3 @@ main().catch((e) => {
   console.error('\n冒烟测试失败：', e);
   process.exit(1);
 });
-

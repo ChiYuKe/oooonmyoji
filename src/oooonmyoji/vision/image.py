@@ -60,6 +60,32 @@ def crop_frame(frame: object, roi: tuple[int, int, int, int] | None = None):
     return image[y : y + height, x : x + width]
 
 
+def make_thumbnail_base64(frame: object, *, width: int = 240) -> str | None:
+    """Downscale a frame to a small PNG and return its base64 payload.
+
+    Returns None when OpenCV is unavailable or encoding fails; used by the run
+    event stream so cards can show a tiny preview of the last captured frame.
+    """
+
+    try:
+        import base64
+
+        import cv2
+    except ImportError:
+        return None
+    try:
+        image = frame_to_bgr(frame)
+        height = max(1, round(image.shape[0] * width / image.shape[1]))
+        if image.shape[1] > width:
+            image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+        ok, encoded = cv2.imencode(".png", image)
+        if not ok:
+            return None
+        return base64.b64encode(encoded.tobytes()).decode("ascii")
+    except Exception:
+        return None
+
+
 def write_frame(path: Path | str, frame: object) -> Path:
     """Persist either the original PNG payload or a BGR image."""
 

@@ -53,6 +53,7 @@ class WorkflowEngine:
         inputs: dict[str, Any],
         *,
         on_step: Callable[[dict[str, Any]], None] | None = None,
+        on_step_start: Callable[[dict[str, Any]], None] | None = None,
         cancel_event: Any | None = None,
         cancel_grace_seconds: float = 1.0,
     ) -> None:
@@ -61,6 +62,7 @@ class WorkflowEngine:
         self.context = context
         self.inputs = inputs
         self.on_step = on_step
+        self.on_step_start = on_step_start
         self.cancel_event = cancel_event
         self.cancel_grace_seconds = cancel_grace_seconds
         self.outputs: dict[str, Any] = {}
@@ -84,6 +86,8 @@ class WorkflowEngine:
                     return self._failed("workflow timeout exceeded", "workflow_timeout", current)
                 self._check_cancelled()
                 step = step_map[current]
+                if self.on_step_start is not None:
+                    self.on_step_start({"step_id": step.id, "action": step.action, "status": "running", "ts": time.time()})
                 started = time.perf_counter()
                 event: dict[str, Any] = {"step_id": step.id, "action": step.action, "status": "running", "started_at": time.time(), "attempts": 0}
                 last_result: ActionResult | None = None

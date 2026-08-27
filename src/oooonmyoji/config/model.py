@@ -65,6 +65,7 @@ class AppConfig:
     retry: RetryConfig
     log_dir: Path
     artifact_dir: Path
+    save_screenshots: bool
     raw: dict[str, Any] = field(repr=False)
 
     def instance(self, instance_id: str) -> InstanceConfig:

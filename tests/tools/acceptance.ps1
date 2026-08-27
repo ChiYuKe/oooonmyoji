@@ -94,8 +94,7 @@ try {
     Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$record.workflow_id)) "workflow_id is missing"
     Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$record.workflow_version)) "workflow_version is missing"
     Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$record.workflow_file_hash)) "workflow_file_hash is missing"
-    Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$record.details.last_frame)) "last frame metadata is missing"
-    Assert-Condition (Test-Path -LiteralPath ([string]$record.details.last_frame) -PathType Leaf) "last frame artifact is missing"
+    Assert-Condition ([string]::IsNullOrWhiteSpace([string]$record.details.last_frame)) "automatic last frame should be disabled by default"
 
     $steps = @($record.step_history)
     Assert-Condition ($steps.Count -gt 0) "step_history is empty"

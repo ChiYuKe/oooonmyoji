@@ -41,5 +41,6 @@
     "max_delay_seconds": 3
   },
   "log_dir": "logs",
-  "artifact_dir": "artifacts"
+  "artifact_dir": "artifacts",
+  "save_screenshots": false
 }

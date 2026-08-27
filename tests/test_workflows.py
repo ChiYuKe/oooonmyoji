@@ -100,6 +100,21 @@ def workflow(raw_steps: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
     return value
 
 
+def test_validator_allows_underscore_metadata_fields(tmp_path: Path) -> None:
+    actions = registry(spec(EchoAction()))
+    raw = workflow(
+        [{"id": "a", "action": "test.echo", "on_success": "$success", "on_skip": "$success"}],
+        _layout={"a": {"x": 120, "y": 80}},
+    )
+    parsed = validate_workflow(raw, tmp_path / "layout.json", actions, project_root=tmp_path)
+    assert parsed.entry == "a"
+
+    # 非 _ 前缀的顶层未知字段仍然被拒绝
+    bad = workflow([{"id": "a", "action": "test.echo"}], layout={"a": {"x": 1}})
+    with pytest.raises(ConfigError):
+        validate_workflow(bad, tmp_path / "bad.json", actions, project_root=tmp_path)
+
+
 def test_validator_rejects_duplicate_unknown_and_unreachable_steps(tmp_path: Path) -> None:
     actions = registry(spec(EchoAction()))
     duplicate = workflow([{"id": "a", "action": "test.echo"}, {"id": "a", "action": "test.echo"}])

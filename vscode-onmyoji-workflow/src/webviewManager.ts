@@ -1,6 +1,7 @@
 /**
  * 可视化流程图编辑器（Webview）管理：面板生命周期、消息协议、文件读写。
  */
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ActionCatalog } from './catalog';
@@ -12,17 +13,30 @@ interface WebviewPayload {
   [key: string]: unknown;
 }
 
+interface RoiCapture {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+type RoiPicker = (referenceResolution: [number, number]) => Promise<RoiCapture | undefined>;
+
 export class WebviewManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private docUri: vscode.Uri | undefined;
   private dirty = false;
   private disposables: vscode.Disposable[] = [];
+  private runWatcherTimer: NodeJS.Timeout | undefined;
+  private runEventsPath: string | undefined;
+  private runWatcherOffset = 0;
+  private latestRunEvents: Record<string, unknown>[] = [];
 
   constructor(
     private context: vscode.ExtensionContext,
     private intelligence: WorkflowIntelligence,
     private getCatalog: () => ActionCatalog,
     private getProjectRoot: () => string,
+    private pickRoi: RoiPicker,
   ) {}
 
   async open(preferred?: vscode.Uri): Promise<void> {
@@ -42,7 +56,11 @@ export class WebviewManager implements vscode.Disposable {
         {
           enableScripts: true,
           retainContextWhenHidden: true,
-          localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'media'))],
+          // media 提供编辑器资源；projectRoot 让运行截图等产物可被 webview 加载
+          localResourceRoots: [
+            vscode.Uri.file(path.join(this.context.extensionPath, 'media')),
+            vscode.Uri.file(this.getProjectRoot()),
+          ],
         },
       );
       this.panel.webview.html = this.buildHtml(this.panel.webview);
@@ -124,7 +142,7 @@ export class WebviewManager implements vscode.Disposable {
     </div>
     <div id="legend">
      <span class="lg lg-ok">成功</span><span class="lg lg-err">失败</span><span class="lg lg-skip">跳过</span><span class="lg lg-fall">默认跳转</span>
-      <span class="hint">滚轮缩放 · 拖拽平移 · 拖卡片摆位 · 从卡片右侧彩色引脚拖到目标左侧 ⚪ 连线（绿=成功 红=失败 橙=跳过）· 悬停连线中点 ✕ 删除</span>
+      <span class="hint">滚轮缩放 · 右键/中键拖拽平移 · 左键框选 · 拖卡片位移（Ctrl+Alt 取消吸附）· 右侧彩色引脚拖到目标左侧 ⚪ 连线（绿=成功 红=失败 橙=跳过）· 点击连线/节点后 Delete 删除 · F 聚焦 · Home 适应视图 · 右键空白添加步骤 · 运行后卡片内显示截图缩略图，点击看大图</span>
    </div>
   </section>
   <aside id="inspector">
@@ -167,6 +185,10 @@ export class WebviewManager implements vscode.Disposable {
     switch (message.type) {
       case 'ready':
         await this.sendInit();
+        // 回放最近一次运行的步骤事件（刷新/重开面板后缩略图仍在）
+        if (this.latestRunEvents.length > 0) {
+          void this.panel.webview.postMessage({ type: 'runReplay', events: this.latestRunEvents.map((e) => this.convertRunEvent(e)) });
+        }
         break;
       case 'reloadRequest':
         this.dirty = false;
@@ -201,9 +223,49 @@ export class WebviewManager implements vscode.Disposable {
      case 'newWorkflow':
        await vscode.commands.executeCommand('onmyoji.createWorkflow');
        break;
-      case 'runWorkflow':
+      case 'runWorkflow': {
+        if (!this.docUri) return;
+        // 事件文件路径与监听由 extension.runWorkflow 统一处理，
+        // 这样命令面板 / 编辑器标题栏等入口也能触发缩略图更新。
         await vscode.commands.executeCommand('onmyoji.runWorkflow', this.docUri);
         break;
+      }
+      case 'pickRoi': {
+        const rawResolution = message.referenceResolution;
+        const referenceResolution: [number, number] = Array.isArray(rawResolution) && rawResolution.length === 2
+          && rawResolution.every((value) => typeof value === 'number' && Number.isInteger(value) && value > 0)
+          ? [rawResolution[0] as number, rawResolution[1] as number]
+          : [1920, 1080];
+        try {
+          const capture = await this.pickRoi(referenceResolution);
+          if (capture && this.panel) {
+            void this.panel.webview.postMessage({
+              type: 'roiPickerImage',
+              requestId: message.requestId,
+              stepId: message.stepId,
+              key: message.key,
+              dataUrl: capture.dataUrl,
+              width: capture.width,
+              height: capture.height,
+              referenceResolution,
+            });
+          } else if (this.panel) {
+            void this.panel.webview.postMessage({
+              type: 'roiPickerCancelled',
+              requestId: message.requestId,
+            });
+          }
+        } catch (error) {
+          if (this.panel) {
+            void this.panel.webview.postMessage({
+              type: 'roiPickerError',
+              requestId: message.requestId,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        break;
+      }
     case 'error':
         vscode.window.showErrorMessage(`Onmyoji 工作流编辑器：${String(message.message ?? '')}`);
         break;
@@ -212,7 +274,86 @@ export class WebviewManager implements vscode.Disposable {
     }
   }
 
+  /** 开始监听运行事件文件（引擎写入 JSONL，本方法尾随并转发给 webview）。 */
+  startRunWatcher(filePath: string): void {
+    this.stopRunWatcher();
+    this.runEventsPath = filePath;
+    this.runWatcherOffset = 0;
+    this.runWatcherTimer = setInterval(() => this.tickRunWatcher(), 400);
+  }
+
+  private stopRunWatcher(): void {
+    if (this.runWatcherTimer !== undefined) {
+      clearInterval(this.runWatcherTimer);
+      this.runWatcherTimer = undefined;
+    }
+    this.runEventsPath = undefined;
+  }
+
+  private tickRunWatcher(): void {
+    if (!this.runEventsPath) return;
+    let size: number;
+    try {
+      size = fs.statSync(this.runEventsPath).size;
+    } catch {
+      return; // 引擎还没创建事件文件
+    }
+    if (size < this.runWatcherOffset) this.runWatcherOffset = 0; // 新一次运行截断了文件
+    if (size === this.runWatcherOffset) return;
+    let chunk = '';
+    try {
+      const fd = fs.openSync(this.runEventsPath, 'r');
+      try {
+        const buffer = Buffer.alloc(size - this.runWatcherOffset);
+        fs.readSync(fd, buffer, 0, buffer.length, this.runWatcherOffset);
+        chunk = buffer.toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+      this.runWatcherOffset = size;
+    } catch {
+      return;
+    }
+    for (const line of chunk.split('\n')) {
+      if (!line.trim()) continue;
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      this.forwardRunEvent(event);
+    }
+  }
+
+  /** 把引擎事件转发给 webview：截图绝对路径先转成 webview URI。 */
+  private convertRunEvent(event: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...event };
+    if (event.type === 'step' && typeof event.screenshot === 'string' && this.panel) {
+      try {
+        out.screenshot = this.panel.webview.asWebviewUri(vscode.Uri.file(event.screenshot)).toString();
+      } catch {
+        // 保留原路径
+      }
+    }
+    return out;
+  }
+
+  private forwardRunEvent(event: Record<string, unknown>): void {
+    // 先缓存（即使面板未打开，重开/刷新时也能回放），有面板再转发。
+    this.latestRunEvents.push(event);
+    if (this.latestRunEvents.length > 5000) this.latestRunEvents.shift();
+    if (this.panel) {
+      void this.panel.webview.postMessage({ type: 'runEvent', event: this.convertRunEvent(event) });
+    }
+    if (event.type === 'run_finished') {
+      // 执行结束：再等 1.5 秒收尾读余量，然后停止轮询
+      setTimeout(() => this.stopRunWatcher(), 1500);
+    }
+  }
+
   dispose(): void {
+    this.stopRunWatcher();
     this.panel?.dispose();
     this.disposePanelSubscriptions();
   }

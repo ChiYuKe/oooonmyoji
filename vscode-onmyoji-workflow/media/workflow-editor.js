@@ -1916,7 +1916,8 @@
       referenceResolution,
       image,
       stage,
-      selection,
+      selectionEl: selection,
+      selectionRect: null,
       info,
       confirm,
       drag: null,
@@ -1958,7 +1959,7 @@
     const point = roiImagePoint(event);
     if (!point) return;
     state.roiPicker.drag = { start: point };
-    state.roiPicker.selection = { x: Math.round(point.x), y: Math.round(point.y), width: 0, height: 0 };
+    state.roiPicker.selectionRect = { x: Math.round(point.x), y: Math.round(point.y), width: 0, height: 0 };
     renderRoiSelection();
     event.preventDefault();
   }
@@ -1968,7 +1969,7 @@
     if (!picker || !picker.drag) return;
     const point = roiImagePoint(event);
     if (!point) return;
-    picker.selection = pickerRect(picker.drag.start, point);
+    picker.selectionRect = pickerRect(picker.drag.start, point);
     renderRoiSelection();
   }
 
@@ -1976,7 +1977,7 @@
     const picker = state.roiPicker;
     if (!picker || !picker.drag) return;
     const point = roiImagePoint(event);
-    if (point) picker.selection = pickerRect(picker.drag.start, point);
+    if (point) picker.selectionRect = pickerRect(picker.drag.start, point);
     picker.drag = null;
     renderRoiSelection();
   }
@@ -1984,22 +1985,22 @@
   function renderRoiSelection() {
     const picker = state.roiPicker;
     if (!picker) return;
-    const selected = picker.selection;
+    const selected = picker.selectionRect;
     const stageRect = picker.stage.getBoundingClientRect();
     const imageRect = picker.image.getBoundingClientRect();
     if (!selected || !imageRect.width || !imageRect.height) {
-      picker.selection.classList.add('hidden');
+      picker.selectionEl.classList.add('hidden');
       picker.confirm.disabled = true;
       picker.info.textContent = picker.width + '×' + picker.height;
       return;
     }
     const scaleX = imageRect.width / picker.width;
     const scaleY = imageRect.height / picker.height;
-    picker.selection.style.left = (imageRect.left - stageRect.left + selected.x * scaleX) + 'px';
-    picker.selection.style.top = (imageRect.top - stageRect.top + selected.y * scaleY) + 'px';
-    picker.selection.style.width = Math.max(0, selected.width * scaleX) + 'px';
-    picker.selection.style.height = Math.max(0, selected.height * scaleY) + 'px';
-    picker.selection.classList.remove('hidden');
+    picker.selectionEl.style.left = (imageRect.left - stageRect.left + selected.x * scaleX) + 'px';
+    picker.selectionEl.style.top = (imageRect.top - stageRect.top + selected.y * scaleY) + 'px';
+    picker.selectionEl.style.width = Math.max(0, selected.width * scaleX) + 'px';
+    picker.selectionEl.style.height = Math.max(0, selected.height * scaleY) + 'px';
+    picker.selectionEl.classList.remove('hidden');
     picker.confirm.disabled = selected.width < 2 || selected.height < 2;
     picker.info.textContent = selected.width >= 2 && selected.height >= 2
       ? '选择区：' + selected.x + ',' + selected.y + ' ' + selected.width + '×' + selected.height
@@ -2029,11 +2030,11 @@
 
   function confirmRoiSelection() {
     const picker = state.roiPicker;
-    if (!picker || !picker.selection || picker.selection.width < 2 || picker.selection.height < 2) {
+    if (!picker || !picker.selectionRect || picker.selectionRect.width < 2 || picker.selectionRect.height < 2) {
       toast('请先框选一个有效区域', 2600);
       return;
     }
-    const selected = picker.selection;
+    const selected = picker.selectionRect;
     const referenceWidth = picker.referenceResolution[0];
     const referenceHeight = picker.referenceResolution[1];
     const roi = [

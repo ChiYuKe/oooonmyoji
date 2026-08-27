@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 
 from src.oooonmyoji.tools.roi_editor import (
     RoiRegion,
     build_parser,
+    capture_result,
     encode_tk_png,
     export_payload,
     normalize_rect,
@@ -72,6 +75,51 @@ def test_roi_cli_defaults_to_live_capture_and_allows_static_mode() -> None:
     picker_args = build_parser().parse_args(["--select-roi", "--result-file", "selection.json"])
     assert picker_args.select_roi is True
     assert picker_args.result_file == Path("selection.json")
+
+    capture_args = build_parser().parse_args(["--capture-only", "--result-file", "capture.json"])
+    assert capture_args.capture_only is True
+    assert capture_args.result_file == Path("capture.json")
+
+
+def test_capture_result_writes_one_png_frame_as_json(tmp_path: Path, monkeypatch) -> None:
+    import cv2
+    import numpy as np
+    import src.oooonmyoji.tools.roi_editor as roi_editor
+
+    class FakeDevice:
+        closed = False
+
+        def __init__(self, *_args) -> None:
+            pass
+
+        def connect(self) -> "FakeDevice":
+            return self
+
+        def capture(self):
+            return object()
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(roi_editor, "MumuDevice", FakeDevice)
+    monkeypatch.setattr(
+        roi_editor,
+        "frame_to_bgr",
+        lambda _frame: np.zeros((3, 4, 3), dtype=np.uint8),
+    )
+
+    result_file = tmp_path / "capture" / "selection.json"
+    capture_result(
+        {"mumu_path": Path("mumu"), "instance_index": 0, "package": "pkg"},
+        result_file,
+    )
+
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+    assert payload["image_size"] == [4, 3]
+    png = base64.b64decode(payload["image_base64"])
+    decoded = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert decoded.shape[:2] == (3, 4)
 
 
 def test_tk_png_encoding_preserves_bgr_colors_for_tk() -> None:

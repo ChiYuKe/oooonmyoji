@@ -51,7 +51,7 @@ function findById(root, id) {
 const body = new FakeEl('body');
 const documentStub = {
   body,
-  getElementById(id) { return els[id] || findById(body, id) || (els[id] = new FakeEl(id === 'graph' || id === 'minimap' ? 'svg' : 'div')); },
+  getElementById(id) { return els[id] || findById(body, id) || (els[id] = new FakeEl(id === 'graph' || id === 'minimap' ? 'svg' : id === 'instance-select' ? 'select' : 'div')); },
   createElement: (tag) => new FakeEl(tag),
   createElementNS: (namespace, tag) => new FakeEl(tag),
   createTextNode: (text) => { const node = new FakeEl('#text'); node.textContent = String(text); return node; },
@@ -95,7 +95,7 @@ const catalog = [
   { name: 'core.log', version: '1.0.0', description: '日志', parameters: { message: { type: 'string', required: true } }, inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: true },
 ];
 
-for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'init', document: { name: 'demo.json', uri: 'file:///demo.json', text: JSON.stringify(workflow) }, catalog, refs: { blackboard: ['blackboard.template'], nodes: ['nodes.capture.output.width'] }, issues: [] } });
+for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'init', document: { name: 'demo.json', uri: 'file:///demo.json', text: JSON.stringify(workflow) }, catalog, refs: { blackboard: ['blackboard.template'], nodes: ['nodes.capture.output.width'] }, issues: [], instances: [{ id: 'mumu-0', backend: 'mumu', displayName: 'primary' }, { id: 'mumu-1', backend: 'mumu', displayName: 'second' }], selectedInstance: 'mumu-0' } });
 
 const graph = els.graph;
 const hasClass = (item, name) => item.classList.contains(name) || String(item.attrs.class || '').split(/\s+/).includes(name);
@@ -124,6 +124,13 @@ let ok = true;
 const check = (name, condition) => { console.log((condition ? '✓ ' : '✗ ') + name); if (!condition) ok = false; };
 
 check('初始化发送 ready', posted.some((message) => message.type === 'ready'));
+check('工具栏显示配置中的两个实例', els['instance-select'].children.length === 2 && els['instance-select'].value === 'mumu-0');
+for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'runtimeInstances', instances: [{ id: 'mumu-0', backend: 'mumu', displayName: 'primary' }, { id: 'mumu-1', backend: 'mumu', displayName: 'second' }, { id: 'mumu-2', backend: 'mumu', displayName: 'third' }], selectedInstance: 'mumu-0' } });
+check('自动发现刷新可追加第三个原生实例', els['instance-select'].children.length === 3 && els['instance-select'].children[2].textContent === 'mumu-2 · third (mumu)');
+els['instance-select'].value = 'mumu-1'; fire(els['instance-select'], 'change');
+check('实例选择写回扩展工作区状态', posted.some((message) => message.type === 'selectInstance' && message.instanceId === 'mumu-1'));
+fire(els['btn-run'], 'click');
+check('运行使用工具栏所选实例', posted.some((message) => message.type === 'runWorkflow' && message.instanceId === 'mumu-1'));
 check('渲染 6 张 Behavior Tree 卡片', allGraph((item) => item.tagName === 'G' && hasClass(item, 'node')).length === 6);
 check('渲染 Root/Sequence/Selector/Task 类型', ['type-root', 'type-sequence', 'type-selector', 'type-task'].every((name) => allGraph((item) => hasClass(item, name)).length > 0));
 check('父子边来自 children（5 条）', allGraph((item) => item.tagName === 'G' && hasClass(item, 'edge')).length === 5);
@@ -134,7 +141,10 @@ check('装饰器嵌入卡片', within(nodeGroup('find'), (item) => hasClass(item
 selectNode('find');
 const templateInput = inspectorItems((item) => item.tagName === 'INPUT' && item.placeholder === 'assets/templates/...')[0];
 check('空参数的必填模板仍渲染输入框', !!templateInput && templateInput.value === '');
-check('模板参数提供截取按钮', inspectorItems((item) => item.tagName === 'BUTTON' && item.textContent === '截取').length === 1);
+const captureTemplateButton = inspectorItems((item) => item.tagName === 'BUTTON' && item.textContent === '截取')[0];
+check('模板参数提供截取按钮', !!captureTemplateButton);
+fire(captureTemplateButton, 'click');
+check('模板截取使用工具栏所选实例', posted.some((message) => message.type === 'pickRoi' && message.instanceId === 'mumu-1'));
 check('模板匹配渲染完整参数组', inspectorItems((item) => hasClass(item, 'parameter-block')).length === 5);
 check('只渲染必填参数不会改写工作流', Object.keys(save().nodes.find((node) => node.id === 'find').params).length === 0);
 templateInput.value = 'assets/templates/other.png'; fire(templateInput, 'change');

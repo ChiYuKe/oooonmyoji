@@ -15,6 +15,7 @@ from .devices.factory import resolve_adb_path
 from .devices.mumu import discover_mumu_path
 from .exceptions import AutomationError, ConfigError
 from .runtime.control import ControlServer, send_control
+from .runtime.instances import ensure_runtime_instance, expand_runtime_instances
 from .runtime.records import AtomicJsonStore
 from .runtime.scheduler import Scheduler
 from .runtime.supervisor import Supervisor
@@ -44,7 +45,7 @@ def _load_validated(path: Path) -> tuple[Any, ActionRegistry, WorkflowLoader, di
 
 
 def _load_runtime(path: Path) -> tuple[Any, ActionRegistry, WorkflowLoader]:
-    config = load_config(path)
+    config = expand_runtime_instances(load_config(path))
     registry = build_action_registry(config.action_dir)
     loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
     return config, registry, loader
@@ -88,6 +89,7 @@ def _prepare_workflow_run(
     inputs_path: Path | None,
 ) -> tuple[str, dict[str, Any]]:
     config, _, loader = _load_runtime(config_path)
+    config = ensure_runtime_instance(config, instance_id)
     try:
         config.instance(instance_id)
     except StopIteration as exc:
@@ -148,6 +150,18 @@ def command_list_actions(args: argparse.Namespace) -> int:
         "side_effect": spec.side_effect,
         "source": spec.source,
     } for spec in registry.specs()})
+    return 0
+
+
+def command_list_instances(args: argparse.Namespace) -> int:
+    config = expand_runtime_instances(load_config(_config_path(args.config)))
+    _print({"instances": [{
+        "id": instance.id,
+        "backend": instance.backend,
+        "mumu_index": instance.mumu_index,
+        "adb_serial": instance.adb_serial,
+        "display_name": instance.display_name,
+    } for instance in config.instances if instance.enabled]})
     return 0
 
 
@@ -221,7 +235,7 @@ def _run_workflow_local(
     inputs: dict[str, Any],
     events_file: Path | None = None,
 ) -> int:
-    config = load_config(config_path)
+    config = ensure_runtime_instance(expand_runtime_instances(load_config(config_path)), instance)
     supervisor = Supervisor(config)
     try:
         run_id = supervisor.run_workflow(workflow, instance, inputs, wait=True, events_file=str(events_file) if events_file else None)
@@ -301,6 +315,11 @@ def command_serve(args: argparse.Namespace) -> int:
             pending[run_id] = str(request["job_id"])
             return {"ok": True, "run_id": run_id}
         if command == "run-workflow":
+            runtime_config = ensure_runtime_instance(
+                expand_runtime_instances(load_config(config.config_path)),
+                str(request["instance"]),
+            )
+            supervisor.ensure_instance(runtime_config.instance(str(request["instance"])))
             run_id = supervisor.run_workflow(
                 str(request["workflow"]),
                 str(request["instance"]),
@@ -378,6 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("workflow")
     show.set_defaults(function=command_show_workflow)
     subparsers.add_parser("list-actions").set_defaults(function=command_list_actions)
+    subparsers.add_parser("list-instances").set_defaults(function=command_list_instances)
     return parser
 
 

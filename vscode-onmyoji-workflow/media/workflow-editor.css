@@ -55,6 +55,7 @@ button.icon-button { width: 28px; min-width: 28px; padding: 0; font-size: 16px; 
 .toolbar-separator { width: 1px; height: 22px; margin: 0 3px; background: var(--border); }
 .badge { padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font-size: 11px; }
 .badge.error { border-color: color-mix(in srgb, var(--danger) 65%, transparent); color: #f08c93; }
+#instance-select { width: auto; min-width: 112px; max-width: 156px; flex: 0 0 auto; }
 
 #external-banner {
   position: absolute;

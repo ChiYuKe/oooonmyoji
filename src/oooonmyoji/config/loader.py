@@ -23,6 +23,7 @@ APP_CONFIG_SCHEMA: dict[str, Any] = {
         "adb_path": {"type": ["string", "null"]},
         "workflow_dir": {"type": "string", "minLength": 1},
         "action_dir": {"type": "string", "minLength": 1},
+        "discover_mumu_instances": {"type": "boolean"},
         "instances": {
             "type": "array",
             "minItems": 1,
@@ -319,6 +320,7 @@ def load_config(path: Path | str) -> AppConfig:
         adb_path=adb_path,
         workflow_dir=workflow_dir,
         action_dir=action_dir,
+        discover_mumu_instances=_bool(raw.get("discover_mumu_instances"), "discover_mumu_instances", False),
         instances=tuple(instances),
         ocr=ocr,
         jobs=tuple(jobs),

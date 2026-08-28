@@ -15,6 +15,7 @@ class InstanceConfig:
     adb_serial: str | None = None
     package: str | None = None
     enabled: bool = True
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class AppConfig:
     adb_path: Path | None
     workflow_dir: Path
     action_dir: Path
+    discover_mumu_instances: bool
     instances: tuple[InstanceConfig, ...]
     ocr: OcrConfig
     jobs: tuple[JobConfig, ...]

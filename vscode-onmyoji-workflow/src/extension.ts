@@ -9,12 +9,16 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ActionCatalog, discoverProjectRoot, loadActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
+import { chooseRuntimeInstance, parseRuntimeInstances, RuntimeInstanceInfo } from './runtimeInstances';
 import { WebviewManager } from './webviewManager';
 
 let intelligence: WorkflowIntelligence;
 let webviewManager: WebviewManager;
 let catalog: ActionCatalog;
 let projectRoot: string;
+let extensionContext: vscode.ExtensionContext;
+
+const SELECTED_INSTANCE_KEY = 'onmyoji.selectedInstance';
 
 interface RoiCapture {
   dataUrl: string;
@@ -40,6 +44,7 @@ function updateWorkflowFileContext(): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  extensionContext = context;
   const configuredRoot = vscode.workspace.getConfiguration('onmyoji').get<string>('projectRoot', '');
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.extensionUri.fsPath;
   if (configuredRoot) {
@@ -52,12 +57,20 @@ export function activate(context: vscode.ExtensionContext): void {
   intelligence = new WorkflowIntelligence(getCatalog);
   context.subscriptions.push(intelligence, ...intelligence.registerProviders());
 
-  webviewManager = new WebviewManager(context, intelligence, getCatalog, () => projectRoot, pickRoi);
+  webviewManager = new WebviewManager(
+    context,
+    intelligence,
+    getCatalog,
+    () => projectRoot,
+    getRuntimeInstanceState,
+    rememberRuntimeInstance,
+    pickRoi,
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('onmyoji.openWorkflowEditor', (uri?: vscode.Uri) => webviewManager.open(uri)),
     vscode.commands.registerCommand('onmyoji.createWorkflow', () => createWorkflow()),
-    vscode.commands.registerCommand('onmyoji.runWorkflow', (uri?: vscode.Uri) => runWorkflow(uri)),
+    vscode.commands.registerCommand('onmyoji.runWorkflow', (uri?: vscode.Uri, instanceId?: string) => runWorkflow(uri, instanceId)),
     vscode.commands.registerCommand('onmyoji.validateCurrentWorkflow', () => validateCurrentWorkflow()),
     vscode.commands.registerCommand('onmyoji.reloadActionCatalog', () => {
       refreshCatalog();
@@ -184,22 +197,83 @@ function resolvePythonExecutable(): string {
   return fs.existsSync(venv) ? venv : 'python';
 }
 
-function resolveFirstInstance(configFile: string): string {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(configFile, 'utf8')) as { instances?: Array<{ id?: unknown }> };
-    const first = parsed.instances?.find((item) => typeof item.id === 'string' && item.id.trim());
-    if (first && typeof first.id === 'string') return first.id;
-  } catch {
-    // 让 ROI 工具负责报告配置文件不存在或格式错误。
-  }
-  return 'mumu-0';
+function getRuntimeConfigFile(): string {
+  const configPath = resolveRuntimeConfigPath();
+  return path.isAbsolute(configPath) ? configPath : path.join(projectRoot, configPath);
 }
 
-async function pickRoi(_referenceResolution: [number, number]): Promise<RoiCapture | undefined> {
+function getConfiguredRuntimeInstances(): RuntimeInstanceInfo[] {
+  try {
+    const instances = parseRuntimeInstances(JSON.parse(fs.readFileSync(getRuntimeConfigFile(), 'utf8')));
+    if (instances.length > 0) return instances;
+  } catch {
+    // 配置错误由引擎报告；编辑器保留默认实例，避免工具栏失去运行入口。
+  }
+  return [{ id: 'mumu-0' }];
+}
+
+async function getRuntimeInstances(): Promise<RuntimeInstanceInfo[]> {
+  const fallback = getConfiguredRuntimeInstances();
+  const args = [
+    '-m',
+    'src.oooonmyoji.cli',
+    '--config',
+    resolveRuntimeConfigPath(),
+    'list-instances',
+  ];
+  return new Promise((resolve) => {
+    const child = spawn(resolvePythonExecutable(), args, {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let stdout = '';
+    let settled = false;
+    const finish = (instances?: RuntimeInstanceInfo[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(instances && instances.length > 0 ? instances : fallback);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish();
+    }, 6000);
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout += String(chunk);
+      if (stdout.length > 256_000) stdout = stdout.slice(-256_000);
+    });
+    child.once('error', () => finish());
+    child.once('close', (code) => {
+      if (code !== 0) {
+        finish();
+        return;
+      }
+      try {
+        finish(parseRuntimeInstances(JSON.parse(stdout)));
+      } catch {
+        finish();
+      }
+    });
+  });
+}
+
+async function getRuntimeInstanceState(requested?: string): Promise<{ instances: RuntimeInstanceInfo[]; selectedInstance: string }> {
+  const instances = await getRuntimeInstances();
+  const persisted = extensionContext.workspaceState.get<string>(SELECTED_INSTANCE_KEY);
+  return { instances, selectedInstance: chooseRuntimeInstance(instances, requested, persisted) };
+}
+
+async function rememberRuntimeInstance(requested: string): Promise<string> {
+  const selected = (await getRuntimeInstanceState(requested)).selectedInstance;
+  await extensionContext.workspaceState.update(SELECTED_INSTANCE_KEY, selected);
+  return selected;
+}
+
+async function pickRoi(_referenceResolution: [number, number], requestedInstance?: string): Promise<RoiCapture | undefined> {
   const configPath = resolveRuntimeConfigPath();
   const pythonPath = resolvePythonExecutable();
-  const configFile = path.isAbsolute(configPath) ? configPath : path.join(projectRoot, configPath);
-  const instance = resolveFirstInstance(configFile);
+  const instance = (await getRuntimeInstanceState(requestedInstance)).selectedInstance;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oooonmyoji-roi-'));
   const resultFile = path.join(tempDir, 'selection.json');
   const args = [
@@ -264,7 +338,7 @@ async function pickRoi(_referenceResolution: [number, number]): Promise<RoiCaptu
   }
 }
 
-async function runWorkflow(preferred?: vscode.Uri, eventsFilePath?: string): Promise<void> {
+async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, eventsFilePath?: string): Promise<void> {
   const active = vscode.window.activeTextEditor;
   const uri = preferred ?? (active && intelligence.isWorkflowFile(active.document.uri) ? active.document.uri : undefined);
   if (!uri || !intelligence.isWorkflowFile(uri)) {
@@ -287,8 +361,7 @@ async function runWorkflow(preferred?: vscode.Uri, eventsFilePath?: string): Pro
 
   const configPath = resolveRuntimeConfigPath();
   const pythonPath = resolvePythonExecutable();
-  const configFile = path.isAbsolute(configPath) ? configPath : path.join(projectRoot, configPath);
-  const instance = resolveFirstInstance(configFile);
+  const instance = await rememberRuntimeInstance(requestedInstance ?? '');
 
   const workflowReference = relative.split(path.sep).join('/');
   // 无论从哪个入口执行（面板▶ / 命令面板 / 编辑器标题栏），都写运行事件文件并让编辑器监听

@@ -27,15 +27,8 @@
         "task_1",
         "task_2",
         "task_3"
-      ]
-    },
-    {
-      "id": "task_1",
-      "type": "task",
-      "action": "core.capture",
-      "params": {},
-      "decorators": [],
-      "name": "截图"
+      ],
+      "decorators": []
     },
     {
       "id": "task_2",
@@ -64,28 +57,35 @@
       },
       "decorators": [],
       "name": "点击模板"
+    },
+    {
+      "id": "task_1",
+      "type": "task",
+      "action": "core.capture",
+      "params": {},
+      "name": "截屏"
     }
   ],
   "_layout": {
     "root": {
-      "x": 280,
-      "y": 160
+      "x": 332,
+      "y": 0
     },
     "sequence_1": {
-      "x": 272,
-      "y": 368
-    },
-    "task_1": {
-      "x": -64,
-      "y": 640
+      "x": 332,
+      "y": 208
     },
     "task_2": {
-      "x": 272,
-      "y": 640
+      "x": 332,
+      "y": 416
     },
     "task_3": {
-      "x": 600,
-      "y": 640
+      "x": 664,
+      "y": 416
+    },
+    "task_1": {
+      "x": 0,
+      "y": 416
     }
   }
 }

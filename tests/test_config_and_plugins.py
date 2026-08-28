@@ -49,6 +49,7 @@ def test_config_and_workflow_manifest_validate(tmp_path: Path) -> None:
     registry = build_action_registry(config.action_dir)
     workflows = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).discover()
     assert config.instance("one").backend == "adb"
+    assert config.discover_mumu_instances is False
     assert workflows["simple"].resolution == (1920, 1080)
 
 

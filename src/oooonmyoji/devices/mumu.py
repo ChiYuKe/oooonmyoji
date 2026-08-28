@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import struct
+import subprocess
 import time
 import zlib
 from dataclasses import dataclass
@@ -40,6 +42,88 @@ def discover_mumu_path() -> Path | None:
         if candidate.is_dir() and find_renderer_dll(candidate, required=False):
             return candidate
     return None
+
+
+@dataclass(frozen=True)
+class MumuPlayerInfo:
+    """One Android-ready player reported by MuMuManager."""
+
+    index: int
+    name: str | None = None
+    adb_serial: str | None = None
+    android_version: str | None = None
+
+
+def find_mumu_manager(mumu_path: Path | str | None = None) -> Path | None:
+    resolved = Path(mumu_path) if mumu_path else discover_mumu_path()
+    if resolved is None:
+        return None
+    for relative in (Path("nx_main/MuMuManager.exe"), Path("MuMuManager.exe")):
+        candidate = resolved / relative
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def parse_mumu_manager_info(value: object) -> tuple[MumuPlayerInfo, ...]:
+    """Parse MuMuManager ``info --vmindex all`` JSON and keep ready players."""
+
+    if not isinstance(value, dict):
+        return ()
+    found: dict[int, MumuPlayerInfo] = {}
+    for raw in value.values():
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("is_process_started") is not True or raw.get("is_android_started") is not True:
+            continue
+        index_value = raw.get("index")
+        if isinstance(index_value, bool) or not isinstance(index_value, (int, str)):
+            continue
+        try:
+            index = int(index_value)
+        except (TypeError, ValueError):
+            continue
+        if index < 0:
+            continue
+        name_value = raw.get("name")
+        name = name_value.strip() if isinstance(name_value, str) and name_value.strip() else None
+        version_value = raw.get("android_version")
+        android_version = version_value.strip() if isinstance(version_value, str) and version_value.strip() else None
+        host_value = raw.get("adb_host_ip")
+        host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else None
+        port_value = raw.get("adb_port")
+        adb_serial = None
+        if host is not None and isinstance(port_value, int) and not isinstance(port_value, bool) and 0 < port_value <= 65535:
+            adb_serial = f"{host}:{port_value}"
+        found[index] = MumuPlayerInfo(index, name, adb_serial, android_version)
+    return tuple(found[index] for index in sorted(found))
+
+
+def discover_running_mumu_players(
+    mumu_path: Path | str | None = None,
+    *,
+    timeout_seconds: float = 5.0,
+) -> tuple[MumuPlayerInfo, ...]:
+    """Return Android-ready MuMu players using the bundled manager CLI."""
+
+    manager = find_mumu_manager(mumu_path)
+    if manager is None:
+        return ()
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    try:
+        result = subprocess.run(
+            [str(manager), "info", "--vmindex", "all"],
+            capture_output=True,
+            check=False,
+            timeout=timeout_seconds,
+            creationflags=creation_flags,
+        )
+        if result.returncode != 0:
+            return ()
+        output = result.stdout.decode("utf-8-sig", errors="replace")
+        return parse_mumu_manager_info(json.loads(output))
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return ()
 
 
 def find_renderer_dll(mumu_path: Path, required: bool = True) -> Path | None:
@@ -373,7 +457,11 @@ __all__ = [
     "CaptureTiming",
     "MumuDevice",
     "MumuDeviceError",
+    "MumuPlayerInfo",
     "discover_mumu_path",
+    "discover_running_mumu_players",
+    "find_mumu_manager",
     "find_renderer_dll",
+    "parse_mumu_manager_info",
     "write_bgra_png",
 ]

@@ -178,3 +178,65 @@ ROI、阈值等控件都没有出现。Action manifest 与 Webview 收到的 cat
 - 已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.2.vsix`（763365 bytes）。
 - 已使用 VS Code CLI 强制覆盖安装，并确认已安装版本为
   `oooonmyoji.onmyoji-workflow-helper@0.2.2`。
+
+### 0.2.3 VS Code 多实例选择
+
+双 MuMu 场景下，工作流编辑器此前始终读取配置中的第一个实例，用户只能离开 VS Code
+手工执行带 `--instance` 的命令。现已在可视化编辑器工具栏增加运行实例下拉框：
+
+- 下拉选项直接读取运行配置的 `instances`，显示实例 ID 与后端类型。
+- “运行”和模板/ROI“截取”统一使用当前实例，避免在一个实例截图、另一个实例执行。
+- 当前选择写入 VS Code 工作区状态；重新打开面板以及从命令面板运行时继续使用该实例。
+- 配置删除或重命名实例后会自动回退到仍然有效的记忆实例或第一个实例；空配置保留
+  `mumu-0` 作为引擎兼容回退。
+- 运行实例属于工作台上下文，不写入工作流 JSON，同一工作流可以直接切换设备运行。
+
+测试新增配置实例解析、去重与选择优先级 3 项；DOM 冒烟新增工具栏双实例、选择持久化
+消息、运行实例和模板截取实例 4 项。TypeScript 编译、逻辑冒烟 38 项、DOM 冒烟 29 项、
+Python/TypeScript 引擎规则对拍均通过。
+
+Chromium 浏览器验收确认桌面工具栏显示 `mumu-0 (mumu)` 与 `mumu-1 (adb)`，切换后
+运行按钮上下文同步到 `mumu-1`，实例标题包含对应 ADB serial，控制台无错误。窄屏下
+沿用工具栏横向滚动，实例下拉框没有挤压、遮挡其他控件。
+
+已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.3.vsix`（765164 bytes），
+使用 VS Code CLI 强制覆盖安装，并确认已安装版本为
+`oooonmyoji.onmyoji-workflow-helper@0.2.3`；安装目录包含新的实例解析模块和 Webview 资源。
+
+### 双实例统一使用 MuMu 原生后端
+
+运行配置中的 `mumu-1` 原先使用纯 ADB 后端，因此实例选择器显示为
+`mumu-1 (adb)`，且不能使用仅支持 MuMu 原生捕获的模板/ROI 截取功能。现已将它改为
+`backend: "mumu"` 并配置 `mumu_index: 1`；`mumu-0` 继续使用 `mumu_index: 0`。
+两个实例分别保留 `127.0.0.1:16384` 和 `127.0.0.1:16416`，只在原生连接失败时作为
+ADB 回退通道。浏览器验收页的实例数据也同步为双原生后端，避免测试页面继续显示
+过期的 `(adb)` 标签。
+
+### 0.2.4 MuMu 原生实例自动发现
+
+为避免三开、四开时继续维护 `instances` 数组，运行时改用 MuMu 安装目录自带的
+`MuMuManager.exe info --vmindex all` 作为权威实例来源。只接纳进程和 Android 均已
+启动的实例，并读取官方返回的索引、实例名称、Android 版本与实际 ADB 端口；不再按
+端口规律猜测。
+
+实现内容：
+
+- 应用配置新增 `discover_mumu_instances` 开关，示例配置已启用。显式配置仍作为实例 ID、
+  包名和 ADB 回退端口的覆盖；未配置的新索引自动生成 `mumu-N` 原生实例。
+- CLI 新增 `list-instances`，输出扩展和脚本共用的机器可读实例列表。
+- 直接运行、长驻 Supervisor 和 ROI/模板截取都能接收动态发现的实例；长驻服务可在
+  启动后为新实例补建 worker。
+- VS Code 扩展每 4 秒刷新可见面板中的实例列表，显示 MuMu 实例名称，并保留工作区
+  记忆选择。新开的三号、四号实例无需重开编辑器或修改工作流 JSON。
+- 新增 MuMuManager JSON 解析、未就绪实例过滤、配置覆盖与新索引合并测试；扩展冒烟
+  增加禁用实例过滤、发现元数据和第三实例热刷新覆盖。
+
+本轮没有拉取或复制任何外部仓库文件；实例枚举依据本机 MuMu 安装包自带的官方
+`MuMuManager.exe`。第一轮验证为 Python `79 passed, 2 skipped`、TypeScript 逻辑冒烟
+39 项、DOM 冒烟 30 项以及 Python/TypeScript 引擎规则对拍全部通过。
+
+最终实机验收自动发现 `mumu-0/扫地工` 与 `mumu-1/吃鱼`，两者均通过原生
+`MumuDevice` 捕获 `1920 x 1080` 画面且健康检查为 `True`。已打包
+`vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.4.vsix`（765850 bytes），使用
+VS Code CLI 强制覆盖安装，并确认当前版本为
+`oooonmyoji.onmyoji-workflow-helper@0.2.4`；安装目录包含新的实例发现调用。

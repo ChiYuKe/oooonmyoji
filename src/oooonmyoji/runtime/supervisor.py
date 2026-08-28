@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ..config.loader import load_config
@@ -151,17 +151,34 @@ class Supervisor:
         for instance in self.config.instances:
             if not instance.enabled:
                 continue
-            command_queue = context.Queue(maxsize=1)
-            control_queue = context.Queue()
-            response_queue = context.Queue()
-            process = context.Process(
-                target=_instance_worker,
-                args=(str(self.config.config_path), instance, command_queue, control_queue, self.event_queue, response_queue),
-                name=f"oooonmyoji-instance-{instance.id}",
-            )
-            process.start()
-            self.workers[instance.id] = _Worker(instance, process, command_queue, response_queue, control_queue)
-            self.logger.emit("worker.started", instance_id=instance.id, pid=process.pid)
+            self._start_worker(context, instance)
+
+    def _start_worker(self, context: Any, instance: InstanceConfig) -> None:
+        command_queue = context.Queue(maxsize=1)
+        control_queue = context.Queue()
+        response_queue = context.Queue()
+        process = context.Process(
+            target=_instance_worker,
+            args=(str(self.config.config_path), instance, command_queue, control_queue, self.event_queue, response_queue),
+            name=f"oooonmyoji-instance-{instance.id}",
+        )
+        process.start()
+        self.workers[instance.id] = _Worker(instance, process, command_queue, response_queue, control_queue)
+        self.logger.emit("worker.started", instance_id=instance.id, pid=process.pid)
+
+    def ensure_instance(self, instance: InstanceConfig) -> None:
+        """Add a newly discovered instance to a running supervisor."""
+
+        if instance.id in self.workers:
+            return
+        if not instance.enabled:
+            raise RuntimeError(f"instance is disabled: {instance.id}")
+        if not any(current.id == instance.id for current in self.config.instances):
+            self.config = replace(self.config, instances=(*self.config.instances, instance))
+        if self.event_queue is None:
+            self.start()
+            return
+        self._start_worker(mp.get_context("spawn"), instance)
 
     def run(self, job_id: str, *, wait: bool = True, events_file: str | None = None) -> str:
         self.start()

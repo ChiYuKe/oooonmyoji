@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
+import { RuntimeInstanceInfo } from './runtimeInstances';
 import { collectRefSuggestions, parseWorkflow, validateWorkflow } from './workflow';
 
 interface WebviewPayload {
@@ -19,7 +20,14 @@ interface RoiCapture {
   height: number;
 }
 
-type RoiPicker = (referenceResolution: [number, number]) => Promise<RoiCapture | undefined>;
+interface RuntimeInstanceState {
+  instances: RuntimeInstanceInfo[];
+  selectedInstance: string;
+}
+
+type RoiPicker = (referenceResolution: [number, number], instanceId?: string) => Promise<RoiCapture | undefined>;
+type InstanceSelector = (instanceId: string) => Promise<string>;
+type RuntimeInstanceProvider = () => Promise<RuntimeInstanceState>;
 
 export class WebviewManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -31,12 +39,16 @@ export class WebviewManager implements vscode.Disposable {
   private runEventsPath: string | undefined;
   private runWatcherOffset = 0;
   private latestRunEvents: Record<string, unknown>[] = [];
+  private instanceRefreshTimer: NodeJS.Timeout | undefined;
+  private instanceRefreshPending = false;
 
   constructor(
     private context: vscode.ExtensionContext,
     private intelligence: WorkflowIntelligence,
     private getCatalog: () => ActionCatalog,
     private getProjectRoot: () => string,
+    private getRuntimeInstanceState: RuntimeInstanceProvider,
+    private selectRuntimeInstance: InstanceSelector,
     private pickRoi: RoiPicker,
   ) {}
 
@@ -68,12 +80,14 @@ export class WebviewManager implements vscode.Disposable {
       this.disposables.push(
         this.panel.webview.onDidReceiveMessage((message: WebviewPayload) => void this.onMessage(message)),
         this.panel.onDidDispose(() => {
+          this.stopInstanceRefresh();
           this.panel = undefined;
           this.docUri = undefined;
           this.disposePanelSubscriptions();
         }),
       );
     }
+    this.startInstanceRefresh();
     this.docUri = uri;
     this.dirty = false;
     await this.sendInit();
@@ -138,6 +152,7 @@ export class WebviewManager implements vscode.Disposable {
   <span class="spacer"></span>
   <button id="btn-workflow" title="工作流设置">设置</button>
   <button id="btn-blackboard" title="黑板参数">黑板</button>
+  <select id="instance-select" title="运行实例" aria-label="运行实例"></select>
   <button id="btn-run" class="primary" title="执行当前工作流">▶ 运行</button>
   <button id="btn-save" class="primary" title="保存到 JSON">保存</button>
   <button id="btn-more" class="icon-button" title="更多操作">⋯</button>
@@ -175,6 +190,7 @@ export class WebviewManager implements vscode.Disposable {
     const info = parseWorkflow(raw);
     const refs = collectRefSuggestions(info, catalog);
     const issues = validateWorkflow(raw, catalog).map((i) => ({ path: i.path, message: i.message, severity: i.severity, code: i.code }));
+    const runtime = await this.getRuntimeInstanceState();
     await this.panel.webview.postMessage({
       type: 'init',
       document: { uri: this.docUri.toString(), name: path.basename(this.docUri.fsPath), text },
@@ -182,7 +198,38 @@ export class WebviewManager implements vscode.Disposable {
       refs,
       issues,
       projectRoot: this.getProjectRoot(),
+      instances: runtime.instances,
+      selectedInstance: runtime.selectedInstance,
     });
+  }
+
+  private startInstanceRefresh(): void {
+    if (this.instanceRefreshTimer !== undefined) return;
+    this.instanceRefreshTimer = setInterval(() => void this.sendRuntimeInstances(), 4000);
+  }
+
+  private stopInstanceRefresh(): void {
+    if (this.instanceRefreshTimer !== undefined) {
+      clearInterval(this.instanceRefreshTimer);
+      this.instanceRefreshTimer = undefined;
+    }
+  }
+
+  private async sendRuntimeInstances(): Promise<void> {
+    if (!this.panel?.visible || this.instanceRefreshPending) return;
+    this.instanceRefreshPending = true;
+    try {
+      const runtime = await this.getRuntimeInstanceState();
+      if (this.panel) {
+        void this.panel.webview.postMessage({
+          type: 'runtimeInstances',
+          instances: runtime.instances,
+          selectedInstance: runtime.selectedInstance,
+        });
+      }
+    } finally {
+      this.instanceRefreshPending = false;
+    }
   }
 
   private async onMessage(message: WebviewPayload): Promise<void> {
@@ -230,9 +277,15 @@ export class WebviewManager implements vscode.Disposable {
        break;
       case 'runWorkflow': {
         if (!this.docUri) return;
+        const instanceId = await this.selectRuntimeInstance(String(message.instanceId ?? ''));
         // 事件文件路径与监听由 extension.runWorkflow 统一处理，
         // 这样命令面板 / 编辑器标题栏等入口也能触发缩略图更新。
-        await vscode.commands.executeCommand('onmyoji.runWorkflow', this.docUri);
+        await vscode.commands.executeCommand('onmyoji.runWorkflow', this.docUri, instanceId);
+        break;
+      }
+      case 'selectInstance': {
+        const instanceId = await this.selectRuntimeInstance(String(message.instanceId ?? ''));
+        void this.panel.webview.postMessage({ type: 'instanceSelected', instanceId });
         break;
       }
       case 'pickRoi': {
@@ -243,7 +296,8 @@ export class WebviewManager implements vscode.Disposable {
           ? [rawResolution[0] as number, rawResolution[1] as number]
           : [1920, 1080];
         try {
-          const capture = await this.pickRoi(referenceResolution);
+          const instanceId = await this.selectRuntimeInstance(String(message.instanceId ?? ''));
+          const capture = await this.pickRoi(referenceResolution, instanceId);
           if (capture && this.panel) {
             void this.panel.webview.postMessage({
               type: 'roiPickerImage',
@@ -395,6 +449,7 @@ export class WebviewManager implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.stopInstanceRefresh();
     this.stopRunWatcher();
     this.panel?.dispose();
     this.disposePanelSubscriptions();

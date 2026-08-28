@@ -39,7 +39,7 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 使用 CPU，并在 OCR 工作进程中共享一份模型。
 
 复制 `config/config.example.json` 为 `config/config.json`，然后填写 MuMu
-安装路径、实例编号、ADB 序列号和任务输入。应用配置使用
+安装路径和任务输入。应用配置使用
 `schema_version: 2`；v1 配置会明确提示迁移。启动前会校验 JSON 类型、实例
 和任务引用、所有工作流、Action 参数、资源路径及时区。
 
@@ -48,12 +48,18 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 实例必须填写 `adb_serial`，例如 `127.0.0.1:16384`。如果 MuMu 的 ADB
 `wm size` 返回竖屏尺寸，后端会以截图 PNG 的实际可见尺寸为准。
 
+`discover_mumu_instances: true` 会调用 MuMu 自带的 `MuMuManager.exe`，自动
+合并所有已完成 Android 启动的原生实例。`instances` 中的同索引条目作为包名、
+实例 ID 和回退端口的显式覆盖；后续三开、四开不需要继续增加配置。运行
+`run_cli.bat list-instances` 可查看当前解析结果。
+
 ## CLI
 
 也可以直接运行项目根目录下的 `run_cli.bat`，例如：
 
 ```powershell
 .\run_cli.bat validate
+.\run_cli.bat list-instances
 .\run_cli.bat list-workflows
 .\run_cli.bat run-workflow new_workflow1 --instance mumu-0
 ```
@@ -88,6 +94,7 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-workflows
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json show-workflow diagnostic
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-actions
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-instances
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json serve
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json status
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run diagnostic-mumu-0

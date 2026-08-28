@@ -15,6 +15,7 @@
   <button id="btn-add-sequence">＋ Sequence</button><button id="btn-add-parallel">＋ Parallel</button>
   <button id="btn-layout" class="icon-button" title="自动排列">⌘</button><button id="btn-fit" class="icon-button" title="适应视口">⌂</button>
   <span class="spacer"></span><button id="btn-workflow">设置</button><button id="btn-blackboard">黑板</button>
+  <select id="instance-select" title="运行实例" aria-label="运行实例"></select>
   <button id="btn-run" class="primary">▶ 运行</button><button id="btn-save" class="primary">保存</button><button id="btn-more" class="icon-button">⋯</button>
 </header>
 <div id="external-banner" class="hidden"></div>
@@ -54,7 +55,7 @@ const harnessWorkflow = {
 };
 window.acquireVsCodeApi = () => ({
   postMessage(message) {
-    if (message.type === 'ready') setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', document: { name: 'browser-acceptance.json', uri: 'harness://browser-acceptance', text: JSON.stringify(harnessWorkflow) }, catalog: harnessCatalog, refs: { blackboard: ['blackboard.template', 'blackboard.enabled', 'blackboard.target_x'], nodes: ['nodes.capture.output.width', 'nodes.capture.output.height'] }, issues: [] } })), 0);
+    if (message.type === 'ready') setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', document: { name: 'browser-acceptance.json', uri: 'harness://browser-acceptance', text: JSON.stringify(harnessWorkflow) }, catalog: harnessCatalog, refs: { blackboard: ['blackboard.template', 'blackboard.enabled', 'blackboard.target_x'], nodes: ['nodes.capture.output.width', 'nodes.capture.output.height'] }, issues: [], instances: [{ id: 'mumu-0', backend: 'mumu', displayName: '扫地工', adbSerial: '127.0.0.1:16384' }, { id: 'mumu-1', backend: 'mumu', displayName: '吃鱼', adbSerial: '127.0.0.1:16416' }], selectedInstance: 'mumu-0' } })), 0);
     if (message.type === 'save') document.title = 'Saved · Behavior Tree Editor Harness';
   },
   getState() { return {}; }, setState() {}

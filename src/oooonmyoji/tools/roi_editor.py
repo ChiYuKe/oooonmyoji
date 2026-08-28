@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover - only relevant to Python builds without
 from ..config import load_config
 from ..devices.mumu import MumuDevice, discover_mumu_path
 from ..exceptions import AutomationError, DeviceError, VisionError
+from ..runtime.instances import ensure_runtime_instance, expand_runtime_instances
 from ..vision.image import frame_to_bgr
 
 
@@ -970,7 +971,10 @@ def _capture_settings(args: argparse.Namespace) -> dict[str, Any] | None:
     instance_index = args.index if args.index is not None else 0
     package = args.package or DEFAULT_PACKAGE
     if args.config is not None:
-        config = load_config(args.config)
+        config = ensure_runtime_instance(
+            expand_runtime_instances(load_config(args.config)),
+            args.instance,
+        )
         instance = config.instance(args.instance)
         if instance.backend != "mumu":
             raise AutomationError(f"ROI editor requires a MuMu instance, got backend={instance.backend}")

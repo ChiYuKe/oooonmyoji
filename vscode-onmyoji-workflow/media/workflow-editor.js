@@ -15,6 +15,8 @@
     catalog: [],
     refs: { blackboard: [], nodes: [] },
     issues: [],
+    instances: [],
+    instanceId: '',
     selected: new Set(),
     selectedEdge: null,
     zoom: 1,
@@ -736,6 +738,26 @@
     return select;
   }
 
+  function renderInstancePicker() {
+    const picker = $('instance-select');
+    picker.innerHTML = '';
+    const instances = state.instances.length ? state.instances : [{ id: 'mumu-0' }];
+    for (const instance of instances) {
+      const suffix = instance.backend ? ` (${instance.backend})` : '';
+      const name = instance.displayName ? ` · ${instance.displayName}` : '';
+      const option = el('option', '', `${instance.id}${name}${suffix}`);
+      option.value = instance.id;
+      picker.appendChild(option);
+    }
+    if (!instances.some((instance) => instance.id === state.instanceId)) state.instanceId = instances[0].id;
+    picker.value = state.instanceId;
+    const selected = instances.find((instance) => instance.id === state.instanceId);
+    picker.title = selected
+      ? [selected.id, selected.displayName, selected.adbSerial].filter(Boolean).join(' · ')
+      : `运行实例：${state.instanceId}`;
+    $('btn-run').title = `在 ${state.instanceId} 执行当前工作流`;
+  }
+
   function checkbox(value, onChange) {
     const input = el('input'); input.type = 'checkbox'; input.checked = !!value;
     input.addEventListener('change', () => onChange(input.checked));
@@ -1056,7 +1078,7 @@
   function requestRoi(nodeId, key, mode) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     state.roi = { requestId, nodeId, key, mode };
-    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, referenceResolution: state.raw.resolution || [1920, 1080] });
+    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
   }
 
   function openRoiPicker(message) {
@@ -1123,7 +1145,12 @@
     $('btn-zoom-out').addEventListener('click', () => zoomAt(1 / 1.2));
     $('btn-workflow').addEventListener('click', () => { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; renderInspector(); });
     $('btn-blackboard').addEventListener('click', () => { state.inspector = 'blackboard'; state.selected.clear(); state.selectedEdge = null; renderInspector(); });
-    $('btn-run').addEventListener('click', () => vscode.postMessage({ type: 'runWorkflow' }));
+    $('instance-select').addEventListener('change', () => {
+      state.instanceId = $('instance-select').value;
+      renderInstancePicker();
+      vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
+    });
+    $('btn-run').addEventListener('click', () => vscode.postMessage({ type: 'runWorkflow', instanceId: state.instanceId }));
     $('btn-save').addEventListener('click', () => { vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' }); setDirty(false); });
     $('btn-more').addEventListener('click', (event) => showMenu(event.clientX || window.innerWidth - 180, event.clientY || 40, [
       { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
@@ -1177,14 +1204,22 @@
       try { raw = JSON.parse(message.document.text); } catch { raw = null; }
       state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
       state.refs = message.refs || { blackboard: [], nodes: [] }; state.issues = message.issues || [];
+      state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
+      state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
       state.selected.clear(); state.selectedEdge = null; state.undo = []; state.redo = []; state.run.clear(); state.inspector = 'node';
       $('file-label').textContent = message.document.name || ''; $('file-label').title = message.document.uri || '';
-      ensureLayout(); setDirty(false); render(); setTimeout(fitView, 0);
+      renderInstancePicker(); ensureLayout(); setDirty(false); render(); setTimeout(fitView, 0);
     } else if (message.type === 'runEvent') handleRunEvent(message.event);
+    else if (message.type === 'runtimeInstances') {
+      state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
+      state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : state.instanceId;
+      renderInstancePicker();
+    }
     else if (message.type === 'runReplay') { state.run.clear(); (message.events || []).forEach(handleRunEvent); }
     else if (message.type === 'roiPickerImage') openRoiPicker(message);
     else if (message.type === 'roiPickerCancelled' || message.type === 'roiPickerError') { const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden'); state.roi = null; if (message.message) toast(message.message, true); }
     else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) { const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; }); state.roi = null; toast('模板已保存'); }
+    else if (message.type === 'instanceSelected') { state.instanceId = String(message.instanceId || ''); renderInstancePicker(); }
     else if (message.type === 'externalChange') { const banner = $('external-banner'); banner.textContent = '文件已在外部修改'; banner.classList.remove('hidden'); }
   });
 

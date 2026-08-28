@@ -37,3 +37,22 @@ def test_template_matching_reads_unicode_paths(tmp_path) -> None:
 
     assert len(matches) == 1
     assert (matches[0].x, matches[0].y) == (40, 30)
+
+
+def test_scale_search_finds_target_after_window_resize() -> None:
+    # 模拟器窗口缩放 10% 后，原模板按原尺度匹配失败，scale_search 能在 0.9 档命中
+    image = np.zeros((270, 480, 3), dtype=np.uint8)
+    pattern = np.full((30, 40, 3), 200, dtype=np.uint8)
+    cv2.rectangle(pattern, (3, 3), (37, 27), (0, 0, 0), 3)
+    original = np.zeros((300, 400, 3), dtype=np.uint8)
+    original[100:130, 150:190] = pattern
+    resized = cv2.resize(original, (360, 270), interpolation=cv2.INTER_AREA)
+    image[:270, :360] = resized
+
+    matcher = TemplateMatcher()
+    single = matcher.find(DeviceFrame(480, 270, image), pattern, threshold=0.8)
+    multi = matcher.find(DeviceFrame(480, 270, image), pattern, threshold=0.8, scale_search=True)
+
+    assert len(single) == 0  # 内容被缩放，原尺度匹配失败
+    assert len(multi) >= 1
+    assert multi[0].confidence >= 0.8

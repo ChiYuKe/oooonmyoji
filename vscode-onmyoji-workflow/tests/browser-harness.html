@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Behavior Tree Editor Harness</title>
+  <link rel="stylesheet" href="../media/workflow-editor.css">
+</head>
+<body>
+<header id="topbar">
+  <span id="brand">Behavior Tree</span><span id="file-label"></span>
+  <span id="dirty-badge" class="badge hidden">未保存</span><span id="issue-badge" class="badge"></span>
+  <span class="toolbar-separator"></span>
+  <button id="btn-add-task" class="primary">＋ Task</button><button id="btn-add-selector">＋ Selector</button>
+  <button id="btn-add-sequence">＋ Sequence</button><button id="btn-add-parallel">＋ Parallel</button>
+  <button id="btn-layout" class="icon-button" title="自动排列">⌘</button><button id="btn-fit" class="icon-button" title="适应视口">⌂</button>
+  <span class="spacer"></span><button id="btn-workflow">设置</button><button id="btn-blackboard">黑板</button>
+  <button id="btn-run" class="primary">▶ 运行</button><button id="btn-save" class="primary">保存</button><button id="btn-more" class="icon-button">⋯</button>
+</header>
+<div id="external-banner" class="hidden"></div>
+<main>
+  <section id="canvas-wrap">
+    <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="viewport-tools"><button id="btn-zoom-out" class="icon-button">−</button><span id="zoom-label">100%</span><button id="btn-zoom-in" class="icon-button">＋</button></div>
+    <svg id="minimap" xmlns="http://www.w3.org/2000/svg"></svg>
+  </section>
+  <aside id="inspector"><div id="inspector-title">详细信息</div><div id="inspector-empty">选择一个节点</div><div id="inspector-body" class="hidden"></div></aside>
+</main>
+<div id="toast" class="hidden"></div>
+<script>
+const harnessCatalog = [
+  { name: 'core.capture', version: '1.0.0', description: '截取当前设备画面', parameters: {}, inputSchema: { type: 'object', properties: {}, additionalProperties: false }, outputSchema: { type: 'object', properties: { width: { type: 'integer' }, height: { type: 'integer' } } }, outputFields: ['width', 'height'], retrySafe: true },
+  { name: 'core.sleep', version: '1.0.0', description: '等待指定时间', parameters: { seconds: { type: 'number', required: true, default: 1, min: 0 } }, inputSchema: { type: 'object', properties: { seconds: { type: 'number' } }, required: ['seconds'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: true },
+  { name: 'core.log', version: '1.0.0', description: '写入运行日志', parameters: { message: { type: 'string', required: true } }, inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: true },
+  { name: 'vision.match_template', version: '1.0.0', description: '在当前画面中匹配模板', parameters: { template: { type: 'asset', required: true }, roi: { type: 'rect' }, threshold: { type: 'number', default: 0.85, min: 0, max: 1 }, scale_search: { type: 'boolean', default: false } }, inputSchema: { type: 'object', properties: { template: { type: 'string' }, roi: { type: 'array' }, threshold: { type: 'number' }, scale_search: { type: 'boolean' } }, required: ['template'], additionalProperties: false }, outputSchema: { type: 'array' }, outputFields: [], retrySafe: true },
+  { name: 'input.tap', version: '1.0.0', description: '点击参考坐标', parameters: { x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, hold_ms: { type: 'integer', default: 0, min: 0 } }, inputSchema: { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' }, hold_ms: { type: 'integer' } }, required: ['x', 'y'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: false },
+];
+const harnessWorkflow = {
+  schema_version: 3, id: 'browser_acceptance', version: '3.0.0', resolution: [1920, 1080], root: 'root',
+  limits: { timeout_seconds: 300, max_steps: 1000 },
+  blackboard: { template: { type: 'asset', required: true, default: 'assets/templates/start/yys_tubiao.png' }, enabled: { type: 'boolean', default: true }, target_x: { type: 'integer', default: 960 } },
+  nodes: [
+    { id: 'root', type: 'root', name: 'Automation Root', children: ['main'] },
+    { id: 'main', type: 'sequence', name: 'Main Sequence', children: ['capture', 'decision', 'parallel'] },
+    { id: 'capture', type: 'task', name: 'Capture Screen', action: 'core.capture', params: {} },
+    { id: 'decision', type: 'selector', name: 'Find Or Fallback', children: ['find', 'fallback'] },
+    { id: 'find', type: 'task', name: 'Find Target', action: 'vision.match_template', params: { template: { ref: 'blackboard.template' }, threshold: 0.85, scale_search: false }, decorators: [{ type: 'condition', expression: { eq: [{ ref: 'blackboard.enabled' }, true] } }, { type: 'cooldown', seconds: 2 }] },
+    { id: 'fallback', type: 'task', name: 'Fallback Log', action: 'core.log', params: { message: 'target not found' } },
+    { id: 'parallel', type: 'simple_parallel', name: 'Monitor While Waiting', finish_mode: 'abort_background', children: ['wait_main', 'background'] },
+    { id: 'wait_main', type: 'task', name: 'Main Wait', action: 'core.sleep', params: { seconds: 3 }, decorators: [{ type: 'timeout', seconds: 5 }] },
+    { id: 'background', type: 'sequence', name: 'Background Branch', children: ['heartbeat'] },
+    { id: 'heartbeat', type: 'task', name: 'Heartbeat', action: 'core.log', params: { message: 'monitoring' }, decorators: [{ type: 'repeat', count: 2 }] }
+  ]
+};
+window.acquireVsCodeApi = () => ({
+  postMessage(message) {
+    if (message.type === 'ready') setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', document: { name: 'browser-acceptance.json', uri: 'harness://browser-acceptance', text: JSON.stringify(harnessWorkflow) }, catalog: harnessCatalog, refs: { blackboard: ['blackboard.template', 'blackboard.enabled', 'blackboard.target_x'], nodes: ['nodes.capture.output.width', 'nodes.capture.output.height'] }, issues: [] } })), 0);
+    if (message.type === 'save') document.title = 'Saved · Behavior Tree Editor Harness';
+  },
+  getState() { return {}; }, setState() {}
+});
+</script>
+<script src="../media/workflow-editor.js"></script>
+</body>
+</html>

@@ -15,12 +15,15 @@ def _write_config(path: Path, *, serial: str = "not-connected") -> Path:
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
     (path / "workflows" / "simple.json").write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 3,
         "id": "simple",
-        "version": "1.0.0",
-        "reference_resolution": [1920, 1080],
-        "entry": "capture",
-        "steps": [{"id": "capture", "action": "core.capture"}],
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["capture"]},
+            {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
+        ],
     }), encoding="utf-8")
     config_path = path / "config" / "config.json"
     config_path.write_text(json.dumps({
@@ -64,12 +67,15 @@ def test_supervisor_runs_two_real_adb_instances(tmp_path: Path) -> None:
     (tmp_path / "workflows").mkdir()
     (tmp_path / "plugins" / "actions").mkdir(parents=True)
     (tmp_path / "workflows" / "simple.json").write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 3,
         "id": "simple",
-        "version": "1.0.0",
-        "reference_resolution": [1920, 1080],
-        "entry": "capture",
-        "steps": [{"id": "capture", "action": "core.capture"}],
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["capture"]},
+            {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
+        ],
     }), encoding="utf-8")
     config_path = tmp_path / "config" / "config.json"
     config_path.write_text(json.dumps({

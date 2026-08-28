@@ -196,7 +196,7 @@ class TaskRunner:
                     max_delay_seconds=self.config.retry.max_delay_seconds,
                 )
                 self.logger.emit("run.device_connected", run_id=run_id, instance_id=instance.id, backend="adb" if used_adb else "mumu")
-                mapper = CoordinateMapper(workflow.reference_resolution[0], workflow.reference_resolution[1], device.width, device.height)
+                mapper = CoordinateMapper(workflow.resolution[0], workflow.resolution[1], device.width, device.height)
                 # 脚本嵌套调用：workflow.run 动作经由 context.run_subworkflow 到这里执行子工作流
                 # 栈初始包含当前工作流自身，任何形式的自调用/跨层递归都会立即被拦截
                 subworkflow_stack: list[str] = [workflow.workflow_id]
@@ -246,11 +246,18 @@ class TaskRunner:
                 def on_step(event: dict[str, Any]) -> None:
                     record.current_step = str(event.get("step_id")) if event.get("step_id") is not None else None
                     record.step_history.append(dict(event))
-                    if self.config.save_screenshots and context is not None and context.last_frame is not None:
-                        try:
-                            record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
-                        except Exception as artifact_error:
-                            record.details["last_frame_error"] = str(artifact_error)
+                    if context is not None and context.last_frame is not None:
+                        # 失败现场转储：失败步骤无条件保留现场帧（不依赖 save_screenshots 开关）
+                        if event.get("status") == "failed":
+                            try:
+                                event["failure_frame"] = str(context.save_frame(context.last_frame, f"failure-{_safe_artifact_name(record.current_step or 'step')}.png"))
+                            except Exception as artifact_error:
+                                event["failure_frame_error"] = str(artifact_error)
+                        if self.config.save_screenshots:
+                            try:
+                                record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
+                            except Exception as artifact_error:
+                                record.details["last_frame_error"] = str(artifact_error)
                     if writer is not None:
                         writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
                     record_store.write(record.to_dict())

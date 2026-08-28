@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "name": "vision.wait_template",
+  "version": "1.0.0",
+  "entry": "builtin:WaitTemplateAction",
+  "description": "等待模板出现（或消失，present=false），超时前满足则成功。输出匹配数组。",
+  "parameters": {
+    "template": {
+      "type": "asset",
+      "required": true,
+      "editor": "asset",
+      "description": "模板图路径"
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "required": true,
+      "min": 0,
+      "description": "等待超时秒数，超时则失败"
+    },
+    "present": {
+      "type": "boolean",
+      "default": true,
+      "description": "true 等待出现；false 等待消失。默认 true"
+    },
+    "roi": {
+      "type": "rect",
+      "description": "裁剪区域 [x, y, w, h]"
+    },
+    "threshold": {
+      "type": "number",
+      "default": 0.85,
+      "min": 0,
+      "max": 1,
+      "description": "匹配置信度阈值，默认 0.85"
+    },
+    "scale_search": {
+      "type": "boolean",
+      "default": false,
+      "description": "是否启用多尺度搜索"
+    }
+  },
+  "outputs": { "type": "array" },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

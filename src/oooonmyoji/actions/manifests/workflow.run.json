@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "name": "workflow.run",
+  "version": "1.0.0",
+  "entry": "builtin:RunWorkflowAction",
+  "description": "运行另一个工作流（脚本嵌套调用）。子脚本完成后返回“回执”输出 { workflow, status, output }：status 为 succeeded/failed/cancelled，供分支与后续节点绑定判断。递归调用会被拦截。",
+  "parameters": {
+    "workflow": {
+      "type": "string",
+      "required": true,
+      "min_length": 1,
+      "description": "子工作流 ID、JSON 文件名或 workflows/ 下的路径"
+    },
+    "inputs": {
+      "type": "object",
+      "description": "传给子工作流的输入（按子工作流 inputs 定义校验），可含绑定引用"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "workflow": { "type": "string" },
+      "status": { "type": "string" },
+      "output": { "type": "object" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

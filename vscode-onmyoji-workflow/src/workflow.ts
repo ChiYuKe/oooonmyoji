@@ -1,580 +1,478 @@
-/**
- * 工作流解析、语义校验与动态 JSON Schema 构建。纯逻辑模块（不依赖 vscode API）。
- */
-import { ActionCatalog } from './catalog';
+/** Behavior Tree v3 parsing, semantic validation, schema, and references. */
+import Ajv2020 from 'ajv/dist/2020';
+import {
+  ActionCatalog,
+  ParameterInfo,
+  applyParameterDefaults,
+  parameterToSchema,
+  parseParameterDefinition,
+} from './catalog';
 
-export const TERMINALS = ['$success', '$failure', '$cancelled'] as const;
+export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'task'] as const;
+export const DECORATOR_TYPES = ['condition', 'cooldown', 'timeout', 'retry', 'repeat'] as const;
+export const PARALLEL_FINISH_MODES = ['abort_background', 'wait_for_background'] as const;
 export const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'] as const;
 
+export type NodeType = typeof NODE_TYPES[number];
 export type Severity = 'error' | 'warning' | 'info';
 
 export interface ValidationIssue {
-  /** JSONPath（键/下标序列），用于在 AST 中定位节点。 */
   path: (string | number)[];
   message: string;
   severity: Severity;
   code?: string;
 }
 
-export interface StepInfo {
+export interface DecoratorInfo {
+  type: string;
+  expression?: unknown;
+  seconds?: number;
+  attempts?: number;
+  delaySeconds?: number;
+  count?: number;
+  raw: Record<string, unknown>;
+}
+
+export interface NodeInfo {
   id: string;
-  action: string;
+  type: NodeType;
   index: number;
-  hasWhen: boolean;
-  onSuccess?: string;
-  onFailure?: string;
-  onSkip?: string;
-  retry?: unknown;
-  timeoutSeconds?: number;
+  name?: string;
+  action?: string;
+  params: Record<string, unknown>;
+  children: string[];
+  decorators: DecoratorInfo[];
+  finishMode: 'abort_background' | 'wait_for_background';
 }
 
 export interface WorkflowInfo {
   raw: Record<string, unknown> | null;
   id?: string;
   version?: string;
-  entry?: string;
-  referenceResolution?: number[];
+  root?: string;
+  resolution?: number[];
   limits?: Record<string, unknown>;
-  inputsSchema: Record<string, unknown> | null;
-  inputsProps: string[];
-  steps: StepInfo[];
-  stepIds: string[];
-  rawSteps: unknown[];
+  blackboard: Record<string, ParameterInfo>;
+  blackboardProps: string[];
+  nodes: NodeInfo[];
+  nodeIds: string[];
+  rawNodes: unknown[];
+}
+
+const workflowAjv = new Ajv2020({ allErrors: true, strict: false });
+const BINDING_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  required: ['ref'],
+  properties: { ref: { type: 'string', minLength: 1 } },
+  additionalProperties: false,
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parsedDecorator(raw: unknown): DecoratorInfo | undefined {
+  if (!isObject(raw)) return undefined;
+  const out: DecoratorInfo = { type: typeof raw.type === 'string' ? raw.type : '', raw };
+  if (raw.expression !== undefined) out.expression = raw.expression;
+  if (typeof raw.seconds === 'number') out.seconds = raw.seconds;
+  if (typeof raw.attempts === 'number') out.attempts = raw.attempts;
+  if (typeof raw.delay_seconds === 'number') out.delaySeconds = raw.delay_seconds;
+  if (typeof raw.count === 'number') out.count = raw.count;
+  return out;
 }
 
 export function parseWorkflow(raw: unknown): WorkflowInfo {
-  const info: WorkflowInfo = { raw: null, inputsSchema: null, inputsProps: [], steps: [], stepIds: [], rawSteps: [] };
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    return info;
-  }
-  const wf = raw as Record<string, unknown>;
-  info.raw = wf;
-  if (typeof wf.id === 'string') info.id = wf.id;
-  if (typeof wf.version === 'string') info.version = wf.version;
-  if (typeof wf.entry === 'string') info.entry = wf.entry;
-  if (Array.isArray(wf.reference_resolution)) info.referenceResolution = wf.reference_resolution as number[];
-  if (wf.limits && typeof wf.limits === 'object' && !Array.isArray(wf.limits)) {
-    info.limits = wf.limits as Record<string, unknown>;
-  }
-  if (wf.inputs_schema && typeof wf.inputs_schema === 'object' && !Array.isArray(wf.inputs_schema)) {
-    info.inputsSchema = wf.inputs_schema as Record<string, unknown>;
-    const props = info.inputsSchema.properties as Record<string, unknown> | undefined;
-    if (props) info.inputsProps = Object.keys(props);
-  }
-  if (!Array.isArray(wf.steps)) {
-    return info;
-  }
-  info.rawSteps = wf.steps;
-  info.steps = (wf.steps as unknown[]).map((item, index) => {
-    const step: StepInfo = { id: '', action: '', index, hasWhen: false };
-    if (item && typeof item === 'object' && !Array.isArray(item)) {
-      const o = item as Record<string, unknown>;
-      if (typeof o.id === 'string') step.id = o.id;
-      if (typeof o.action === 'string') step.action = o.action;
-      step.hasWhen = o.when !== undefined;
-      if (typeof o.on_success === 'string') step.onSuccess = o.on_success;
-      if (typeof o.on_failure === 'string') step.onFailure = o.on_failure;
-      if (typeof o.on_skip === 'string') step.onSkip = o.on_skip;
-      step.retry = o.retry;
-      if (typeof o.timeout_seconds === 'number') step.timeoutSeconds = o.timeout_seconds;
+  const info: WorkflowInfo = {
+    raw: null,
+    blackboard: {},
+    blackboardProps: [],
+    nodes: [],
+    nodeIds: [],
+    rawNodes: [],
+  };
+  if (!isObject(raw)) return info;
+  info.raw = raw;
+  if (typeof raw.id === 'string') info.id = raw.id;
+  if (typeof raw.version === 'string') info.version = raw.version;
+  if (typeof raw.root === 'string') info.root = raw.root;
+  if (Array.isArray(raw.resolution)) info.resolution = raw.resolution as number[];
+  if (isObject(raw.limits)) info.limits = raw.limits;
+  if (isObject(raw.blackboard)) {
+    for (const [key, value] of Object.entries(raw.blackboard)) {
+      try {
+        info.blackboard[key] = parseParameterDefinition(value, `blackboard.${key}`);
+      } catch {
+        info.blackboard[key] = { type: isObject(value) ? String(value.type ?? '') : '' };
+      }
     }
-    return step;
-  });
-  info.stepIds = info.steps.filter((s) => s.id).map((s) => s.id);
+    info.blackboardProps = Object.keys(info.blackboard);
+  }
+  if (Array.isArray(raw.nodes)) {
+    info.rawNodes = raw.nodes;
+    info.nodes = raw.nodes.map((item, index): NodeInfo => {
+      const object = isObject(item) ? item : {};
+      const type = (NODE_TYPES as readonly string[]).includes(String(object.type)) ? object.type as NodeType : 'task';
+      return {
+        id: typeof object.id === 'string' ? object.id : '',
+        type,
+        index,
+        name: typeof object.name === 'string' ? object.name : undefined,
+        action: typeof object.action === 'string' ? object.action : undefined,
+        params: isObject(object.params) ? object.params : {},
+        children: Array.isArray(object.children) ? object.children.filter((child): child is string => typeof child === 'string') : [],
+        decorators: Array.isArray(object.decorators) ? object.decorators.flatMap((decorator) => parsedDecorator(decorator) ?? []) : [],
+        finishMode: object.finish_mode === 'wait_for_background' ? 'wait_for_background' : 'abort_background',
+      };
+    });
+  }
+  info.nodeIds = info.nodes.filter((node) => node.id).map((node) => node.id);
   return info;
 }
 
-function isScalar(value: unknown): boolean {
-  return value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+interface RefContext {
+  info: WorkflowInfo;
+  catalog: ActionCatalog;
+  nodeIds: Set<string>;
 }
 
-function validateRefValue(value: string, path: (string | number)[], issues: ValidationIssue[], stepIds: Set<string>): void {
-  const parts = value.split('.');
-  const all = (arr: string[]) => arr.length > 0 && arr.every((p) => p.length > 0);
-  if (parts.length >= 2 && parts[0] === 'inputs' && all(parts.slice(1))) {
-    return;
+function schemaAtPath(schema: Record<string, unknown>, segments: string[]): Record<string, unknown> | undefined {
+  let current = schema;
+  for (const segment of segments) {
+    if (Object.keys(current).length === 0) return {};
+    if (current.type === 'object') {
+      const properties = isObject(current.properties) ? current.properties : {};
+      if (isObject(properties[segment])) {
+        current = properties[segment] as Record<string, unknown>;
+        continue;
+      }
+      if (current.additionalProperties === false) return undefined;
+      current = isObject(current.additionalProperties) ? current.additionalProperties : {};
+      continue;
+    }
+    if (current.type === 'array') {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0) return undefined;
+      const prefixItems = Array.isArray(current.prefixItems) ? current.prefixItems : [];
+      if (isObject(prefixItems[index])) {
+        current = prefixItems[index] as Record<string, unknown>;
+        continue;
+      }
+      if (current.items === false) return undefined;
+      current = isObject(current.items) ? current.items : {};
+      continue;
+    }
+    return undefined;
   }
-  if (parts.length >= 4 && parts[0] === 'steps' && parts[2] === 'output' && stepIds.has(parts[1]) && all(parts.slice(3))) {
-    return;
-  }
-  issues.push({
-    path,
-    message: `无效的结构化引用 "${value}"。合法形式：inputs.<字段> 或 steps.<步骤id>.output.<字段>`,
-    severity: 'error',
-    code: 'ref.invalid',
-  });
+  return current;
 }
 
-function validateRefObject(node: unknown, path: (string | number)[], issues: ValidationIssue[], stepIds: Set<string>): void {
-  if (node === null || typeof node !== 'object' || Array.isArray(node)) {
-    issues.push({ path, message: '必须是一个仅含 $ref 的对象', severity: 'error', code: 'ref.shape' });
-    return;
-  }
-  const obj = node as Record<string, unknown>;
-  if (Object.keys(obj).length !== 1 || typeof obj.$ref !== 'string') {
-    issues.push({ path, message: '$ref 对象必须只包含一个字符串 $ref', severity: 'error', code: 'ref.shape' });
-    return;
-  }
-  validateRefValue(obj.$ref, [...path, '$ref'], issues, stepIds);
+function schemaTypes(schema: Record<string, unknown> | undefined): Set<string> {
+  if (!schema) return new Set();
+  if (typeof schema.type === 'string') return new Set([schema.type]);
+  if (Array.isArray(schema.type)) return new Set(schema.type.filter((item): item is string => typeof item === 'string'));
+  return new Set();
 }
 
-function validateScalarOrRef(node: unknown, path: (string | number)[], issues: ValidationIssue[], stepIds: Set<string>): void {
-  if (isScalar(node)) return;
-  if (node && typeof node === 'object' && !Array.isArray(node) && '$ref' in (node as Record<string, unknown>)) {
-    validateRefObject(node, path, issues, stepIds);
-    return;
-  }
-  // 引擎允许嵌套结构作为操作数（运行时递归解析其中的 $ref），因此递归校验引用即可
-  validateRefsInTree(node, path, issues, stepIds);
+function bindingTypesCompatible(expected: Record<string, unknown> | undefined, actual: Record<string, unknown>): boolean {
+  const expectedTypes = schemaTypes(expected);
+  const actualTypes = schemaTypes(actual);
+  if (expectedTypes.size === 0 || actualTypes.size === 0) return true;
+  if (expectedTypes.has('number') && actualTypes.has('integer')) actualTypes.add('number');
+  return [...expectedTypes].some((type) => actualTypes.has(type));
 }
 
-function validateCondition(node: unknown, path: (string | number)[], issues: ValidationIssue[], stepIds: Set<string>): void {
-  if (typeof node === 'boolean') return;
-  if (node === null || typeof node !== 'object' || Array.isArray(node)) {
-    issues.push({ path, message: 'when 必须是布尔值或条件对象', severity: 'error', code: 'when.shape' });
+function resolveRefSchema(ref: string, context: RefContext, path: (string | number)[], issues: ValidationIssue[]): Record<string, unknown> | undefined {
+  const parts = ref.split('.');
+  if (parts.length >= 2 && parts[0] === 'blackboard' && parts.slice(1).every(Boolean)) {
+    const parameter = context.info.blackboard[parts[1]];
+    const resolved = parameter ? schemaAtPath(parameterToSchema(parameter), parts.slice(2)) : undefined;
+    if (resolved) return resolved;
+    issues.push({ path, message: `绑定引用了未声明的黑板键：${ref}`, severity: 'error', code: 'unknown-ref' });
+    return undefined;
+  }
+  if (parts.length >= 4 && parts[0] === 'nodes' && parts[2] === 'output' && context.nodeIds.has(parts[1]) && parts.slice(3).every(Boolean)) {
+    const source = context.info.nodes.find((node) => node.id === parts[1]);
+    const spec = source?.action ? context.catalog.byName(source.action) : undefined;
+    const resolved = spec ? schemaAtPath(spec.outputSchema, parts.slice(3)) : undefined;
+    if (resolved) return resolved;
+    issues.push({ path, message: `绑定引用了不存在的 Action 输出：${ref}`, severity: 'error', code: 'unknown-ref' });
+    return undefined;
+  }
+  issues.push({ path, message: `无效的绑定引用：${ref}`, severity: 'error', code: 'invalid-ref' });
+  return undefined;
+}
+
+function schemaChild(schema: Record<string, unknown> | undefined, key: string | number): Record<string, unknown> | undefined {
+  if (!schema) return undefined;
+  if (typeof key === 'string' && schema.type === 'object' && isObject(schema.properties)) {
+    return isObject(schema.properties[key]) ? schema.properties[key] as Record<string, unknown> : undefined;
+  }
+  if (typeof key === 'number' && schema.type === 'array') {
+    const prefixItems = Array.isArray(schema.prefixItems) ? schema.prefixItems : [];
+    if (isObject(prefixItems[key])) return prefixItems[key] as Record<string, unknown>;
+    return isObject(schema.items) ? schema.items : undefined;
+  }
+  return undefined;
+}
+
+function validateBindings(
+  value: unknown,
+  context: RefContext,
+  path: (string | number)[],
+  issues: ValidationIssue[],
+  condition = false,
+  expectedSchema?: Record<string, unknown>,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => validateBindings(child, context, [...path, index], issues, condition, schemaChild(expectedSchema, index)));
     return;
   }
-  const obj = node as Record<string, unknown>;
-  const keys = Object.keys(obj);
-  if (keys.length === 1 && keys[0] === '$ref') {
-    issues.push({
-      path,
-      message: 'when 不能直接写成一个 $ref（引擎静态校验会放过，但运行时会报 unsupported operator: $ref）；请改用 exists/eq 等条件',
-      severity: 'error',
-      code: 'when.ref',
-    });
+  if (!isObject(value)) {
+    if (condition && typeof value !== 'boolean') issues.push({ path, message: '条件必须是布尔值或条件对象', severity: 'error', code: 'invalid-condition' });
     return;
   }
-  if (keys.length !== 1 || !(CONDITION_OPERATORS as readonly string[]).includes(keys[0])) {
-    issues.push({
-      path,
-      message: `when 必须只包含一个支持的条件运算符：${CONDITION_OPERATORS.join(', ')}`,
-      severity: 'error',
-      code: 'when.operator',
-    });
-    return;
-  }
-  const op = keys[0];
-  const operands = obj[op];
-  if (op === 'and' || op === 'or') {
-    if (!Array.isArray(operands) || operands.length === 0) {
-      issues.push({ path: [...path, op], message: `${op} 必须是非空数组`, severity: 'error', code: 'when.operands' });
+  if ('ref' in value) {
+    if (Object.keys(value).length !== 1 || typeof value.ref !== 'string') {
+      issues.push({ path, message: '绑定对象必须只含字符串 ref', severity: 'error', code: 'invalid-binding' });
       return;
     }
-    operands.forEach((child, index) => validateCondition(child, [...path, op, index], issues, stepIds));
-  } else if (op === 'not') {
-    validateCondition(operands, [...path, 'not'], issues, stepIds);
-  } else if (op === 'exists') {
-    validateRefObject(operands, [...path, 'exists'], issues, stepIds);
-  } else {
-    if (!Array.isArray(operands) || operands.length !== 2) {
-      issues.push({ path: [...path, op], message: `${op} 必须包含两个操作数`, severity: 'error', code: 'when.operands' });
+    const actual = resolveRefSchema(value.ref, context, [...path, 'ref'], issues);
+    if (actual && !bindingTypesCompatible(expectedSchema, actual)) {
+      issues.push({ path, message: `绑定类型与 Action 参数不兼容：${value.ref}`, severity: 'error', code: 'binding-type' });
+    }
+    return;
+  }
+  if (condition) {
+    const keys = Object.keys(value);
+    if (keys.length !== 1 || !(CONDITION_OPERATORS as readonly string[]).includes(keys[0])) {
+      issues.push({ path, message: '条件必须恰好使用一个受支持的操作符', severity: 'error', code: 'invalid-condition' });
       return;
     }
-    operands.forEach((child, index) => validateScalarOrRef(child, [...path, op, index], issues, stepIds));
+    const op = keys[0];
+    const operand = value[op];
+    if (op === 'and' || op === 'or') {
+      if (!Array.isArray(operand) || operand.length === 0) {
+        issues.push({ path: [...path, op], message: `${op} 必须是非空数组`, severity: 'error', code: 'invalid-condition' });
+      } else operand.forEach((child, index) => validateBindings(child, context, [...path, op, index], issues, true));
+    } else if (op === 'not') {
+      validateBindings(operand, context, [...path, op], issues, true);
+    } else if (op === 'exists') {
+      if (!isObject(operand) || Object.keys(operand).length !== 1 || typeof operand.ref !== 'string') {
+        issues.push({ path: [...path, op], message: 'exists 需要绑定引用', severity: 'error', code: 'invalid-condition' });
+      } else resolveRefSchema(operand.ref, context, [...path, op, 'ref'], issues);
+    } else if (!Array.isArray(operand) || operand.length !== 2) {
+      issues.push({ path: [...path, op], message: `${op} 需要两个操作数`, severity: 'error', code: 'invalid-condition' });
+    } else operand.forEach((child, index) => validateBindings(child, context, [...path, op, index], issues));
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    validateBindings(child, context, [...path, key], issues, false, schemaChild(expectedSchema, key));
   }
 }
 
-/** 递归遍历任意 JSON 子树，校验其中所有 $ref。 */
-export function validateRefsInTree(node: unknown, path: (string | number)[], issues: ValidationIssue[], stepIds: Set<string>): void {
-  if (node === null || typeof node !== 'object') return;
-  if (Array.isArray(node)) {
-    node.forEach((child, index) => validateRefsInTree(child, [...path, index], issues, stepIds));
-    return;
-  }
-  const obj = node as Record<string, unknown>;
-  if ('$ref' in obj) {
-    validateRefObject(obj, path, issues, stepIds);
-    return;
-  }
-  for (const [key, value] of Object.entries(obj)) {
-    validateRefsInTree(value, [...path, key], issues, stepIds);
-  }
+function allowBinding(schema: Record<string, unknown>): Record<string, unknown> {
+  const literal = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
+  if (isObject(literal.properties)) literal.properties = Object.fromEntries(Object.entries(literal.properties).map(([key, child]) => [key, isObject(child) ? allowBinding(child) : child]));
+  if (isObject(literal.items)) literal.items = allowBinding(literal.items);
+  if (Array.isArray(literal.prefixItems)) literal.prefixItems = literal.prefixItems.map((child) => isObject(child) ? allowBinding(child) : child);
+  return { anyOf: [literal, BINDING_SCHEMA] };
 }
 
-function outgoingTargets(steps: StepInfo[], index: number): string[] {
-  const step = steps[index];
-  const next = index + 1 < steps.length ? steps[index + 1].id : '$success';
-  return [
-    step.onSuccess ?? next,
-    step.onFailure ?? '$failure',
-    step.onSkip ?? next,
-  ];
+function bindingAwareParameterSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const result = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
+  if (isObject(result.properties)) result.properties = Object.fromEntries(Object.entries(result.properties).map(([key, child]) => [key, isObject(child) ? allowBinding(child) : child]));
+  return result;
+}
+
+function issue(path: (string | number)[], message: string, code: string): ValidationIssue {
+  return { path, message, severity: 'error', code };
+}
+
+function validateDecorator(item: Record<string, unknown>, path: (string | number)[], context: RefContext, issues: ValidationIssue[]): void {
+  const type = item.type;
+  if (typeof type !== 'string' || !(DECORATOR_TYPES as readonly string[]).includes(type)) {
+    issues.push(issue([...path, 'type'], `未知装饰器类型：${String(type)}`, 'invalid-decorator'));
+    return;
+  }
+  const allowed: Record<string, string[]> = {
+    condition: ['type', 'expression'], cooldown: ['type', 'seconds'], timeout: ['type', 'seconds'],
+    retry: ['type', 'attempts', 'delay_seconds'], repeat: ['type', 'count'],
+  };
+  const required: Record<string, string[]> = {
+    condition: ['expression'], cooldown: ['seconds'], timeout: ['seconds'], retry: ['attempts'], repeat: ['count'],
+  };
+  const extras = Object.keys(item).filter((key) => !allowed[type].includes(key));
+  if (extras.length) issues.push(issue(path, `装饰器包含未知字段：${extras.join(', ')}`, 'invalid-decorator'));
+  for (const key of required[type]) if (!(key in item)) issues.push(issue(path, `装饰器缺少 ${key}`, 'invalid-decorator'));
+  if (type === 'condition') validateBindings(item.expression, context, [...path, 'expression'], issues, true);
+  if ((type === 'cooldown' || type === 'timeout') && (typeof item.seconds !== 'number' || item.seconds <= 0)) issues.push(issue([...path, 'seconds'], 'seconds 必须大于 0', 'invalid-decorator'));
+  if (type === 'retry' && (!Number.isInteger(item.attempts) || Number(item.attempts) < 1)) issues.push(issue([...path, 'attempts'], 'attempts 必须是正整数', 'invalid-decorator'));
+  if (type === 'retry' && item.delay_seconds !== undefined && (typeof item.delay_seconds !== 'number' || item.delay_seconds < 0)) issues.push(issue([...path, 'delay_seconds'], 'delay_seconds 不能小于 0', 'invalid-decorator'));
+  if (type === 'repeat' && (!Number.isInteger(item.count) || Number(item.count) < 1)) issues.push(issue([...path, 'count'], 'count 必须是正整数', 'invalid-decorator'));
 }
 
 export function validateWorkflow(raw: unknown, catalog: ActionCatalog): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    issues.push({ path: [], message: '工作流必须是 JSON 对象', severity: 'error', code: 'workflow.shape' });
-    return issues;
-  }
-  const wf = raw as Record<string, unknown>;
-  for (const field of ['schema_version', 'id', 'version', 'reference_resolution', 'entry', 'steps']) {
-    if (!(field in wf)) {
-      issues.push({ path: [field], message: `缺少必需字段 ${field}`, severity: 'error', code: 'workflow.required' });
+  const info = parseWorkflow(raw);
+  if (!info.raw) return [issue([], '工作流必须是一个 JSON 对象', 'not-object')];
+  const root = info.raw;
+  if (root.schema_version !== 3) issues.push(issue(['schema_version'], '仅支持 schema_version 3', 'schema-version'));
+  if (typeof root.id !== 'string' || !root.id) issues.push(issue(['id'], '缺少 id', 'missing-id'));
+  if (typeof root.version !== 'string' || !root.version) issues.push(issue(['version'], '缺少 version', 'missing-version'));
+  if (typeof root.root !== 'string' || !root.root) issues.push(issue(['root'], '缺少 root', 'missing-root'));
+  if (!Array.isArray(root.resolution) || root.resolution.length !== 2 || !root.resolution.every((value) => Number.isInteger(value) && Number(value) > 0)) issues.push(issue(['resolution'], 'resolution 必须包含两个正整数', 'invalid-resolution'));
+  if (!Array.isArray(root.nodes) || root.nodes.length < 2) issues.push(issue(['nodes'], 'Behavior Tree 至少需要 Root 和一个子节点', 'invalid-nodes'));
+  if (root.blackboard !== undefined && !isObject(root.blackboard)) {
+    issues.push(issue(['blackboard'], 'blackboard 必须是参数定义对象', 'invalid-blackboard'));
+  } else if (isObject(root.blackboard)) {
+    for (const [name, definition] of Object.entries(root.blackboard)) {
+      try { parseParameterDefinition(definition, `blackboard.${name}`); }
+      catch (error) { issues.push(issue(['blackboard', name], (error as Error).message, 'invalid-blackboard-definition')); }
     }
   }
-  if (!Array.isArray(wf.steps)) {
-    if (wf.steps !== undefined) {
-      issues.push({ path: ['steps'], message: 'steps 必须是数组', severity: 'error', code: 'workflow.steps' });
-    }
-    return issues;
-  }
 
-  const stepIds: string[] = [];
-  const idToIndex = new Map<string, number>();
-  const byId = new Map<string, Record<string, unknown>>();
-  const rawSteps = wf.steps as Record<string, unknown>[];
+  const ids = new Set(info.nodeIds);
+  if (ids.size !== info.nodeIds.length) issues.push(issue(['nodes'], '存在重复的节点 ID', 'duplicate-node'));
+  const context: RefContext = { info, catalog, nodeIds: ids };
+  const parents = new Map<string, number>(info.nodeIds.map((id) => [id, 0]));
+  const nodeMap = new Map(info.nodes.map((node) => [node.id, node]));
 
-  // 第一遍：收集全部步骤 ID（校验跳转/引用需要完整集合）
-  rawSteps.forEach((step, index) => {
-    if (step === null || typeof step !== 'object' || Array.isArray(step)) {
-      issues.push({ path: ['steps', index], message: '步骤必须是对象', severity: 'error', code: 'step.shape' });
-      return;
-    }
-    const id = typeof step.id === 'string' ? step.id : '';
-    if (!id) {
-      issues.push({ path: ['steps', index, 'id'], message: '步骤缺少 id', severity: 'error', code: 'step.required' });
-    } else if (idToIndex.has(id)) {
-      issues.push({
-        path: ['steps', index, 'id'],
-        message: `重复的步骤 ID: ${id}（第一次出现在第 ${idToIndex.get(id)! + 1} 步）`,
-        severity: 'error',
-        code: 'step.dup',
-      });
-    } else {
-      idToIndex.set(id, index);
-      stepIds.push(id);
-      byId.set(id, step);
-    }
-  });
-  const allStepIds = new Set(stepIds);
-
-  // 第二遍：校验 action / 参数 / 跳转 / 条件 / 重试
-  rawSteps.forEach((step, index) => {
-    if (step === null || typeof step !== 'object' || Array.isArray(step)) return;
-    const action = typeof step.action === 'string' ? step.action : '';
-    const spec = action ? catalog.byName(action) : undefined;
-    if (!action) {
-      issues.push({ path: ['steps', index, 'action'], message: '步骤缺少 action', severity: 'error', code: 'step.required' });
-    } else if (!spec) {
-      issues.push({ path: ['steps', index, 'action'], message: `未知 Action: ${action}`, severity: 'error', code: 'action.unknown' });
-    } else {
-      const withVal = step['with'];
-      if (withVal !== undefined) {
-        if (withVal === null || typeof withVal !== 'object' || Array.isArray(withVal)) {
-          issues.push({ path: ['steps', index, 'with'], message: 'with 必须是对象', severity: 'error', code: 'with.shape' });
-        } else {
-          const withObj = withVal as Record<string, unknown>;
-          const inputSchema = spec.inputSchema as Record<string, unknown>;
-          const props = inputSchema.properties as Record<string, unknown> | undefined;
-          // 引擎对 additionalProperties:false 的 Action 拒绝任何未声明参数（如 core.capture 空 schema 也拒绝所有参数）
-          if (inputSchema.additionalProperties === false) {
-            for (const key of Object.keys(withObj)) {
-              if (!props || !(key in props)) {
-                issues.push({
-                  path: ['steps', index, 'with', key],
-                  // 引擎静态校验（cli validate）不检查 with 参数，但运行时会按 additionalProperties:false 拒绝
-                  message: `Action ${action} 不接受参数 ${key}（引擎运行时会拒绝；静态 validate 不检查这一层）`,
-                  severity: 'error',
-                  code: 'with.unknown',
-                });
-              }
+  (root.nodes as unknown[] | undefined)?.forEach((rawNode, index) => {
+    const path = ['nodes', index];
+    if (!isObject(rawNode)) { issues.push(issue(path, '节点必须是对象', 'invalid-node')); return; }
+    const node = info.nodes[index];
+    if (!node.id) issues.push(issue([...path, 'id'], '节点缺少 id', 'missing-node-id'));
+    if (!(NODE_TYPES as readonly string[]).includes(String(rawNode.type))) issues.push(issue([...path, 'type'], `未知节点类型：${String(rawNode.type)}`, 'invalid-node-type'));
+    const decoratorsRaw = rawNode.decorators;
+    const singletons = new Set<string>();
+    if (decoratorsRaw !== undefined && !Array.isArray(decoratorsRaw)) issues.push(issue([...path, 'decorators'], 'decorators 必须是数组', 'invalid-decorator'));
+    if (Array.isArray(decoratorsRaw)) decoratorsRaw.forEach((decorator, decoratorIndex) => {
+      if (!isObject(decorator)) { issues.push(issue([...path, 'decorators', decoratorIndex], '装饰器必须是对象', 'invalid-decorator')); return; }
+      validateDecorator(decorator, [...path, 'decorators', decoratorIndex], context, issues);
+      if (decorator.type !== 'condition' && typeof decorator.type === 'string') {
+        if (singletons.has(decorator.type)) issues.push(issue([...path, 'decorators', decoratorIndex], `重复的 ${decorator.type} 装饰器`, 'duplicate-decorator'));
+        singletons.add(decorator.type);
+      }
+    });
+    if (node.type === 'task') {
+      if ('children' in rawNode || 'finish_mode' in rawNode) issues.push(issue(path, 'Task 不能定义 children 或 finish_mode', 'invalid-task'));
+      if (typeof rawNode.action !== 'string' || !rawNode.action) issues.push(issue([...path, 'action'], 'Task 必须定义 Action', 'invalid-action'));
+      else {
+        const spec = catalog.byName(rawNode.action);
+        if (!spec) issues.push(issue([...path, 'action'], `未知 Action：${rawNode.action}`, 'unknown-action'));
+        else {
+          const params = rawNode.params === undefined ? {} : rawNode.params;
+          if (!isObject(params)) issues.push(issue([...path, 'params'], 'params 必须是对象', 'invalid-params'));
+          else {
+            validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema);
+            const validate = workflowAjv.compile(bindingAwareParameterSchema(spec.inputSchema));
+            const normalized = applyParameterDefaults(spec.parameters, params);
+            if (!validate(normalized)) {
+              const primary = validate.errors?.find((error) => ['required', 'additionalProperties', 'type', 'enum', 'minimum', 'maximum'].includes(error.keyword)) ?? validate.errors?.[0];
+              issues.push(issue([...path, 'params'], `Action ${rawNode.action} 参数无效：${primary?.instancePath || '/'} ${primary?.message || 'validation failed'}`, 'invalid-params'));
             }
+            const retry = node.decorators.find((decorator) => decorator.type === 'retry' && Number(decorator.attempts) > 1);
+            if (retry && !spec.retrySafe && root.retry_safe !== true) issues.push(issue([...path, 'decorators'], `Action ${rawNode.action} 不可安全重试`, 'unsafe-retry'));
           }
-          validateRefsInTree(withVal, ['steps', index, 'with'], issues, allStepIds);
         }
       }
+    } else {
+      if ('action' in rawNode || 'params' in rawNode) issues.push(issue(path, `${node.type} 不能定义 action 或 params`, 'invalid-composite'));
+      if (node.type === 'root' && node.decorators.length) issues.push(issue([...path, 'decorators'], 'Root 不能挂装饰器', 'invalid-root'));
+      if (!Array.isArray(rawNode.children)) issues.push(issue([...path, 'children'], `${node.type} 必须定义 children`, 'invalid-children'));
+      if (node.type === 'root' && node.children.length !== 1) issues.push(issue([...path, 'children'], 'Root 必须恰好连接一个子节点', 'root-child-count'));
+      if ((node.type === 'selector' || node.type === 'sequence') && node.children.length < 1) issues.push(issue([...path, 'children'], `${node.type} 至少需要一个子节点`, 'composite-child-count'));
+      if (node.type === 'simple_parallel') {
+        if (node.children.length !== 2) issues.push(issue([...path, 'children'], 'Simple Parallel 必须恰好有两个子节点', 'parallel-child-count'));
+        if (node.children[0] && nodeMap.get(node.children[0])?.type !== 'task') issues.push(issue([...path, 'children', 0], 'Simple Parallel 的第一个子节点必须是主 Task', 'parallel-main-task'));
+      } else if ('finish_mode' in rawNode) issues.push(issue([...path, 'finish_mode'], 'finish_mode 只适用于 Simple Parallel', 'invalid-finish-mode'));
     }
-
-    for (const field of ['on_success', 'on_failure', 'on_skip'] as const) {
-      const target = step[field];
-      if (target === undefined) continue;
-      if (typeof target !== 'string' || target.length === 0) {
-        issues.push({ path: ['steps', index, field], message: `${field} 必须是字符串`, severity: 'error', code: 'target.type' });
-      } else if (!(allStepIds.has(target) || TERMINALS.includes(target as (typeof TERMINALS)[number]))) {
-        issues.push({
-          path: ['steps', index, field],
-          message: `${field} 指向未知目标: ${target}`,
-          severity: 'error',
-          code: 'target.unknown',
-        });
-      }
-    }
-
-    if (step['when'] !== undefined) {
-      validateCondition(step['when'], ['steps', index, 'when'], issues, allStepIds);
-    }
-
-    if (spec && step['retry'] !== undefined) {
-      let attempts = 0;
-      const retry = step['retry'];
-      if (typeof retry === 'number') {
-        attempts = retry;
-      } else if (retry && typeof retry === 'object' && !Array.isArray(retry)) {
-        attempts = Number((retry as Record<string, unknown>).attempts ?? 1);
-      }
-      if (attempts > 1 && (!spec.retrySafe || spec.sideEffect)) {
-        issues.push({
-          path: ['steps', index, 'retry'],
-          message: `Action ${action} 不允许重试（非 retry-safe 或有副作用）`,
-          severity: 'error',
-          code: 'retry.unsafe',
-        });
-      }
+    for (const [childIndex, child] of node.children.entries()) {
+      if (!ids.has(child)) issues.push(issue([...path, 'children', childIndex], `未知子节点：${child}`, 'unknown-child'));
+      else parents.set(child, (parents.get(child) ?? 0) + 1);
     }
   });
 
-  const entry = typeof wf.entry === 'string' ? wf.entry : '';
-  if (entry && stepIds.length > 0 && !stepIds.includes(entry)) {
-    issues.push({ path: ['entry'], message: `entry 不是有效步骤: ${entry}`, severity: 'error', code: 'entry.unknown' });
+  const rootNode = typeof root.root === 'string' ? nodeMap.get(root.root) : undefined;
+  if (typeof root.root === 'string' && !rootNode) issues.push(issue(['root'], `root 指向不存在的节点：${root.root}`, 'unknown-root'));
+  else if (rootNode?.type !== 'root') issues.push(issue(['root'], 'root 必须指向 Root 类型节点', 'invalid-root'));
+  if (rootNode && (parents.get(rootNode.id) ?? 0) !== 0) issues.push(issue(['root'], 'Root 不能有父节点', 'root-parent'));
+  for (const node of info.nodes) {
+    if (rootNode && node.id !== rootNode.id && (parents.get(node.id) ?? 0) !== 1) issues.push(issue(['nodes', node.index], `节点 ${node.id} 必须恰好有一个父节点`, 'parent-count'));
   }
 
-  if (stepIds.length > 0 && entry && byId.has(entry)) {
-    const stepInfoList = (wf.steps as Record<string, unknown>[]).map((s, i) => ({
-      id: typeof s.id === 'string' ? s.id : '',
-      action: typeof s.action === 'string' ? s.action : '',
-      index: i,
-      hasWhen: false,
-      onSuccess: typeof s.on_success === 'string' ? s.on_success : undefined,
-      onFailure: typeof s.on_failure === 'string' ? s.on_failure : undefined,
-      onSkip: typeof s.on_skip === 'string' ? s.on_skip : undefined,
-    }));
-    // 可达性（警告级别，编辑过程中噪声更小）
-    const reachable = new Set<string>();
-    const pending = [entry];
-    while (pending.length > 0) {
-      const current = pending.pop()!;
-      if (reachable.has(current) || TERMINALS.includes(current as (typeof TERMINALS)[number])) continue;
-      reachable.add(current);
-      const index = stepInfoList.findIndex((s) => s.id === current);
-      if (index < 0) continue;
-      for (const target of outgoingTargets(stepInfoList, index)) {
-        if (!reachable.has(target)) pending.push(target);
-      }
-    }
-    const unreachable = stepIds.filter((id) => !reachable.has(id));
-    for (const id of unreachable) {
-      issues.push({
-        path: ['steps', idToIndex.get(id)!],
-        // 引擎（validator.py）把不可达步骤当作硬错误（ConfigError），故此处也用错误级别
-        message: `步骤不可达（从 entry 无法到达）: ${id}`,
-        severity: 'error',
-        code: 'graph.unreachable',
-      });
-    }
-    // 每个步骤能否到达终点
-    const canFinish = new Set<string>(TERMINALS as unknown as string[]);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      stepInfoList.forEach((step, index) => {
-        if (!canFinish.has(step.id) && outgoingTargets(stepInfoList, index).some((t) => canFinish.has(t))) {
-          canFinish.add(step.id);
-          changed = true;
-        }
-      });
-    }
-    const noTerminal = stepIds.filter((id) => !canFinish.has(id));
-    for (const id of noTerminal) {
-      issues.push({
-        path: ['steps', idToIndex.get(id)!],
-        message: `步骤无法到达任何终点（$success/$failure/$cancelled）: ${id}`,
-        severity: 'warning',
-        code: 'graph.no-terminal',
-      });
-    }
+  if (rootNode && !issues.some((entry) => ['duplicate-node', 'unknown-child'].includes(entry.code ?? ''))) {
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (id: string): void => {
+      if (visiting.has(id)) { issues.push(issue(['nodes', nodeMap.get(id)?.index ?? 0], `检测到环：${id}`, 'cycle')); return; }
+      if (visited.has(id)) return;
+      visiting.add(id);
+      for (const child of nodeMap.get(id)?.children ?? []) visit(child);
+      visiting.delete(id);
+      visited.add(id);
+    };
+    visit(rootNode.id);
+    for (const node of info.nodes) if (!visited.has(node.id)) issues.push(issue(['nodes', node.index], `存在不可达节点：${node.id}`, 'unreachable-node'));
   }
-
   return issues;
 }
 
-export function deepClone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-export interface RefSuggestions {
-  inputs: string[];
-  steps: string[];
-}
-
-export function collectRefSuggestions(info: WorkflowInfo, catalog: ActionCatalog): RefSuggestions {
-  const inputs = info.inputsProps.map((p) => `inputs.${p}`);
-  const steps: string[] = [];
-  for (const step of info.steps) {
-    const spec = step.action ? catalog.byName(step.action) : undefined;
-    const fields = spec?.outputFields ?? [];
-    if (fields.length > 0) {
-      for (const field of fields) {
-        steps.push(`steps.${step.id}.output.${field}`);
-      }
-    } else {
-      steps.push(`steps.${step.id}.output.0`);
-    }
-  }
-  return { inputs, steps };
-}
-
-/** 依据当前工作流内容 + Action 目录，构建可用于补全/校验/悬停的动态 JSON Schema。 */
 export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog): Record<string, unknown> {
-  const targets = [...info.stepIds, ...TERMINALS];
-  const withProperties: Record<string, unknown> = {};
-  for (const spec of catalog.all()) {
-    const props = (spec.inputSchema as Record<string, unknown>).properties as Record<string, unknown> | undefined;
-    if (!props) continue;
-    for (const [key, value] of Object.entries(props)) {
-      const clone = deepClone(value) as Record<string, unknown>;
-      const existing = typeof clone.description === 'string' ? String(clone.description) : '';
-      clone.description = existing ? `${existing}（${spec.name} 参数）` : `${spec.name} 参数`;
-      // 允许 $ref 引用代替字面量，避免把 {"$ref": ...} 误报为类型错误
-      withProperties[key] = {
-        anyOf: [clone, { $ref: '#/definitions/refObject' }],
-        description: `${existing ? existing + '；' : ''}${spec.name} 参数（可为字面量或 $ref 引用）`,
-      };
-    }
-  }
-
-  const targetDescriptions = targets.map((id) => (TERMINALS.includes(id as (typeof TERMINALS)[number]) ? `${id}（终点）` : `步骤：${id}`));
-  const actionEnumDescriptions = catalog.all().map((s) => `${s.name} — ${s.description}`);
-
-  const stepSchema: Record<string, unknown> = {
-    type: 'object',
-    required: ['id', 'action'],
-    properties: {
-      id: { type: 'string', minLength: 1, description: '步骤 ID，全局唯一，供跳转与引用' },
-      action: {
-        type: 'string',
-        minLength: 1,
-        enum: catalog.names(),
-        enumDescriptions: actionEnumDescriptions,
-        description: '要执行的 Action（内置 + 自定义）',
-      },
-      with: {
-        type: 'object',
-        properties: withProperties,
-        additionalProperties: false,
-        description: 'Action 参数。参数随 action 变化，此处为所有 Action 支持参数的并集。',
-      },
-      when: { $ref: '#/definitions/condition', description: '执行条件（可选）。支持 exists/eq/ne/gt/gte/lt/lte/contains/and/or/not' },
-      on_success: {
-        type: 'string',
-        enum: targets,
-        enumDescriptions: targetDescriptions,
-        description: '成功后的跳转目标；缺省跳到下一步',
-      },
-      on_failure: {
-        type: 'string',
-        enum: targets,
-        enumDescriptions: targetDescriptions,
-        description: '失败后的跳转目标；缺省 $failure',
-      },
-      on_skip: {
-        type: 'string',
-        enum: targets,
-        enumDescriptions: targetDescriptions,
-        description: '条件不满足被跳过后的跳转目标；缺省跳到下一步',
-      },
-      retry: {
-        oneOf: [
-          { type: 'integer', minimum: 1, description: '重试次数' },
-          {
-            type: 'object',
-            properties: {
-              attempts: { type: 'integer', minimum: 1, description: '重试次数' },
-              delay_seconds: { type: 'number', minimum: 0, description: '重试间隔（秒）' },
-            },
-            additionalProperties: false,
-            description: '重试配置',
-          },
-        ],
-        description: '重试配置（默认 1；有副作用或非 retry-safe 的 Action 不允许 >1）',
-      },
-      timeout_seconds: { type: 'number', exclusiveMinimum: 0, description: '本步骤超时秒数（可选）' },
-    },
-    additionalProperties: false,
-  };
-
   return {
-    $schema: 'http://json-schema.org/draft-07/schema#',
     type: 'object',
-    required: ['schema_version', 'id', 'version', 'reference_resolution', 'entry', 'steps'],
+    required: ['schema_version', 'id', 'version', 'resolution', 'root', 'nodes'],
     properties: {
-      schema_version: { const: 1, description: '工作流 schema 版本，固定为 1' },
-      id: { type: 'string', minLength: 1, description: '工作流 ID（供 config 中 task.workflow 引用）' },
-      version: { type: 'string', minLength: 1, description: '版本号，如 1.0.0' },
-      reference_resolution: {
-        type: 'array',
-        items: [{ type: 'integer', minimum: 1 }, { type: 'integer', minimum: 1 }],
-        additionalItems: false,
-        minItems: 2,
-        maxItems: 2,
-        description: '参考分辨率 [宽, 高]，所有坐标按此换算，通常 [1920, 1080]',
-      },
-      entry: {
-        type: 'string',
-        minLength: 1,
-        enum: info.stepIds,
-        enumDescriptions: info.stepIds.map((id) => `入口步骤：${id}`),
-        description: '入口步骤 ID，必须命名一个步骤',
-      },
-      limits: {
-        type: 'object',
-        properties: {
-          timeout_seconds: { type: 'number', exclusiveMinimum: 0, description: '整个工作流超时（秒）' },
-          max_steps: { type: 'integer', minimum: 1, description: '最大执行步数' },
+      schema_version: { const: 3 },
+      id: { type: 'string', minLength: 1 },
+      version: { type: 'string', minLength: 1 },
+      resolution: { type: 'array', prefixItems: [{ type: 'integer', minimum: 1 }, { type: 'integer', minimum: 1 }], minItems: 2, maxItems: 2 },
+      root: { type: 'string', enum: info.nodeIds },
+      blackboard: { type: 'object' },
+      retry_safe: { type: 'boolean' },
+      limits: { type: 'object', properties: { timeout_seconds: { type: 'number', exclusiveMinimum: 0 }, max_steps: { type: 'integer', minimum: 1 } }, additionalProperties: false },
+      nodes: {
+        type: 'array', minItems: 2,
+        items: {
+          type: 'object', required: ['id', 'type'],
+          properties: {
+            id: { type: 'string', minLength: 1 }, type: { enum: [...NODE_TYPES] }, name: { type: 'string', minLength: 1 },
+            action: { type: 'string', enum: catalog.names() }, params: { type: 'object' },
+            children: { type: 'array', items: { type: 'string', enum: info.nodeIds }, uniqueItems: true },
+            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, expression: {}, seconds: { type: 'number', exclusiveMinimum: 0 }, attempts: { type: 'integer', minimum: 1 }, delay_seconds: { type: 'number', minimum: 0 }, count: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+            finish_mode: { enum: [...PARALLEL_FINISH_MODES] },
+          },
+          additionalProperties: false,
         },
-        additionalProperties: false,
-        description: '工作流整体限制（可选）',
       },
-      inputs_schema: { type: 'object', description: '任务输入参数 JSON Schema（可选）；其 properties 用于 inputs.<字段> 引用补全' },
-      steps: { type: 'array', minItems: 1, items: stepSchema, description: '步骤列表' },
     },
-    // 允许下划线前缀的元数据字段（如 _layout 卡片位置布局），与引擎 validator 一致
-    patternProperties: { '^_': { description: '编辑器/工具私有元数据（引擎忽略）' } },
+    patternProperties: { '^_': {} },
     additionalProperties: false,
-    definitions: {
-      refObject: {
-        type: 'object',
-        required: ['$ref'],
-        properties: { $ref: { type: 'string', description: '结构化引用：inputs.<字段> 或 steps.<步骤id>.output.<字段>' } },
-        additionalProperties: false,
-      },
-      operand: {
-        anyOf: [
-          { type: ['string', 'number', 'boolean', 'null'] },
-          { $ref: '#/definitions/refObject' },
-          { type: 'object' },
-          { type: 'array' },
-        ],
-        description: '操作数：标量或 $ref 引用（引擎也允许嵌套结构，运行时递归解析其中的 $ref）',
-      },
-      pair: {
-        type: 'array',
-        items: [{ $ref: '#/definitions/operand' }, { $ref: '#/definitions/operand' }],
-        additionalItems: false,
-        minItems: 2,
-        maxItems: 2,
-      },
-      conditionObject: {
-        type: 'object',
-        properties: {
-          exists: { $ref: '#/definitions/refObject', description: '引用是否存在/有值' },
-          eq: { $ref: '#/definitions/pair', description: '两操作数相等' },
-          ne: { $ref: '#/definitions/pair', description: '两操作数不相等' },
-          gt: { $ref: '#/definitions/pair', description: '前操作数 > 后操作数' },
-          gte: { $ref: '#/definitions/pair', description: '前操作数 >= 后操作数' },
-          lt: { $ref: '#/definitions/pair', description: '前操作数 < 后操作数' },
-          lte: { $ref: '#/definitions/pair', description: '前操作数 <= 后操作数' },
-          contains: { $ref: '#/definitions/pair', description: '前操作数包含后操作数' },
-          and: { type: 'array', items: { $ref: '#/definitions/condition' }, description: '全部成立' },
-          or: { type: 'array', items: { $ref: '#/definitions/condition' }, description: '任一成立' },
-          not: { $ref: '#/definitions/condition', description: '取反' },
-        },
-        additionalProperties: false,
-      },
-      condition: {
-        oneOf: [{ type: 'boolean' }, { $ref: '#/definitions/conditionObject' }],
-      },
-    },
   };
+}
+
+function parameterPaths(prefix: string, parameter: ParameterInfo, out: string[]): void {
+  if (parameter.type !== 'object' || !parameter.properties) return;
+  for (const [key, child] of Object.entries(parameter.properties)) {
+    const next = `${prefix}.${key}`;
+    out.push(next);
+    parameterPaths(next, child, out);
+  }
+}
+
+export function collectRefSuggestions(info: WorkflowInfo, catalog: ActionCatalog): { blackboard: string[]; nodes: string[] } {
+  const blackboard: string[] = [];
+  for (const name of info.blackboardProps) {
+    const prefix = `blackboard.${name}`;
+    blackboard.push(prefix);
+    parameterPaths(prefix, info.blackboard[name], blackboard);
+  }
+  const nodes: string[] = [];
+  for (const node of info.nodes) {
+    if (!node.id || !node.action) continue;
+    const spec = catalog.byName(node.action);
+    if (spec) for (const field of spec.outputFields) nodes.push(`nodes.${node.id}.output.${field}`);
+  }
+  return { blackboard, nodes };
 }

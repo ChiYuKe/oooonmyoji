@@ -122,8 +122,8 @@ def command_list_workflows(args: argparse.Namespace) -> int:
         "version": spec.version,
         "file": str(spec.path),
         "file_hash": spec.file_hash,
-        "reference_resolution": list(spec.reference_resolution),
-        "steps": [step.id for step in spec.steps],
+        "resolution": list(spec.resolution),
+        "nodes": [node.id for node in spec.nodes],
     } for workflow_id, spec in sorted(workflows.items())})
     return 0
 

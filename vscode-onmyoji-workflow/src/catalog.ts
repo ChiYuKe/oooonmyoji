@@ -1,21 +1,45 @@
 /**
  * Action 目录：内置 Action + plugins/actions 下的自定义 Action。
+ * 二者共享同一份 v2 manifest 格式（schema_version 2），参数元数据只有一份，
+ * 运行时（Python）与编辑器（本模块）各自解析同一批 manifest 文件。
  * 纯逻辑模块（不依赖 vscode API），便于 Node 冒烟测试。
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import Ajv2020 from 'ajv/dist/2020';
+
+export interface ParameterInfo {
+  type: string;
+  required?: boolean;
+  default?: unknown;
+  description?: string;
+  editor?: string;
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+  enum?: unknown[];
+  minItems?: number;
+  maxItems?: number;
+  items?: ParameterInfo;
+  properties?: Record<string, ParameterInfo>;
+}
 
 export interface ActionSpecInfo {
   name: string;
   version: string;
+  entry: string;
+  description: string;
+  parameters: Record<string, ParameterInfo>;
+  /** 由参数编译得到的 JSON Schema（运行时同源）。 */
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
+  /** 该 Action 输出的对象字段名（用于 nodes.<node>.output.<field> 补全）。数组输出为空。 */
+  outputFields: string[];
+  retry: string;
   retrySafe: boolean;
   sideEffect: boolean;
   source: string;
-  description: string;
-  /** 该 Action 输出的对象字段名（用于 steps.<id>.output.<field> 补全）。数组输出为空。 */
-  outputFields: string[];
 }
 
 export interface ActionCatalog {
@@ -26,229 +50,296 @@ export interface ActionCatalog {
   clashes(): string[];
 }
 
-function spec(
-  name: string,
-  inputSchema: Record<string, unknown>,
-  outputSchema: Record<string, unknown>,
-  retrySafe: boolean,
-  sideEffect: boolean,
-  description: string,
-  outputFields: string[] = [],
-): ActionSpecInfo {
+const PARAMETER_TYPES = ['string', 'number', 'integer', 'boolean', 'rect', 'asset', 'path', 'array', 'object', 'any'] as const;
+const RETRY_MODES = ['safe', 'unsafe'] as const;
+const ACTION_MANIFEST_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  required: ['schema_version', 'name', 'entry', 'parameters'],
+  properties: {
+    schema_version: { const: 2 },
+    name: { type: 'string', minLength: 1 },
+    version: { type: 'string', minLength: 1 },
+    entry: { type: 'string', minLength: 1 },
+    description: { type: 'string' },
+    parameters: { type: 'object', additionalProperties: { $ref: '#/$defs/parameter' } },
+    outputs: { type: 'object' },
+    effects: {
+      type: 'object',
+      properties: {
+        side_effect: { type: 'boolean' },
+        retry: { enum: [...RETRY_MODES] },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+  $defs: {
+    parameter: {
+      type: 'object',
+      required: ['type'],
+      properties: {
+        type: { enum: [...PARAMETER_TYPES] },
+        required: { type: 'boolean' },
+        default: {},
+        description: { type: 'string' },
+        editor: { type: 'string' },
+        min: { type: 'number' },
+        max: { type: 'number' },
+        min_length: { type: 'integer', minimum: 0 },
+        max_length: { type: 'integer', minimum: 0 },
+        enum: { type: 'array', minItems: 1 },
+        min_items: { type: 'integer', minimum: 0 },
+        max_items: { type: 'integer', minimum: 0 },
+        items: { $ref: '#/$defs/parameter' },
+        properties: { type: 'object', additionalProperties: { $ref: '#/$defs/parameter' } },
+      },
+      additionalProperties: false,
+    },
+  },
+};
+
+const schemaAjv = new Ajv2020({ allErrors: true, strict: false });
+const validateManifestShape = schemaAjv.compile(ACTION_MANIFEST_SCHEMA);
+
+const SCALAR_TYPES: Record<string, string> = {
+  string: 'string',
+  number: 'number',
+  integer: 'integer',
+  boolean: 'boolean',
+};
+
+export function parameterToSchema(param: ParameterInfo): Record<string, unknown> {
+  const schema: Record<string, unknown> = {};
+  const scalar = SCALAR_TYPES[param.type];
+  if (scalar) {
+    schema.type = scalar;
+    if (param.type === 'number' || param.type === 'integer') {
+      if (typeof param.min === 'number') schema.minimum = param.min;
+      if (typeof param.max === 'number') schema.maximum = param.max;
+    }
+    if (param.type === 'string') {
+      if (typeof param.minLength === 'number') schema.minLength = param.minLength;
+      if (typeof param.maxLength === 'number') schema.maxLength = param.maxLength;
+    }
+  } else if (param.type === 'asset' || param.type === 'path') {
+    schema.type = 'string';
+    if (typeof param.minLength === 'number') schema.minLength = param.minLength;
+    if (typeof param.maxLength === 'number') schema.maxLength = param.maxLength;
+  } else if (param.type === 'rect') {
+    schema.type = 'array';
+    schema.prefixItems = [{ type: 'integer' }, { type: 'integer' }, { type: 'integer' }, { type: 'integer' }];
+    schema.minItems = 4;
+    schema.maxItems = 4;
+  } else if (param.type === 'array') {
+    schema.type = 'array';
+    schema.items = param.items ? parameterToSchema(param.items) : {};
+    if (typeof param.minItems === 'number') schema.minItems = param.minItems;
+    if (typeof param.maxItems === 'number') schema.maxItems = param.maxItems;
+  } else if (param.type === 'object') {
+    schema.type = 'object';
+    if (param.properties && Object.keys(param.properties).length > 0) {
+      schema.properties = Object.fromEntries(
+        Object.entries(param.properties).map(([key, value]) => [key, parameterToSchema(value)]),
+      );
+      schema.required = Object.entries(param.properties)
+        .filter(([, value]) => value.required === true)
+        .map(([key]) => key);
+      schema.additionalProperties = false;
+    }
+    // 无 properties 的 object 参数为自由形态（对应历史 {"type":"object"} 透传）。
+  }
+  // 'any' 类型不写入 type 约束
+  if (Array.isArray(param.enum) && param.enum.length > 0) schema.enum = param.enum;
+  if (param.default !== undefined) schema.default = param.default;
+  if (typeof param.description === 'string' && param.description) schema.description = param.description;
+  return schema;
+}
+
+export function compileParameters(parameters: Record<string, ParameterInfo>): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const [name, param] of Object.entries(parameters)) {
+    properties[name] = parameterToSchema(param);
+    if (param.required) required.push(name);
+  }
+  return { type: 'object', properties, required, additionalProperties: false };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function applyValueDefaults(param: ParameterInfo, value: unknown): unknown {
+  if (param.type === 'object' && param.properties && isPlainObject(value)) {
+    const out: Record<string, unknown> = cloneValue(value);
+    for (const [name, child] of Object.entries(param.properties)) {
+      if (!(name in out) && child.default !== undefined) out[name] = cloneValue(child.default);
+      if (name in out) out[name] = applyValueDefaults(child, out[name]);
+    }
+    return out;
+  }
+  if (param.type === 'array' && param.items && Array.isArray(value)) {
+    return value.map((child) => applyValueDefaults(param.items!, child));
+  }
+  return cloneValue(value);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function applyParameterDefaults(
+  parameters: Record<string, ParameterInfo>,
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = cloneValue(values);
+  for (const [name, param] of Object.entries(parameters)) {
+    if (!(name in out) && param.default !== undefined) out[name] = cloneValue(param.default);
+    if (name in out) out[name] = applyValueDefaults(param, out[name]);
+  }
+  return out;
+}
+
+function validationMessage(prefix: string, errors: typeof validateManifestShape.errors): string {
+  const detail = errors?.map((error) => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`).join('; ');
+  return `${prefix}: ${detail || 'validation failed'}`;
+}
+
+function validateParameter(param: ParameterInfo, key: string): void {
+  if (!PARAMETER_TYPES.includes(param.type as (typeof PARAMETER_TYPES)[number])) {
+    throw new Error(`parameter ${key}: unknown type ${param.type}`);
+  }
+  if (!['number', 'integer'].includes(param.type) && (param.min !== undefined || param.max !== undefined)) {
+    throw new Error(`parameter ${key}: min/max are only valid for numeric types`);
+  }
+  if (!['string', 'asset', 'path'].includes(param.type) && (param.minLength !== undefined || param.maxLength !== undefined)) {
+    throw new Error(`parameter ${key}: min_length/max_length are only valid for string types`);
+  }
+  if (param.type !== 'array' && (param.minItems !== undefined || param.maxItems !== undefined)) {
+    throw new Error(`parameter ${key}: min_items/max_items are only valid for array`);
+  }
+  if (param.min !== undefined && param.max !== undefined && param.min > param.max) {
+    throw new Error(`parameter ${key}: min must be <= max`);
+  }
+  if (param.minLength !== undefined && param.maxLength !== undefined && param.minLength > param.maxLength) {
+    throw new Error(`parameter ${key}: min_length must be <= max_length`);
+  }
+  if (param.minItems !== undefined && param.maxItems !== undefined && param.minItems > param.maxItems) {
+    throw new Error(`parameter ${key}: min_items must be <= max_items`);
+  }
+
+  const schema = parameterToSchema(param);
+  let validate: ReturnType<Ajv2020['compile']>;
+  try {
+    validate = schemaAjv.compile(schema);
+  } catch (error) {
+    throw new Error(`parameter ${key} compiles to an invalid schema: ${(error as Error).message}`);
+  }
+  for (const [index, value] of (param.enum ?? []).entries()) {
+    if (!validate(value)) throw new Error(validationMessage(`parameter ${key}.enum[${index}]`, validate.errors));
+  }
+  if (param.default !== undefined) {
+    const normalized = applyValueDefaults(param, param.default);
+    if (!validate(normalized)) throw new Error(validationMessage(`parameter ${key}.default`, validate.errors));
+  }
+}
+
+export function parseParameterDefinition(raw: unknown, key: string): ParameterInfo {
+  const obj = asRecord(raw);
+  const info: ParameterInfo = { type: String(obj.type ?? '') };
+  if (obj.required === true) info.required = true;
+  if (obj.default !== undefined) info.default = obj.default;
+  if (typeof obj.description === 'string') info.description = obj.description;
+  if (typeof obj.editor === 'string') info.editor = obj.editor;
+  if (typeof obj.min === 'number') info.min = obj.min;
+  if (typeof obj.max === 'number') info.max = obj.max;
+  if (typeof obj.min_length === 'number') info.minLength = obj.min_length;
+  if (typeof obj.max_length === 'number') info.maxLength = obj.max_length;
+  if (Array.isArray(obj.enum)) info.enum = obj.enum;
+  if (typeof obj.min_items === 'number') info.minItems = obj.min_items;
+  if (typeof obj.max_items === 'number') info.maxItems = obj.max_items;
+  if (obj.items !== undefined) info.items = parseParameterDefinition(obj.items, `${key}[]`);
+  if (obj.properties !== undefined) {
+    const props = asRecord(obj.properties);
+    const out: Record<string, ParameterInfo> = {};
+    for (const [name, value] of Object.entries(props)) out[name] = parseParameterDefinition(value, `${key}.${name}`);
+    info.properties = out;
+  }
+  validateParameter(info, key);
+  return info;
+}
+
+export function parseManifest(raw: unknown): ActionSpecInfo | undefined {
+  if (!validateManifestShape(raw)) {
+    throw new Error(validationMessage('invalid Action manifest', validateManifestShape.errors));
+  }
+  const obj = asRecord(raw);
+  const name = typeof obj.name === 'string' ? obj.name : '';
+  if (!name) return undefined;
+  const parametersRaw = asRecord(obj.parameters);
+  const parameters: Record<string, ParameterInfo> = {};
+  for (const [key, value] of Object.entries(parametersRaw)) parameters[key] = parseParameterDefinition(value, key);
+  const effects = asRecord(obj.effects);
+  const retry = typeof effects.retry === 'string' ? effects.retry : 'unsafe';
+  const outputSchema = asRecord(obj.outputs);
+  try {
+    schemaAjv.compile(outputSchema);
+  } catch (error) {
+    throw new Error(`Action ${name}: outputs is not a valid JSON Schema: ${(error as Error).message}`);
+  }
+  const outputFields: string[] = [];
+  const outProps = asRecord(outputSchema.properties);
+  if (outputSchema.type === 'object' && Object.keys(outProps).length > 0) {
+    outputFields.push(...Object.keys(outProps));
+  }
   return {
     name,
-    version: '1.0.0',
-    inputSchema,
+    version: typeof obj.version === 'string' ? obj.version : '1.0.0',
+    entry: typeof obj.entry === 'string' ? obj.entry : '',
+    description: typeof obj.description === 'string' ? obj.description : '',
+    parameters,
+    inputSchema: compileParameters(parameters),
     outputSchema,
-    retrySafe,
-    sideEffect,
-    source: 'builtin',
-    description,
     outputFields,
+    retry,
+    retrySafe: retry === 'safe',
+    sideEffect: effects.side_effect === true,
+    source: '',
   };
 }
 
-export function defaultBuiltinActions(): ActionSpecInfo[] {
-  return [
-    spec(
-      'core.capture',
-      { type: 'object', additionalProperties: false },
-      { type: 'object' },
-      true,
-      false,
-      '截取当前画面一帧（无参数）。输出 { width, height }，并把该帧保存为“最近一帧”供后续 save_frame 使用。',
-      ['width', 'height'],
-    ),
-    spec(
-      'core.save_frame',
-      {
-        type: 'object',
-        required: ['name'],
-        properties: { name: { type: 'string', minLength: 1, description: '保存到产物目录的文件名，如 01-launcher.png' } },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      true,
-      false,
-      '把最近一帧保存到当前运行的产物目录。输出 { path }。',
-      ['path'],
-    ),
-    spec(
-      'core.sleep',
-      {
-        type: 'object',
-        required: ['seconds'],
-        properties: { seconds: { type: 'number', minimum: 0, description: '等待的秒数' } },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      true,
-      false,
-      '等待 seconds 秒（可取消）。输出 { seconds }。',
-      ['seconds'],
-    ),
-    spec(
-      'core.log',
-      {
-        type: 'object',
-        required: ['message'],
-        properties: {
-          message: { type: 'string', description: '日志文本' },
-          fields: { type: 'object', description: '附加结构化字段（可选）' },
-        },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      true,
-      false,
-      '记录一条日志。输出 { message }。',
-      ['message'],
-    ),
-    spec(
-      'core.assert',
-      {
-        type: 'object',
-        required: ['value'],
-        properties: {
-          value: { description: '要断言为真的值（可引用 $ref）' },
-          message: { type: 'string', description: '断言失败时的错误信息（可选）' },
-        },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      true,
-      false,
-      '断言 value 为真，否则工作流以 assertion 失败终止。输出 { asserted }。',
-      ['asserted'],
-    ),
-    spec(
-      'vision.match_template',
-      {
-        type: 'object',
-        required: ['template'],
-        properties: {
-          template: { type: 'string', description: '模板图路径，如 assets/templates/xxx.png' },
-          roi: { type: 'array', items: { type: 'integer' }, minItems: 4, maxItems: 4, description: '裁剪区域 [x, y, w, h]' },
-          threshold: { type: 'number', minimum: 0, maximum: 1, description: '匹配置信度阈值，默认 0.85' },
-          max_results: { type: 'integer', minimum: 1, description: '最多返回的匹配数，默认 20' },
-        },
-        additionalProperties: false,
-      },
-      { type: 'array' },
-      true,
-      false,
-      '在画面中匹配模板图，返回匹配对象数组（不等待）。输出数组，元素含 x/y/width/height/confidence/reference/center。',
-      [],
-    ),
-    spec(
-      'vision.ocr',
-      {
-        type: 'object',
-        properties: { roi: { type: 'array', items: { type: 'integer' }, minItems: 4, maxItems: 4, description: '裁剪区域 [x, y, w, h]' } },
-        additionalProperties: false,
-      },
-      { type: 'array' },
-      true,
-      false,
-      '对画面（可选 roi）做 OCR，返回识别文本项数组。',
-      [],
-    ),
-    spec(
-      'vision.wait_template',
-      {
-        type: 'object',
-        required: ['template', 'timeout_seconds'],
-        properties: {
-          template: { type: 'string', description: '模板图路径' },
-          timeout_seconds: { type: 'number', minimum: 0, description: '等待超时秒数，超时则失败' },
-          present: { type: 'boolean', description: 'true 等待出现；false 等待消失。默认 true' },
-          roi: { type: 'array', items: { type: 'integer' }, minItems: 4, maxItems: 4, description: '裁剪区域 [x, y, w, h]' },
-          threshold: { type: 'number', minimum: 0, maximum: 1, description: '匹配置信度阈值，默认 0.85' },
-        },
-        additionalProperties: false,
-      },
-      { type: 'array' },
-      true,
-      false,
-      '等待模板出现（或消失，present=false），超时前满足则成功。输出匹配数组。',
-      [],
-    ),
-    spec(
-      'input.tap',
-      {
-        type: 'object',
-        required: ['x', 'y'],
-        properties: {
-          x: { type: 'number', description: '点击 X 坐标（参考分辨率坐标）' },
-          y: { type: 'number', description: '点击 Y 坐标（参考分辨率坐标）' },
-          hold_ms: { type: 'integer', minimum: 0, description: '按住毫秒数，默认 0' },
-          random_offset: { type: 'integer', minimum: 0, description: '在 X/Y 方向分别随机偏移的最大像素数，默认 0' },
-          random_interval: {
-            type: 'array',
-            prefixItems: [
-              { type: 'number', minimum: 0 },
-              { type: 'number', minimum: 0 },
-            ],
-            minItems: 2,
-            maxItems: 2,
-            description: '点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]',
-          },
-        },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      false,
-      true,
-      '在 (x, y) 处点击，可配置随机偏移和随机点击前等待。有输入副作用，默认不可自动重试。输出实际点击坐标、偏移量和等待间隔。',
-      ['x', 'y', 'offset_x', 'offset_y', 'interval_seconds'],
-    ),
-    spec(
-      'input.tap_match',
-      {
-        type: 'object',
-        required: ['match'],
-        properties: {
-          match: { type: 'object', description: '匹配对象，通常引用 steps.<id>.output.0' },
-          revalidate: { type: 'boolean', description: '点击前重新截图验证匹配是否仍在，默认 true' },
-          hold_ms: { type: 'integer', minimum: 0, description: '按住毫秒数，默认 0' },
-          random_offset: { type: 'integer', minimum: 0, description: '在匹配中心 X/Y 方向分别随机偏移的最大像素数，默认 0' },
-          random_interval: {
-            type: 'array',
-            prefixItems: [
-              { type: 'number', minimum: 0 },
-              { type: 'number', minimum: 0 },
-            ],
-            minItems: 2,
-            maxItems: 2,
-            description: '点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]',
-          },
-        },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      false,
-      true,
-      '点击匹配结果中心，可配置随机偏移和随机点击前等待。有输入副作用，默认不可自动重试。输出实际点击坐标、偏移量和等待间隔。',
-      ['x', 'y', 'offset_x', 'offset_y', 'interval_seconds', 'revalidated'],
-    ),
-    spec(
-      'workflow.run',
-      {
-        type: 'object',
-        required: ['workflow'],
-        properties: {
-          workflow: { type: 'string', minLength: 1, description: '子工作流 ID、JSON 文件名或 workflows/ 下的路径' },
-          inputs: { type: 'object', description: '传给子工作流的输入（按子工作流 inputs_schema 校验），可含 $ref 引用' },
-        },
-        additionalProperties: false,
-      },
-      { type: 'object' },
-      false,
-      true,
-      '运行另一个工作流（脚本嵌套调用）。子脚本完成后返回“回执”输出 { workflow, status, output }：status 为 succeeded/failed/cancelled，供 on_success/on_failure 分支与后续步骤 $ref 判断。递归调用会被拦截。',
-      ['workflow', 'status', 'output'],
-    ),
-  ];
+function readManifests(root: string): { actions: ActionSpecInfo[]; errors: string[] } {
+  const actions: ActionSpecInfo[] = [];
+  const errors: string[] = [];
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return { actions, errors };
+  for (const file of fs.readdirSync(root).sort()) {
+    if (!file.toLowerCase().endsWith('.json')) continue;
+    const manifestPath = path.join(root, file);
+    try {
+      const parsed = parseManifest(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
+      if (!parsed) {
+        errors.push(`${manifestPath}: 缺少 name`);
+        continue;
+      }
+      parsed.source = manifestPath;
+      actions.push(parsed);
+    } catch (err) {
+      errors.push(`${manifestPath}: 解析失败 ${(err as Error).message}`);
+    }
+  }
+  return { actions, errors };
+}
+
+/** 读取内置 Action manifest（与 Python 运行时共享的同一批文件）。 */
+export function loadBuiltinActions(projectRoot: string): { actions: ActionSpecInfo[]; errors: string[] } {
+  const root = path.join(projectRoot, 'src', 'oooonmyoji', 'actions', 'manifests');
+  const loaded = readManifests(root);
+  for (const item of loaded.actions) item.source = 'builtin';
+  return loaded;
 }
 
 /** 读取 plugins/actions/<dir>/action.json，返回自定义 Action 清单。 */
@@ -261,38 +352,17 @@ export function loadCustomActions(projectRoot: string): { actions: ActionSpecInf
   }
   for (const dirName of fs.readdirSync(root).sort()) {
     const dir = path.join(root, dirName);
-    if (!fs.statSync(dir).isDirectory()) {
-      continue;
-    }
+    if (!fs.statSync(dir).isDirectory()) continue;
     const manifestPath = path.join(dir, 'action.json');
-    if (!fs.existsSync(manifestPath)) {
-      continue;
-    }
+    if (!fs.existsSync(manifestPath)) continue;
     try {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
-      const name = String(manifest.name ?? '');
-      if (!name) {
+      const parsed = parseManifest(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
+      if (!parsed) {
         errors.push(`${manifestPath}: 缺少 name`);
         continue;
       }
-      const inputSchema = (manifest.input_schema as Record<string, unknown>) ?? { type: 'object' };
-      const outputSchema = (manifest.output_schema as Record<string, unknown>) ?? { type: 'object' };
-      const outputFields: string[] = [];
-      const outProps = (outputSchema.properties as Record<string, unknown> | undefined);
-      if (outputSchema.type === 'object' && outProps) {
-        outputFields.push(...Object.keys(outProps));
-      }
-      actions.push({
-        name,
-        version: String(manifest.version ?? '0.0.0'),
-        inputSchema,
-        outputSchema,
-        retrySafe: manifest.retry_safe === true,
-        sideEffect: manifest.side_effect === true,
-        source: manifestPath,
-        description: typeof manifest.description === 'string' ? manifest.description : `自定义 Action（${manifestPath}）`,
-        outputFields,
-      });
+      parsed.source = manifestPath;
+      actions.push(parsed);
     } catch (err) {
       errors.push(`${manifestPath}: 解析失败 ${(err as Error).message}`);
     }
@@ -303,9 +373,7 @@ export function loadCustomActions(projectRoot: string): { actions: ActionSpecInf
 export function buildCatalog(builtin: ActionSpecInfo[], custom: ActionSpecInfo[]): ActionCatalog {
   const byName = new Map<string, ActionSpecInfo>();
   const clashes: string[] = [];
-  for (const item of builtin) {
-    byName.set(item.name, item);
-  }
+  for (const item of builtin) byName.set(item.name, item);
   for (const item of custom) {
     if (byName.has(item.name)) {
       clashes.push(item.name);
@@ -323,8 +391,9 @@ export function buildCatalog(builtin: ActionSpecInfo[], custom: ActionSpecInfo[]
 }
 
 export function loadActionCatalog(projectRoot: string): ActionCatalog {
+  const builtin = loadBuiltinActions(projectRoot);
   const custom = loadCustomActions(projectRoot);
-  return buildCatalog(defaultBuiltinActions(), custom.actions);
+  return buildCatalog(builtin.actions, custom.actions);
 }
 
 export interface ProjectInfo {

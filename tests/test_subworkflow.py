@@ -31,38 +31,58 @@ class StubDevice:
         return None
 
 
-def _write_workflow(path: Path, workflow_id: str, steps: list[dict[str, object]]) -> None:
-    (path / "workflows" / f"{workflow_id}.json").write_text(json.dumps({
-        "schema_version": 1,
+def _write_workflow(
+    path: Path,
+    workflow_id: str,
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]] | None = None,
+    inputs: dict[str, object] | None = None,
+) -> None:
+    del edges
+    tasks = [
+        {
+            **node,
+            "type": "task",
+            "params": node.get("params", {}),
+        }
+        for node in nodes
+        if "action" in node
+    ]
+    if len(tasks) == 1:
+        root_child = str(tasks[0]["id"])
+        tree_nodes: list[dict[str, object]] = tasks
+    else:
+        root_child = "main"
+        tree_nodes = [
+            {"id": "main", "type": "sequence", "children": [str(node["id"]) for node in tasks]},
+            *tasks,
+        ]
+    payload: dict[str, object] = {
+        "schema_version": 3,
         "id": workflow_id,
-        "version": "1.0.0",
-        "reference_resolution": [1920, 1080],
-        "entry": steps[0]["id"],
-        "steps": steps,
-    }, ensure_ascii=False), encoding="utf-8")
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [{"id": "root", "type": "root", "children": [root_child]}, *tree_nodes],
+    }
+    if inputs is not None:
+        payload["blackboard"] = inputs
+    (path / "workflows" / f"{workflow_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def _write_config(path: Path) -> Path:
     (path / "config").mkdir()
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
-    # 子工作流：截屏成功即成功，缺 ok 输入会报错（inputs_schema required）
-    _write_workflow(path, "sub", [
-        {"id": "s", "action": "core.capture", "on_success": "$success"},
-    ])
-    (path / "workflows" / "sub.json").write_text(json.dumps({
-        "schema_version": 1,
-        "id": "sub",
-        "version": "1.0.0",
-        "reference_resolution": [1920, 1080],
-        "entry": "s",
-        "inputs_schema": {
-            "type": "object",
-            "required": ["ok"],
-            "properties": {"ok": {"type": "boolean"}},
-        },
-        "steps": [{"id": "s", "action": "core.capture", "on_success": "$success"}],
-    }, ensure_ascii=False), encoding="utf-8")
+    # 子工作流：截屏成功即成功，缺 ok 输入会报错（inputs required）
+    _write_workflow(
+        path, "sub",
+        [{"id": "s", "action": "core.capture"}],
+        [{"from": "s", "event": "success", "to": "$success"}],
+        inputs={"ok": {"type": "boolean", "required": True}},
+    )
     config_path = path / "config" / "config.json"
     config_path.write_text(json.dumps({
         "schema_version": 2,
@@ -80,7 +100,7 @@ def _write_config(path: Path) -> Path:
     return config_path
 
 
-def _run(config: Any, workflow_id: str) -> object:
+def _run(config: object, workflow_id: str) -> object:
     job = JobConfig(
         id=f"run-{workflow_id}",
         workflow=workflow_id,
@@ -104,13 +124,13 @@ def test_subworkflow_success_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyP
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     _write_workflow(tmp_path, "parent_ok", [
-        {"id": "cap", "action": "core.capture", "on_success": "exec_sub"},
-        {"id": "exec_sub", "action": "workflow.run",
-         "with": {"workflow": "sub", "inputs": {"ok": True}},
-         "on_success": "check"},
-        {"id": "check", "action": "core.assert",
-         "with": {"value": {"eq": [{"$ref": "steps.exec_sub.output.status"}, "succeeded"]}},
-         "on_success": "$success", "on_failure": "$failure"},
+        {"id": "cap", "action": "core.capture"},
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "sub", "inputs": {"ok": True}}},
+    ], [
+        {"from": "cap", "event": "success", "to": "exec_sub"},
+        {"from": "exec_sub", "event": "success", "to": "check"},
+        {"from": "check", "event": "success", "to": "$success"},
+        {"from": "check", "event": "failure", "to": "$failure"},
     ])
     record = _run(config, "parent_ok")
     assert record.status.value == "succeeded"
@@ -121,16 +141,17 @@ def test_subworkflow_success_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_subworkflow_missing_input_fails_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # 子工作流缺少必填输入 ok → 步骤失败（category config），父走 on_failure
+    # 子工作流缺少必填输入 ok → 节点失败（category config），父走 failure 边
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     _write_workflow(tmp_path, "parent_bad_input", [
-        {"id": "exec_sub", "action": "workflow.run",
-         "with": {"workflow": "sub", "inputs": {}},
-         "on_success": "$failure", "on_failure": "$success"},
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "sub", "inputs": {}}},
+    ], [
+        {"from": "exec_sub", "event": "success", "to": "$failure"},
+        {"from": "exec_sub", "event": "failure", "to": "$success"},
     ])
     record = _run(config, "parent_bad_input")
-    assert record.status.value == "succeeded"  # on_failure → $success
+    assert record.status.value == "failed"
     step = _step(record, "exec_sub")
     assert step is not None and step["status"] == "failed"
     assert step["error_category"] == "config"
@@ -140,12 +161,13 @@ def test_subworkflow_missing_file_fails_call(tmp_path: Path, monkeypatch: pytest
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     _write_workflow(tmp_path, "parent_missing", [
-        {"id": "exec_sub", "action": "workflow.run",
-         "with": {"workflow": "no_such_workflow"},
-         "on_success": "$failure", "on_failure": "$success"},
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "no_such_workflow"}},
+    ], [
+        {"from": "exec_sub", "event": "success", "to": "$failure"},
+        {"from": "exec_sub", "event": "failure", "to": "$success"},
     ])
     record = _run(config, "parent_missing")
-    assert record.status.value == "succeeded"
+    assert record.status.value == "failed"
     step = _step(record, "exec_sub")
     assert step is not None and step["status"] == "failed"
     assert step["error_category"] in {"config", "workflow"}
@@ -156,25 +178,26 @@ def test_subworkflow_recursion_is_blocked(tmp_path: Path, monkeypatch: pytest.Mo
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     _write_workflow(tmp_path, "recursive", [
-        {"id": "exec_sub", "action": "workflow.run",
-         "with": {"workflow": "recursive"},
-         "on_success": "$failure", "on_failure": "$success"},
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "recursive"}},
+    ], [
+        {"from": "exec_sub", "event": "success", "to": "$failure"},
+        {"from": "exec_sub", "event": "failure", "to": "$success"},
     ])
     record = _run(config, "recursive")
-    assert record.status.value == "succeeded"
+    assert record.status.value == "failed"
     step = _step(record, "exec_sub")
     assert step is not None and step["status"] == "failed"
     assert "recursive" in str(step["error"])
 
 
 def test_subworkflow_screenshot_thumbnail_in_parent_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # 子脚本里截的屏，会作为父步骤的截图产物进入事件文件（缩略图）
+    # 子脚本里截的屏，会作为父节点的截图产物进入事件文件（缩略图）
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     _write_workflow(tmp_path, "parent_snap", [
-        {"id": "exec_sub", "action": "workflow.run",
-         "with": {"workflow": "sub", "inputs": {"ok": True}},
-         "on_success": "$success"},
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "sub", "inputs": {"ok": True}}},
+    ], [
+        {"from": "exec_sub", "event": "success", "to": "$success"},
     ])
     events_path = tmp_path / "artifacts" / "runs" / "events-latest.jsonl"
     job = JobConfig(
@@ -186,5 +209,5 @@ def test_subworkflow_screenshot_thumbnail_in_parent_events(tmp_path: Path, monke
     parent_steps = [line for line in lines if line["type"] == "step" and line["step_id"] == "exec_sub"]
     parent_step = parent_steps[-1]  # 最后一条是完成态（之前有 running 事件）
     assert parent_step["step"]["status"] == "succeeded"
-    assert parent_step["thumbnail"]  # 子脚本截屏成为父步骤截图产物
+    assert parent_step["thumbnail"]  # 子脚本截屏成为父节点截图产物
     assert Path(parent_step["screenshot"]).is_file()

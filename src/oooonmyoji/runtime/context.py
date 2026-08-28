@@ -49,12 +49,14 @@ class TaskContextImpl:
         self.retry_max_delay = retry_max_delay
         self.subworkflow_runner = subworkflow_runner
         self._last_frame: DeviceFrame | None = None
-        self._action_cancel_event = threading.Event()
+        self._action_local = threading.local()
+        self._state_lock = threading.RLock()
         self._deadline: float | None = None
 
     @property
     def last_frame(self) -> DeviceFrame | None:
-        return self._last_frame
+        with self._state_lock:
+            return self._last_frame
 
     def capture(self) -> DeviceFrame:
         self.check_cancelled()
@@ -64,8 +66,10 @@ class TaskContextImpl:
             base_delay_seconds=self.retry_base_delay,
             max_delay_seconds=self.retry_max_delay,
             retry_if=lambda error: isinstance(error, DeviceError),
+            jitter=True,
         )
-        self._last_frame = frame
+        with self._state_lock:
+            self._last_frame = frame
         return frame
 
     def find_template(
@@ -75,9 +79,10 @@ class TaskContextImpl:
         roi: Sequence[int] | None = None,
         threshold: float = 0.85,
         max_results: int = 20,
+        scale_search: bool = False,
     ) -> list[TemplateMatch]:
         self.check_cancelled()
-        frame = self._last_frame or self.capture()
+        frame = self.last_frame or self.capture()
         reference_roi = None
         if roi is not None:
             values = tuple(int(value) for value in roi)
@@ -94,13 +99,13 @@ class TaskContextImpl:
                 template_path.relative_to(self.template_root.resolve())
             except ValueError as exc:
                 raise ValueError("template path must stay below the project root") from exc
-        return self.template_matcher.find(frame, template_path, roi=reference_roi, threshold=threshold, max_results=max_results)
+        return self.template_matcher.find(frame, template_path, roi=reference_roi, threshold=threshold, max_results=max_results, scale_search=scale_search)
 
     def ocr(self, *, roi: Sequence[int] | None = None) -> list[OcrResult]:
         self.check_cancelled()
         if self.ocr_engine is None:
             raise RuntimeError("OCR is disabled or unavailable")
-        frame = self._last_frame or self.capture()
+        frame = self.last_frame or self.capture()
         actual_roi = None
         if roi is not None:
             actual_roi = self.mapper.rect(Rect(*tuple(int(value) for value in roi))).as_tuple()
@@ -112,6 +117,7 @@ class TaskContextImpl:
             attempts=self.ocr_attempts,
             base_delay_seconds=self.retry_base_delay,
             max_delay_seconds=self.retry_max_delay,
+            jitter=True,
         )
         if actual_roi is None:
             return results
@@ -141,13 +147,14 @@ class TaskContextImpl:
         present: bool = True,
         roi: Sequence[int] | None = None,
         threshold: float = 0.85,
+        scale_search: bool = False,
     ) -> list[TemplateMatch]:
         deadline = time.monotonic() + timeout_seconds
         while True:
             self.check_cancelled()
             if isinstance(target, (str, Path)):
                 self.capture()
-                matches = self.find_template(target, roi=roi, threshold=threshold)
+                matches = self.find_template(target, roi=roi, threshold=threshold, scale_search=scale_search)
             else:
                 matches = []
             if bool(matches) is present:
@@ -157,15 +164,49 @@ class TaskContextImpl:
                 raise TimeoutError(f"timed out waiting for template to {state}: {target}")
             time.sleep(0.1)
 
+    def wait_for_text(
+        self,
+        text: str,
+        *,
+        timeout_seconds: float,
+        roi: Sequence[int] | None = None,
+        min_confidence: float = 0.0,
+        present: bool = True,
+    ) -> list[OcrResult]:
+        """轮询 OCR 直到指定文本出现/消失（超时抛 TimeoutError）。"""
+
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            self.check_cancelled()
+            results = self.ocr(roi=roi)
+            matched = [result for result in results if text in result.text and result.confidence >= min_confidence]
+            if bool(matched) is present:
+                return matched
+            if time.monotonic() >= deadline:
+                state = "出现" if present else "消失"
+                raise TimeoutError(f"等待 OCR 文本{state}超时：{text}")
+            time.sleep(0.1)
+
     def check_cancelled(self) -> None:
-        if self.cancel_event.is_set() or self._action_cancel_event.is_set():
+        action_event = getattr(self._action_local, "cancel_event", None)
+        if self.cancel_event.is_set() or (action_event is not None and action_event.is_set()):
             raise CancelledError("task cancellation requested")
 
-    def begin_action(self) -> None:
-        self._action_cancel_event.clear()
+    def begin_action(self) -> threading.Event:
+        """Create an isolated cancellation token for one Action invocation."""
+        return threading.Event()
 
-    def request_action_cancel(self) -> None:
-        self._action_cancel_event.set()
+    def bind_action(self, token: threading.Event) -> None:
+        self._action_local.cancel_event = token
+
+    def end_action(self, token: threading.Event) -> None:
+        if getattr(self._action_local, "cancel_event", None) is token:
+            del self._action_local.cancel_event
+
+    def request_action_cancel(self, token: threading.Event | None = None) -> None:
+        target = token or getattr(self._action_local, "cancel_event", None)
+        if target is not None:
+            target.set()
 
     def set_deadline(self, deadline: float) -> None:
         self._deadline = deadline

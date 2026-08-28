@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "name": "workflow.select",
+  "version": "1.0.0",
+  "entry": "builtin:SelectWorkflowAction",
+  "description": "UE 行为树 Selector：按顺序尝试 workflows 中的子工作流，第一个成功即成功（失败回退到下一个），全部失败则本节点失败。输出回执 { workflow, status, output, attempts }。",
+  "parameters": {
+    "workflows": {
+      "type": "array",
+      "items": { "type": "string", "min_length": 1 },
+      "min_items": 1,
+      "required": true,
+      "description": "候选子工作流（按顺序尝试）"
+    },
+    "inputs": {
+      "type": "object",
+      "description": "传给每个候选子工作流的输入，可含绑定引用"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "workflow": { "type": "string" },
+      "status": { "type": "string" },
+      "output": { "type": "object" },
+      "attempts": { "type": "array" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

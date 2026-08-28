@@ -338,9 +338,13 @@ class MumuDevice:
         return frame
 
     def close(self) -> None:
-        if self.handle:
-            self._disconnect(self.handle)
-            self.handle = 0
+        handle, self.handle = self.handle, 0
+        if handle:
+            try:
+                self._disconnect(handle)
+            except OSError:
+                # 模拟器可能已退出导致句柄失效；资源清理必须继续
+                pass
         self._buffer = None
         self._buffer_pointer = None
         self._buffer_size = 0

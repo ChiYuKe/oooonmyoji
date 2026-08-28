@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "name": "vision.ocr",
+  "version": "1.0.0",
+  "entry": "builtin:OcrAction",
+  "description": "对画面（可选 roi）做 OCR，返回识别文本项数组。",
+  "parameters": {
+    "roi": {
+      "type": "rect",
+      "description": "裁剪区域 [x, y, w, h]"
+    }
+  },
+  "outputs": { "type": "array" },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

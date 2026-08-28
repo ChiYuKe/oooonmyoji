@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "name": "vision.match_template",
+  "version": "1.0.0",
+  "entry": "builtin:MatchTemplateAction",
+  "description": "在画面中匹配模板图，返回匹配对象数组（不等待）。输出数组，元素含 x/y/width/height/confidence/reference/center。",
+  "parameters": {
+    "template": {
+      "type": "asset",
+      "required": true,
+      "editor": "asset",
+      "description": "模板图路径，如 assets/templates/xxx.png"
+    },
+    "roi": {
+      "type": "rect",
+      "description": "裁剪区域 [x, y, w, h]"
+    },
+    "threshold": {
+      "type": "number",
+      "default": 0.85,
+      "min": 0,
+      "max": 1,
+      "description": "匹配置信度阈值，默认 0.85"
+    },
+    "max_results": {
+      "type": "integer",
+      "default": 20,
+      "min": 1,
+      "description": "最多返回的匹配数，默认 20"
+    },
+    "scale_search": {
+      "type": "boolean",
+      "default": false,
+      "description": "是否启用多尺度搜索"
+    }
+  },
+  "outputs": { "type": "array" },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

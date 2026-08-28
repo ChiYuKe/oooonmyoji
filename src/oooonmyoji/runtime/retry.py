@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable
 from typing import TypeVar
@@ -17,6 +18,7 @@ def retry_call(
     max_delay_seconds: float = 3.0,
     retry_if: Callable[[BaseException], bool] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    jitter: bool = False,
 ) -> T:
     if attempts < 1:
         raise ValueError("attempts must be at least 1")
@@ -32,7 +34,10 @@ def retry_call(
             last_error = exc
             if attempt + 1 >= attempts or (retry_if is not None and not retry_if(exc)):
                 raise
-            sleep(min(max_delay_seconds, base_delay_seconds * (2**attempt)))
+            delay = min(max_delay_seconds, base_delay_seconds * (2**attempt))
+            if jitter and delay > 0:
+                delay = random.uniform(0, delay)
+            sleep(delay)
     assert last_error is not None
     raise last_error
 

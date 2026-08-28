@@ -1,4 +1,4 @@
-"""Safe structured reference and condition evaluation."""
+"""Structured blackboard and Behavior Tree node-output references."""
 
 from __future__ import annotations
 
@@ -6,47 +6,45 @@ from typing import Any
 
 from ..exceptions import WorkflowError
 
-
 MISSING = object()
 _NO_DEFAULT = object()
 
 
+def is_binding(value: Any) -> bool:
+    return isinstance(value, dict) and set(value) == {"ref"} and isinstance(value.get("ref"), str)
+
+
 class ReferenceResolver:
-    def __init__(self, inputs: dict[str, Any], outputs: dict[str, Any]) -> None:
-        self.inputs = inputs
+    def __init__(self, blackboard: dict[str, Any], outputs: dict[str, Any]) -> None:
+        self.blackboard = blackboard
         self.outputs = outputs
 
     def reference(self, value: str, *, default: Any = _NO_DEFAULT) -> Any:
         parts = value.split(".")
-        if len(parts) >= 2 and parts[0] == "inputs":
-            current: Any = self.inputs
-            segments = parts[1:]
-        elif len(parts) >= 4 and parts[0] == "steps" and parts[2] == "output":
-            if parts[1] not in self.outputs:
-                if default is not _NO_DEFAULT:
-                    return default
-                raise WorkflowError(f"workflow output is not available: {value}")
-            current = self.outputs[parts[1]]
-            segments = parts[3:]
+        if len(parts) >= 2 and parts[0] == "blackboard" and all(parts[1:]):
+            current: Any = self.blackboard
+            path = parts[1:]
+        elif len(parts) >= 4 and parts[0] == "nodes" and parts[2] == "output" and all(parts[1:]):
+            current = self.outputs
+            path = [parts[1], *parts[3:]]
         else:
+            if default is not _NO_DEFAULT:
+                return default
             raise WorkflowError(f"invalid structured reference: {value}")
-        for segment in segments:
-            try:
-                if isinstance(current, list):
-                    current = current[int(segment)]
-                elif isinstance(current, dict):
-                    current = current[segment]
-                else:
-                    raise KeyError(segment)
-            except (KeyError, IndexError, TypeError, ValueError) as exc:
+        for part in path:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+                current = current[int(part)]
+            else:
                 if default is not _NO_DEFAULT:
                     return default
-                raise WorkflowError(f"reference path does not exist: {value}") from exc
+                raise WorkflowError(f"reference is unavailable: {value}")
         return current
 
     def value(self, value: Any) -> Any:
-        if isinstance(value, dict) and set(value) == {"$ref"}:
-            return self.reference(value["$ref"])
+        if is_binding(value):
+            return self.reference(value["ref"])
         if isinstance(value, dict):
             return {key: self.value(child) for key, child in value.items()}
         if isinstance(value, list):
@@ -57,23 +55,21 @@ class ReferenceResolver:
         if isinstance(expression, bool):
             return expression
         if not isinstance(expression, dict) or len(expression) != 1:
-            raise WorkflowError("condition must be a boolean or one operator object")
+            raise WorkflowError("condition must use exactly one operator")
         operator, operands = next(iter(expression.items()))
-        if operator == "exists":
-            if not isinstance(operands, dict) or set(operands) != {"$ref"}:
-                raise WorkflowError("exists requires a structured reference")
-            return self.reference(operands["$ref"], default=MISSING) is not MISSING
+        if operator == "and":
+            return all(self.condition(item) for item in operands)
+        if operator == "or":
+            return any(self.condition(item) for item in operands)
         if operator == "not":
             return not self.condition(operands)
-        if operator in {"and", "or"}:
-            if not isinstance(operands, list):
-                raise WorkflowError(f"{operator} requires an array")
-            values = (self.condition(item) for item in operands)
-            return all(values) if operator == "and" else any(values)
-        if operator not in {"eq", "ne", "gt", "gte", "lt", "lte", "contains"} or not isinstance(operands, list) or len(operands) != 2:
-            raise WorkflowError(f"unsupported or malformed condition operator: {operator}")
-        left = self.value(operands[0])
-        right = self.value(operands[1])
+        if operator == "exists":
+            if not is_binding(operands):
+                raise WorkflowError("exists expects a structured reference")
+            return self.reference(operands["ref"], default=MISSING) is not MISSING
+        if not isinstance(operands, list) or len(operands) != 2:
+            raise WorkflowError(f"condition operator {operator} expects two operands")
+        left, right = (self.value(item) for item in operands)
         if operator == "eq":
             return left == right
         if operator == "ne":
@@ -86,9 +82,9 @@ class ReferenceResolver:
             return left < right
         if operator == "lte":
             return left <= right
-        if isinstance(left, (str, list, tuple, dict)):
+        if operator == "contains":
             return right in left
-        return False
+        raise WorkflowError(f"unsupported condition operator: {operator}")
 
 
-__all__ = ["MISSING", "ReferenceResolver"]
+__all__ = ["MISSING", "ReferenceResolver", "is_binding"]

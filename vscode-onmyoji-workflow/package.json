@@ -1,8 +1,8 @@
 {
   "name": "onmyoji-workflow-helper",
   "displayName": "Onmyoji Workflow Helper",
-  "description": "为 oooonmyoji 自动化项目编写 workflows/*.json：智能补全/校验/悬停提示 + 可视化流程图编辑器（支持内置与自定义 Action）",
-  "version": "0.1.17",
+  "description": "为 oooonmyoji 自动化项目编写 Behavior Tree schema v3 工作流：智能补全、校验、悬停提示与可视化编辑器（支持内置与自定义 Action）",
+  "version": "0.2.0",
   "publisher": "oooonmyoji",
   "license": "MIT",
   "engines": {
@@ -23,38 +23,38 @@
   ],
   "activationEvents": [
     "workspaceContains:workflows/*.json",
-   "workspaceContains:plugins/actions/*/action.json",
-   "onCommand:onmyoji.openWorkflowEditor",
-   "onCommand:onmyoji.createWorkflow",
+    "workspaceContains:plugins/actions/*/action.json",
+    "onCommand:onmyoji.openWorkflowEditor",
+    "onCommand:onmyoji.createWorkflow",
     "onCommand:onmyoji.runWorkflow",
-   "onCommand:onmyoji.validateCurrentWorkflow",
+    "onCommand:onmyoji.validateCurrentWorkflow",
     "onCommand:onmyoji.runEngineValidate",
     "onCommand:onmyoji.reloadActionCatalog"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-     {
-       "command": "onmyoji.openWorkflowEditor",
-       "title": "Onmyoji: 打开工作流可视化编辑器",
-       "category": "Onmyoji",
-       "shortTitle": "打开工作流编辑器",
-       "icon": "$(type-hierarchy)"
-     },
-     {
-       "command": "onmyoji.createWorkflow",
-       "title": "Onmyoji: 新建工作流",
-       "category": "Onmyoji",
-       "icon": "$(new-file)"
-     },
+      {
+        "command": "onmyoji.openWorkflowEditor",
+        "title": "Onmyoji: 打开工作流可视化编辑器",
+        "category": "Onmyoji",
+        "shortTitle": "打开工作流编辑器",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "onmyoji.createWorkflow",
+        "title": "Onmyoji: 新建工作流",
+        "category": "Onmyoji",
+        "icon": "$(new-file)"
+      },
       {
         "command": "onmyoji.runWorkflow",
         "title": "Onmyoji: 执行当前工作流",
         "category": "Onmyoji",
         "icon": "$(play)"
       },
-     {
-       "command": "onmyoji.validateCurrentWorkflow",
+      {
+        "command": "onmyoji.validateCurrentWorkflow",
         "title": "Onmyoji: 校验当前工作流 JSON",
         "category": "Onmyoji"
       },
@@ -70,16 +70,16 @@
       }
     ],
     "menus": {
-     "commandPalette": [
-       {
-         "command": "onmyoji.createWorkflow"
-       },
+      "commandPalette": [
+        {
+          "command": "onmyoji.createWorkflow"
+        },
         {
           "command": "onmyoji.runWorkflow",
           "when": "onmyoji.workflowFile"
         },
-      {
-        "command": "onmyoji.validateCurrentWorkflow",
+        {
+          "command": "onmyoji.validateCurrentWorkflow",
           "when": "editorLangId == json"
         },
         {
@@ -87,35 +87,35 @@
           "when": "resourceScheme == file"
         }
       ],
-     "editor/title": [
-       {
-         "command": "onmyoji.openWorkflowEditor",
-         "when": "onmyoji.workflowFile",
-         "group": "navigation@1"
-       }
-        ,{
+      "editor/title": [
+        {
+          "command": "onmyoji.openWorkflowEditor",
+          "when": "onmyoji.workflowFile",
+          "group": "navigation@1"
+        },
+        {
           "command": "onmyoji.runWorkflow",
           "when": "onmyoji.workflowFile",
           "group": "navigation@2"
         }
-     ],
+      ],
       "editor/context": [
         {
           "command": "onmyoji.validateCurrentWorkflow",
           "when": "onmyoji.workflowFile",
           "group": "navigation@100"
         },
-       {
-         "command": "onmyoji.openWorkflowEditor",
-         "when": "onmyoji.workflowFile",
-         "group": "navigation@101"
-       }
-        ,{
+        {
+          "command": "onmyoji.openWorkflowEditor",
+          "when": "onmyoji.workflowFile",
+          "group": "navigation@101"
+        },
+        {
           "command": "onmyoji.runWorkflow",
           "when": "onmyoji.workflowFile",
           "group": "navigation@102"
         }
-     ],
+      ],
       "explorer/context": [
         {
           "command": "onmyoji.openWorkflowEditor",
@@ -163,12 +163,14 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "jsonc-parser": "^3.3.1",
     "vscode-json-languageservice": "^4.2.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^3.9.2",
     "typescript": "^5.4.0"
   }
 }

@@ -1,4 +1,4 @@
-"""Immutable workflow snapshots loaded from JSON."""
+"""Immutable Behavior Tree workflow snapshots."""
 
 from __future__ import annotations
 
@@ -6,24 +6,40 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "task")
+COMPOSITE_TYPES = ("root", "selector", "sequence", "simple_parallel")
+DECORATOR_TYPES = ("condition", "cooldown", "timeout", "retry", "repeat")
+PARALLEL_FINISH_MODES = ("abort_background", "wait_for_background")
+
 
 @dataclass(frozen=True)
-class StepRetry:
+class BehaviorDecorator:
+    type: str
+    expression: Any = None
+    seconds: float | None = None
     attempts: int = 1
     delay_seconds: float = 0.0
+    count: int = 1
 
 
 @dataclass(frozen=True)
-class WorkflowStep:
+class WorkflowNode:
     id: str
-    action: str
-    arguments: dict[str, Any] = field(default_factory=dict)
-    when: Any = None
-    on_success: str | None = None
-    on_failure: str | None = None
-    on_skip: str | None = None
-    retry: StepRetry = field(default_factory=StepRetry)
-    timeout_seconds: float | None = None
+    type: str
+    name: str | None = None
+    action: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+    children: tuple[str, ...] = ()
+    decorators: tuple[BehaviorDecorator, ...] = ()
+    finish_mode: str = "abort_background"
+
+    @property
+    def is_task(self) -> bool:
+        return self.type == "task"
+
+    @property
+    def is_composite(self) -> bool:
+        return self.type in COMPOSITE_TYPES
 
 
 @dataclass(frozen=True)
@@ -31,26 +47,28 @@ class WorkflowSpec:
     schema_version: int
     workflow_id: str
     version: str
-    reference_resolution: tuple[int, int]
-    entry: str
+    resolution: tuple[int, int]
+    root: str
     timeout_seconds: float
     max_steps: int
-    inputs_schema: dict[str, Any]
-    steps: tuple[WorkflowStep, ...]
+    blackboard_schema: dict[str, Any]
+    nodes: tuple[WorkflowNode, ...]
     path: Path
     file_hash: str
     raw: dict[str, Any] = field(repr=False)
     retry_safe: bool = False
 
     @property
-    def step_map(self) -> dict[str, WorkflowStep]:
-        return {step.id: step for step in self.steps}
-
-    def next_step(self, step_id: str) -> str:
-        index = next(index for index, step in enumerate(self.steps) if step.id == step_id)
-        if index + 1 >= len(self.steps):
-            return "$success"
-        return self.steps[index + 1].id
+    def node_map(self) -> dict[str, WorkflowNode]:
+        return {node.id: node for node in self.nodes}
 
 
-__all__ = ["StepRetry", "WorkflowSpec", "WorkflowStep"]
+__all__ = [
+    "COMPOSITE_TYPES",
+    "DECORATOR_TYPES",
+    "NODE_TYPES",
+    "PARALLEL_FINISH_MODES",
+    "BehaviorDecorator",
+    "WorkflowNode",
+    "WorkflowSpec",
+]

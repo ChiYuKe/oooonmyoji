@@ -113,6 +113,9 @@ def _instance_worker(
         finally:
             with state_lock:
                 completed_run_ids.add(command["run_id"])
+                if len(completed_run_ids) >= 512:
+                    # 防止长驻 worker 内存无限增长，只保留最近的完成记录
+                    completed_run_ids = set(list(completed_run_ids)[-256:])
                 current_run_id = None
             if stop_requested.is_set():
                 return

@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "name": "core.capture",
+  "version": "1.0.0",
+  "entry": "builtin:CaptureAction",
+  "description": "截取当前画面一帧（无参数）。输出 { width, height }，并把该帧保存为“最近一帧”供后续 save_frame 使用。",
+  "parameters": {},
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "width": { "type": "integer" },
+      "height": { "type": "integer" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

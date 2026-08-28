@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "name": "workflow.sequence",
+  "version": "1.0.0",
+  "entry": "builtin:SequenceWorkflowAction",
+  "description": "UE 行为树 Sequence：按顺序执行 workflows 中的子工作流，全部成功才成功，任一失败立即中止。输出回执 { workflow, status, output, attempts }。",
+  "parameters": {
+    "workflows": {
+      "type": "array",
+      "items": { "type": "string", "min_length": 1 },
+      "min_items": 1,
+      "required": true,
+      "description": "子工作流（按顺序执行）"
+    },
+    "inputs": {
+      "type": "object",
+      "description": "传给每个子工作流的输入，可含绑定引用"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "workflow": { "type": "string" },
+      "status": { "type": "string" },
+      "output": { "type": "object" },
+      "attempts": { "type": "array" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

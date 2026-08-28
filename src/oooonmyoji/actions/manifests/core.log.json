@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "name": "core.log",
+  "version": "1.0.0",
+  "entry": "builtin:LogAction",
+  "description": "记录一条日志。输出 { message }。",
+  "parameters": {
+    "message": {
+      "type": "string",
+      "required": true,
+      "description": "日志文本"
+    },
+    "fields": {
+      "type": "object",
+      "description": "附加结构化字段（可选）"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "message": { "type": "string" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

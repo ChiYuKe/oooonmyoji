@@ -1,65 +1,223 @@
-"""JSON Schema and graph validation for workflow files."""
+"""Schema, reference, and structural validation for Behavior Tree v3 files."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ..actions import ActionRegistry
+from ..actions.manifest import ParameterDefinition, apply_parameter_defaults, compile_parameters
 from ..config.loader import _validate_json_schema
-from ..exceptions import ConfigError, WorkflowError
-from .model import StepRetry, WorkflowSpec, WorkflowStep
+from ..exceptions import ConfigError
+from .model import (
+    DECORATOR_TYPES,
+    NODE_TYPES,
+    PARALLEL_FINISH_MODES,
+    BehaviorDecorator,
+    WorkflowNode,
+    WorkflowSpec,
+)
+from .resolver import is_binding
 
+CONDITION_OPERATORS = {"exists", "eq", "ne", "gt", "gte", "lt", "lte", "contains", "and", "or", "not"}
+_BINDING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["ref"],
+    "properties": {"ref": {"type": "string", "minLength": 1}},
+    "additionalProperties": False,
+}
 
 WORKFLOW_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
-    "required": ["schema_version", "id", "version", "reference_resolution", "entry", "steps"],
+    "required": ["schema_version", "id", "version", "resolution", "root", "nodes"],
     "properties": {
-        "schema_version": {"const": 1},
+        "schema_version": {"const": 3},
         "id": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},
-        "reference_resolution": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 1}, {"type": "integer", "minimum": 1}], "minItems": 2, "maxItems": 2},
-        "entry": {"type": "string", "minLength": 1},
-        "limits": {"type": "object", "properties": {"timeout_seconds": {"type": "number", "exclusiveMinimum": 0}, "max_steps": {"type": "integer", "minimum": 1}}, "additionalProperties": False},
-        "inputs_schema": {"type": "object"},
-        "steps": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["id", "action"], "properties": {
-            "id": {"type": "string", "minLength": 1},
-            "action": {"type": "string", "minLength": 1},
-            "with": {"type": "object"},
-            "when": {},
-            "on_success": {"type": "string", "minLength": 1},
-            "on_failure": {"type": "string", "minLength": 1},
-            "on_skip": {"type": "string", "minLength": 1},
-            "retry": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "object", "properties": {"attempts": {"type": "integer", "minimum": 1}, "delay_seconds": {"type": "number", "minimum": 0}}, "additionalProperties": False}]},
-            "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
-        }, "additionalProperties": False}},
+        "resolution": {
+            "type": "array",
+            "prefixItems": [
+                {"type": "integer", "minimum": 1},
+                {"type": "integer", "minimum": 1},
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+        },
+        "root": {"type": "string", "minLength": 1},
+        "blackboard": {"type": "object"},
+        "retry_safe": {"type": "boolean"},
+        "limits": {
+            "type": "object",
+            "properties": {
+                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "max_steps": {"type": "integer", "minimum": 1},
+            },
+            "additionalProperties": False,
+        },
+        "nodes": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+                "type": "object",
+                "required": ["id", "type"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "type": {"enum": list(NODE_TYPES)},
+                    "name": {"type": "string", "minLength": 1},
+                    "action": {"type": "string", "minLength": 1},
+                    "params": {"type": "object"},
+                    "children": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "uniqueItems": True,
+                    },
+                    "decorators": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["type"],
+                            "properties": {
+                                "type": {"enum": list(DECORATOR_TYPES)},
+                                "expression": {},
+                                "seconds": {"type": "number", "exclusiveMinimum": 0},
+                                "attempts": {"type": "integer", "minimum": 1},
+                                "delay_seconds": {"type": "number", "minimum": 0},
+                                "count": {"type": "integer", "minimum": 1},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "finish_mode": {"enum": list(PARALLEL_FINISH_MODES)},
+                },
+                "additionalProperties": False,
+            },
+        },
     },
-    # 允许下划线前缀的元数据字段（如 _layout 卡片位置布局），其余未知顶层字段仍拒绝
     "patternProperties": {"^_": {}},
     "additionalProperties": False,
 }
 
-TERMINALS = {"$success", "$failure", "$cancelled"}
-CONDITION_OPERATORS = {"exists", "eq", "ne", "gt", "gte", "lt", "lte", "contains", "and", "or", "not"}
+
+def _schema_at_path(schema: dict[str, Any], segments: list[str]) -> dict[str, Any] | None:
+    current = schema
+    for segment in segments:
+        if not current:
+            return {}
+        if current.get("type") == "object":
+            properties = current.get("properties")
+            if isinstance(properties, dict) and isinstance(properties.get(segment), dict):
+                current = properties[segment]
+                continue
+            additional = current.get("additionalProperties", True)
+            if additional is False:
+                return None
+            current = additional if isinstance(additional, dict) else {}
+            continue
+        if current.get("type") == "array":
+            try:
+                index = int(segment)
+            except ValueError:
+                return None
+            prefix = current.get("prefixItems")
+            if isinstance(prefix, list) and index < len(prefix) and isinstance(prefix[index], dict):
+                current = prefix[index]
+                continue
+            items = current.get("items")
+            if items is False:
+                return None
+            current = items if isinstance(items, dict) else {}
+            continue
+        return None
+    return current
 
 
-def _ref_path(value: str, *, step_ids: set[str], path: str) -> None:
+def _schema_types(schema: dict[str, Any] | None) -> set[str]:
+    if not schema:
+        return set()
+    value = schema.get("type")
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, list):
+        return {item for item in value if isinstance(item, str)}
+    return set()
+
+
+def _binding_types_compatible(expected: dict[str, Any] | None, actual: dict[str, Any]) -> bool:
+    expected_types = _schema_types(expected)
+    actual_types = _schema_types(actual)
+    if not expected_types or not actual_types:
+        return True
+    if "number" in expected_types and "integer" in actual_types:
+        actual_types = (actual_types - {"integer"}) | {"number"}
+    return bool(expected_types & actual_types)
+
+
+def _ref_schema(
+    value: str,
+    *,
+    node_ids: set[str],
+    blackboard_schema: dict[str, Any],
+    output_schemas: dict[str, dict[str, Any] | None],
+    path: str,
+) -> dict[str, Any]:
     parts = value.split(".")
-    if len(parts) >= 2 and parts[0] == "inputs" and all(parts[1:]):
-        return
-    if len(parts) >= 4 and parts[0] == "steps" and parts[2] == "output" and parts[1] in step_ids and all(parts[3:]):
-        return
+    if len(parts) >= 2 and parts[0] == "blackboard" and all(parts[1:]):
+        resolved = _schema_at_path(blackboard_schema, parts[1:])
+        if resolved is not None:
+            return resolved
+        raise ConfigError(f"{path} references an unknown blackboard key: {value}")
+    if len(parts) >= 4 and parts[0] == "nodes" and parts[2] == "output" and parts[1] in node_ids and all(parts[3:]):
+        output_schema = output_schemas.get(parts[1])
+        if output_schema is None:
+            raise ConfigError(f"{path} references a node without output: {value}")
+        resolved = _schema_at_path(output_schema, parts[3:])
+        if resolved is not None:
+            return resolved
+        raise ConfigError(f"{path} references an unknown Action output: {value}")
     raise ConfigError(f"{path} has invalid structured reference: {value}")
 
 
-def _validate_ref_and_conditions(value: Any, *, step_ids: set[str], path: str, condition: bool = False) -> None:
+def _schema_child(schema: dict[str, Any] | None, key: str | int) -> dict[str, Any] | None:
+    if not schema:
+        return None
+    if isinstance(key, str) and schema.get("type") == "object":
+        properties = schema.get("properties")
+        if isinstance(properties, dict) and isinstance(properties.get(key), dict):
+            return properties[key]
+    if isinstance(key, int) and schema.get("type") == "array":
+        prefix = schema.get("prefixItems")
+        if isinstance(prefix, list) and key < len(prefix) and isinstance(prefix[key], dict):
+            return prefix[key]
+        items = schema.get("items")
+        return items if isinstance(items, dict) else None
+    return None
+
+
+def _validate_value(
+    value: Any,
+    *,
+    node_ids: set[str],
+    blackboard_schema: dict[str, Any],
+    output_schemas: dict[str, dict[str, Any] | None],
+    path: str,
+    condition: bool = False,
+    expected_schema: dict[str, Any] | None = None,
+) -> None:
     if isinstance(value, dict):
-        if "$ref" in value:
-            if set(value) != {"$ref"} or not isinstance(value["$ref"], str):
-                raise ConfigError(f"{path} must contain only a string $ref")
-            _ref_path(value["$ref"], step_ids=step_ids, path=path)
+        if "ref" in value:
+            if not is_binding(value):
+                raise ConfigError(f"{path} must contain only a string ref")
+            actual = _ref_schema(
+                value["ref"],
+                node_ids=node_ids,
+                blackboard_schema=blackboard_schema,
+                output_schemas=output_schemas,
+                path=path,
+            )
+            if not _binding_types_compatible(expected_schema, actual):
+                raise ConfigError(f"{path} binding type is incompatible with its Action parameter: {value['ref']}")
             return
         if condition:
             if len(value) != 1 or next(iter(value)) not in CONDITION_OPERATORS:
@@ -69,125 +227,225 @@ def _validate_ref_and_conditions(value: Any, *, step_ids: set[str], path: str, c
                 if not isinstance(operands, list) or not operands:
                     raise ConfigError(f"{path}.{operator} must be a non-empty array")
                 for index, operand in enumerate(operands):
-                    _validate_ref_and_conditions(operand, step_ids=step_ids, path=f"{path}.{operator}[{index}]", condition=True)
+                    _validate_value(operand, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}.{operator}[{index}]", condition=True)
             elif operator == "not":
-                _validate_ref_and_conditions(operands, step_ids=step_ids, path=f"{path}.not", condition=True)
+                _validate_value(operands, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}.not", condition=True)
             elif operator == "exists":
-                if not isinstance(operands, dict) or set(operands) != {"$ref"}:
+                if not is_binding(operands):
                     raise ConfigError(f"{path}.exists must contain a structured reference")
-                _validate_ref_and_conditions(operands, step_ids=step_ids, path=f"{path}.exists", condition=True)
+                _validate_value(operands, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}.exists")
             else:
                 if not isinstance(operands, list) or len(operands) != 2:
                     raise ConfigError(f"{path}.{operator} must contain two operands")
                 for index, operand in enumerate(operands):
-                    _validate_ref_and_conditions(operand, step_ids=step_ids, path=f"{path}.{operator}[{index}]", condition=False)
+                    _validate_value(operand, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}.{operator}[{index}]")
             return
         for key, child in value.items():
-            _validate_ref_and_conditions(child, step_ids=step_ids, path=f"{path}.{key}", condition=False)
+            _validate_value(child, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}.{key}", expected_schema=_schema_child(expected_schema, key))
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            _validate_ref_and_conditions(child, step_ids=step_ids, path=f"{path}[{index}]", condition=False)
+            _validate_value(child, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}[{index}]", expected_schema=_schema_child(expected_schema, index))
     elif condition and not isinstance(value, bool):
         raise ConfigError(f"{path} must be a boolean or condition object")
 
 
-def _targets(spec_steps: tuple[WorkflowStep, ...], step: WorkflowStep) -> Iterable[str]:
-    index = next(index for index, item in enumerate(spec_steps) if item.id == step.id)
-    yield step.on_success or (spec_steps[index + 1].id if index + 1 < len(spec_steps) else "$success")
-    yield step.on_failure or "$failure"
-    yield step.on_skip or (spec_steps[index + 1].id if index + 1 < len(spec_steps) else "$success")
+def _allow_binding(schema: dict[str, Any]) -> dict[str, Any]:
+    literal = deepcopy(schema)
+    properties = literal.get("properties")
+    if isinstance(properties, dict):
+        literal["properties"] = {name: _allow_binding(child) if isinstance(child, dict) else child for name, child in properties.items()}
+    items = literal.get("items")
+    if isinstance(items, dict):
+        literal["items"] = _allow_binding(items)
+    prefix = literal.get("prefixItems")
+    if isinstance(prefix, list):
+        literal["prefixItems"] = [_allow_binding(child) if isinstance(child, dict) else child for child in prefix]
+    return {"anyOf": [literal, deepcopy(_BINDING_SCHEMA)]}
+
+
+def _binding_aware_parameter_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(schema)
+    properties = result.get("properties")
+    if isinstance(properties, dict):
+        result["properties"] = {name: _allow_binding(child) if isinstance(child, dict) else child for name, child in properties.items()}
+    return result
+
+
+def _parse_decorators(
+    raw: list[Any],
+    *,
+    node_index: int,
+    node_ids: set[str],
+    blackboard_schema: dict[str, Any],
+    output_schemas: dict[str, dict[str, Any] | None],
+) -> tuple[BehaviorDecorator, ...]:
+    parsed: list[BehaviorDecorator] = []
+    seen_singletons: set[str] = set()
+    for index, item in enumerate(raw):
+        assert isinstance(item, dict)
+        kind = str(item["type"])
+        path = f"nodes[{node_index}].decorators[{index}]"
+        allowed = {
+            "condition": {"type", "expression"},
+            "cooldown": {"type", "seconds"},
+            "timeout": {"type", "seconds"},
+            "retry": {"type", "attempts", "delay_seconds"},
+            "repeat": {"type", "count"},
+        }[kind]
+        extra = set(item) - allowed
+        missing = allowed - set(item) - ({"delay_seconds"} if kind == "retry" else set())
+        if extra or missing:
+            details = f"unknown fields {sorted(extra)}" if extra else f"missing fields {sorted(missing)}"
+            raise ConfigError(f"{path}: {details}")
+        if kind != "condition":
+            if kind in seen_singletons:
+                raise ConfigError(f"nodes[{node_index}] contains duplicate {kind} decorators")
+            seen_singletons.add(kind)
+        if kind == "condition":
+            _validate_value(item["expression"], node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"{path}.expression", condition=True)
+            parsed.append(BehaviorDecorator(type=kind, expression=item["expression"]))
+        elif kind in {"cooldown", "timeout"}:
+            parsed.append(BehaviorDecorator(type=kind, seconds=float(item["seconds"])))
+        elif kind == "retry":
+            parsed.append(BehaviorDecorator(type=kind, attempts=int(item["attempts"]), delay_seconds=float(item.get("delay_seconds", 0.0))))
+        else:
+            parsed.append(BehaviorDecorator(type=kind, count=int(item["count"])))
+    return tuple(parsed)
 
 
 def validate_workflow(raw: dict[str, Any], path: Path, registry: ActionRegistry, *, project_root: Path) -> WorkflowSpec:
+    del project_root
     _validate_json_schema(raw, WORKFLOW_SCHEMA, f"workflow {path}")
-    try:
-        from jsonschema import Draft202012Validator
-        Draft202012Validator.check_schema(raw.get("inputs_schema", {"type": "object"}))
-    except ImportError as exc:
-        raise ConfigError("jsonschema is required for workflow validation", cause=exc) from exc
-    except Exception as exc:
-        raise ConfigError(f"workflow {path} inputs_schema is invalid: {exc}", cause=exc) from exc
-    steps_raw = raw["steps"]
-    assert isinstance(steps_raw, list)
-    step_ids = [item["id"] for item in steps_raw]
-    if len(step_ids) != len(set(step_ids)):
-        raise ConfigError(f"workflow {path} contains duplicate step IDs")
-    step_id_set = set(step_ids)
-    if raw["entry"] not in step_id_set:
-        raise ConfigError(f"workflow {path} entry does not name a step: {raw['entry']}")
-    parsed: list[WorkflowStep] = []
-    for index, item in enumerate(steps_raw):
-        action = registry.get(item["action"])
-        arguments = item.get("with", {})
-        _validate_ref_and_conditions(arguments, step_ids=step_id_set, path=f"steps[{index}].with")
-        when = item.get("when")
-        if when is not None:
-            _validate_ref_and_conditions(when, step_ids=step_id_set, path=f"steps[{index}].when", condition=True)
-        retry_raw = item.get("retry", 1)
-        if isinstance(retry_raw, int):
-            retry = StepRetry(retry_raw)
+
+    blackboard_raw = raw.get("blackboard", {})
+    assert isinstance(blackboard_raw, dict)
+    blackboard_schema = compile_parameters({name: ParameterDefinition.parse(name, value) for name, value in blackboard_raw.items()})
+
+    nodes_raw = raw["nodes"]
+    assert isinstance(nodes_raw, list)
+    node_ids = [str(item["id"]) for item in nodes_raw]
+    if len(node_ids) != len(set(node_ids)):
+        raise ConfigError(f"workflow {path} contains duplicate node IDs")
+    node_id_set = set(node_ids)
+    if raw["root"] not in node_id_set:
+        raise ConfigError(f"workflow {path} root does not name a node: {raw['root']}")
+
+    output_schemas: dict[str, dict[str, Any] | None] = {}
+    action_specs: dict[str, Any] = {}
+    for index, item in enumerate(nodes_raw):
+        if item["type"] == "task":
+            action = item.get("action")
+            if not isinstance(action, str) or not action:
+                raise ConfigError(f"nodes[{index}] task must define action")
+            action_specs[item["id"]] = registry.get(action)
+            output_schemas[item["id"]] = action_specs[item["id"]].output_schema
         else:
-            retry = StepRetry(int(retry_raw.get("attempts", 1)), float(retry_raw.get("delay_seconds", 0.0)))
-        if retry.attempts > 1 and (not action.retry_safe or action.side_effect):
-            raise ConfigError(f"steps[{index}] Action {action.name} is not retry-safe")
-        parsed.append(WorkflowStep(
-            id=item["id"],
-            action=item["action"],
-            arguments=deepcopy(arguments),
-            when=deepcopy(when),
-            on_success=item.get("on_success"),
-            on_failure=item.get("on_failure"),
-            on_skip=item.get("on_skip"),
-            retry=retry,
-            timeout_seconds=item.get("timeout_seconds"),
+            output_schemas[item["id"]] = None
+
+    parsed: list[WorkflowNode] = []
+    for index, item in enumerate(nodes_raw):
+        node_type = str(item["type"])
+        children_raw = item.get("children", [])
+        decorators_raw = item.get("decorators", [])
+        assert isinstance(children_raw, list) and isinstance(decorators_raw, list)
+        if node_type == "task":
+            forbidden = set(item) & {"children", "finish_mode"}
+            if forbidden:
+                raise ConfigError(f"nodes[{index}] task cannot define {sorted(forbidden)}")
+            params = item.get("params", {})
+            assert isinstance(params, dict)
+            spec = action_specs[item["id"]]
+            _validate_value(params, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, path=f"nodes[{index}].params", expected_schema=spec.input_schema)
+            normalized = apply_parameter_defaults(spec.definition.parameters, params)
+            _validate_json_schema(normalized, _binding_aware_parameter_schema(spec.input_schema), f"nodes[{index}].params")
+            action = str(item["action"])
+        else:
+            forbidden = set(item) & {"action", "params"}
+            if forbidden:
+                raise ConfigError(f"nodes[{index}] {node_type} cannot define {sorted(forbidden)}")
+            params = {}
+            action = None
+        if node_type != "simple_parallel" and "finish_mode" in item:
+            raise ConfigError(f"nodes[{index}].finish_mode is only valid for simple_parallel")
+        decorators = _parse_decorators(decorators_raw, node_index=index, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas)
+        if node_type == "root" and decorators:
+            raise ConfigError(f"nodes[{index}] root cannot have decorators")
+        retry = next((decorator for decorator in decorators if decorator.type == "retry"), None)
+        if retry is not None and retry.attempts > 1 and node_type == "task" and not action_specs[item["id"]].definition.retry_safe and not raw.get("retry_safe", False):
+            raise ConfigError(f"nodes[{index}] retries an Action that is not declared retry-safe")
+        parsed.append(WorkflowNode(
+            id=str(item["id"]),
+            type=node_type,
+            name=item.get("name") if isinstance(item.get("name"), str) else None,
+            action=action,
+            params=params,
+            children=tuple(str(child) for child in children_raw),
+            decorators=decorators,
+            finish_mode=str(item.get("finish_mode", "abort_background")),
         ))
-    parsed_tuple = tuple(parsed)
-    valid_targets = step_id_set | TERMINALS
-    for step in parsed_tuple:
-        for target in _targets(parsed_tuple, step):
-            if target not in valid_targets:
-                raise ConfigError(f"step {step.id} points to unknown target: {target}")
-    reachable: set[str] = set()
-    pending = [raw["entry"]]
-    while pending:
-        current = pending.pop()
-        if current in reachable or current in TERMINALS:
-            continue
-        reachable.add(current)
-        step = next(item for item in parsed_tuple if item.id == current)
-        pending.extend(target for target in _targets(parsed_tuple, step) if target not in reachable)
-    if reachable != step_id_set:
-        raise ConfigError(f"workflow {path} contains unreachable steps: {', '.join(sorted(step_id_set - reachable))}")
-    can_finish = set(TERMINALS)
-    changed = True
-    while changed:
-        changed = False
-        for step in parsed_tuple:
-            if step.id not in can_finish and any(target in can_finish for target in _targets(parsed_tuple, step)):
-                can_finish.add(step.id)
-                changed = True
-    if not step_id_set.issubset(can_finish):
-        raise ConfigError(f"workflow {path} has a step with no reachable terminal")
+
+    node_map = {node.id: node for node in parsed}
+    root = node_map[str(raw["root"])]
+    if root.type != "root":
+        raise ConfigError("workflow root must reference a node of type root")
+    parent_counts = {node.id: 0 for node in parsed}
+    for node in parsed:
+        for child_id in node.children:
+            if child_id not in node_map:
+                raise ConfigError(f"node {node.id} references unknown child: {child_id}")
+            parent_counts[child_id] += 1
+        if node.type == "root" and len(node.children) != 1:
+            raise ConfigError(f"root node {node.id} must contain exactly one child")
+        if node.type in {"selector", "sequence"} and not node.children:
+            raise ConfigError(f"{node.type} node {node.id} must contain at least one child")
+        if node.type == "simple_parallel":
+            if len(node.children) != 2:
+                raise ConfigError(f"simple_parallel node {node.id} must contain exactly two children")
+            elif node_map[node.children[0]].type != "task":
+                raise ConfigError(f"simple_parallel node {node.id} requires a task as its first (main) child")
+        if node.type == "task" and node.children:
+            raise ConfigError(f"task node {node.id} cannot contain children")
+    if parent_counts[root.id] != 0:
+        raise ConfigError("root node cannot have a parent")
+    for node in parsed:
+        if node.id != root.id and parent_counts[node.id] != 1:
+            raise ConfigError(f"node {node.id} must have exactly one parent (found {parent_counts[node.id]})")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in visiting:
+            raise ConfigError(f"workflow contains a cycle at node {node_id}")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for child_id in node_map[node_id].children:
+            visit(child_id)
+        visiting.remove(node_id)
+        visited.add(node_id)
+
+    visit(root.id)
+    if visited != node_id_set:
+        raise ConfigError(f"workflow contains unreachable nodes: {', '.join(sorted(node_id_set - visited))}")
+
     limits = raw.get("limits", {})
-    retry_safe = all(
-        not registry.get(step.action).side_effect and registry.get(step.action).retry_safe
-        for step in parsed_tuple
-    )
+    assert isinstance(limits, dict)
     return WorkflowSpec(
-        schema_version=1,
-        workflow_id=raw["id"],
-        version=raw["version"],
-        reference_resolution=(int(raw["reference_resolution"][0]), int(raw["reference_resolution"][1])),
-        entry=raw["entry"],
+        schema_version=3,
+        workflow_id=str(raw["id"]),
+        version=str(raw["version"]),
+        resolution=(int(raw["resolution"][0]), int(raw["resolution"][1])),
+        root=root.id,
         timeout_seconds=float(limits.get("timeout_seconds", 300.0)),
-        max_steps=int(limits.get("max_steps", 200)),
-        retry_safe=retry_safe,
-        inputs_schema=deepcopy(raw.get("inputs_schema", {"type": "object"})),
-        steps=parsed_tuple,
+        max_steps=int(limits.get("max_steps", 1000)),
+        blackboard_schema=blackboard_schema,
+        nodes=tuple(parsed),
         path=path,
         file_hash="",
         raw=deepcopy(raw),
+        retry_safe=bool(raw.get("retry_safe", False)),
     )
 
 
-__all__ = ["CONDITION_OPERATORS", "TERMINALS", "WORKFLOW_SCHEMA", "validate_workflow"]
+__all__ = ["CONDITION_OPERATORS", "WORKFLOW_SCHEMA", "validate_workflow"]

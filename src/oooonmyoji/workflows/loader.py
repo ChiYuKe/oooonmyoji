@@ -13,7 +13,7 @@ from ..actions import ActionRegistry
 from ..config.loader import resolve_workflow_path
 from ..exceptions import ConfigError, WorkflowError
 from .model import WorkflowSpec
-from .resolver import ReferenceResolver
+from .resolver import ReferenceResolver, is_binding
 from .validator import validate_workflow
 
 
@@ -44,10 +44,10 @@ class WorkflowLoader:
             from jsonschema import Draft202012Validator
         except ImportError as exc:
             raise ConfigError("jsonschema is required for workflow validation", cause=exc) from exc
-        error = next(iter(Draft202012Validator(workflow.inputs_schema).iter_errors(inputs)), None)
+        error = next(iter(Draft202012Validator(workflow.blackboard_schema).iter_errors(inputs)), None)
         if error is not None:
             location = ".".join(str(item) for item in error.absolute_path)
-            raise ConfigError(f"workflow {workflow.workflow_id} inputs{('.' + location) if location else ''}: {error.message}")
+            raise ConfigError(f"workflow {workflow.workflow_id} blackboard{('.' + location) if location else ''}: {error.message}")
 
     def normalize_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> dict[str, Any]:
         """Apply JSON Schema defaults after validating the caller's input object."""
@@ -68,14 +68,14 @@ class WorkflowLoader:
                 for item in value:
                     apply(item, schema["items"])
 
-        apply(normalized, workflow.inputs_schema)
+        apply(normalized, workflow.blackboard_schema)
         return normalized
 
     def validate_paths(self, workflow: WorkflowSpec) -> None:
-        for step in workflow.steps:
-            if step.action not in {"vision.match_template", "vision.wait_template"}:
+        for node in workflow.nodes:
+            if not node.is_task or node.action not in {"vision.match_template", "vision.wait_template"}:
                 continue
-            template = step.arguments.get("template")
+            template = node.params.get("template")
             if not isinstance(template, str):
                 continue
             self._validate_template_path(workflow, template)
@@ -83,13 +83,16 @@ class WorkflowLoader:
     def validate_input_paths(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> None:
         resolver = ReferenceResolver(inputs, {})
         missing = object()
-        for step in workflow.steps:
-            if step.action not in {"vision.match_template", "vision.wait_template"}:
+        for node in workflow.nodes:
+            if not node.is_task or node.action not in {"vision.match_template", "vision.wait_template"}:
                 continue
-            template = step.arguments.get("template")
-            if not (isinstance(template, dict) and set(template) == {"$ref"} and isinstance(template["$ref"], str) and template["$ref"].startswith("inputs.")):
+            template = node.params.get("template")
+            if not (isinstance(template, dict) and is_binding(template)):
                 continue
-            resolved = resolver.reference(template["$ref"], default=missing)
+            ref = template.get("ref")
+            if not isinstance(ref, str) or not ref.startswith("blackboard."):
+                continue
+            resolved = resolver.reference(ref, default=missing)
             if resolved is missing:
                 continue
             if isinstance(resolved, str):

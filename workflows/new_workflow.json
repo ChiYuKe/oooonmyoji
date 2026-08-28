@@ -1,35 +1,37 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "id": "new_workflow",
-  "version": "1.0.0",
-  "reference_resolution": [
+  "version": "3.0.0",
+  "resolution": [
     1920,
     1080
   ],
-  "entry": "截图",
+  "root": "root",
   "limits": {
-    "timeout_seconds": 60,
-    "max_steps": 20
+    "timeout_seconds": 300,
+    "max_steps": 1000
   },
-  "inputs_schema": {
-    "type": "object",
-    "properties": {},
-    "additionalProperties": false
-  },
-  "steps": [
+  "blackboard": {},
+  "nodes": [
     {
-      "id": "截图",
-      "action": "core.capture",
-      "on_success": "step_1",
-      "on_failure": "$failure",
-      "on_skip": "$cancelled"
+      "id": "root",
+      "type": "root",
+      "children": []
     },
     {
-      "id": "step_1",
-      "action": "input.tap_match",
-      "with": {
-        "revalidate": true
-      }
+      "id": "sequence_1",
+      "type": "sequence",
+      "children": []
     }
-  ]
+  ],
+  "_layout": {
+    "root": {
+      "x": 0,
+      "y": 0
+    },
+    "sequence_1": {
+      "x": -144,
+      "y": 224
+    }
+  }
 }

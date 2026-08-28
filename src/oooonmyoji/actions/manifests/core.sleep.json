@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "name": "core.sleep",
+  "version": "1.0.0",
+  "entry": "builtin:SleepAction",
+  "description": "等待 seconds 秒（可取消）。输出 { seconds }。",
+  "parameters": {
+    "seconds": {
+      "type": "number",
+      "required": true,
+      "min": 0,
+      "description": "等待的秒数"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "seconds": { "type": "number" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

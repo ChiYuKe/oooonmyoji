@@ -55,15 +55,15 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 ```powershell
 .\run_cli.bat validate
 .\run_cli.bat list-workflows
-.\run_cli.bat run-workflow onmyoji_start_icon_click --instance mumu-0
+.\run_cli.bat run-workflow new_workflow1 --instance mumu-0
 ```
 
-`run-workflow` 会直接按 `workflows/` 下指定 JSON 的步骤运行，不需要先在
-`config.json` 的 `tasks` 中注册。工作流中的 `inputs_schema.default` 会自动生效；
+`run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
+`config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
 需要覆盖输入时可传入 JSON 文件：
 
 ```powershell
-.\run_cli.bat run-workflow onmyoji_start_icon_click --instance mumu-0 --inputs .\inputs.json
+.\run_cli.bat run-workflow new_workflow1 --instance mumu-0 --inputs .\inputs.json
 ```
 
 `tasks` 仍用于定时调度和为同一工作流保存多个固定任务配置。
@@ -203,20 +203,39 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 
 ## 工作流和 Action 开发
 
-普通任务只需要新增 `workflows/<name>.json`，无需创建 Python 任务类或修改
-运行时源码。工作流的 `entry`、步骤 ID 和跳转目标必须存在；终点固定为
-`$success`、`$failure`、`$cancelled`。步骤可使用 `when`、`on_success`、
-`on_failure`、`on_skip`、`retry` 和 `timeout_seconds`。
+工作流是 Behavior Tree v3（`schema_version: 3`）。`children` 表示有序父子关系，
+执行结果由 `Selector`、`Sequence` 与 `Simple Parallel` 组合节点解释，不再使用
+成功/失败跳转边。完整契约见 [docs/workflow-schema-v3.md](docs/workflow-schema-v3.md)。
 
-引用只允许结构化对象，例如 `{"$ref": "inputs.name"}` 或
-`{"$ref": "steps.find_button.output.0"}`。条件只支持 `exists`、`eq`、
-`ne`、`gt`、`gte`、`lt`、`lte`、`contains`、`and`、`or`、`not`，不执行
-Python 表达式。每次运行从入口开始，使用启动时读取的不可变文件哈希快照；
-修改 JSON 只影响下一次运行。
+```json
+{
+  "schema_version": 3,
+  "id": "my_workflow",
+  "version": "3.0.0",
+  "resolution": [1920, 1080],
+  "root": "root",
+  "blackboard": { "template": { "type": "asset", "default": "assets/templates/x.png" } },
+  "nodes": [
+    { "id": "root", "type": "root", "children": ["main"] },
+    { "id": "main", "type": "sequence", "children": ["find", "tap"] },
+    { "id": "find", "type": "task", "action": "vision.match_template", "params": { "template": { "ref": "blackboard.template" } } },
+    { "id": "tap", "type": "task", "action": "input.tap_match", "params": { "match": { "ref": "nodes.find.output.0" } } }
+  ]
+}
+```
 
-自定义 Action 放在 `plugins/actions/<name>/`，清单至少包含 `name`、`version`、
-`entry`、`input_schema`，并可声明 `output_schema`、`retry_safe` 和
-`side_effect`。入口类继承 `Action` 并实现：
+- `root` 恰好连接一个子节点；其他节点恰好有一个父节点，禁止环和孤立节点。
+- `Selector` 遇到成功即停止，`Sequence` 遇到失败即停止；`Simple Parallel` 的
+  第一个子节点必须是主 Task，第二个是后台分支。
+- 条件、冷却、超时、重试、重复都作为 `decorators` 挂在节点或子树上。
+- 参数绑定使用 `{"ref": "blackboard.<键>"}` 或
+  `{"ref": "nodes.<节点id>.output.<字段>"}`。
+- 每次运行使用启动时读取的不可变文件哈希快照；修改 JSON 只影响下一次运行。
+
+自定义 Action 放在 `plugins/actions/<name>/`，清单是 v2 manifest
+（`schema_version: 2`，字段为 `name`、`entry`、`parameters`、`outputs`、
+`effects`），与内置 Action 完全同构，运行时与编辑器读取同一份定义。入口类
+继承 `Action` 并实现：
 
 ```python
 from src.oooonmyoji.actions.base import Action, ActionResult
@@ -230,11 +249,12 @@ class ExampleAction(Action):
 ```
 
 例如 `plugins/actions/example/action.json` 可以声明
-`{"name":"example.inspect","version":"1.0.0","entry":"action.py:ExampleAction","input_schema":{"type":"object"}}`。
+`{"schema_version":2,"name":"example.inspect","version":"1.0.0","entry":"action.py:ExampleAction","parameters":{"target":{"type":"string","required":true}}}`。
 Action 代码属于可信本地扩展；更新代码后需要重启监督器，工作流 JSON 则在下一次运行时重新加载。
 
-有输入副作用的 Action 默认不可自动重试。模板和产物路径必须留在项目资源
-目录或当前运行的产物目录内；失败和中断会保存最后一帧、步骤历史及元数据。
+有输入副作用的 Action（`effects.retry: "unsafe"`）不可自动重试。模板和产物
+路径必须留在项目资源目录或当前运行的产物目录内；失败和中断会保存最后一帧、
+步骤历史及元数据。
 
 ## 调度和故障产物
 

@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import tkinter as tk
@@ -319,6 +319,7 @@ class RoiEditor:
 
         toolbar = tk.Frame(self.root, padx=8, pady=8)
         toolbar.grid(row=0, column=0, sticky="ew")
+        buttons: tuple[tuple[str, Callable[[], None]], ...]
         if self.select_only:
             buttons = (
                 ("重新截图", self.capture_current),

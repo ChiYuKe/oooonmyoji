@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import json
+import threading
 import time
 from concurrent.futures import TimeoutError
 from dataclasses import dataclass
@@ -184,6 +185,7 @@ class SharedOcrPool:
         self.min_confidence = min_confidence
         self.use_gpu = use_gpu
         self._pool: mp.pool.Pool | None = None
+        self._restart_lock = threading.Lock()
         self._start()
 
     def _start(self) -> None:
@@ -208,8 +210,10 @@ class SharedOcrPool:
             raise OcrError(f"OCR worker failed: {exc}", cause=exc) from exc
 
     def restart(self) -> None:
-        self.close(force=True)
-        self._start()
+        # 多个调用方并发超时可能同时触发热重建，串行化避免互相踩踏
+        with self._restart_lock:
+            self.close(force=True)
+            self._start()
 
     def close(self, *, force: bool = False) -> None:
         pool, self._pool = self._pool, None

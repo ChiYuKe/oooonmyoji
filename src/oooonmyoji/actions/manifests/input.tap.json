@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "name": "input.tap",
+  "version": "1.0.0",
+  "entry": "builtin:TapAction",
+  "description": "在 (x, y) 处点击，可配置随机偏移和随机点击前等待。有输入副作用，默认不可自动重试。输出实际点击坐标、偏移量和等待间隔。",
+  "parameters": {
+    "x": {
+      "type": "number",
+      "required": true,
+      "description": "点击 X 坐标（参考分辨率坐标）"
+    },
+    "y": {
+      "type": "number",
+      "required": true,
+      "description": "点击 Y 坐标（参考分辨率坐标）"
+    },
+    "hold_ms": {
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "description": "按住毫秒数，默认 0"
+    },
+    "random_offset": {
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "description": "在 X/Y 方向分别随机偏移的最大像素数，默认 0"
+    },
+    "random_interval": {
+      "type": "array",
+      "items": { "type": "number", "min": 0 },
+      "min_items": 2,
+      "max_items": 2,
+      "default": [0, 0],
+      "description": "点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "x": { "type": "integer" },
+      "y": { "type": "integer" },
+      "offset_x": { "type": "integer" },
+      "offset_y": { "type": "integer" },
+      "interval_seconds": { "type": "number" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "name": "core.assert",
+  "version": "1.0.0",
+  "entry": "builtin:AssertAction",
+  "description": "断言 value 为真，否则工作流以 assertion 失败终止。输出 { asserted }。",
+  "parameters": {
+    "value": {
+      "type": "any",
+      "required": true,
+      "description": "要断言为真的值（可引用绑定 ref）"
+    },
+    "message": {
+      "type": "string",
+      "description": "断言失败时的错误信息（可选）"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "asserted": { "type": "boolean" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

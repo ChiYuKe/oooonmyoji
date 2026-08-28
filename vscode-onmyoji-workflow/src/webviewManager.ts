@@ -27,6 +27,7 @@ export class WebviewManager implements vscode.Disposable {
   private dirty = false;
   private disposables: vscode.Disposable[] = [];
   private runWatcherTimer: NodeJS.Timeout | undefined;
+  private runStopTimer: NodeJS.Timeout | undefined;
   private runEventsPath: string | undefined;
   private runWatcherOffset = 0;
   private latestRunEvents: Record<string, unknown>[] = [];
@@ -123,30 +124,34 @@ export class WebviewManager implements vscode.Disposable {
 </head>
 <body>
 <header id="topbar">
+  <span id="brand">Behavior Tree</span>
   <span id="file-label" title=""></span>
   <span id="dirty-badge" class="badge hidden">未保存</span>
   <span id="issue-badge" class="badge"></span>
- <span class="spacer"></span>
- <button id="btn-new" class="primary" title="创建一个新的工作流 JSON 文件">＋ 新建工作流</button>
-  <button id="btn-run" class="primary" title="执行当前已保存的工作流">▶ 执行工作流</button>
- <button id="btn-open" title="在编辑器里打开 JSON 文件">打开 JSON</button>
-  <button id="btn-reload" title="丢弃未保存修改，重新从文件加载">重新加载</button>
-  <button id="btn-add" class="primary" title="新增一个步骤节点">＋ 新增步骤</button>
-  <button id="btn-save" class="primary" title="把当前模型写回 JSON 文件">保存到 JSON</button>
+  <span class="toolbar-separator"></span>
+  <button id="btn-add-task" class="primary" title="添加 Task">＋ Task</button>
+  <button id="btn-add-selector" title="添加 Selector">＋ Selector</button>
+  <button id="btn-add-sequence" title="添加 Sequence">＋ Sequence</button>
+  <button id="btn-add-parallel" title="添加 Simple Parallel">＋ Parallel</button>
+  <button id="btn-layout" class="icon-button" title="自动排列">⌘</button>
+  <button id="btn-fit" class="icon-button" title="适应视口">⌂</button>
+  <span class="spacer"></span>
+  <button id="btn-workflow" title="工作流设置">设置</button>
+  <button id="btn-blackboard" title="黑板参数">黑板</button>
+  <button id="btn-run" class="primary" title="执行当前工作流">▶ 运行</button>
+  <button id="btn-save" class="primary" title="保存到 JSON">保存</button>
+  <button id="btn-more" class="icon-button" title="更多操作">⋯</button>
 </header>
 <div id="external-banner" class="hidden"></div>
 <main>
   <section id="canvas-wrap">
-    <div id="canvas-scroll">
-      <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
-    </div>
-    <div id="legend">
-     <span class="lg lg-ok">成功</span><span class="lg lg-err">失败</span><span class="lg lg-skip">跳过</span><span class="lg lg-fall">默认跳转</span>
-      <span class="hint">滚轮缩放 · 右键/中键拖拽平移 · 左键框选 · 拖卡片位移（Ctrl+Alt 取消吸附）· 右侧彩色引脚拖到目标左侧 ⚪ 连线（绿=成功 红=失败 橙=跳过）· 点击连线/节点后 Delete 删除 · F 聚焦 · Home 适应视图 · 右键空白添加步骤 · 运行后卡片内显示截图缩略图，点击看大图</span>
-   </div>
+    <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="viewport-tools"><button id="btn-zoom-out" class="icon-button" title="缩小">−</button><span id="zoom-label">100%</span><button id="btn-zoom-in" class="icon-button" title="放大">＋</button></div>
+    <svg id="minimap" xmlns="http://www.w3.org/2000/svg"></svg>
   </section>
   <aside id="inspector">
-    <div id="inspector-empty">点击左侧节点查看/编辑；或点击「＋ 新增步骤」。</div>
+    <div id="inspector-title">详细信息</div>
+    <div id="inspector-empty">选择一个节点</div>
     <div id="inspector-body" class="hidden"></div>
   </aside>
 </main>
@@ -232,6 +237,7 @@ export class WebviewManager implements vscode.Disposable {
       }
       case 'pickRoi': {
         const rawResolution = message.referenceResolution;
+        const nodeId = String(message.nodeId ?? message.stepId ?? '');
         const referenceResolution: [number, number] = Array.isArray(rawResolution) && rawResolution.length === 2
           && rawResolution.every((value) => typeof value === 'number' && Number.isInteger(value) && value > 0)
           ? [rawResolution[0] as number, rawResolution[1] as number]
@@ -242,7 +248,7 @@ export class WebviewManager implements vscode.Disposable {
             void this.panel.webview.postMessage({
               type: 'roiPickerImage',
               requestId: message.requestId,
-              stepId: message.stepId,
+              nodeId,
               key: message.key,
               dataUrl: capture.dataUrl,
               width: capture.width,
@@ -266,6 +272,37 @@ export class WebviewManager implements vscode.Disposable {
         }
         break;
       }
+      case 'saveTemplate': {
+        const requestId = String(message.requestId ?? '');
+        const nodeId = String(message.nodeId ?? message.stepId ?? '');
+        const key = String(message.key ?? 'template');
+        let filename = String(message.filename ?? 'template.png')
+          .replace(/\\/g, '/')
+          .replace(/[\x00-\x1f<>:"|?*]/g, '_')
+          .replace(/^\/+/, '')
+          .trim();
+        filename = path.posix.normalize(filename);
+        if (!filename || filename === '.' || filename === '..' || filename.startsWith('../') || filename.includes('/../')) filename = 'template.png';
+        if (!/\.png$/i.test(filename)) filename += '.png';
+        const dataUrl = String(message.dataUrl ?? '');
+        const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+        if (!requestId || !nodeId || !match) {
+          void this.panel.webview.postMessage({ type: 'roiPickerError', requestId, message: '模板图片数据无效' });
+          break;
+        }
+        try {
+          const relativePath = path.posix.join('assets/templates', filename);
+          const outputPath = path.resolve(this.getProjectRoot(), relativePath);
+          const root = path.resolve(this.getProjectRoot());
+          if (outputPath !== root && !outputPath.startsWith(root + path.sep)) throw new Error('模板路径无效');
+          await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(outputPath)));
+          await vscode.workspace.fs.writeFile(vscode.Uri.file(outputPath), Buffer.from(match[1], 'base64'));
+          void this.panel.webview.postMessage({ type: 'templateSaved', requestId, nodeId, key, path: relativePath });
+        } catch (error) {
+          void this.panel.webview.postMessage({ type: 'roiPickerError', requestId, message: error instanceof Error ? error.message : String(error) });
+        }
+        break;
+      }
     case 'error':
         vscode.window.showErrorMessage(`Onmyoji 工作流编辑器：${String(message.message ?? '')}`);
         break;
@@ -283,6 +320,10 @@ export class WebviewManager implements vscode.Disposable {
   }
 
   private stopRunWatcher(): void {
+    if (this.runStopTimer !== undefined) {
+      clearTimeout(this.runStopTimer);
+      this.runStopTimer = undefined;
+    }
     if (this.runWatcherTimer !== undefined) {
       clearInterval(this.runWatcherTimer);
       this.runWatcherTimer = undefined;
@@ -347,8 +388,9 @@ export class WebviewManager implements vscode.Disposable {
       void this.panel.webview.postMessage({ type: 'runEvent', event: this.convertRunEvent(event) });
     }
     if (event.type === 'run_finished') {
-      // 执行结束：再等 1.5 秒收尾读余量，然后停止轮询
-      setTimeout(() => this.stopRunWatcher(), 1500);
+      // 执行结束：再等 1.5 秒收尾读余量，然后停止轮询；句柄受管，期间发起新运行不会被误停
+      if (this.runStopTimer !== undefined) clearTimeout(this.runStopTimer);
+      this.runStopTimer = setTimeout(() => this.stopRunWatcher(), 1500);
     }
   }
 

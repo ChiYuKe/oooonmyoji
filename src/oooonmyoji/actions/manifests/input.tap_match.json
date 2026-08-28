@@ -1,0 +1,52 @@
+{
+  "schema_version": 2,
+  "name": "input.tap_match",
+  "version": "1.0.0",
+  "entry": "builtin:TapMatchAction",
+  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。有输入副作用，默认不可自动重试。输出实际点击坐标、偏移量和等待间隔。",
+  "parameters": {
+    "match": {
+      "type": "object",
+      "required": true,
+      "description": "匹配对象，通常引用 nodes.<node>.output.0"
+    },
+    "revalidate": {
+      "type": "boolean",
+      "default": true,
+      "description": "点击前重新截图验证匹配是否仍在，默认 true"
+    },
+    "hold_ms": {
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "description": "按住毫秒数，默认 0"
+    },
+    "random_offset": {
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "description": "在匹配中心 X/Y 方向分别随机偏移的最大像素数，默认 0"
+    },
+    "random_interval": {
+      "type": "array",
+      "items": { "type": "number", "min": 0 },
+      "min_items": 2,
+      "max_items": 2,
+      "default": [0, 0],
+      "description": "点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "x": { "type": "integer" },
+      "y": { "type": "integer" },
+      "offset_x": { "type": "integer" },
+      "offset_y": { "type": "integer" },
+      "interval_seconds": { "type": "number" },
+      "revalidated": { "type": "boolean" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

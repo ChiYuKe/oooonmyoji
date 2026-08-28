@@ -108,22 +108,24 @@ async function createWorkflow(): Promise<void> {
   }
 
   const workflow = {
-    schema_version: 1,
+    schema_version: 3,
     id: workflowId,
-    version: '1.0.0',
-    reference_resolution: [1920, 1080],
-    entry: 'capture',
-    limits: { timeout_seconds: 60, max_steps: 20 },
-    inputs_schema: {
-      type: 'object',
-      properties: {},
-      additionalProperties: false,
-    },
-    steps: [
+    version: '3.0.0',
+    resolution: [1920, 1080],
+    root: 'root',
+    limits: { timeout_seconds: 300, max_steps: 1000 },
+    blackboard: {},
+    nodes: [
+      {
+        id: 'root',
+        type: 'root',
+        children: ['capture'],
+      },
       {
         id: 'capture',
+        type: 'task',
         action: 'core.capture',
-        on_success: '$success',
+        params: {},
       },
     ],
   };
@@ -283,7 +285,6 @@ async function runWorkflow(preferred?: vscode.Uri, eventsFilePath?: string): Pro
     if (choice !== '保存并执行' || !(await doc.save())) return;
   }
 
-  const config = vscode.workspace.getConfiguration('onmyoji');
   const configPath = resolveRuntimeConfigPath();
   const pythonPath = resolvePythonExecutable();
   const configFile = path.isAbsolute(configPath) ? configPath : path.join(projectRoot, configPath);

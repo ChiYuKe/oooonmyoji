@@ -62,6 +62,7 @@ class TemplateMatcher:
         threshold: float = 0.85,
         max_results: int = 20,
         deduplicate_iou: float = 0.3,
+        scale_search: bool = False,
     ) -> list[TemplateMatch]:
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("threshold must be between 0 and 1")
@@ -111,32 +112,47 @@ class TemplateMatcher:
             )
         if search.shape[0] < template_image.shape[0] or search.shape[1] < template_image.shape[1]:
             return []
-        result = cv2.matchTemplate(search, template_image, cv2.TM_CCOEFF_NORMED)
-        locations = np.where(result >= threshold)
+        # 多尺度匹配（scale_search）：模拟器窗口缩放/分辨率漂移时按多档缩放搜索图兜底
+        scales = [0.9, 0.95, 1.0, 1.05, 1.1] if scale_search else [1.0]
         candidates: list[TemplateMatch] = []
         template_height, template_width = template_image.shape[:2]
-        for row, column in zip(*locations):
-            confidence = float(result[row, column])
-            actual_x, actual_y = int(column + x), int(row + y)
-            if self.mapper is None:
-                reference_x, reference_y = float(actual_x), float(actual_y)
-                reference_width, reference_height = float(template_width), float(template_height)
+        for scale in scales:
+            if scale == 1.0:
+                search_view = search
             else:
-                reference_x = actual_x / self.mapper.scale_x
-                reference_y = actual_y / self.mapper.scale_y
-                reference_width = template_width / self.mapper.scale_x
-                reference_height = template_height / self.mapper.scale_y
-            candidates.append(TemplateMatch(
-                actual_x,
-                actual_y,
-                template_width,
-                template_height,
-                confidence,
-                reference_x,
-                reference_y,
-                reference_width,
-                reference_height,
-            ))
+                search_view = cv2.resize(
+                    search,
+                    (max(1, round(search.shape[1] * scale)), max(1, round(search.shape[0] * scale))),
+                    interpolation=cv2.INTER_AREA,
+                )
+            if search_view.shape[0] < template_image.shape[0] or search_view.shape[1] < template_image.shape[1]:
+                continue
+            result = cv2.matchTemplate(search_view, template_image, cv2.TM_CCOEFF_NORMED)
+            locations = np.where(result >= threshold)
+            for row, column in zip(*locations):
+                confidence = float(result[row, column])
+                # 缩放尺度下的命中点换算回原搜索图坐标
+                actual_x = int(round(column / scale)) + x
+                actual_y = int(round(row / scale)) + y
+                if self.mapper is None:
+                    reference_x, reference_y = float(actual_x), float(actual_y)
+                    reference_width, reference_height = float(template_width), float(template_height)
+                else:
+                    reference_x = actual_x / self.mapper.scale_x
+                    reference_y = actual_y / self.mapper.scale_y
+                    reference_width = template_width / self.mapper.scale_x
+                    reference_height = template_height / self.mapper.scale_y
+                candidates.append(TemplateMatch(
+                    actual_x,
+                    actual_y,
+                    template_width,
+                    template_height,
+                    confidence,
+                    reference_x,
+                    reference_y,
+                    reference_width,
+                    reference_height,
+                ))
         candidates.sort(key=lambda item: item.confidence, reverse=True)
         selected: list[TemplateMatch] = []
         for candidate in candidates:

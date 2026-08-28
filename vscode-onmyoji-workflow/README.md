@@ -1,21 +1,26 @@
 # Onmyoji Workflow Helper
 
-为 [oooonmyoji](https://github.com/)（阴阳师自动化底座）项目编写 `workflows/*.json` 的 VS Code 扩展：
+为 oooonmyoji（阴阳师自动化底座）项目编写 `workflows/*.json` 的 VS Code 扩展。
+工作流采用 **Behavior Tree schema v3**（有序 `children`），Action 参数元数据
+来自与 Python 运行时共享的唯一 manifest。
 
-- **智能 JSON 编辑**：在 `.json` 工作流文件里获得基于动态 schema 的自动补全、悬停文档与诊断。
-  - Action 名称（内置 `core.*`/`vision.*`/`input.*` + `plugins/actions` 下的自定义 Action）
-  - 每步 `with` 参数、`when` 条件运算符、`on_success`/`on_failure`/`on_skip` 跳转目标（步骤 ID + 终点）
-  - `entry`、`$ref` 路径（`inputs.<字段>`、`steps.<步骤id>.output.<字段>`）
-  - 校验：重复步骤 ID、未知 Action、未知跳转目标、无效 `$ref`、非法重试、未知参数、不可达步骤
-- **可视化流程图编辑器**：以节点图编辑步骤与跳转，参数表单化编辑，一键生成/回写 JSON。
+- **智能 JSON 编辑**：在工作流 JSON 里获得基于结构 schema 的自动补全、悬停文档与诊断。
+  - Action 名称（内置 `core.*`/`vision.*`/`input.*`/`workflow.*` + `plugins/actions` 下的自定义 Action）
+  - 每个节点的 `params` 参数键（按该 Action 的 manifest 参数定义）、`ref` 绑定路径
+    （`blackboard.<键>`、`nodes.<节点id>.output.<字段>`）
+  - Root / Selector / Sequence / Simple Parallel / Task 节点及装饰器
+  - 校验：父级唯一性、未知子节点、环、孤立节点、无效绑定、非法装饰器和非安全重试
+- **可视化 Behavior Tree 编辑器**：蓝图式卡片、有序父子连线、重新连接/断开、
+  参数表单（含 ROI 与模板截取）、装饰器、黑板、缩放平移、自动布局与小地图。
 - **引擎校验**：一键在终端里运行 `python -m src.oooonmyoji.cli ... validate`。
+- **自定义 Action 零编辑**：插件只写一份 v2 manifest + Action 类，编辑器无需改代码。
 
 ## 安装
 
 ### 方式一：直接安装打包好的 VSIX
 
 ```powershell
-code --install-extension vscode-onmyoji-workflow-0.1.0.vsix
+code --install-extension onmyoji-workflow-helper-0.2.0.vsix
 ```
 
 ### 方式二：从源码运行（调试开发）
@@ -23,26 +28,34 @@ code --install-extension vscode-onmyoji-workflow-0.1.0.vsix
 1. `npm install`
 2. 在 VS Code 中打开本目录，按 `F5`（使用 `.vscode/launch.json` 启动扩展开发宿主，会自动打开项目根目录）。
 
-> 工程位置：`vscode-onmyoji-workflow/`。工作区根目录应为 oooonmyoji 项目根（自动向上查找 `src/oooonmyoji/actions/builtin.py` 与 `plugins/actions`；也可用 `onmyoji.projectRoot` 配置覆盖）。
+> 工程位置：`vscode-onmyoji-workflow/`。工作区根目录应为 oooonmyoji 项目根
+> （自动向上查找 `src/oooonmyoji/actions/builtin.py` 与 `plugins/actions`；
+> 也可用 `onmyoji.projectRoot` 配置覆盖）。
 
 ## 使用
 
-- 打开任意 `workflows/*.json`，即可获得补全/悬停/波浪线诊断（错误=红，警告=黄）。
+- 打开任意 `workflows/*.json`，即可获得补全/悬停/波浪线诊断（错误=红）。
 - 打开工作流 JSON 后，可点击编辑器右上角的流程图按钮直接打开可视化编辑器。
 - 命令面板（`Ctrl+Shift+P`）：
- - `Onmyoji: 新建工作流`（自动创建 `workflows/*.json` 并打开可视化编辑器）
+  - `Onmyoji: 新建工作流`（自动创建 v3 Behavior Tree 骨架并打开可视化编辑器）
   - `Onmyoji: 执行当前工作流`（使用配置文件中的第一个实例运行当前工作流）
- - `Onmyoji: 打开工作流可视化编辑器`
+  - `Onmyoji: 打开工作流可视化编辑器`
   - `Onmyoji: 校验当前工作流 JSON`
   - `Onmyoji: 用自动化引擎校验 (CLI validate)`
   - `Onmyoji: 重新加载 Action 目录`
 - 可视化编辑器：
-  - 滚轮缩放、拖拽平移、拖动卡片调整位置（视觉位置不写入 JSON）。
-- 点击节点 → 右侧表单编辑 ID / Action / 参数 / when / 跳转 / 重试 / 超时。
- - `roi` 参数旁的取框按钮会从 MuMu 获取当前截图，并直接在 VS Code 面板内框选、确认或重新截图，随后自动换算为工作流坐标；如果该参数引用 `inputs.roi`，会更新该输入的默认值并保留引用。
- - 「🔗 引用」可为参数插入 `$ref`；「＋ 新增步骤」「保存到 JSON」「重新加载」。
+  - 滚轮缩放，右键/中键拖拽平移，拖动卡片调整位置（持久化到 `_layout`）。
+  - 从复合节点下方输出引脚拖到节点上方输入引脚；输入只允许一个父级，新连接自动替换旧父级。
+  - 拖动连线靠近目标端的手柄可重新连接；双击连线或选中后按 Delete 可断开。
+  - 右侧详情栏编辑 Action 参数、Condition/Cooldown/Time Limit/Retry/Repeat 装饰器、
+    Simple Parallel 结束模式和子节点优先级。
+  - `roi` 参数旁「选择识别区域」按钮会从 MuMu 获取当前截图，在面板内框选后自动换算为
+    参考分辨率坐标写入参数；`template` 参数旁「截取模板」按钮把框选区域保存为
+    `assets/templates/` 下的模板图。
+  - 参数可在固定值与结构化引用间切换；黑板面板编辑 `blackboard` 类型化键。
+  - 「设置」编辑 ID、版本、参考分辨率与运行限制。
   - 「▶ 执行工作流」会运行当前已保存的工作流；有未保存修改时需先保存。
- - 保存会以 2 空格缩进规范化 JSON 并保留原键顺序，最小化 diff。
+  - 保存会以 2 空格缩进输出 v3 JSON。
 
 ## 配置
 
@@ -55,20 +68,20 @@ code --install-extension vscode-onmyoji-workflow-0.1.0.vsix
 
 ## 自定义 Action
 
-扩展会自动扫描 `<projectRoot>/plugins/actions/*/action.json` 并把它们纳入补全、参数表单和校验。
-清单格式与引擎完全一致（引擎用 `additionalProperties: false` 校验，**不要加额外字段**）：`name`、`version`、`entry`、`input_schema` 必填，`output_schema`、`retry_safe`、`side_effect` 可选。
-新增/修改自定义 Action 后执行 `Onmyoji: 重新加载 Action 目录`。
+扩展会自动扫描 `<projectRoot>/plugins/actions/*/action.json` 并把它们纳入补全、
+参数表单和校验。清单与内置 Action 完全同构（v2 manifest，与 Python 运行时共享
+同一解析规则）：`schema_version`、`name`、`entry`、`parameters` 必填，
+`outputs`、`effects`、`version`、`description` 可选。参数词汇见项目根目录
+`docs/workflow-schema-v3.md`。新增/修改自定义 Action 后执行
+`Onmyoji: 重新加载 Action 目录`。
 
 ## 与引擎静态校验（`cli validate`）的关系
 
-扩展的波浪线校验以「让工作流真正跑起来」为目标，与引擎 `validate` 命令的规则一致，并且**额外**提前暴露两类只有运行才会失败的问题：
-
-| 问题 | `cli validate`（静态） | 引擎运行 | 扩展 |
-| --- | --- | --- | --- |
-| `with` 里写了 Action 不支持的参数 | 通过（不检查这一层） | 拒绝（`additionalProperties:false`） | 报错 `with.unknown` |
-| `when` 直接写成 `{"$ref": ...}` | 通过 | 拒绝（`unsupported operator: $ref`） | 报错 `when.ref` |
-
-其余规则（未知 Action、未知跳转、重复 ID、非法重试、非法 `$ref`、非法条件运算符、不可达步骤）与引擎 `validate` 完全一致，均为错误级别。
+扩展的波浪线校验与引擎 `validate` 命令的规则一致：重复节点 ID、未知 Action、
+未知子节点、多父级、环、孤立节点、无效 `ref`、非法装饰器与非安全 Action 重试
+均为错误级别。两套实现由
+`tests/smoke.js`（TypeScript）与 `tests/engine_crosscheck.py`（Python 引擎）
+对拍验证，保证编辑器校验结果与运行时一致。
 
 ## 构建与打包
 
@@ -81,7 +94,8 @@ npm run package   # vsce 打包 .vsix
 
 ```powershell
 npm run compile
-node tests/smoke.js
+node tests/smoke.js            # 纯逻辑模块 + JSON 语言服务管线
+node tests/editor-dom-smoke.js # Webview 编辑器 DOM 桩交互
 ```
 
 ## 结构
@@ -89,10 +103,11 @@ node tests/smoke.js
 ```
 src/extension.ts        扩展入口、命令
 src/jsonProviders.ts    补全/悬停/诊断（vscode-json-languageservice + jsonc-parser）
-src/catalog.ts          内置 + 自定义 Action 目录
-src/workflow.ts         解析、语义校验、动态 schema、$ref 补全数据
-src/layout.ts           图布局（纯逻辑）
+src/catalog.ts          内置 + 自定义 Action 目录（解析共享 manifest，含参数→JSON Schema 编译）
+src/workflow.ts         v3 解析、树结构校验、schema、ref 补全数据
+src/layout.ts           Behavior Tree 分层布局（纯逻辑）
 src/webviewManager.ts   Webview 面板与消息协议
 media/                  Webview 前端（HTML/CSS/JS）
-snippets/               常用步骤代码片段
+snippets/               常用树节点/装饰器代码片段
+tests/                  冒烟测试与引擎对拍
 ```

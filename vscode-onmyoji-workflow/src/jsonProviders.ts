@@ -1,6 +1,6 @@
 /**
  * 智能 JSON 编辑：基于 vscode-json-languageservice 的补全/悬停/诊断，
- * 叠加针对本工作流格式的动态 schema（步骤 ID、Action、跳转目标、$ref、条件）。
+ * 叠加针对 v2 工作流格式的结构 schema（节点 ID、Action、边目标、ref 绑定、条件）。
  */
 import * as vscode from 'vscode';
 import { getLanguageService, LanguageService } from 'vscode-json-languageservice';
@@ -120,6 +120,43 @@ function nodeValue(node: Node): string {
   return typeof (node as { value?: string }).value === 'string' ? String((node as { value?: string }).value) : '';
 }
 
+/** 向上查找名为 name 的 property 节点。 */
+function findAncestorProperty(node: Node, name: string): Node | undefined {
+  let current: Node | undefined = node;
+  while (current) {
+    if (current.type === 'property' && String((current.children?.[0] as { value?: string } | undefined)?.value ?? '') === name) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/** 参数插入片段：常见类型给出占位值；asset/rect 给编辑器友好占位。 */
+function paramSnippet(param: { type: string; default?: unknown; enum?: unknown[] }): string {
+  if (param.default !== undefined) return JSON.stringify(param.default);
+  if (Array.isArray(param.enum) && param.enum.length > 0) return JSON.stringify(param.enum[0]);
+  switch (param.type) {
+    case 'string':
+    case 'asset':
+    case 'path':
+      return '""';
+    case 'number':
+    case 'integer':
+      return '0';
+    case 'boolean':
+      return 'false';
+    case 'rect':
+      return '[0, 0, 0, 0]';
+    case 'array':
+      return '[]';
+    case 'object':
+      return '{}';
+    default:
+      return 'null';
+  }
+}
+
 function paramList(spec: ActionSpecInfo): string {
   const props = (spec.inputSchema.properties ?? {}) as Record<string, unknown>;
   const keys = Object.keys(props);
@@ -233,24 +270,61 @@ export class WorkflowIntelligence implements vscode.Disposable {
         items.push(toVscodeItem(item));
       }
     }
-    // $ref 路径补全：当正在输入 "$ref": "..." 时
+    // ref 绑定路径补全：当正在输入 "ref": "..." 的值时
     const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
-    const match = /"\$ref"\s*:\s*"([^"]*)$/.exec(prefix);
+    const match = /"ref"\s*:\s*"([^"]*)$/.exec(prefix);
     if (match) {
       const typed = match[1];
       const valueStartOffset = match.index + match[0].length - typed.length;
       const valueStart = document.positionAt(valueStartOffset);
       const replaceRange = new vscode.Range(valueStart, position);
       const suggestions = collectRefSuggestions(info, catalog);
-      for (const refPath of [...suggestions.inputs, ...suggestions.steps]) {
+      for (const refPath of [...suggestions.blackboard, ...suggestions.nodes]) {
         if (typed && !refPath.toLowerCase().includes(typed.toLowerCase())) continue;
         const item = new vscode.CompletionItem(refPath, vscode.CompletionItemKind.Reference);
         item.range = replaceRange;
         item.insertText = refPath;
         item.filterText = refPath;
-        item.detail = refPath.startsWith('inputs.') ? '输入参数引用' : '步骤输出引用';
-        item.documentation = new vscode.MarkdownString('结构化引用，引擎仅支持 `inputs.<字段>` 与 `steps.<步骤id>.output.<字段>`');
+        item.detail = refPath.startsWith('blackboard.') ? '黑板键引用' : '节点输出引用';
+        item.documentation = new vscode.MarkdownString('结构化绑定，引擎仅支持 `blackboard.<键>` 与 `nodes.<节点id>.output.<字段>`');
         items.push(item);
+      }
+    }
+    // params 参数键补全：根据节点 action 的 manifest 参数定义
+    const tree = parseTree(document.getText());
+    const cursorNode = tree ? deepestNode(tree, document.offsetAt(position)) : undefined;
+    const paramsNode = cursorNode ? findAncestorProperty(cursorNode, 'params') : undefined;
+    if (paramsNode && paramsNode.parent && paramsNode.parent.type === 'object') {
+      const actionProp = (paramsNode.parent.children ?? []).find(
+        (child) => child.type === 'property' && String((child.children?.[0] as { value?: string } | undefined)?.value ?? '') === 'action',
+      );
+      if (actionProp) {
+        const actionName = String((actionProp.children?.[1] as { value?: string } | undefined)?.value ?? '');
+        const spec = actionName ? catalog.byName(actionName) : undefined;
+        if (spec) {
+          const existing = new Set<string>();
+          for (const child of paramsNode.parent.children ?? []) {
+            if (child.type === 'property') {
+              existing.add(String((child.children?.[0] as { value?: string } | undefined)?.value ?? ''));
+            }
+          }
+          const wordMatch = /[A-Za-z_][A-Za-z0-9_]*$/.exec(prefix);
+          const wordStartOffset = wordMatch ? document.offsetAt(position) - wordMatch[0].length : document.offsetAt(position);
+          const wordRange = new vscode.Range(document.positionAt(wordStartOffset), position);
+          for (const [paramName, param] of Object.entries(spec.parameters)) {
+            if (existing.has(paramName)) continue;
+            if (wordMatch && !paramName.toLowerCase().startsWith(wordMatch[0].toLowerCase())) continue;
+            const item = new vscode.CompletionItem(paramName, vscode.CompletionItemKind.Property);
+            item.range = wordRange;
+            item.insertText = `"${paramName}": ${paramSnippet(param)}`;
+            item.detail = `${param.type}${param.required ? '（必填）' : ''}`;
+            item.documentation = new vscode.MarkdownString(
+              (param.description ?? '') + (param.default !== undefined ? `\n\n默认值: \`${JSON.stringify(param.default)}\`` : ''),
+            );
+            item.sortText = param.required ? '0' : '1';
+            items.push(item);
+          }
+        }
       }
     }
     return new vscode.CompletionList(items, result?.isIncomplete ?? false);
@@ -362,34 +436,31 @@ function customHover(node: Node, catalog: ActionCatalog, info: WorkflowInfo): vs
     return new vscode.Hover(md);
   }
 
-  if (keyOfParent === '$ref' || value.startsWith('inputs.') || value.startsWith('steps.')) {
+  if (keyOfParent === 'ref' || value.startsWith('blackboard.') || value.startsWith('nodes.')) {
     const parts = value.split('.');
     const md = new vscode.MarkdownString();
-    md.appendMarkdown(`**结构化引用** \`${value}\`\n\n`);
-    if (parts[0] === 'inputs') {
+    md.appendMarkdown(`**结构化绑定** \`${value}\`\n\n`);
+    if (parts[0] === 'blackboard') {
       const propName = parts[1] ?? '';
-      const props = (info.inputsSchema?.properties ?? {}) as Record<string, unknown>;
-      const prop = props[propName] as Record<string, unknown> | undefined;
+      const prop = info.blackboard[propName];
       if (prop) {
-        const type = String(prop.type ?? 'any');
         const def = prop.default !== undefined ? JSON.stringify(prop.default) : undefined;
-        const desc = typeof prop.description === 'string' ? prop.description : undefined;
-        md.appendMarkdown(`输入参数 \`${propName}\`（${type}${def !== undefined ? `，默认 ${def}` : ''}）`);
-        if (desc) md.appendMarkdown(`\n\n${desc}`);
+        md.appendMarkdown(`黑板键 \`${propName}\`（${prop.type}${def !== undefined ? `，默认 ${def}` : ''}）`);
+        if (prop.description) md.appendMarkdown(`\n\n${prop.description}`);
       } else {
-        md.appendMarkdown('引用 `inputs_schema` 中未声明的字段（引擎仍允许，但建议补全声明）');
+        md.appendMarkdown('引用 `blackboard` 中未声明的键');
       }
-    } else if (parts[0] === 'steps' && parts[2] === 'output') {
-      const stepId = parts[1] ?? '';
-      const step = info.steps.find((s) => s.id === stepId);
-      if (step) {
-        const spec = step.action ? catalog.byName(step.action) : undefined;
-        md.appendMarkdown(`步骤 \`${stepId}\` 的输出（Action: \`${step.action}\`）`);
+    } else if (parts[0] === 'nodes' && parts[2] === 'output') {
+      const nodeId = parts[1] ?? '';
+      const node = info.nodes.find((n) => n.id === nodeId);
+      if (node) {
+        const spec = node.action ? catalog.byName(node.action) : undefined;
+        md.appendMarkdown(`节点 \`${nodeId}\` 的输出（Action: \`${node.action ?? '(复合节点)'}\`）`);
         if (spec && spec.outputFields.length > 0) {
           md.appendMarkdown(`\n\n可用输出字段: \`${spec.outputFields.join('`、`')}\``);
         }
       } else {
-        md.appendMarkdown(`未知步骤 \`${stepId}\``);
+        md.appendMarkdown(`未知节点 \`${nodeId}\``);
       }
     }
     return new vscode.Hover(md);

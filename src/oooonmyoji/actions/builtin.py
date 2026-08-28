@@ -68,6 +68,7 @@ class MatchTemplateAction(Action):
             roi=arguments.get("roi"),
             threshold=float(arguments.get("threshold", 0.85)),
             max_results=int(arguments.get("max_results", 20)),
+            scale_search=bool(arguments.get("scale_search", False)),
         )
         output = []
         for match in matches:
@@ -97,6 +98,7 @@ class WaitTemplateAction(Action):
             present=bool(arguments.get("present", True)),
             roi=arguments.get("roi"),
             threshold=float(arguments.get("threshold", 0.85)),
+            scale_search=bool(arguments.get("scale_search", False)),
         )
         return ActionResult.succeeded([match.to_dict() for match in matches])
 
@@ -209,19 +211,131 @@ class RunWorkflowAction(Action):
         )
 
 
-BUILTIN_ACTIONS: tuple[tuple[Action, dict[str, Any], dict[str, Any], bool, bool], ...] = (
-    (CaptureAction(), {"type": "object", "additionalProperties": False}, {"type": "object"}, True, False),
-    (SaveFrameAction(), {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}, "additionalProperties": False}, {"type": "object"}, True, False),
-    (SleepAction(), {"type": "object", "required": ["seconds"], "properties": {"seconds": {"type": "number", "minimum": 0}}, "additionalProperties": False}, {"type": "object"}, True, False),
-    (LogAction(), {"type": "object", "required": ["message"], "properties": {"message": {"type": "string"}, "fields": {"type": "object"}}, "additionalProperties": False}, {"type": "object"}, True, False),
-    (AssertAction(), {"type": "object", "required": ["value"], "properties": {"value": {}, "message": {"type": "string"}}, "additionalProperties": False}, {"type": "object"}, True, False),
-    (MatchTemplateAction(), {"type": "object", "required": ["template"], "properties": {"template": {"type": "string"}, "roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}, "max_results": {"type": "integer", "minimum": 1}}, "additionalProperties": False}, {"type": "array"}, True, False),
-    (OcrAction(), {"type": "object", "properties": {"roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}}, "additionalProperties": False}, {"type": "array"}, True, False),
-    (WaitTemplateAction(), {"type": "object", "required": ["template", "timeout_seconds"], "properties": {"template": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0}, "present": {"type": "boolean"}, "roi": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}, "threshold": {"type": "number", "minimum": 0, "maximum": 1}}, "additionalProperties": False}, {"type": "array"}, True, False),
-    (TapAction(), {"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "hold_ms": {"type": "integer", "minimum": 0}, "random_offset": {"type": "integer", "minimum": 0}, "random_interval": {"type": "array", "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}}, "additionalProperties": False}, {"type": "object"}, False, True),
-    (TapMatchAction(), {"type": "object", "required": ["match"], "properties": {"match": {"type": "object"}, "revalidate": {"type": "boolean"}, "hold_ms": {"type": "integer", "minimum": 0}, "random_offset": {"type": "integer", "minimum": 0}, "random_interval": {"type": "array", "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}}, "additionalProperties": False}, {"type": "object"}, False, True),
-    (RunWorkflowAction(), {"type": "object", "required": ["workflow"], "properties": {"workflow": {"type": "string", "minLength": 1}, "inputs": {"type": "object"}}, "additionalProperties": False}, {"type": "object"}, False, True),
-)
+class SelectWorkflowAction(Action):
+    """UE 行为树 Selector 语义：按顺序尝试子工作流，一个成功即成功，全部失败才失败。"""
+
+    name = "workflow.select"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        refs = arguments.get("workflows")
+        if not isinstance(refs, list) or not refs or not all(isinstance(r, str) and r.strip() for r in refs):
+            return ActionResult.failed("workflows must be a non-empty array of workflow references", category="workflow")
+        inputs = arguments.get("inputs", {})
+        if not isinstance(inputs, dict):
+            return ActionResult.failed("inputs must be an object", category="workflow")
+        attempts: list[dict[str, Any]] = []
+        for reference in refs:
+            try:
+                status, output, error, error_category = context.run_subworkflow(reference, inputs)
+            except WorkflowError as exc:
+                attempts.append({"workflow": reference, "status": "failed", "error": str(exc)})
+                continue
+            attempts.append({"workflow": reference, "status": status, "error": error})
+            if status == "succeeded":
+                return ActionResult.succeeded({
+                    "workflow": reference,
+                    "status": "succeeded",
+                    "output": output,
+                    "attempts": attempts,
+                })
+            if status == "cancelled":
+                return ActionResult.cancelled(error or "subworkflow cancelled")
+        return ActionResult.failed(
+            "workflow.select: all branches failed",
+            category="subworkflow",
+            output={"attempts": attempts},
+        )
 
 
-__all__ = ["BUILTIN_ACTIONS"]
+class SequenceWorkflowAction(Action):
+    """UE 行为树 Sequence 语义：按顺序执行子工作流，全部成功才成功，任一失败立即中止。"""
+
+    name = "workflow.sequence"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        refs = arguments.get("workflows")
+        if not isinstance(refs, list) or not refs or not all(isinstance(r, str) and r.strip() for r in refs):
+            return ActionResult.failed("workflows must be a non-empty array of workflow references", category="workflow")
+        inputs = arguments.get("inputs", {})
+        if not isinstance(inputs, dict):
+            return ActionResult.failed("inputs must be an object", category="workflow")
+        attempts: list[dict[str, Any]] = []
+        output: Any = None
+        for reference in refs:
+            try:
+                status, output, error, error_category = context.run_subworkflow(reference, inputs)
+            except WorkflowError as exc:
+                attempts.append({"workflow": reference, "status": "failed", "error": str(exc)})
+                return ActionResult.failed(
+                    f"workflow.sequence aborted at {reference}: {exc}",
+                    category=exc.category.value,
+                    output={"attempts": attempts},
+                )
+            attempts.append({"workflow": reference, "status": status, "error": error})
+            if status == "cancelled":
+                return ActionResult.cancelled(error or "subworkflow cancelled")
+            if status != "succeeded":
+                return ActionResult.failed(
+                    f"workflow.sequence aborted at {reference}: {error or 'failed'}",
+                    category=error_category or "subworkflow",
+                    output={"attempts": attempts},
+                )
+        return ActionResult.succeeded({
+            "workflow": refs[-1],
+            "status": "succeeded",
+            "output": output,
+            "attempts": attempts,
+        })
+
+
+class WaitTextAction(Action):
+    """轮询 OCR 直到指定文本出现（或消失），超时判定为失败。"""
+
+    name = "vision.wait_text"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        text = arguments.get("text")
+        if not isinstance(text, str) or not text:
+            return ActionResult.failed("text must be a non-empty string", category="workflow")
+        timeout = float(arguments.get("timeout_seconds", 30))
+        min_confidence = float(arguments.get("min_confidence", 0.0))
+        if not 0.0 <= min_confidence <= 1.0:
+            return ActionResult.failed("min_confidence must be between 0 and 1", category="workflow")
+        present = bool(arguments.get("present", True))
+        try:
+            matches = context.wait_for_text(
+                text,
+                timeout_seconds=timeout,
+                roi=arguments.get("roi"),
+                min_confidence=min_confidence,
+                present=present,
+            )
+        except RuntimeError as exc:
+            return ActionResult.failed(str(exc), category="ocr")
+        except TimeoutError as exc:
+            return ActionResult.failed(str(exc), category="vision")
+        return ActionResult.succeeded({"matched": len(matches), "text": text, "present": present})
+
+
+# Action parameter metadata now lives in the shared manifest files under
+# ``src/oooonmyoji/actions/manifests/*.json`` (one per Action, consumed by both
+# the Python runtime and the TypeScript editor). This module only implements the
+# Action classes; ``build_action_registry`` resolves ``builtin:<ClassName>``
+# entries against the classes defined here.
+
+__all__ = [
+    "AssertAction",
+    "CaptureAction",
+    "LogAction",
+    "MatchTemplateAction",
+    "OcrAction",
+    "RunWorkflowAction",
+    "SaveFrameAction",
+    "SelectWorkflowAction",
+    "SequenceWorkflowAction",
+    "SleepAction",
+    "TapAction",
+    "TapMatchAction",
+    "WaitTemplateAction",
+    "WaitTextAction",
+]

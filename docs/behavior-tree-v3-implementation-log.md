@@ -136,3 +136,45 @@ vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.0.vsix
 打包过程会再次执行 TypeScript 编译并通过。`vsce` 报告了三个非阻断发布提示：
 `package.json` 未声明独立仓库字段、扩展目录没有 LICENSE 文件、依赖尚未 bundle。
 这些不影响本地安装和本轮功能验收，也没有把 UE 参考仓库错误登记为扩展发布仓库。
+
+### 0.2.1 连线释放修复
+
+真实 VS Code Webview 复测发现，拖线经过目标输入引脚时虽然出现高亮，但松手后不会
+建立连接。原因是拖线的每次 `mousemove` 都会重绘整个 SVG；目标引脚 DOM 在
+`mouseenter` 中被替换后，浏览器不会再把 `mouseup` 发送给原元素。此前 DOM 冒烟
+直接调用输出端 `mousedown` 和输入端 `mouseup`，没有覆盖这一浏览器事件生命周期。
+
+修复内容：
+
+- 鼠标移动和全局释放时，按画布坐标与当前缩放计算最近的兼容引脚，不依赖会被重绘
+  替换的 DOM 元素接收 `mouseup`。
+- 全局 `mouseup` 使用吸附目标提交连接；未命中时取消预览，不改工作流。
+- 输入引脚也可作为起点反向拖到复合节点输出引脚；已有父级只在新连接校验成功后替换。
+- 起点节点不会被识别为自己的落点，避免低缩放下误触自连接。
+- DOM 冒烟新增“输入到输出反向连接”和“SVG 重绘后全局释放”两项检查，共 21 项。
+- 无缓存 Chromium 真实指针测试通过两个方向：Decision 输出到 Capture 输入、Capture
+  输入到 Main 输出，父级关系均按预期更新。
+
+### 0.2.2 模板参数栏修复
+
+新建 `vision.match_template` 节点的 `params` 为空时，详情栏只显示“参数”标题，模板路径、
+ROI、阈值等控件都没有出现。Action manifest 与 Webview 收到的 catalog 实际完整；原因是
+参数渲染器对“必填且没有默认值”的 `template` 执行 `clone(undefined)`，异常中断了整个参数组。
+
+修复内容：
+
+- 必填参数没有默认值时使用其类型初始值渲染；`asset` 显示空路径输入框和“截取”按钮，
+  不在用户编辑前擅自写入工作流。
+- DOM 冒烟改为覆盖真实故障形态：`vision.match_template.params` 为 `{}`，并检查 5 个参数组、
+  空模板输入框和截取按钮均存在。
+- 逻辑冒烟校验真实 manifest 的 `template` 类型和 5 个完整参数名，防止 catalog 链路退化。
+- Chromium 浏览器验收确认空参数节点显示 `template`、`roi`、`threshold`、`max_results`、
+  `scale_search` 五组控件，模板路径框与“截取”按钮可见，控制台无错误。
+
+验收与安装：
+
+- TypeScript 编译通过；Node 逻辑冒烟 35 项、DOM 编辑器冒烟 25 项、Python/TypeScript
+  引擎规则对拍全部通过。
+- 已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.2.vsix`（763365 bytes）。
+- 已使用 VS Code CLI 强制覆盖安装，并确认已安装版本为
+  `oooonmyoji.onmyoji-workflow-helper@0.2.2`。

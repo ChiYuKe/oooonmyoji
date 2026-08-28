@@ -27,6 +27,8 @@ class FakeEl {
   appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
   addEventListener(type, fn) { (this._listeners[type] = this._listeners[type] || []).push(fn); }
   removeEventListener() {}
+  setPointerCapture() {}
+  releasePointerCapture() {}
   getBoundingClientRect() { return { left: 0, top: 0, right: 900, bottom: 640, width: 900, height: 640 }; }
   get clientWidth() { return 900; }
   get clientHeight() { return 640; }
@@ -83,13 +85,13 @@ const workflow = {
     { id: 'main', type: 'sequence', children: ['capture', 'selector'] },
     { id: 'capture', type: 'task', action: 'core.capture', params: {} },
     { id: 'selector', type: 'selector', children: ['find', 'fallback'] },
-    { id: 'find', type: 'task', action: 'vision.match_template', params: { template: 'assets/templates/start/yys_tubiao.png', threshold: 0.85 }, decorators: [{ type: 'timeout', seconds: 10 }] },
+    { id: 'find', type: 'task', action: 'vision.match_template', params: {}, decorators: [{ type: 'timeout', seconds: 10 }] },
     { id: 'fallback', type: 'task', action: 'core.log', params: { message: 'not found' } },
   ],
 };
 const catalog = [
   { name: 'core.capture', version: '1.0.0', description: '截屏', parameters: {}, inputSchema: { type: 'object', properties: {}, additionalProperties: false }, outputSchema: { type: 'object', properties: { width: { type: 'integer' } } }, outputFields: ['width'], retrySafe: true },
-  { name: 'vision.match_template', version: '1.0.0', description: '匹配', parameters: { template: { type: 'asset', required: true }, roi: { type: 'rect' }, threshold: { type: 'number', default: 0.85, min: 0, max: 1 } }, inputSchema: { type: 'object', properties: { template: { type: 'string' }, roi: { type: 'array' }, threshold: { type: 'number' } }, required: ['template'], additionalProperties: false }, outputSchema: { type: 'array' }, outputFields: [], retrySafe: true },
+  { name: 'vision.match_template', version: '1.0.0', description: '匹配', parameters: { template: { type: 'asset', required: true }, roi: { type: 'rect' }, threshold: { type: 'number', default: 0.85, min: 0, max: 1 }, max_results: { type: 'integer', default: 20, min: 1 }, scale_search: { type: 'boolean', default: false } }, inputSchema: { type: 'object', properties: { template: { type: 'string' }, roi: { type: 'array' }, threshold: { type: 'number' }, max_results: { type: 'integer' }, scale_search: { type: 'boolean' } }, required: ['template'], additionalProperties: false }, outputSchema: { type: 'array' }, outputFields: [], retrySafe: true },
   { name: 'core.log', version: '1.0.0', description: '日志', parameters: { message: { type: 'string', required: true } }, inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: true },
 ];
 
@@ -100,11 +102,23 @@ const hasClass = (item, name) => item.classList.contains(name) || String(item.at
 const allGraph = (predicate) => walk(graph, predicate);
 const nodeGroup = (id) => allGraph((item) => item.tagName === 'G' && hasClass(item, 'node')).find((item) => item.dataset.id === id);
 const within = (root, predicate) => walk(root, predicate);
-const fire = (target, type, values = {}) => { const event = Object.assign({ button: 0, clientX: 100, clientY: 100, shiftKey: false, altKey: false, ctrlKey: false, target, preventDefault() {}, stopPropagation() {} }, values); for (const fn of target._listeners[type] || []) fn(event); };
+const fire = (target, type, values = {}) => { const event = Object.assign({ button: 0, clientX: 100, clientY: 100, pointerId: 1, shiftKey: false, altKey: false, ctrlKey: false, target, preventDefault() {}, stopPropagation() {} }, values); for (const fn of target._listeners[type] || []) fn(event); };
 const fireWindow = (type, values = {}) => { const event = Object.assign({ key: '', button: 0, clientX: 100, clientY: 100, target: body, preventDefault() {}, stopPropagation() {} }, values); for (const fn of windowStub._listeners[type] || []) fn(event); };
 const save = () => { fire(els['btn-save'], 'click'); return JSON.parse(saved); };
 const inspectorItems = (predicate) => walk(els['inspector-body'], predicate);
 const selectNode = (id) => fire(within(nodeGroup(id), (item) => hasClass(item, 'node-box'))[0], 'mousedown');
+const portPoint = (id, kind) => {
+  const editor = windowStub.__btEditor;
+  const raw = editor.snapshot();
+  const node = raw.nodes.find((item) => item.id === id);
+  const pos = raw._layout[id];
+  const height = 96 + (Array.isArray(node.decorators) ? node.decorators.length * 22 : 0);
+  return {
+    clientX: editor.state.panX + (pos.x + 130) * editor.state.zoom,
+    clientY: editor.state.panY + (pos.y + (kind === 'output' ? height : 0)) * editor.state.zoom,
+    pointerId: 1,
+  };
+};
 
 let ok = true;
 const check = (name, condition) => { console.log((condition ? '✓ ' : '✗ ') + name); if (!condition) ok = false; };
@@ -118,7 +132,11 @@ check('复合节点有输出引脚', allGraph((item) => hasClass(item, 'port-out
 check('装饰器嵌入卡片', within(nodeGroup('find'), (item) => hasClass(item, 'decorator-label')).some((item) => String(item.textContent).includes('Time Limit')));
 
 selectNode('find');
-const templateInput = inspectorItems((item) => item.tagName === 'INPUT' && String(item.value).includes('yys_tubiao.png'))[0];
+const templateInput = inspectorItems((item) => item.tagName === 'INPUT' && item.placeholder === 'assets/templates/...')[0];
+check('空参数的必填模板仍渲染输入框', !!templateInput && templateInput.value === '');
+check('模板参数提供截取按钮', inspectorItems((item) => item.tagName === 'BUTTON' && item.textContent === '截取').length === 1);
+check('模板匹配渲染完整参数组', inspectorItems((item) => hasClass(item, 'parameter-block')).length === 5);
+check('只渲染必填参数不会改写工作流', Object.keys(save().nodes.find((node) => node.id === 'find').params).length === 0);
 templateInput.value = 'assets/templates/other.png'; fire(templateInput, 'change');
 check('参数栏写回 Action 参数', save().nodes.find((node) => node.id === 'find').params.template === 'assets/templates/other.png');
 
@@ -128,10 +146,27 @@ check('详情栏添加 Retry 装饰器', save().nodes.find((node) => node.id ===
 
 // Output -> input reparents capture from Sequence to Selector.
 const selectorOut = within(nodeGroup('selector'), (item) => hasClass(item, 'port-out'))[0];
-const captureIn = within(nodeGroup('capture'), (item) => hasClass(item, 'port-in'))[0];
-fire(selectorOut, 'mousedown'); fire(captureIn, 'mouseup');
+fire(selectorOut, 'pointerdown');
+fire(graph, 'pointermove', portPoint('capture', 'input'));
+fire(graph, 'pointerup', portPoint('capture', 'input'));
 let raw = save();
 check('新连接替换目标旧父级', !raw.nodes.find((node) => node.id === 'main').children.includes('capture') && raw.nodes.find((node) => node.id === 'selector').children.includes('capture'));
+
+// Input -> output supports the UE-style reverse drag direction.
+const captureInReverse = within(nodeGroup('capture'), (item) => hasClass(item, 'port-in'))[0];
+fire(captureInReverse, 'pointerdown');
+fire(graph, 'pointermove', portPoint('main', 'output'));
+fire(graph, 'pointerup', portPoint('main', 'output'));
+raw = save();
+check('输入引脚可反向拖到输出引脚', raw.nodes.find((node) => node.id === 'main').children.includes('capture') && !raw.nodes.find((node) => node.id === 'selector').children.includes('capture'));
+
+// Real SVG rerenders replace the hovered input before mouseup; the window fallback must commit it.
+const selectorOutFallback = within(nodeGroup('selector'), (item) => hasClass(item, 'port-out'))[0];
+fire(selectorOutFallback, 'pointerdown');
+windowStub.__btEditor.state.connect.hover = 'capture';
+fire(graph, 'pointerup', { clientX: -10000, clientY: -10000, pointerId: 1 });
+raw = save();
+check('全局 mouseup 可在 SVG 重绘后完成连接', !raw.nodes.find((node) => node.id === 'main').children.includes('capture') && raw.nodes.find((node) => node.id === 'selector').children.includes('capture'));
 
 // Select the selector->capture edge and delete it.
 const edge = allGraph((item) => item.tagName === 'G' && hasClass(item, 'edge')).find((item) => item.dataset.parent === 'selector' && item.dataset.child === 'capture');

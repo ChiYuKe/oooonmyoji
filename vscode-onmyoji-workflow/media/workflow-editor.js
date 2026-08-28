@@ -349,21 +349,27 @@
       event.stopPropagation();
       mutate(() => disconnect(parent.id, childId));
     });
-    rewire.addEventListener('mousedown', (event) => {
+    rewire.addEventListener('pointerdown', (event) => {
       event.preventDefault(); event.stopPropagation();
       const point = worldPoint(event);
-      state.connect = { parent: parent.id, x: point.x, y: point.y, oldChild: childId, oldIndex: order, hover: null };
+      state.connect = { direction: 'from-output', parent: parent.id, x: point.x, y: point.y, oldChild: childId, oldIndex: order, hover: null, pointerId: captureConnectionPointer(event) };
       render();
     });
   }
 
   function renderConnection(layer) {
+    const classes = `connection-preview${state.connect.hover ? ' snapped' : ''}`;
+    if (state.connect.direction === 'from-input') {
+      const child = nodeById(state.connect.child);
+      if (!child) return;
+      const pos = position(child);
+      svgEl('path', { class: classes, d: bezier(state.connect.x, state.connect.y, pos.x + NODE_W / 2, pos.y) }, layer);
+      return;
+    }
     const parent = nodeById(state.connect.parent);
     if (!parent) return;
     const pos = position(parent);
-    const x = pos.x + NODE_W / 2;
-    const y = pos.y + nodeHeight(parent);
-    svgEl('path', { class: `connection-preview${state.connect.hover ? ' snapped' : ''}`, d: bezier(x, y, state.connect.x, state.connect.y) }, layer);
+    svgEl('path', { class: classes, d: bezier(pos.x + NODE_W / 2, pos.y + nodeHeight(parent), state.connect.x, state.connect.y) }, layer);
   }
 
   function renderNode(layer, node) {
@@ -399,13 +405,11 @@
     });
     if (node.type !== 'root') {
       const input = svgEl('circle', { class: 'port port-in', cx: NODE_W / 2, cy: 0, r: PORT_R, 'data-node': node.id }, group);
-      input.addEventListener('mouseup', (event) => finishConnection(event, node.id));
-      input.addEventListener('mouseenter', () => { if (state.connect) { state.connect.hover = node.id; render(); } });
-      input.addEventListener('mouseleave', () => { if (state.connect && state.connect.hover === node.id) { state.connect.hover = null; render(); } });
+      input.addEventListener('pointerdown', (event) => startConnectionFromInput(event, node.id));
     }
     if (node.type !== 'task') {
       const output = svgEl('circle', { class: 'port port-out', cx: NODE_W / 2, cy: height, r: PORT_R, 'data-node': node.id }, group);
-      output.addEventListener('mousedown', (event) => startConnection(event, node.id));
+      output.addEventListener('pointerdown', (event) => startConnection(event, node.id));
     }
     body.addEventListener('mousedown', (event) => startNodeDrag(event, node.id));
     body.addEventListener('dblclick', () => { state.selected = new Set([node.id]); state.inspector = 'node'; render(); });
@@ -439,8 +443,36 @@
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
     const point = worldPoint(event);
-    state.connect = { parent: parentId, x: point.x, y: point.y, hover: null };
+    state.connect = { direction: 'from-output', parent: parentId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
     state.selectedEdge = null;
+    render();
+  }
+
+  function startConnectionFromInput(event, childId) {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const point = worldPoint(event);
+    state.connect = { direction: 'from-input', child: childId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+    state.selectedEdge = null;
+    render();
+  }
+
+  function captureConnectionPointer(event) {
+    if (!Number.isInteger(event.pointerId)) return null;
+    try { graph.setPointerCapture(event.pointerId); } catch { /* Synthetic tests may not own an active pointer. */ }
+    return event.pointerId;
+  }
+
+  function releaseConnectionPointer(pointerId) {
+    if (!Number.isInteger(pointerId)) return;
+    try { graph.releasePointerCapture(pointerId); } catch { /* Capture may already be released. */ }
+  }
+
+  function cancelConnection() {
+    if (!state.connect) return;
+    const pointerId = state.connect.pointerId;
+    state.connect = null;
+    releaseConnectionPointer(pointerId);
     render();
   }
 
@@ -449,10 +481,36 @@
     event.preventDefault(); event.stopPropagation();
     const connection = state.connect;
     state.connect = null;
+    releaseConnectionPointer(connection.pointerId);
+    const before = snapshot();
     mutate(() => {
+      if (connection.direction === 'from-input') {
+        connect(childId, connection.child);
+        return;
+      }
       if (connection.oldChild) disconnect(connection.parent, connection.oldChild);
       if (!connect(connection.parent, childId, connection.oldIndex) && connection.oldChild) connect(connection.parent, connection.oldChild, connection.oldIndex);
     });
+    if (snapshot() === before) render();
+  }
+
+  function connectionTargetAt(event) {
+    if (!state.connect || !event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
+    const point = worldPoint(event);
+    const maxDistance = Math.max(PORT_R + 6, 24 / state.zoom);
+    let best = null;
+    let bestDistance = maxDistance;
+    for (const node of nodes()) {
+      const wantsOutput = state.connect.direction === 'from-input';
+      if ((wantsOutput && node.type === 'task') || (!wantsOutput && node.type === 'root')) continue;
+      if ((wantsOutput && node.id === state.connect.child) || (!wantsOutput && node.id === state.connect.parent)) continue;
+      const pos = position(node);
+      const x = pos.x + NODE_W / 2;
+      const y = wantsOutput ? pos.y + nodeHeight(node) : pos.y;
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance <= bestDistance) { best = node.id; bestDistance = distance; }
+    }
+    return best;
   }
 
   function startNodeDrag(event, id) {
@@ -504,9 +562,11 @@
 
   function onPointerMove(event) {
     if (state.connect) {
+      if (Number.isInteger(event.pointerId) && Number.isInteger(state.connect.pointerId) && event.pointerId !== state.connect.pointerId) return;
       autoPan(event);
       const point = worldPoint(event);
       state.connect.x = point.x; state.connect.y = point.y;
+      state.connect.hover = connectionTargetAt(event);
       render();
       return;
     }
@@ -538,8 +598,14 @@
     render();
   }
 
-  function onPointerUp() {
-    if (state.connect) { state.connect = null; render(); }
+  function onPointerUp(event) {
+    if (state.connect) {
+      if (Number.isInteger(event.pointerId) && Number.isInteger(state.connect.pointerId) && event.pointerId !== state.connect.pointerId) return;
+      const target = connectionTargetAt(event) || state.connect.hover;
+      if (target) finishConnection(event, target);
+      else cancelConnection();
+      return;
+    }
     if (!state.drag) return;
     if (state.drag.kind === 'nodes' && state.drag.moved && snapshot() !== state.drag.before) {
       state.undo.push(state.drag.before); state.redo = []; setDirty();
@@ -783,7 +849,11 @@
     block.appendChild(heading);
     if (definition.description) block.appendChild(el('div', 'field-hint', definition.description));
     if (!exists && !definition.required && definition.default === undefined) { body.appendChild(block); return; }
-    const value = exists ? node.params[name] : clone(definition.default);
+    const value = exists
+      ? node.params[name]
+      : definition.default !== undefined
+        ? clone(definition.default)
+        : defaultValue(definition);
     const bound = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && Object.keys(value).length === 1;
     const mode = selectInput(bound ? 'binding' : 'literal', [{ value: 'literal', label: '固定值' }, { value: 'binding', label: '引用' }], (next) => mutate(() => {
       node.params[name] = next === 'binding' ? { ref: allRefs()[0] || 'blackboard.key' } : defaultValue(definition);
@@ -1065,6 +1135,9 @@
   graph.addEventListener('mousedown', onPointerDown);
   graph.addEventListener('mousemove', onPointerMove);
   graph.addEventListener('mouseup', onPointerUp);
+  graph.addEventListener('pointermove', (event) => { if (state.connect) onPointerMove(event); });
+  graph.addEventListener('pointerup', (event) => { if (state.connect) onPointerUp(event); });
+  graph.addEventListener('pointercancel', () => cancelConnection());
   graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect) onPointerMove(event); });
   graph.addEventListener('wheel', (event) => { event.preventDefault(); zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY); }, { passive: false });
   graph.addEventListener('contextmenu', (event) => {
@@ -1081,7 +1154,7 @@
   window.addEventListener('keydown', (event) => {
     const tag = event.target && event.target.tagName;
     const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-    if (event.key === 'Escape') { state.connect = null; state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); render(); }
+    if (event.key === 'Escape') { if (state.connect) cancelConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); render(); }
     if (!editing && event.key === 'Delete') { event.preventDefault(); deleteSelection(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); }

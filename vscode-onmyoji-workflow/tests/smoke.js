@@ -65,6 +65,9 @@ async function main() {
   check('内置 Action 数量为 14', builtin.actions.length === 14);
   const match = builtin.actions.find((action) => action.name === 'vision.match_template');
   check('Action 参数默认值来自 manifest', match && match.parameters.threshold.default === 0.85);
+  check('模板匹配 Action 暴露完整参数', match
+    && match.parameters.template.type === 'asset'
+    && JSON.stringify(Object.keys(match.parameters)) === JSON.stringify(['template', 'roi', 'threshold', 'max_results', 'scale_search']));
   check('重试安全元数据可用', match && match.retrySafe === true);
   const tap = builtin.actions.find((action) => action.name === 'input.tap');
   check('副作用 Action 不可安全重试', tap && !tap.retrySafe && tap.sideEffect);

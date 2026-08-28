@@ -16,22 +16,76 @@
     {
       "id": "root",
       "type": "root",
-      "children": []
+      "children": [
+        "sequence_1"
+      ]
     },
     {
       "id": "sequence_1",
       "type": "sequence",
-      "children": []
+      "children": [
+        "task_1",
+        "task_2",
+        "task_3"
+      ]
+    },
+    {
+      "id": "task_1",
+      "type": "task",
+      "action": "core.capture",
+      "params": {},
+      "decorators": [],
+      "name": "截图"
+    },
+    {
+      "id": "task_2",
+      "type": "task",
+      "action": "vision.match_template",
+      "params": {
+        "template": "assets/templates/task_2-template.png",
+        "roi": [
+          1029,
+          450,
+          407,
+          265
+        ]
+      },
+      "name": "识别模板"
+    },
+    {
+      "id": "task_3",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.task_2.output.0"
+        },
+        "revalidate": true
+      },
+      "decorators": [],
+      "name": "点击模板"
     }
   ],
   "_layout": {
     "root": {
-      "x": 0,
-      "y": 0
+      "x": 280,
+      "y": 160
     },
     "sequence_1": {
-      "x": -144,
-      "y": 224
+      "x": 272,
+      "y": 368
+    },
+    "task_1": {
+      "x": -64,
+      "y": 640
+    },
+    "task_2": {
+      "x": 272,
+      "y": 640
+    },
+    "task_3": {
+      "x": 600,
+      "y": 640
     }
   }
 }

@@ -45,7 +45,8 @@ code --install-extension onmyoji-workflow-helper-0.2.0.vsix
   - `Onmyoji: 重新加载 Action 目录`
 - 可视化编辑器：
   - 滚轮缩放，右键/中键拖拽平移，拖动卡片调整位置（持久化到 `_layout`）。
-  - 从复合节点下方输出引脚拖到节点上方输入引脚；输入只允许一个父级，新连接自动替换旧父级。
+  - 可从复合节点下方输出引脚拖到节点上方输入引脚，也可从输入引脚反向拖到输出引脚；
+    输入只允许一个父级，新连接自动替换旧父级。
   - 拖动连线靠近目标端的手柄可重新连接；双击连线或选中后按 Delete 可断开。
   - 右侧详情栏编辑 Action 参数、Condition/Cooldown/Time Limit/Retry/Repeat 装饰器、
     Simple Parallel 结束模式和子节点优先级。

@@ -12,6 +12,11 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Force machine-readable Python CLI output to use the UTF-8 decoding expected by Node. */
+export function pythonUtf8Environment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...environment, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+}
+
 /** 从运行配置中提取可供编辑器选择的实例，忽略空 ID 和重复项。 */
 export function parseRuntimeInstances(raw: unknown): RuntimeInstanceInfo[] {
   const source = asRecord(raw).instances;

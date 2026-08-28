@@ -240,3 +240,17 @@ ADB 回退通道。浏览器验收页的实例数据也同步为双原生后端�
 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.4.vsix`（765850 bytes），使用
 VS Code CLI 强制覆盖安装，并确认当前版本为
 `oooonmyoji.onmyoji-workflow-helper@0.2.4`；安装目录包含新的实例发现调用。
+
+### 0.2.5 Windows 实例名称编码修复
+
+VS Code 扩展通过管道读取 Python `list-instances` 输出时，Python 在 Windows 下可能按
+本地代码页写出中文，而 Node 固定按 UTF-8 解码，导致 MuMu 实例名称显示为替换字符。
+实例发现子进程现显式设置 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`，并保留其他
+进程环境变量。逻辑冒烟新增编码环境断言，防止后续重构再次遗漏。
+
+Node 到 Python 的真实管道验收确认实例名称码点分别为“扫地工”和“吃鱼”，没有替换
+字符。TypeScript 逻辑冒烟增至 40 项，DOM 30 项、Python `79 passed, 2 skipped`、
+`mypy` 46 个源码文件及引擎规则对拍均通过。已打包
+`vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.5.vsix`（766028 bytes）并强制
+覆盖安装；当前版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.5`，安装目录包含
+UTF-8 环境修复。

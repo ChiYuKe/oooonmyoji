@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ActionCatalog, discoverProjectRoot, loadActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
-import { chooseRuntimeInstance, parseRuntimeInstances, RuntimeInstanceInfo } from './runtimeInstances';
+import { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment, RuntimeInstanceInfo } from './runtimeInstances';
 import { WebviewManager } from './webviewManager';
 
 let intelligence: WorkflowIntelligence;
@@ -224,6 +224,7 @@ async function getRuntimeInstances(): Promise<RuntimeInstanceInfo[]> {
   return new Promise((resolve) => {
     const child = spawn(resolvePythonExecutable(), args, {
       cwd: projectRoot,
+      env: pythonUtf8Environment(process.env),
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
     });

@@ -14,7 +14,7 @@ const {
 } = require('../out/catalog');
 const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions } = require('../out/workflow');
 const { computeLayout } = require('../out/layout');
-const { chooseRuntimeInstance, parseRuntimeInstances } = require('../out/runtimeInstances');
+const { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment } = require('../out/runtimeInstances');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURE = {
@@ -70,6 +70,8 @@ async function main() {
   ] });
   check('运行配置提取并去重实例', runtimeInstances.length === 2 && runtimeInstances[1].adbSerial === '127.0.0.1:16416');
   check('MuMu 发现元数据可供实例选择器显示', runtimeInstances[0].mumuIndex === 0 && runtimeInstances[0].displayName === 'primary');
+  const pythonEnvironment = pythonUtf8Environment({ KEEP: 'yes', PYTHONIOENCODING: 'gbk' });
+  check('Python 实例发现输出固定为 UTF-8', pythonEnvironment.KEEP === 'yes' && pythonEnvironment.PYTHONIOENCODING === 'utf-8' && pythonEnvironment.PYTHONUTF8 === '1');
   check('显式实例选择优先于工作区记忆', chooseRuntimeInstance(runtimeInstances, 'mumu-1', 'mumu-0') === 'mumu-1');
   check('无效实例回退到工作区记忆', chooseRuntimeInstance(runtimeInstances, 'missing', 'mumu-0') === 'mumu-0');
 

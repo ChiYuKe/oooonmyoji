@@ -16,6 +16,12 @@ from ..devices.protocol import DeviceFrame
 from ..vision.template import TemplateMatcher
 
 
+REWARD_SCREENSHOT_RETENTION_BATTLES = 10
+_REWARD_SCREENSHOT_PATTERN = re.compile(
+    r"^reward-(?P<battle>\d+)-layer-(?P<layer>\d+)-capture-(?P<capture>\d+)\.png$"
+)
+
+
 @dataclass(frozen=True)
 class _MaterialTemplate:
     id: str
@@ -43,6 +49,7 @@ class RewardStatsProcessor:
         self.logger = logger
         self.material_templates = _load_material_catalog(material_catalog)
         self._run_material_totals: dict[str, dict[str, dict[str, Any]]] = {}
+        self._run_instances: dict[str, str] = {}
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=queue_size)
         self._closed = False
         self._stop_enqueued = False
@@ -87,6 +94,8 @@ class RewardStatsProcessor:
                     self._write_run_event(request, status="failed", error=str(exc), items=[])
                     self._emit("reward_stats.failed", error=str(exc), screenshot=request.get("screenshot"))
             finally:
+                if request is not None:
+                    self._prune_reward_screenshots(request)
                 self._queue.task_done()
 
     def _process(self, request: dict[str, Any]) -> None:
@@ -151,6 +160,117 @@ class RewardStatsProcessor:
             text=" ".join(texts),
             items=[{"id": item["id"], "name": item["name"], "quantity": item["quantity"]} for item in items],
         )
+
+    def _prune_reward_screenshots(self, request: dict[str, Any]) -> None:
+        run_id = request.get("run_id")
+        instance_id = request.get("instance_id")
+        battle_index = request.get("battle_index")
+        screenshot_value = request.get("screenshot")
+        if (
+            not isinstance(run_id, str)
+            or not run_id
+            or not isinstance(instance_id, str)
+            or not instance_id
+            or isinstance(battle_index, bool)
+            or not isinstance(battle_index, int)
+            or battle_index < 1
+            or not isinstance(screenshot_value, str)
+            or not screenshot_value
+        ):
+            return
+
+        artifact_root = self.artifact_dir.resolve()
+        screenshot = Path(screenshot_value).resolve()
+        expected_directory = (artifact_root / run_id / "rewards").resolve()
+        try:
+            expected_directory.relative_to(artifact_root)
+        except ValueError:
+            return
+        if screenshot.parent != expected_directory:
+            return
+        try:
+            processed_through = screenshot.stat().st_mtime_ns
+        except OSError:
+            return
+
+        self._run_instances[run_id] = instance_id
+        groups: dict[tuple[str, int], list[tuple[Path, int]]] = {}
+        try:
+            run_directories = tuple(path for path in artifact_root.iterdir() if path.is_dir())
+        except OSError as exc:
+            self._emit("reward_stats.screenshot_prune_failed", instance_id=instance_id, error=str(exc))
+            return
+
+        for run_directory in run_directories:
+            candidate_run_id = run_directory.name
+            if self._instance_for_run(candidate_run_id) != instance_id:
+                continue
+            reward_directory = run_directory / "rewards"
+            if not reward_directory.is_dir():
+                continue
+            try:
+                candidates = tuple(reward_directory.glob("reward-*-layer-*-capture-*.png"))
+            except OSError:
+                continue
+            for candidate in candidates:
+                match = _REWARD_SCREENSHOT_PATTERN.fullmatch(candidate.name)
+                if match is None:
+                    continue
+                try:
+                    modified_at = candidate.stat().st_mtime_ns
+                except OSError:
+                    continue
+                # Same-instance submissions are FIFO. Newer files may still be
+                # waiting for OCR, so only prune screenshots already reached.
+                if modified_at > processed_through:
+                    continue
+                key = (candidate_run_id, int(match.group("battle")))
+                groups.setdefault(key, []).append((candidate, modified_at))
+
+        ordered_groups = sorted(
+            groups,
+            key=lambda key: (max(item[1] for item in groups[key]), key[0], key[1]),
+            reverse=True,
+        )
+        retained = set(ordered_groups[:REWARD_SCREENSHOT_RETENTION_BATTLES])
+        retained.add((run_id, battle_index))
+        deleted = 0
+        for key in ordered_groups:
+            if key in retained:
+                continue
+            for candidate, _ in groups[key]:
+                try:
+                    candidate.unlink()
+                    deleted += 1
+                except OSError as exc:
+                    self._emit(
+                        "reward_stats.screenshot_delete_failed",
+                        instance_id=instance_id,
+                        screenshot=str(candidate),
+                        error=str(exc),
+                    )
+        if deleted:
+            self._emit(
+                "reward_stats.screenshots_pruned",
+                instance_id=instance_id,
+                retained_battles=REWARD_SCREENSHOT_RETENTION_BATTLES,
+                deleted_screenshots=deleted,
+            )
+
+    def _instance_for_run(self, run_id: str) -> str | None:
+        cached = self._run_instances.get(run_id)
+        if cached is not None:
+            return cached
+        state_path = self.artifact_dir / "runs" / f"{run_id}.json"
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        instance_id = state.get("instance_id") if isinstance(state, dict) else None
+        if not isinstance(instance_id, str) or not instance_id:
+            return None
+        self._run_instances[run_id] = instance_id
+        return instance_id
 
     def _recognize_unresolved_quantities(
         self,

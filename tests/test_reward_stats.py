@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,68 @@ def test_reward_stats_retries_unresolved_quantity_with_local_crop(tmp_path: Path
     assert record["items"][0]["unresolved_occurrences"] == 0
     assert record["items"][0]["detections"][0]["quantity_source"] == "ocr"
     assert record["items"][0]["detections"][0]["quantity_ocr"]["source"] == "quantity_crop"
+
+
+def test_reward_screenshots_retain_latest_ten_battles_per_instance_across_runs(tmp_path: Path) -> None:
+    fixture, _ = _write_reward_fixture(tmp_path)
+    artifact_dir = tmp_path / "artifacts"
+    state_dir = artifact_dir / "runs"
+    state_dir.mkdir(parents=True)
+    image_bytes = fixture.read_bytes()
+    base_time = 1_700_000_000_000_000_000
+
+    def write_state(run_id: str, instance_id: str) -> None:
+        (state_dir / f"{run_id}.json").write_text(
+            json.dumps({"run_id": run_id, "instance_id": instance_id}),
+            encoding="utf-8",
+        )
+
+    def write_screenshot(run_id: str, battle: int, modified_at: int) -> Path:
+        reward_dir = artifact_dir / run_id / "rewards"
+        reward_dir.mkdir(parents=True, exist_ok=True)
+        path = reward_dir / f"reward-{battle:04d}-layer-1-capture-{battle:04d}.png"
+        path.write_bytes(image_bytes)
+        os.utime(path, ns=(modified_at, modified_at))
+        return path
+
+    write_state("run-old", "mumu-1")
+    write_state("run-new", "mumu-1")
+    write_state("run-other", "mumu-0")
+    for battle in range(1, 13):
+        write_screenshot("run-old", battle, base_time + battle * 1_000_000_000)
+    other_screenshots = [
+        write_screenshot("run-other", battle, base_time + battle * 1_000_000_000)
+        for battle in range(1, 6)
+    ]
+    current = write_screenshot("run-new", 1, base_time + 100 * 1_000_000_000)
+    pending = write_screenshot("run-new", 2, base_time + 101 * 1_000_000_000)
+
+    processor = RewardStatsProcessor(artifact_dir, lambda _image: [])
+    for battle, screenshot in ((1, current), (2, pending)):
+        assert processor.submit({
+            "instance_id": "mumu-1",
+            "run_id": "run-new",
+            "category": "souls",
+            "battle_index": battle,
+            "layer": 1,
+            "capture_index": battle,
+            "captured_at": "2026-08-30T12:00:00+00:00",
+            "screenshot": str(screenshot),
+            "roi": [0, 0, 200, 100],
+        })
+    assert processor.close(wait_seconds=5)
+
+    retained = {
+        path.relative_to(artifact_dir).as_posix()
+        for path in artifact_dir.glob("run-*/rewards/reward-*.png")
+        if "run-other" not in path.parts
+    }
+    assert retained == {
+        *(f"run-old/rewards/reward-{battle:04d}-layer-1-capture-{battle:04d}.png" for battle in range(5, 13)),
+        "run-new/rewards/reward-0001-layer-1-capture-0001.png",
+        "run-new/rewards/reward-0002-layer-1-capture-0002.png",
+    }
+    assert all(path.is_file() for path in other_screenshots)
 
 
 def test_supervisor_drains_reward_stats_before_stopping_ocr(tmp_path: Path) -> None:

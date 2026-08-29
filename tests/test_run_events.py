@@ -148,3 +148,73 @@ def test_run_events_file_truncates_on_new_run(tmp_path: Path, monkeypatch: pytes
     assert lines[0]["type"] == "run_started"
     assert lines[0]["run_id"] != first_run_id
     assert lines[-1]["type"] == "run_finished"
+
+
+def test_run_uses_run_specific_events_file_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    job = JobConfig(
+        id="wf-run",
+        workflow="wf",
+        instance="fake",
+        inputs={},
+        schedule={"type": "manual"},
+        enabled=True,
+        retry_enabled=False,
+    )
+
+    record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-default-events")
+
+    events_path = tmp_path / "artifacts" / "runs" / "events-run-default-events.jsonl"
+    assert record.details["events_file"] == str(events_path)
+    lines = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert lines[0]["type"] == "run_started"
+    assert lines[-1]["type"] == "run_finished"
+
+
+def test_run_record_checkpoints_are_batched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = _write_config(tmp_path)
+    workflow_path = tmp_path / "workflows" / "wf.json"
+    task_ids = [f"log-{index}" for index in range(30)]
+    workflow_path.write_text(json.dumps({
+        "schema_version": 3,
+        "id": "wf",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["batch"]},
+            {"id": "batch", "type": "sequence", "children": task_ids},
+            *[
+                {"id": task_id, "type": "task", "action": "core.log", "params": {"message": task_id}}
+                for task_id in task_ids
+            ],
+        ],
+    }), encoding="utf-8")
+    config = load_config(config_path)
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    original_write = runner_module.AtomicJsonStore.write
+    state_writes = 0
+
+    def counting_write(store: runner_module.AtomicJsonStore, value: object) -> None:
+        nonlocal state_writes
+        if store.path.name == "run-batched.json":
+            state_writes += 1
+        original_write(store, value)
+
+    monkeypatch.setattr(runner_module.AtomicJsonStore, "write", counting_write)
+    job = JobConfig(
+        id="wf-run",
+        workflow="wf",
+        instance="fake",
+        inputs={},
+        schedule={"type": "manual"},
+        enabled=True,
+        retry_enabled=False,
+    )
+
+    record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-batched")
+
+    assert record.status.value == "succeeded"
+    assert record.step_history_total == 32
+    assert state_writes == 5

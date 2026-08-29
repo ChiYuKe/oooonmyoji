@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import queue
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +25,9 @@ from ..workflows.loader import WorkflowLoader
 from .context import TaskContextImpl
 from .logging import EventLogger
 from .records import AtomicJsonStore, RunRecord, RunStatus
+
+
+RUN_RECORD_CHECKPOINT_STEPS = 25
 
 
 class RemoteOcrEngine:
@@ -70,14 +74,16 @@ class RunEventWriter:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self._started = False
+        self._lock = threading.Lock()
 
     def write(self, payload: dict[str, Any]) -> None:
         line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        mode = "w" if not self._started else "a"
-        with self.path.open(mode, encoding="utf-8", newline="\n") as stream:
-            stream.write(line)
-        self._started = True
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            mode = "w" if not self._started else "a"
+            with self.path.open(mode, encoding="utf-8", newline="\n") as stream:
+                stream.write(line)
+            self._started = True
 
 
 def _safe_artifact_name(value: str) -> str:
@@ -143,7 +149,12 @@ class TaskRunner:
         events_file: Path | str | None = None,
     ) -> RunRecord:
         run_id = run_id or uuid.uuid4().hex
-        writer = RunEventWriter(events_file) if events_file is not None else None
+        resolved_events_file = (
+            Path(events_file)
+            if events_file is not None
+            else self.config.artifact_dir / "runs" / f"events-{run_id}.jsonl"
+        )
+        writer = RunEventWriter(resolved_events_file)
         record = RunRecord(
             run_id=run_id,
             job_id=job.id,
@@ -151,7 +162,18 @@ class TaskRunner:
             plugin_id=None,
             status=RunStatus.QUEUED,
         )
+        record.details["events_file"] = str(resolved_events_file)
         record_store = AtomicJsonStore(self.config.artifact_dir / "runs" / f"{run_id}.json")
+        record_lock = threading.RLock()
+        steps_since_checkpoint = 0
+
+        def checkpoint_record(*, force: bool = False) -> None:
+            nonlocal steps_since_checkpoint
+            if not force and steps_since_checkpoint < RUN_RECORD_CHECKPOINT_STEPS:
+                return
+            record_store.write(record.to_dict())
+            steps_since_checkpoint = 0
+
         record_store.write(record.to_dict())
         self._emit(event_queue, {"type": "status", "run_id": run_id, "status": RunStatus.QUEUED.value})
         lock = InstanceLock(self.config.artifact_dir / "locks", instance.id)
@@ -174,15 +196,14 @@ class TaskRunner:
             record.started_at = datetime.now(timezone.utc).isoformat()
             record_store.write(record.to_dict())
             self._emit(event_queue, {"type": "status", "run_id": run_id, "status": RunStatus.RUNNING.value})
-            if writer is not None:
-                writer.write({
-                    "type": "run_started",
-                    "run_id": run_id,
-                    "instance_id": instance.id,
-                    "workflow_id": record.workflow_id,
-                    "status": RunStatus.RUNNING.value,
-                    "ts": time.time(),
-                })
+            writer.write({
+                "type": "run_started",
+                "run_id": run_id,
+                "instance_id": instance.id,
+                "workflow_id": record.workflow_id,
+                "status": RunStatus.RUNNING.value,
+                "ts": time.time(),
+            })
 
             attempts = self.config.retry.task_attempts if job.retry_enabled and workflow.retry_safe else 1
             result: Any = None
@@ -236,8 +257,7 @@ class TaskRunner:
                     if event_queue is None:
                         return
                     payload = dict(event)
-                    if events_file is not None:
-                        payload["events_file"] = str(events_file)
+                    payload["events_file"] = str(resolved_events_file)
                     event_queue.put(payload)
 
                 context = TaskContextImpl(
@@ -260,28 +280,29 @@ class TaskRunner:
                 )
 
                 def on_step(event: dict[str, Any]) -> None:
-                    record.current_step = str(event.get("step_id")) if event.get("step_id") is not None else None
-                    record.step_history.append(dict(event))
-                    if context is not None and context.last_frame is not None:
-                        # 失败现场转储：失败步骤无条件保留现场帧（不依赖 save_screenshots 开关）
-                        if event.get("status") == "failed":
-                            try:
-                                event["failure_frame"] = str(context.save_frame(context.last_frame, f"failure-{_safe_artifact_name(record.current_step or 'step')}.png"))
-                            except Exception as artifact_error:
-                                event["failure_frame_error"] = str(artifact_error)
-                        if self.config.save_screenshots:
-                            try:
-                                record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
-                            except Exception as artifact_error:
-                                record.details["last_frame_error"] = str(artifact_error)
-                    if writer is not None:
+                    nonlocal steps_since_checkpoint
+                    with record_lock:
+                        record.current_step = str(event.get("step_id")) if event.get("step_id") is not None else None
+                        record.append_step(event)
+                        if context is not None and context.last_frame is not None:
+                            # 失败现场转储：失败步骤无条件保留现场帧（不依赖 save_screenshots 开关）
+                            if event.get("status") == "failed":
+                                try:
+                                    event["failure_frame"] = str(context.save_frame(context.last_frame, f"failure-{_safe_artifact_name(record.current_step or 'step')}.png"))
+                                except Exception as artifact_error:
+                                    event["failure_frame_error"] = str(artifact_error)
+                            if self.config.save_screenshots:
+                                try:
+                                    record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
+                                except Exception as artifact_error:
+                                    record.details["last_frame_error"] = str(artifact_error)
                         writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
-                    record_store.write(record.to_dict())
-                    self._emit(event_queue, {"type": "step", "run_id": run_id, "step": dict(event)})
+                        self._emit(event_queue, {"type": "step", "run_id": run_id, "step": dict(event)})
+                        steps_since_checkpoint += 1
+                        checkpoint_record()
 
                 def on_step_start(event: dict[str, Any]) -> None:
-                    if writer is not None:
-                        writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
+                    writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
 
                 engine = WorkflowEngine(
                     workflow,
@@ -339,18 +360,17 @@ class TaskRunner:
                 failure_metadata.parent.mkdir(parents=True, exist_ok=True)
                 record.artifacts.append(str(failure_metadata))
                 failure_metadata.write_text(json.dumps(record.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            record_store.write(record.to_dict())
+            checkpoint_record(force=True)
             self.logger.emit("run.finished", run_id=run_id, instance_id=instance.id, workflow_id=record.workflow_id, status=record.status.value, duration_ms=record.duration_ms)
-            if writer is not None:
-                writer.write({
-                    "type": "run_finished",
-                    "run_id": run_id,
-                    "workflow_id": record.workflow_id,
-                    "status": record.status.value,
-                    "error": record.error,
-                    "error_category": record.error_category,
-                    "ts": time.time(),
-                })
+            writer.write({
+                "type": "run_finished",
+                "run_id": run_id,
+                "workflow_id": record.workflow_id,
+                "status": record.status.value,
+                "error": record.error,
+                "error_category": record.error_category,
+                "ts": time.time(),
+            })
             self._emit(event_queue, {"type": "result", "run_id": run_id, "status": record.status.value, "record": record.to_dict()})
         return record
 

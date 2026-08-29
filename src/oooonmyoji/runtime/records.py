@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+
+DEFAULT_STEP_HISTORY_LIMIT = 250
+_TRANSIENT_REPLACE_WINERRORS = {5, 32, 33}
 
 
 class RunStatus(StrEnum):
@@ -41,7 +46,19 @@ class RunRecord:
     error_category: str | None = None
     artifacts: list[str] = field(default_factory=list)
     step_history: list[dict[str, Any]] = field(default_factory=list)
+    step_history_total: int = 0
+    step_history_dropped: int = 0
     details: dict[str, Any] = field(default_factory=dict)
+
+    def append_step(self, event: dict[str, Any], *, limit: int = DEFAULT_STEP_HISTORY_LIMIT) -> None:
+        if limit < 1:
+            raise ValueError("step history limit must be positive")
+        self.step_history.append(dict(event))
+        self.step_history_total += 1
+        overflow = len(self.step_history) - limit
+        if overflow > 0:
+            del self.step_history[:overflow]
+            self.step_history_dropped += overflow
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -50,8 +67,22 @@ class RunRecord:
 
 
 class AtomicJsonStore:
-    def __init__(self, path: Path | str) -> None:
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        replace_attempts: int = 10,
+        replace_retry_base_seconds: float = 0.025,
+        replace_retry_max_seconds: float = 0.5,
+    ) -> None:
+        if replace_attempts < 1:
+            raise ValueError("replace_attempts must be positive")
+        if replace_retry_base_seconds < 0 or replace_retry_max_seconds < 0:
+            raise ValueError("replace retry delays must not be negative")
         self.path = Path(path)
+        self.replace_attempts = replace_attempts
+        self.replace_retry_base_seconds = replace_retry_base_seconds
+        self.replace_retry_max_seconds = replace_retry_max_seconds
 
     def read(self, default: Any = None) -> Any:
         if not self.path.is_file():
@@ -71,10 +102,29 @@ class AtomicJsonStore:
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary_path, self.path)
+            self._replace_with_retry(temporary_path)
         finally:
-            if temporary_path.exists():
-                temporary_path.unlink()
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _replace_with_retry(self, temporary_path: Path) -> None:
+        for attempt in range(self.replace_attempts):
+            try:
+                os.replace(temporary_path, self.path)
+                return
+            except OSError as exc:
+                winerror = getattr(exc, "winerror", None)
+                transient = isinstance(exc, PermissionError) or winerror in _TRANSIENT_REPLACE_WINERRORS
+                if not transient or attempt + 1 >= self.replace_attempts:
+                    raise
+                delay = min(
+                    self.replace_retry_base_seconds * (2**attempt),
+                    self.replace_retry_max_seconds,
+                )
+                if delay > 0:
+                    time.sleep(delay)
 
 
-__all__ = ["AtomicJsonStore", "RunRecord", "RunStatus"]
+__all__ = ["AtomicJsonStore", "DEFAULT_STEP_HISTORY_LIMIT", "RunRecord", "RunStatus"]

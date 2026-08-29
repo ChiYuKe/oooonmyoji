@@ -290,9 +290,11 @@ def _run_party_souls_local(
             timeout_seconds=1209700,
             cancel_on_failure=True,
         )
+        member_record = records.get(member_run_id)
+        leader_record = records.get(leader_run_id)
         statuses = {
-            "member": records[member_run_id].get("status") if records[member_run_id] else None,
-            "leader": records[leader_run_id].get("status") if records[leader_run_id] else None,
+            "member": member_record.get("status") if isinstance(member_record, dict) else None,
+            "leader": leader_record.get("status") if isinstance(leader_record, dict) else None,
         }
         _print({
             "runs": {"member": member_run_id, "leader": leader_run_id},

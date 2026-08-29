@@ -285,12 +285,6 @@ class TaskRunner:
                         record.current_step = str(event.get("step_id")) if event.get("step_id") is not None else None
                         record.append_step(event)
                         if context is not None and context.last_frame is not None:
-                            # 失败现场转储：失败步骤无条件保留现场帧（不依赖 save_screenshots 开关）
-                            if event.get("status") == "failed":
-                                try:
-                                    event["failure_frame"] = str(context.save_frame(context.last_frame, f"failure-{_safe_artifact_name(record.current_step or 'step')}.png"))
-                                except Exception as artifact_error:
-                                    event["failure_frame_error"] = str(artifact_error)
                             if self.config.save_screenshots:
                                 try:
                                     record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
@@ -351,7 +345,7 @@ class TaskRunner:
                     record.details["device_close_error"] = str(close_error)
             lock.release()
             if record.status in {RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.INTERRUPTED}:
-                if self.config.save_screenshots and context is not None and context.last_frame is not None:
+                if context is not None and context.last_frame is not None:
                     try:
                         record.artifacts.append(str(context.save_frame(context.last_frame, "failure-last-frame.png")))
                     except Exception as artifact_error:

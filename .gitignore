@@ -6,6 +6,7 @@ __pycache__/
 tests/artifacts/
 artifacts/
 logs/
+config/config.json
 
 # Local VS Code settings and packaged extension artifacts
 .vscode/

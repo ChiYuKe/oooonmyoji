@@ -6,24 +6,16 @@
 
 ## 目录结构
 
-- `src/oooonmyoji/devices/`：设备协议、MuMu 原生后端、ADB 后端、坐标映射和实例锁。
-- `tests/tools/mumu_fast_benchmark.py`：原生截图和触控速度测试工具。
-- `tests/tools/adb_benchmark.py`：ADB 性能对比测试工具。
-- `tests/tools/mumu_native_probe.cpp`：原生接口测试源码。
-- `src/oooonmyoji/vision/`：BGRA/PNG 转换、OpenCV 模板匹配和 PaddleOCR 适配。
-- `src/oooonmyoji/actions/`：内置和可信本地 Python Action 注册表。
-- `src/oooonmyoji/workflows/`：工作流 JSON 加载、校验、引用解析和执行引擎。
-- `src/oooonmyoji/runtime/`：任务上下文、调度、重试、监督器、记录和本机控制管道。
-- `src/oooonmyoji/config/`：带 `schema_version` 的 JSON 配置模型和加载逻辑。
-- `workflows/diagnostic.json`：首个只读诊断工作流。
-- `plugins/actions/`：可选的自定义 Action 清单和实现。
-- `src/oooonmyoji/ui/tui/`：前期使用的终端操作界面。
-- `tests/`：测试代码、测试工具和测试产物。
-- `tests/artifacts/screenshots/`：测试截图。
-- `tests/artifacts/bin/`：原生测试程序编译产物。
-- `config/`：运行配置文件。
-- `assets/`：模板图和参考素材。
-- `requirements.txt`：Python 依赖版本。
+- `src/oooonmyoji/`：设备、视觉识别、Action、工作流引擎和运行时源码。
+- `workflows/`：单人御魂、组队队长/队员及奖励统计工作流。
+- `assets/templates/`：按功能和实例分组的游戏模板图。
+- `vscode-onmyoji-workflow/`：侧边栏控制、可视化编辑器和运行日志插件。
+- `config/`：示例配置和本机运行配置。
+- `plugins/actions/`：可选的可信本地 Action。
+- `tests/`：单元测试、集成测试和设备测试工具。
+- `scripts/`：本地维护脚本，默认先预览再执行。
+- `docs/`：工作流规范、设计研究和实现记录。
+- `artifacts/`、`logs/`：本地运行产物，已被 Git 忽略。
 
 ## 安装和配置
 
@@ -51,17 +43,29 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 `discover_mumu_instances: true` 会调用 MuMu 自带的 `MuMuManager.exe`，自动
 合并所有已完成 Android 启动的原生实例。`instances` 中的同索引条目作为包名、
 实例 ID 和回退端口的显式覆盖；后续三开、四开不需要继续增加配置。运行
-`run_cli.bat list-instances` 可查看当前解析结果。
+下面的 `list-instances` 命令可查看当前解析结果。
+
+## VS Code 运行
+
+日常使用统一从 VS Code 左侧活动栏的 **Onmyoji** 页面操作：
+
+- **组队御魂**：按配置启动 `mumu-0` 队长和 `mumu-1` 队员。
+- **停止**：协作取消当前运行。
+- **运行日志**：分别查看队长、队员步骤和奖励统计。
+- 工作流编辑器标题栏的播放按钮可运行当前 JSON 工作流。
+
+插件默认使用项目的 `.venv/Scripts/python.exe` 和 `config/config.json`，无需 BAT
+或单独打开终端。
 
 ## CLI
 
-也可以直接运行项目根目录下的 `run_cli.bat`，例如：
+需要诊断或开发时，可以直接调用 Python CLI：
 
 ```powershell
-.\run_cli.bat validate
-.\run_cli.bat list-instances
-.\run_cli.bat list-workflows
-.\run_cli.bat run-workflow new_workflow1 --instance mumu-0
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json validate
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-instances
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-workflows
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999
 ```
 
 `run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
@@ -69,7 +73,9 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 需要覆盖输入时可传入 JSON 文件：
 
 ```powershell
-.\run_cli.bat run-workflow new_workflow1 --instance mumu-0 --inputs .\inputs.json
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli `
+  --config .\config\config.json `
+  run-workflow mumu_1_souls_loop --instance mumu-1 --inputs .\inputs.json
 ```
 
 `tasks` 仍用于定时调度和为同一工作流保存多个固定任务配置。
@@ -92,12 +98,12 @@ PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json validate
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json doctor
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-workflows
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json show-workflow diagnostic
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json show-workflow mumu_1_souls_loop
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-actions
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-instances
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json serve
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json status
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run diagnostic-mumu-0
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 1
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli cancel <run-id>
 ```
 
@@ -172,9 +178,6 @@ python -m venv .venv
 间隔通过 `--interval-ms 500` 设置为 500 毫秒。拖动框选时实时捕获不会暂停，
 临时框会在刷新后继续显示。
 
-也可以直接双击项目根目录的 `run_roi_editor.bat` 启动工具。批处理文件会优先
-读取 `config/config.json`，不存在时回退到 `config/config.example.json`。
-
 也可以直接打开已有截图，不连接设备：
 
 ```powershell
@@ -205,7 +208,7 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 
 - Windows
 - MuMu Player 12 已启动
-- Python 3.10 或更高版本
+- 64 位 Python 3.12
 - 当前 MuMu 安装目录中存在 `external_renderer_ipc.dll`
 
 ## 工作流和 Action 开发
@@ -274,9 +277,19 @@ Action 代码属于可信本地扩展；更新代码后需要重启监督器，�
 14 天。运行器默认不保存步骤截图、缩略图或自动 `last-frame.png`；需要调试
 截图时，在配置中设置 `"save_screenshots": true`。工作流显式使用
 `core.save_frame` 时仍会保存指定截图。失败或中断运行写入
-`artifacts/<run-id>/`，包括失败元数据和 OCR/模板结果。
+`artifacts/<run-id>/`，包括失败元数据、OCR/模板结果和一张最终现场图；选择器
+正常回退产生的中间失败不会保存截图。
 奖励统计截图按游戏实例跨运行滚动保留最近 10 局；OCR 尚未处理的截图不会提前
 删除，结构化奖励统计和运行事件日志不受截图清理影响。
+
+维护脚本默认只显示清理计划，不修改文件：
+
+```powershell
+.\scripts\cleanup-artifacts.ps1 -KeepLatestRuns 10 -ClearCaches
+```
+
+确认预览内容后添加 `-Apply` 执行。脚本保留最新运行、结构化统计、日志和参考
+素材，清理旧工作流图片、重复失败截图、临时验证目录及可再生成的测试缓存。
 
 单元测试：
 
@@ -300,17 +313,8 @@ $env:OOOONMYOJI_RUN_REAL_DEVICES = "1"
 .\.venv\Scripts\python.exe -m pytest tests/test_supervisor_integration.py::test_supervisor_runs_two_real_adb_instances -q
 ```
 
-主验收工作流使用真实 JSON 配置，包含截图、保存帧、条件跳转和 OCR，并要求运行
-记录可追溯且不执行点击：
-
-```powershell
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli `
-  --config .\config\config.example.json `
-  run diagnostic-mumu-0
-```
-
 也可以用一个命令执行完整验收（默认测试、`mypy src`、`doctor`、实时 OCR、双
-ADB、3 批性能基准和真实 JSON 工作流）：
+ADB 和 3 批性能基准）：
 
 ```powershell
 .\tests\tools\acceptance.ps1

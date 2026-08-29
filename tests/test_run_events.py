@@ -218,3 +218,79 @@ def test_run_record_checkpoints_are_batched(tmp_path: Path, monkeypatch: pytest.
     assert record.status.value == "succeeded"
     assert record.step_history_total == 32
     assert state_writes == 5
+
+
+def test_recovered_selector_branch_does_not_save_failure_frames(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path)
+    (tmp_path / "workflows" / "wf.json").write_text(json.dumps({
+        "schema_version": 3,
+        "id": "wf",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["choice"]},
+            {"id": "choice", "type": "selector", "children": ["attempt", "fallback"]},
+            {"id": "attempt", "type": "sequence", "children": ["capture", "reject"]},
+            {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
+            {"id": "reject", "type": "task", "action": "core.assert", "params": {"value": False}},
+            {"id": "fallback", "type": "task", "action": "core.log", "params": {"message": "recovered"}},
+        ],
+    }), encoding="utf-8")
+    config = load_config(config_path)
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    job = JobConfig(
+        id="wf-run",
+        workflow="wf",
+        instance="fake",
+        inputs={},
+        schedule={"type": "manual"},
+        enabled=True,
+        retry_enabled=False,
+    )
+
+    record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-recovered")
+
+    assert record.status.value == "succeeded"
+    assert not list((tmp_path / "artifacts" / "run-recovered").glob("failure-*.png"))
+
+
+def test_failed_run_saves_one_final_failure_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path)
+    (tmp_path / "workflows" / "wf.json").write_text(json.dumps({
+        "schema_version": 3,
+        "id": "wf",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["main"]},
+            {"id": "main", "type": "sequence", "children": ["capture", "reject"]},
+            {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
+            {"id": "reject", "type": "task", "action": "core.assert", "params": {"value": False}},
+        ],
+    }), encoding="utf-8")
+    config = load_config(config_path)
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    job = JobConfig(
+        id="wf-run",
+        workflow="wf",
+        instance="fake",
+        inputs={},
+        schedule={"type": "manual"},
+        enabled=True,
+        retry_enabled=False,
+    )
+
+    record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-failed")
+
+    failure_frames = list((tmp_path / "artifacts" / "run-failed").glob("failure-*.png"))
+    assert record.status.value == "failed"
+    assert [path.name for path in failure_frames] == ["failure-last-frame.png"]
+    assert str(failure_frames[0]) in record.artifacts

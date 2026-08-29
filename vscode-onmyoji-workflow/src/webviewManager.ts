@@ -28,6 +28,7 @@ interface RuntimeInstanceState {
 type RoiPicker = (referenceResolution: [number, number], instanceId?: string) => Promise<RoiCapture | undefined>;
 type InstanceSelector = (instanceId: string) => Promise<string>;
 type RuntimeInstanceProvider = () => Promise<RuntimeInstanceState>;
+type RunEventListener = (event: Record<string, unknown>) => void;
 
 export class WebviewManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -50,6 +51,7 @@ export class WebviewManager implements vscode.Disposable {
     private getRuntimeInstanceState: RuntimeInstanceProvider,
     private selectRuntimeInstance: InstanceSelector,
     private pickRoi: RoiPicker,
+    private onRunEvent: RunEventListener,
   ) {}
 
   async open(preferred?: vscode.Uri): Promise<void> {
@@ -153,7 +155,9 @@ export class WebviewManager implements vscode.Disposable {
   <button id="btn-workflow" title="工作流设置">设置</button>
   <button id="btn-blackboard" title="黑板参数">黑板</button>
   <select id="instance-select" title="运行实例" aria-label="运行实例"></select>
+  <button id="btn-run-log" class="icon-button" title="打开运行日志" aria-label="打开运行日志">☷</button>
   <button id="btn-run" class="primary" title="执行当前工作流">▶ 运行</button>
+  <button id="btn-stop" class="icon-button" title="停止当前工作流" aria-label="停止当前工作流">■</button>
   <button id="btn-save" class="primary" title="保存到 JSON">保存</button>
   <button id="btn-more" class="icon-button" title="更多操作">⋯</button>
 </header>
@@ -283,6 +287,12 @@ export class WebviewManager implements vscode.Disposable {
         await vscode.commands.executeCommand('onmyoji.runWorkflow', this.docUri, instanceId);
         break;
       }
+      case 'stopWorkflow':
+        await vscode.commands.executeCommand('onmyoji.stopWorkflow');
+        break;
+      case 'openRunLog':
+        await vscode.commands.executeCommand('onmyoji.openRunLog');
+        break;
       case 'selectInstance': {
         const instanceId = await this.selectRuntimeInstance(String(message.instanceId ?? ''));
         void this.panel.webview.postMessage({ type: 'instanceSelected', instanceId });
@@ -438,6 +448,7 @@ export class WebviewManager implements vscode.Disposable {
     // 先缓存（即使面板未打开，重开/刷新时也能回放），有面板再转发。
     this.latestRunEvents.push(event);
     if (this.latestRunEvents.length > 5000) this.latestRunEvents.shift();
+    this.onRunEvent(event);
     if (this.panel) {
       void this.panel.webview.postMessage({ type: 'runEvent', event: this.convertRunEvent(event) });
     }

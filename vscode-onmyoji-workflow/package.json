@@ -2,7 +2,7 @@
   "name": "onmyoji-workflow-helper",
   "displayName": "Onmyoji Workflow Helper",
   "description": "为 oooonmyoji 自动化项目编写 Behavior Tree schema v3 工作流：智能补全、校验、悬停提示与可视化编辑器（支持内置与自定义 Action）",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "publisher": "oooonmyoji",
   "license": "MIT",
   "engines": {
@@ -27,6 +27,8 @@
     "onCommand:onmyoji.openWorkflowEditor",
     "onCommand:onmyoji.createWorkflow",
     "onCommand:onmyoji.runWorkflow",
+    "onCommand:onmyoji.stopWorkflow",
+    "onCommand:onmyoji.openRunLog",
     "onCommand:onmyoji.validateCurrentWorkflow",
     "onCommand:onmyoji.runEngineValidate",
     "onCommand:onmyoji.reloadActionCatalog"
@@ -52,6 +54,18 @@
         "title": "Onmyoji: 执行当前工作流",
         "category": "Onmyoji",
         "icon": "$(play)"
+      },
+      {
+        "command": "onmyoji.stopWorkflow",
+        "title": "Onmyoji: 停止当前工作流",
+        "category": "Onmyoji",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "onmyoji.openRunLog",
+        "title": "Onmyoji: 打开运行日志",
+        "category": "Onmyoji",
+        "icon": "$(output)"
       },
       {
         "command": "onmyoji.validateCurrentWorkflow",

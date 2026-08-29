@@ -12,6 +12,7 @@
   - 校验：父级唯一性、未知子节点、环、孤立节点、无效绑定、非法装饰器和非安全重试
 - **可视化 Behavior Tree 编辑器**：蓝图式卡片、有序父子连线、重新连接/断开、
   参数表单（含 ROI 与模板截取）、装饰器、黑板、缩放平移、自动布局与小地图。
+- **独立运行日志**：节点时间线、状态/耗时统计、失败筛选、运行截图预览和原始引擎输出。
 - **引擎校验**：一键在终端里运行 `python -m src.oooonmyoji.cli ... validate`。
 - **自定义 Action 零编辑**：插件只写一份 v2 manifest + Action 类，编辑器无需改代码。
 
@@ -20,7 +21,7 @@
 ### 方式一：直接安装打包好的 VSIX
 
 ```powershell
-code --install-extension onmyoji-workflow-helper-0.2.0.vsix
+code --install-extension onmyoji-workflow-helper-0.2.7.vsix
 ```
 
 ### 方式二：从源码运行（调试开发）
@@ -39,6 +40,8 @@ code --install-extension onmyoji-workflow-helper-0.2.0.vsix
 - 命令面板（`Ctrl+Shift+P`）：
   - `Onmyoji: 新建工作流`（自动创建 v3 Behavior Tree 骨架并打开可视化编辑器）
   - `Onmyoji: 执行当前工作流`（使用可视化编辑器最近选择的实例运行当前工作流）
+  - `Onmyoji: 停止当前工作流`
+  - `Onmyoji: 打开运行日志`
   - `Onmyoji: 打开工作流可视化编辑器`
   - `Onmyoji: 校验当前工作流 JSON`
   - `Onmyoji: 用自动化引擎校验 (CLI validate)`
@@ -58,7 +61,10 @@ code --install-extension onmyoji-workflow-helper-0.2.0.vsix
     `assets/templates/` 下的模板图。
   - 参数可在固定值与结构化引用间切换；黑板面板编辑 `blackboard` 类型化键。
   - 「设置」编辑 ID、版本、参考分辨率与运行限制。
-  - 「▶ 执行工作流」会运行当前已保存的工作流；有未保存修改时需先保存。
+  - 「▶ 运行」会通过后台 Python 进程运行当前已保存的工作流，并自动在旁边打开独立
+    运行日志窗口；有未保存修改时需先保存。「■」可停止当前运行，「☷」可随时重新打开日志。
+  - 运行日志按时间线展示节点状态、Action、耗时、错误和截图，可在「任务 / 全部 / 失败」
+    间筛选；「引擎输出」保留清理 ANSI 控制码后的原始输出，关闭窗口后仍可回放本次运行。
   - 保存会以 2 空格缩进输出 v3 JSON。
 
 ## 配置

@@ -37,10 +37,10 @@
       "params": {
         "template": "assets/templates/task_2-template.png",
         "roi": [
-          1029,
-          450,
-          407,
-          265
+          1669,
+          823,
+          235,
+          237
         ]
       },
       "name": "识别模板"
@@ -53,7 +53,13 @@
         "match": {
           "ref": "nodes.task_2.output.0"
         },
-        "revalidate": true
+        "revalidate": true,
+        "random_offset": 10,
+        "hold_ms": 0,
+        "random_interval": [
+          0.2,
+          0.4
+        ]
       },
       "decorators": [],
       "name": "点击模板"

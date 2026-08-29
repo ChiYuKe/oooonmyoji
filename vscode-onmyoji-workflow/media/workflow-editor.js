@@ -1151,6 +1151,8 @@
       vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
     });
     $('btn-run').addEventListener('click', () => vscode.postMessage({ type: 'runWorkflow', instanceId: state.instanceId }));
+    $('btn-stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
+    $('btn-run-log').addEventListener('click', () => vscode.postMessage({ type: 'openRunLog' }));
     $('btn-save').addEventListener('click', () => { vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' }); setDirty(false); });
     $('btn-more').addEventListener('click', (event) => showMenu(event.clientX || window.innerWidth - 180, event.clientY || 40, [
       { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },

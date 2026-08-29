@@ -1,0 +1,646 @@
+{
+  "schema_version": 3,
+  "id": "mumu_1_souls_loop",
+  "version": "3.0.0",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 7200,
+    "max_steps": 1000
+  },
+  "blackboard": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "御魂循环入口",
+      "children": [
+        "main"
+      ]
+    },
+    {
+      "id": "main",
+      "type": "sequence",
+      "name": "进入副本并循环战斗",
+      "children": [
+        "enter_souls",
+        "battle_loop"
+      ]
+    },
+    {
+      "id": "enter_souls",
+      "type": "selector",
+      "name": "恢复到御魂副本页",
+      "children": [
+        "already_at_floor",
+        "from_souls_type",
+        "from_explore_map",
+        "from_courtyard"
+      ]
+    },
+    {
+      "id": "already_at_floor",
+      "type": "sequence",
+      "name": "已经在御魂副本页",
+      "children": [
+        "detect_floor"
+      ]
+    },
+    {
+      "id": "detect_floor",
+      "type": "task",
+      "name": "检测挑战按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 1,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_souls_type",
+      "type": "sequence",
+      "name": "从御魂类型页进入",
+      "children": [
+        "detect_orochi_type",
+        "tap_orochi_type",
+        "wait_floor_from_type"
+      ]
+    },
+    {
+      "id": "detect_orochi_type",
+      "type": "task",
+      "name": "检测大蛇副本",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 1,
+        "roi": [
+          0,
+          80,
+          600,
+          850
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_type",
+      "type": "task",
+      "name": "进入大蛇副本",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.detect_orochi_type.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "wait_floor_from_type",
+      "type": "task",
+      "name": "等待御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_explore_map",
+      "type": "sequence",
+      "name": "从探索地图进入",
+      "children": [
+        "detect_map_souls",
+        "tap_map_souls",
+        "wait_orochi_from_map",
+        "tap_orochi_from_map",
+        "wait_floor_from_map"
+      ]
+    },
+    {
+      "id": "detect_map_souls",
+      "type": "task",
+      "name": "检测地图御魂入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/map-souls.png",
+        "timeout_seconds": 1,
+        "roi": [
+          150,
+          850,
+          250,
+          230
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_map_souls",
+      "type": "task",
+      "name": "点击地图御魂入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.detect_map_souls.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "wait_orochi_from_map",
+      "type": "task",
+      "name": "等待大蛇副本入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 20,
+        "roi": [
+          0,
+          80,
+          600,
+          850
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_from_map",
+      "type": "task",
+      "name": "进入大蛇副本",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_orochi_from_map.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "wait_floor_from_map",
+      "type": "task",
+      "name": "等待御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_courtyard",
+      "type": "sequence",
+      "name": "从庭院进入",
+      "children": [
+        "wait_courtyard_explore",
+        "tap_courtyard_explore",
+        "wait_map_from_courtyard",
+        "tap_map_from_courtyard",
+        "wait_orochi_from_courtyard",
+        "tap_orochi_from_courtyard",
+        "wait_floor_from_courtyard"
+      ]
+    },
+    {
+      "id": "wait_courtyard_explore",
+      "type": "task",
+      "name": "等待庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/courtyard-explore.png",
+        "timeout_seconds": 5,
+        "roi": [
+          650,
+          80,
+          300,
+          300
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_courtyard_explore",
+      "type": "task",
+      "name": "点击探索入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_courtyard_explore.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "wait_map_from_courtyard",
+      "type": "task",
+      "name": "等待地图御魂入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/map-souls.png",
+        "timeout_seconds": 20,
+        "roi": [
+          150,
+          850,
+          250,
+          230
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_map_from_courtyard",
+      "type": "task",
+      "name": "点击地图御魂入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_map_from_courtyard.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "wait_orochi_from_courtyard",
+      "type": "task",
+      "name": "等待大蛇副本入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 20,
+        "roi": [
+          0,
+          80,
+          600,
+          850
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_from_courtyard",
+      "type": "task",
+      "name": "进入大蛇副本",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_orochi_from_courtyard.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.15,
+          0.3
+        ]
+      }
+    },
+    {
+      "id": "wait_floor_from_courtyard",
+      "type": "task",
+      "name": "等待御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "battle_loop",
+      "type": "sequence",
+      "name": "循环战斗 30 次",
+      "children": [
+        "wait_challenge",
+        "tap_challenge",
+        "wait_ready",
+        "tap_ready",
+        "wait_victory",
+        "tap_victory",
+        "settlement"
+      ],
+      "decorators": [
+        {
+          "type": "repeat",
+          "count": 30
+        },
+        {
+          "type": "timeout",
+          "seconds": 7000
+        }
+      ]
+    },
+    {
+      "id": "wait_challenge",
+      "type": "task",
+      "name": "等待挑战按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 30,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_challenge",
+      "type": "task",
+      "name": "点击挑战",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_challenge.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 5,
+        "random_interval": [
+          0.2,
+          0.45
+        ]
+      }
+    },
+    {
+      "id": "wait_ready",
+      "type": "task",
+      "name": "等待编队准备",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-ready.png",
+        "timeout_seconds": 30,
+        "roi": [
+          1500,
+          700,
+          420,
+          380
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_ready",
+      "type": "task",
+      "name": "点击准备开始战斗",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_ready.output.0"
+        },
+        "revalidate": false,
+        "random_offset": 5,
+        "random_interval": [
+          0.2,
+          0.45
+        ]
+      }
+    },
+    {
+      "id": "wait_victory",
+      "type": "task",
+      "name": "等待战斗胜利",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-victory-continue.png",
+        "timeout_seconds": 180,
+        "roi": [
+          650,
+          900,
+          650,
+          180
+        ],
+        "threshold": 0.86,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_victory",
+      "type": "task",
+      "name": "点击胜利页继续",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_victory.output.0"
+        },
+        "revalidate": false,
+        "random_offset": 8,
+        "random_interval": [
+          0.4,
+          0.8
+        ]
+      }
+    },
+    {
+      "id": "settlement",
+      "type": "selector",
+      "name": "兼容普通结算与奖励弹层",
+      "children": [
+        "settled_direct",
+        "settled_one_tap",
+        "settled_more_taps"
+      ]
+    },
+    {
+      "id": "settled_direct",
+      "type": "sequence",
+      "name": "结算直接返回",
+      "children": [
+        "wait_floor_direct"
+      ]
+    },
+    {
+      "id": "wait_floor_direct",
+      "type": "task",
+      "name": "短暂等待副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 3,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "settled_one_tap",
+      "type": "sequence",
+      "name": "关闭一层奖励",
+      "children": [
+        "dismiss_reward_once",
+        "wait_floor_after_one"
+      ]
+    },
+    {
+      "id": "dismiss_reward_once",
+      "type": "task",
+      "name": "关闭奖励弹层",
+      "action": "input.tap",
+      "params": {
+        "x": 1500,
+        "y": 850,
+        "random_offset": 12,
+        "random_interval": [
+          0.4,
+          0.8
+        ]
+      }
+    },
+    {
+      "id": "wait_floor_after_one",
+      "type": "task",
+      "name": "等待副本页返回",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 6,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "settled_more_taps",
+      "type": "sequence",
+      "name": "关闭多层奖励",
+      "children": [
+        "dismiss_reward_twice_a",
+        "settlement_pause",
+        "dismiss_reward_twice_b",
+        "wait_floor_after_more"
+      ]
+    },
+    {
+      "id": "dismiss_reward_twice_a",
+      "type": "task",
+      "name": "关闭第一层奖励",
+      "action": "input.tap",
+      "params": {
+        "x": 1500,
+        "y": 850,
+        "random_offset": 12,
+        "random_interval": [
+          0.4,
+          0.8
+        ]
+      }
+    },
+    {
+      "id": "settlement_pause",
+      "type": "task",
+      "name": "等待奖励动画",
+      "action": "core.sleep",
+      "params": {
+        "seconds": 1
+      }
+    },
+    {
+      "id": "dismiss_reward_twice_b",
+      "type": "task",
+      "name": "关闭第二层奖励",
+      "action": "input.tap",
+      "params": {
+        "x": 1500,
+        "y": 850,
+        "random_offset": 12,
+        "random_interval": [
+          0.4,
+          0.8
+        ]
+      }
+    },
+    {
+      "id": "wait_floor_after_more",
+      "type": "task",
+      "name": "等待副本页返回",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 10,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    }
+  ]
+}

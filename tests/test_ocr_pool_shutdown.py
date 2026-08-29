@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import queue
+from types import SimpleNamespace
+
+from src.oooonmyoji.runtime.supervisor import Supervisor
 from src.oooonmyoji.vision.ocr import SharedOcrPool
 
 
@@ -39,3 +43,36 @@ def test_force_shutdown_kills_stuck_ocr_worker() -> None:
     assert pool.terminated is True
     assert process.killed is True
     assert pool.joined is True
+
+
+def test_supervisor_starts_ocr_pool_only_when_requested(tmp_path, monkeypatch) -> None:
+    created = []
+
+    class FakeOcrPool:
+        def __init__(self, **options) -> None:
+            created.append(options)
+
+        def recognize(self, image):
+            return [f"recognized:{image}"]
+
+    config = SimpleNamespace(
+        log_dir=tmp_path,
+        ocr=SimpleNamespace(
+            enabled=True,
+            language="ch",
+            workers=1,
+            request_timeout_seconds=60,
+            min_confidence=0.6,
+            use_gpu=False,
+        ),
+    )
+    supervisor = Supervisor(config)  # type: ignore[arg-type]
+    responses = queue.Queue()
+    supervisor.workers["mumu-1"] = SimpleNamespace(response_queue=responses)  # type: ignore[assignment]
+    monkeypatch.setattr("src.oooonmyoji.runtime.supervisor.SharedOcrPool", FakeOcrPool)
+
+    assert created == []
+    supervisor._handle_ocr({"id": "request-1", "instance_id": "mumu-1", "image": "frame"})
+
+    assert len(created) == 1
+    assert responses.get_nowait() == {"id": "request-1", "results": ["recognized:frame"]}

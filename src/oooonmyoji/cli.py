@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import shutil
 import sys
@@ -236,6 +237,7 @@ def _run_workflow_local(
     events_file: Path | None = None,
 ) -> int:
     config = ensure_runtime_instance(expand_runtime_instances(load_config(config_path)), instance)
+    config = replace(config, instances=(config.instance(instance),))
     supervisor = Supervisor(config)
     try:
         run_id = supervisor.run_workflow(workflow, instance, inputs, wait=True, events_file=str(events_file) if events_file else None)

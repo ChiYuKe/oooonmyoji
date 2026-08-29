@@ -140,14 +140,6 @@ class Supervisor:
             return
         context = mp.get_context("spawn")
         self.event_queue = context.Queue()
-        if self.config.ocr.enabled:
-            self.ocr_pool = SharedOcrPool(
-                language=self.config.ocr.language,
-                workers=self.config.ocr.workers,
-                timeout_seconds=self.config.ocr.request_timeout_seconds,
-                min_confidence=self.config.ocr.min_confidence,
-                use_gpu=self.config.ocr.use_gpu,
-            )
         for instance in self.config.instances:
             if not instance.enabled:
                 continue
@@ -325,10 +317,18 @@ class Supervisor:
     def _handle_ocr(self, event: dict[str, Any]) -> None:
         instance_id = event["instance_id"]
         worker = self.workers[instance_id]
-        if self.ocr_pool is None:
+        if not self.config.ocr.enabled:
             worker.response_queue.put({"id": event["id"], "error": "OCR is disabled"})
             return
         try:
+            if self.ocr_pool is None:
+                self.ocr_pool = SharedOcrPool(
+                    language=self.config.ocr.language,
+                    workers=self.config.ocr.workers,
+                    timeout_seconds=self.config.ocr.request_timeout_seconds,
+                    min_confidence=self.config.ocr.min_confidence,
+                    use_gpu=self.config.ocr.use_gpu,
+                )
             results = self.ocr_pool.recognize(event["image"])
             worker.response_queue.put({"id": event["id"], "results": results})
         except Exception as exc:

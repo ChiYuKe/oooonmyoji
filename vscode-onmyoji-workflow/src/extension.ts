@@ -3,20 +3,26 @@
  * 提供：工作流 JSON 智能补全/悬停/诊断、可视化流程图编辑器、引擎 CLI 校验。
  */
 import * as fs from 'fs';
-import { spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ActionCatalog, discoverProjectRoot, loadActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
+import { RunLogManager } from './runLogManager';
 import { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment, RuntimeInstanceInfo } from './runtimeInstances';
 import { WebviewManager } from './webviewManager';
+import { buildWorkflowRunArguments } from './workflowProcess';
 
 let intelligence: WorkflowIntelligence;
 let webviewManager: WebviewManager;
+let runLogManager: RunLogManager;
 let catalog: ActionCatalog;
 let projectRoot: string;
 let extensionContext: vscode.ExtensionContext;
+let workflowOutput: vscode.OutputChannel;
+let activeWorkflowProcess: ChildProcess | undefined;
+let workflowStopRequested = false;
 
 const SELECTED_INSTANCE_KEY = 'onmyoji.selectedInstance';
 
@@ -54,8 +60,12 @@ export function activate(context: vscode.ExtensionContext): void {
   }
   refreshCatalog();
 
+  workflowOutput = vscode.window.createOutputChannel('Onmyoji 工作流运行');
+
   intelligence = new WorkflowIntelligence(getCatalog);
   context.subscriptions.push(intelligence, ...intelligence.registerProviders());
+
+  runLogManager = new RunLogManager(context, () => projectRoot);
 
   webviewManager = new WebviewManager(
     context,
@@ -65,12 +75,15 @@ export function activate(context: vscode.ExtensionContext): void {
     getRuntimeInstanceState,
     rememberRuntimeInstance,
     pickRoi,
+    (event) => runLogManager.acceptEvent(event),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('onmyoji.openWorkflowEditor', (uri?: vscode.Uri) => webviewManager.open(uri)),
     vscode.commands.registerCommand('onmyoji.createWorkflow', () => createWorkflow()),
     vscode.commands.registerCommand('onmyoji.runWorkflow', (uri?: vscode.Uri, instanceId?: string) => runWorkflow(uri, instanceId)),
+    vscode.commands.registerCommand('onmyoji.stopWorkflow', () => stopWorkflow()),
+    vscode.commands.registerCommand('onmyoji.openRunLog', () => runLogManager.open()),
     vscode.commands.registerCommand('onmyoji.validateCurrentWorkflow', () => validateCurrentWorkflow()),
     vscode.commands.registerCommand('onmyoji.reloadActionCatalog', () => {
       refreshCatalog();
@@ -81,6 +94,9 @@ export function activate(context: vscode.ExtensionContext): void {
       void webviewManager.notifyExternalChange(event.document.uri);
     }),
     vscode.window.onDidChangeActiveTextEditor(() => updateWorkflowFileContext()),
+    workflowOutput,
+    runLogManager,
+    { dispose: () => activeWorkflowProcess?.kill() },
   );
   updateWorkflowFileContext();
 }
@@ -347,6 +363,12 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
     return;
   }
 
+  if (activeWorkflowProcess && activeWorkflowProcess.exitCode === null) {
+    await runLogManager.open();
+    void vscode.window.showWarningMessage('已有工作流正在运行，请先停止后再启动新的工作流。');
+    return;
+  }
+
   const workflowRoot = path.resolve(projectRoot, 'workflows');
   const relative = path.relative(workflowRoot, path.resolve(uri.fsPath));
   if (!relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) {
@@ -367,15 +389,80 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
   const workflowReference = relative.split(path.sep).join('/');
   // 无论从哪个入口执行（面板▶ / 命令面板 / 编辑器标题栏），都写运行事件文件并让编辑器监听
   const eventsFile = eventsFilePath ?? resolveEventsFilePath(projectRoot);
+  await runLogManager.beginRun(path.basename(uri.fsPath), instance);
   webviewManager.startRunWatcher(eventsFile);
-  const terminal = vscode.window.createTerminal({
-    name: `Onmyoji 执行：${path.basename(uri.fsPath)}`,
+  const args = buildWorkflowRunArguments(configPath, workflowReference, instance, eventsFile);
+  workflowOutput.clear();
+  workflowOutput.appendLine(`启动工作流：${path.basename(uri.fsPath)}`);
+  workflowOutput.appendLine(`运行实例：${instance}`);
+  workflowOutput.appendLine('');
+
+  const child = spawn(pythonPath, args, {
     cwd: projectRoot,
+    env: pythonUtf8Environment(process.env),
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  terminal.show();
-  const eventsArg = ` --events-file ${quotePowerShellArg(eventsFile)}`;
-  terminal.sendText(`& ${quotePowerShellArg(pythonPath)} -m src.oooonmyoji.cli --config ${quotePowerShellArg(configPath)} run-workflow ${quotePowerShellArg(workflowReference)} --instance ${quotePowerShellArg(instance)}${eventsArg}`);
+  activeWorkflowProcess = child;
+  workflowStopRequested = false;
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string | Buffer) => {
+    workflowOutput.append(String(chunk));
+    runLogManager.appendOutput(String(chunk), 'stdout');
+  });
+  child.stderr?.on('data', (chunk: string | Buffer) => {
+    workflowOutput.append(String(chunk));
+    runLogManager.appendOutput(String(chunk), 'stderr');
+  });
+  child.once('error', (error) => {
+    workflowOutput.appendLine(`\n启动失败：${error.message}`);
+    runLogManager.appendOutput(`\n启动失败：${error.message}\n`, 'stderr');
+    runLogManager.finishProcess(-1, null, false);
+    if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
+    void vscode.window.showErrorMessage(`工作流启动失败：${error.message}`);
+  });
+  child.once('close', (code, signal) => {
+    const stopped = workflowStopRequested;
+    workflowOutput.appendLine(`\n进程结束：${stopped ? '已停止' : `退出代码 ${code ?? '未知'}`}${signal ? `，信号 ${signal}` : ''}`);
+    if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
+    workflowStopRequested = false;
+    runLogManager.finishProcess(code, signal, stopped);
+    if (stopped) {
+      void vscode.window.setStatusBarMessage('工作流已停止', 3000);
+    } else if (code === 0) {
+      void vscode.window.setStatusBarMessage(`工作流执行完成：${path.basename(uri.fsPath)}`, 3000);
+    } else {
+      void runLogManager.open();
+      void vscode.window.showErrorMessage(`工作流执行失败（退出代码 ${code ?? '未知'}），请查看“Onmyoji 工作流运行”输出。`);
+    }
+  });
   void vscode.window.setStatusBarMessage(`已启动工作流：${path.basename(uri.fsPath)}（实例：${instance}）`, 3000);
+}
+
+async function stopWorkflow(): Promise<void> {
+  const child = activeWorkflowProcess;
+  if (!child || child.exitCode !== null) {
+    void vscode.window.showInformationMessage('当前没有正在运行的工作流。');
+    return;
+  }
+  workflowStopRequested = true;
+  workflowOutput.appendLine('\n正在停止工作流...');
+  if (process.platform === 'win32' && child.pid) {
+    await new Promise<void>((resolve) => {
+      const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      killer.once('error', () => {
+        child.kill();
+        resolve();
+      });
+      killer.once('close', () => resolve());
+    });
+  } else {
+    child.kill('SIGTERM');
+  }
 }
 
 function validateCurrentWorkflow(): void {

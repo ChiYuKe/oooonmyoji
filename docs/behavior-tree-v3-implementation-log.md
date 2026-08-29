@@ -254,3 +254,102 @@ Node 到 Python 的真实管道验收确认实例名称码点分别为“扫地�
 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.5.vsix`（766028 bytes）并强制
 覆盖安装；当前版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.5`，安装目录包含
 UTF-8 环境修复。
+
+### mumu-1 御魂副本循环工作流
+
+为 `mumu-1/吃鱼` 新建 `workflows/mumu_1_souls_loop.json`，共 41 个 Behavior Tree
+节点。流程会先恢复到御魂副本页，再循环执行“挑战、准备、等待胜利、继续、关闭奖励”。
+入口恢复覆盖四种起始状态：庭院主界面、探索地图、御魂类型页和已经打开的御魂层级页；
+层级沿用游戏当前选中的“悲鸣”，不在流程中切换层级。正式默认循环 30 次，可直接修改
+`battle_loop` 的 `repeat.count` 调整次数。
+
+新增六张从 `mumu-1` 实机画面裁剪的模板，统一放在
+`assets/templates/souls/`：
+
+- `courtyard-explore.png`：庭院的探索入口。
+- `map-souls.png`：探索地图的御魂入口。
+- `souls-orochi.png`：御魂类型页的大蛇入口。
+- `souls-challenge.png`：当前御魂层的挑战按钮。
+- `souls-ready.png`：编队页的准备按钮。
+- `souls-victory-continue.png`：胜利结算页的继续区域。
+
+工作流对每次战斗设置 180 秒胜利等待上限；失败、体力不足或超时会使流程停止，避免
+在未知界面继续点击。结算使用 selector 兼容直接返回、一层奖励和多层奖励弹窗。所有
+模板点击都在实际点击前重新识别，并保留小范围随机偏移与随机间隔。
+
+实机联调同时发现 `vision.wait_template` 的输出缺少 `template`、`threshold` 和 `roi`，
+导致后续启用 `revalidate` 的 `input.tap_match` 报
+`revalidation requires match.template`。已在 `src/oooonmyoji/actions/builtin.py` 补齐这三项
+匹配上下文，并在 `tests/test_input_actions.py` 增加回归测试，确保等待模板的输出可以直接
+交给重新校验点击。
+
+验收时临时将循环数改为 2。运行
+`workflow-ebbed1271c8c-bb9b698e8c8f` 在 53.2 秒内成功完成，两次挑战、两次准备和
+两次胜利继续均执行成功，`battle_loop` 记录 `repeats: 2`，最终状态为 `succeeded`；事件
+记录保存在 `artifacts/runs/mumu-1-souls-acceptance-2.jsonl`。验收后已恢复默认 30 次。
+
+最终校验结果：Python `80 passed, 2 skipped`，`mypy` 检查 46 个源码文件通过，CLI
+配置与工作流静态校验通过，`git diff --check` 通过。本轮没有拉取、复制或下载任何外部
+仓库内容；模板仅来自本机 `mumu-1` 的实际游戏画面。现有
+`workflows/new_workflow.json` 与 `assets/templates/task_2-template.png` 的用户改动未被覆盖。
+
+追加复验从庭院主界面开始，运行
+`workflow-bc5b8ea900a7-46489135321b` 在 60.7 秒内成功完成。庭院探索、地图御魂和大蛇
+入口各点击 1 次，挑战、准备、胜利继续和奖励关闭各执行 2 次，`battle_loop` 记录
+`attempts: 2`、`repeats: 2`，最终状态为 `succeeded`。事件记录保存在
+`artifacts/runs/mumu-1-souls-retest-20260829.jsonl`；复验后正式循环数再次恢复为 30，CLI
+静态校验通过。
+
+### 0.2.6 VS Code 运行进程修复
+
+从可视化编辑器点击运行时，集成终端会在启动约 3.34 秒后连续收到
+`KeyboardInterrupt`，随后本地 Supervisor 命名管道关闭并产生二次
+`FileNotFoundError`。相同 CLI 命令在普通进程中可稳定运行，事件文件也表明工作流在
+中断前已正常识别画面，因此问题定位到 VS Code 集成终端启动链路。
+
+扩展不再通过 `terminal.sendText` 拼接 PowerShell 命令，改为以参数数组直接启动隐藏的
+Python 子进程；中文和空格路径不经过 shell 转义，标准输出与错误统一写入
+`Onmyoji 工作流运行` 输出面板。新增“■ 停止”按钮和
+`Onmyoji: 停止当前工作流` 命令，同一时间只允许一个扩展工作流进程。引擎本地直跑只
+创建所选实例的 worker；共享 OCR 池改为首次收到 OCR 请求时延迟创建，纯模板工作流不再
+加载 Paddle 模型。
+
+实机复验还发现准备按钮和胜利继续区域存在逐帧动画竞态：`wait_template` 刚匹配成功，
+紧接着的重新校验可能因画面自动切换或动画帧变化而认为模板消失。两处点击现使用刚识别
+到的匹配坐标直接执行；挑战及页面入口仍保留重新校验。最终后台运行验收
+`workflow-3b6a12e7537b-75269e4003ec` 连续完成两轮，耗时 52.7 秒，状态为
+`succeeded`；事件记录在
+`artifacts/runs/mumu-1-souls-vscode-runner-026-final.jsonl`。输出只启动 `mumu-1`，没有
+OCR 初始化和 `KeyboardInterrupt`。验收后正式循环数恢复为 30。
+
+最终校验为 Python `81 passed, 2 skipped`、`mypy` 46 个源码文件、TypeScript 逻辑
+冒烟 41 项、DOM 冒烟 31 项以及引擎规则对拍全部通过。已打包
+`vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.6.vsix`（767292 bytes）并使用 VS Code
+CLI 强制覆盖安装；当前安装版本确认为
+`oooonmyoji.onmyoji-workflow-helper@0.2.6`，安装目录包含后台运行器和停止命令。
+
+### 0.2.7 独立运行日志窗口
+
+VS Code 扩展新增 `Onmyoji: 打开运行日志` 命令和可视化编辑器工具栏“☷”入口。每次从
+扩展启动工作流时会自动在旁边打开独立 Webview；窗口关闭后仍缓存本次事件和引擎输出，
+重新打开即可回放，不再需要依赖集成终端查看执行过程。
+
+日志窗口包含工作流、实例、运行状态、耗时、已完成数、失败数和当前节点；“步骤”页按
+时间线显示节点 ID、Action、相对时间、耗时、错误与截图缩略图，支持“任务 / 全部 / 失败”
+筛选和截图大图预览。“引擎输出”页显示清理 ANSI 控制码后的原始 stdout/stderr，并提供
+自动滚动、停止和清空控制。界面对 VS Code 主题变量和窄编辑器列做了响应式适配。
+
+新增 `src/runLogManager.ts`、`media/run-log.css`、`media/run-log.js`，并在
+`extension.ts` 中把后台 Python 子进程输出、事件文件和结束状态统一转发到日志窗口；
+`webviewManager.ts` 与 `workflow-editor.js` 增加打开日志入口。新增日志 DOM 冒烟测试及本地
+视觉验收页，桌面 `1440x900` 与窄窗口 `390x844` 均无页面级横向溢出，步骤/引擎标签、
+失败筛选和截图预览交互正常。
+
+校验结果：TypeScript 编译通过，逻辑冒烟 41 项、编辑器 DOM 冒烟 32 项、日志 DOM 冒烟
+8 项、Python `81 passed, 2 skipped`、mypy 46 个源码文件以及 Python/TypeScript 引擎规则
+对拍全部通过；CLI 配置和工作流静态校验通过。本轮没有拉取或下载外部仓库内容，也没有
+覆盖 `workflows/new_workflow.json` 与 `assets/templates/task_2-template.png` 的用户改动。
+
+最终打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.7.vsix` 并通过 VS Code CLI
+强制覆盖安装；当前版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.7`，安装目录已核对
+包含 `out/runLogManager.js`、`media/run-log.css` 和 `media/run-log.js`。

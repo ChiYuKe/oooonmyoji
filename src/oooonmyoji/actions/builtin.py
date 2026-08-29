@@ -100,7 +100,15 @@ class WaitTemplateAction(Action):
             threshold=float(arguments.get("threshold", 0.85)),
             scale_search=bool(arguments.get("scale_search", False)),
         )
-        return ActionResult.succeeded([match.to_dict() for match in matches])
+        output = []
+        for match in matches:
+            value = match.to_dict()
+            value["template"] = str(arguments["template"])
+            value["threshold"] = float(arguments.get("threshold", 0.85))
+            if arguments.get("roi") is not None:
+                value["roi"] = list(arguments["roi"])
+            output.append(value)
+        return ActionResult.succeeded(output)
 
 
 class TapAction(Action):

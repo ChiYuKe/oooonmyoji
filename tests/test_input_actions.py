@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from src.oooonmyoji.actions.builtin import TapAction, TapMatchAction
+from src.oooonmyoji.actions.builtin import TapAction, TapMatchAction, WaitTemplateAction
+from src.oooonmyoji.vision.template import TemplateMatch
 
 
 class TapContext:
@@ -24,6 +25,11 @@ class MatchContext(TapContext):
 
     def find_template(self, template: str, *, roi: Any = None, threshold: float = 0.85) -> list[Any]:
         return []
+
+
+class WaitContext:
+    def wait_for(self, *_args: Any, **_kwargs: Any) -> list[TemplateMatch]:
+        return [TemplateMatch(10, 20, 30, 40, 0.97, 10.0, 20.0, 30.0, 40.0)]
 
 
 def test_tap_applies_random_offset_and_interval(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +82,28 @@ def test_tap_match_applies_variation_to_match_center(monkeypatch: pytest.MonkeyP
         "revalidated": False,
     }
     assert context.taps == [(122, 211, 0)]
+
+
+def test_wait_template_output_can_be_revalidated_by_tap_match() -> None:
+    result = WaitTemplateAction().execute(WaitContext(), {
+        "template": "assets/templates/target.png",
+        "timeout_seconds": 5,
+        "roi": [1, 2, 300, 400],
+        "threshold": 0.91,
+    })
+
+    assert result.output == [{
+        "x": 10,
+        "y": 20,
+        "width": 30,
+        "height": 40,
+        "confidence": 0.97,
+        "reference": [10.0, 20.0, 30.0, 40.0],
+        "center": [25, 40],
+        "template": "assets/templates/target.png",
+        "threshold": 0.91,
+        "roi": [1, 2, 300, 400],
+    }]
 
 
 @pytest.mark.parametrize(

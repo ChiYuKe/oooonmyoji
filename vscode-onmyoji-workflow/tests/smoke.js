@@ -15,6 +15,7 @@ const {
 const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions } = require('../out/workflow');
 const { computeLayout } = require('../out/layout');
 const { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment } = require('../out/runtimeInstances');
+const { buildWorkflowRunArguments } = require('../out/workflowProcess');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURE = {
@@ -74,6 +75,11 @@ async function main() {
   check('Python 实例发现输出固定为 UTF-8', pythonEnvironment.KEEP === 'yes' && pythonEnvironment.PYTHONIOENCODING === 'utf-8' && pythonEnvironment.PYTHONUTF8 === '1');
   check('显式实例选择优先于工作区记忆', chooseRuntimeInstance(runtimeInstances, 'mumu-1', 'mumu-0') === 'mumu-1');
   check('无效实例回退到工作区记忆', chooseRuntimeInstance(runtimeInstances, 'missing', 'mumu-0') === 'mumu-0');
+  const runArgs = buildWorkflowRunArguments('配置/运行.json', 'mumu_1_souls_loop.json', 'mumu-1', '产物/events latest.jsonl');
+  check('工作流运行参数不经过 shell 拼接', JSON.stringify(runArgs) === JSON.stringify([
+    '-m', 'src.oooonmyoji.cli', '--config', '配置/运行.json', 'run-workflow', 'mumu_1_souls_loop.json',
+    '--instance', 'mumu-1', '--events-file', '产物/events latest.jsonl',
+  ]));
 
   const builtin = loadBuiltinActions(PROJECT_ROOT);
   check('内置 manifest 无错误', builtin.errors.length === 0);

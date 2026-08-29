@@ -25,6 +25,8 @@ from .workflows.loader import WorkflowLoader
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "config.json"
+PARTY_SOULS_LEADER_WORKFLOW = "mumu_0_souls_party_leader.json"
+PARTY_SOULS_MEMBER_WORKFLOW = "mumu_1_souls_party_member.json"
 
 
 def _config_path(value: str | None) -> Path:
@@ -248,6 +250,59 @@ def _run_workflow_local(
         supervisor.stop()
 
 
+def _run_party_souls_local(
+    config_path: Path,
+    leader_instance: str,
+    member_instance: str,
+    rounds: int,
+    leader_events_file: Path | None = None,
+    member_events_file: Path | None = None,
+) -> int:
+    config = expand_runtime_instances(load_config(config_path))
+    config = ensure_runtime_instance(config, leader_instance)
+    config = ensure_runtime_instance(config, member_instance)
+    if leader_instance == member_instance:
+        raise ConfigError("party leader and member must use different instances")
+    try:
+        leader = config.instance(leader_instance)
+        member = config.instance(member_instance)
+    except StopIteration as exc:
+        raise ConfigError("party leader or member instance does not exist") from exc
+    config = replace(config, instances=(leader, member))
+    supervisor = Supervisor(config)
+    try:
+        member_run_id = supervisor.run_workflow(
+            PARTY_SOULS_MEMBER_WORKFLOW,
+            member_instance,
+            {"rounds": rounds},
+            wait=False,
+            events_file=str(member_events_file) if member_events_file else None,
+        )
+        leader_run_id = supervisor.run_workflow(
+            PARTY_SOULS_LEADER_WORKFLOW,
+            leader_instance,
+            {"rounds": rounds},
+            wait=False,
+            events_file=str(leader_events_file) if leader_events_file else None,
+        )
+        records = supervisor.wait_for_all(
+            [member_run_id, leader_run_id],
+            timeout_seconds=1209700,
+            cancel_on_failure=True,
+        )
+        statuses = {
+            "member": records[member_run_id].get("status") if records[member_run_id] else None,
+            "leader": records[leader_run_id].get("status") if records[leader_run_id] else None,
+        }
+        _print({
+            "runs": {"member": member_run_id, "leader": leader_run_id},
+            "statuses": statuses,
+        })
+        return 0 if all(status == "succeeded" for status in statuses.values()) else 1
+    finally:
+        supervisor.stop()
+
+
 def command_run(args: argparse.Namespace) -> int:
     path = _config_path(args.config)
     try:
@@ -274,6 +329,36 @@ def command_run_workflow(args: argparse.Namespace) -> int:
         return 0 if response.get("ok", False) else 2
     except (OSError, EOFError, TimeoutError):
         return _run_workflow_local(path, workflow, args.instance, inputs, args.events_file)
+
+
+def command_run_party_souls(args: argparse.Namespace) -> int:
+    path = _config_path(args.config)
+    leader_workflow, _ = _prepare_workflow_run(path, PARTY_SOULS_LEADER_WORKFLOW, args.leader_instance, None)
+    member_workflow, _ = _prepare_workflow_run(path, PARTY_SOULS_MEMBER_WORKFLOW, args.member_instance, None)
+    if args.leader_instance == args.member_instance:
+        raise ConfigError("party leader and member must use different instances")
+    try:
+        response = send_control({
+            "command": "run-party-souls",
+            "leader_workflow": leader_workflow,
+            "leader_instance": args.leader_instance,
+            "member_workflow": member_workflow,
+            "member_instance": args.member_instance,
+            "rounds": args.rounds,
+            "leader_events_file": str(args.leader_events_file) if args.leader_events_file else None,
+            "member_events_file": str(args.member_events_file) if args.member_events_file else None,
+        })
+        _print(response)
+        return 0 if response.get("ok", False) else 2
+    except (OSError, EOFError, TimeoutError):
+        return _run_party_souls_local(
+            path,
+            args.leader_instance,
+            args.member_instance,
+            args.rounds,
+            args.leader_events_file,
+            args.member_events_file,
+        )
 
 
 def command_cancel(args: argparse.Namespace) -> int:
@@ -330,6 +415,41 @@ def command_serve(args: argparse.Namespace) -> int:
                 events_file=request.get("events_file"),
             )
             return {"ok": True, "run_id": run_id}
+        if command == "run-party-souls":
+            leader_instance = str(request["leader_instance"])
+            member_instance = str(request["member_instance"])
+            rounds = int(request.get("rounds", 9999))
+            if rounds not in {1, 9999}:
+                return {"ok": False, "error": "party rounds must be 1 or 9999"}
+            if leader_instance == member_instance:
+                return {"ok": False, "error": "party leader and member must use different instances"}
+            runtime_config = expand_runtime_instances(load_config(config.config_path))
+            runtime_config = ensure_runtime_instance(runtime_config, leader_instance)
+            runtime_config = ensure_runtime_instance(runtime_config, member_instance)
+            supervisor.ensure_instance(runtime_config.instance(leader_instance))
+            supervisor.ensure_instance(runtime_config.instance(member_instance))
+            member_run_id = supervisor.run_workflow(
+                str(request["member_workflow"]),
+                member_instance,
+                {"rounds": rounds},
+                wait=False,
+                events_file=request.get("member_events_file"),
+            )
+            try:
+                leader_run_id = supervisor.run_workflow(
+                    str(request["leader_workflow"]),
+                    leader_instance,
+                    {"rounds": rounds},
+                    wait=False,
+                    events_file=request.get("leader_events_file"),
+                )
+            except Exception:
+                supervisor.cancel(member_run_id)
+                raise
+            return {
+                "ok": True,
+                "runs": {"member": member_run_id, "leader": leader_run_id},
+            }
         if command == "cancel":
             supervisor.cancel(str(request["run_id"]))
             return {"ok": True}
@@ -389,6 +509,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_workflow.add_argument("--inputs", type=Path, help="可选的工作流输入 JSON 文件")
     run_workflow.add_argument("--events-file", type=Path, help="可选的运行事件 JSONL 输出文件（编辑器用它显示步骤缩略图）")
     run_workflow.set_defaults(function=command_run_workflow)
+    run_party_souls = subparsers.add_parser(
+        "run-party-souls",
+        help="mumu-0 发起御魂组队邀请，mumu-1 接受并协同刷 9999 次",
+    )
+    run_party_souls.add_argument("--leader-instance", default="mumu-0", help="队长实例 ID，默认 mumu-0")
+    run_party_souls.add_argument("--member-instance", default="mumu-1", help="队员实例 ID，默认 mumu-1")
+    run_party_souls.add_argument("--rounds", type=int, choices=(1, 9999), default=9999, help="运行 1 轮验证或连续运行 9999 轮")
+    run_party_souls.add_argument("--leader-events-file", type=Path, help="可选的队长运行事件 JSONL 输出文件")
+    run_party_souls.add_argument("--member-events-file", type=Path, help="可选的队员运行事件 JSONL 输出文件")
+    run_party_souls.set_defaults(function=command_run_party_souls)
     cancel = subparsers.add_parser("cancel")
     cancel.add_argument("run_id")
     cancel.set_defaults(function=command_cancel)

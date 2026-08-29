@@ -54,3 +54,30 @@ def test_task_context_maps_taps_and_translates_roi_ocr(tmp_path: Path) -> None:
     assert result.box[0] == (101, 52)
     context.tap(960, 540, hold_ms=25)
     assert device.taps == [(480, 270, 25)]
+
+
+def test_task_context_enqueues_reward_screens_with_battle_and_layer_ids(tmp_path: Path) -> None:
+    device = FakeDevice()
+    mapper = CoordinateMapper(1920, 1080, device.width, device.height)
+    requests: list[dict[str, object]] = []
+    context = TaskContextImpl(
+        device=device,
+        mapper=mapper,
+        template_matcher=TemplateMatcher(mapper),
+        ocr_engine=None,
+        artifact_dir=tmp_path / "run-one",
+        template_root=tmp_path,
+        logger=EventLogger(tmp_path / "logs"),
+        run_id="run-one",
+        instance_id="mumu-1",
+        reward_stats_submitter=requests.append,
+    )
+
+    first = context.enqueue_reward_statistics(category="souls", layer=1, roi=(100, 200, 400, 300))
+    second = context.enqueue_reward_statistics(category="souls", layer=2, roi=(100, 200, 400, 300))
+    third = context.enqueue_reward_statistics(category="souls", layer=1, roi=(100, 200, 400, 300))
+
+    assert [first["battle_index"], second["battle_index"], third["battle_index"]] == [1, 1, 2]
+    assert [request["layer"] for request in requests] == [1, 2, 1]
+    assert requests[0]["roi"] == [50, 100, 200, 150]
+    assert all(Path(str(request["screenshot"])).is_file() for request in requests)

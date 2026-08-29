@@ -15,7 +15,8 @@ const {
 const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions } = require('../out/workflow');
 const { computeLayout } = require('../out/layout');
 const { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment } = require('../out/runtimeInstances');
-const { buildWorkflowRunArguments } = require('../out/workflowProcess');
+const { buildPartySoulsRunArguments, buildWorkflowRunArguments } = require('../out/workflowProcess');
+const extensionManifest = require('../package.json');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURE = {
@@ -62,6 +63,11 @@ async function main() {
     check(name, thrown instanceof Error && pattern.test(thrown.message));
   };
 
+  const activityContainers = extensionManifest.contributes.viewsContainers.activitybar;
+  const onmyojiViews = extensionManifest.contributes.views.onmyoji;
+  check('活动栏注册 Onmyoji 插件入口', activityContainers.some((item) => item.id === 'onmyoji' && item.icon === 'media/onmyoji-activity.svg'));
+  check('活动栏入口包含自动化控制 Webview', onmyojiViews.some((item) => item.id === 'onmyoji.controlPanel' && item.type === 'webview'));
+
   const runtimeInstances = parseRuntimeInstances({ instances: [
     { id: 'mumu-0', backend: 'mumu', mumu_index: 0, adb_serial: '127.0.0.1:16384', display_name: 'primary' },
     { id: 'mumu-1', backend: 'adb', adb_serial: '127.0.0.1:16416' },
@@ -80,10 +86,16 @@ async function main() {
     '-m', 'src.oooonmyoji.cli', '--config', '配置/运行.json', 'run-workflow', 'mumu_1_souls_loop.json',
     '--instance', 'mumu-1', '--events-file', '产物/events latest.jsonl',
   ]));
+  const partyArgs = buildPartySoulsRunArguments('配置/运行.json', 'mumu-0', 'mumu-1', 9999, '日志/队长.jsonl', '日志/队员.jsonl');
+  check('组队御魂参数直接启动双实例协调入口', JSON.stringify(partyArgs) === JSON.stringify([
+    '-m', 'src.oooonmyoji.cli', '--config', '配置/运行.json', 'run-party-souls',
+    '--leader-instance', 'mumu-0', '--member-instance', 'mumu-1', '--rounds', '9999',
+    '--leader-events-file', '日志/队长.jsonl', '--member-events-file', '日志/队员.jsonl',
+  ]));
 
   const builtin = loadBuiltinActions(PROJECT_ROOT);
   check('内置 manifest 无错误', builtin.errors.length === 0);
-  check('内置 Action 数量为 14', builtin.actions.length === 14);
+  check('内置 Action 数量为 15', builtin.actions.length === 15);
   const match = builtin.actions.find((action) => action.name === 'vision.match_template');
   check('Action 参数默认值来自 manifest', match && match.parameters.threshold.default === 0.85);
   check('模板匹配 Action 暴露完整参数', match
@@ -92,6 +104,12 @@ async function main() {
   check('重试安全元数据可用', match && match.retrySafe === true);
   const tap = builtin.actions.find((action) => action.name === 'input.tap');
   check('副作用 Action 不可安全重试', tap && !tap.retrySafe && tap.sideEffect);
+  const rewardStats = builtin.actions.find((action) => action.name === 'stats.enqueue_reward');
+  check('奖励统计 Action 暴露层号与 ROI', rewardStats
+    && rewardStats.parameters.layer.type === 'integer'
+    && rewardStats.parameters.roi.type === 'rect'
+    && rewardStats.sideEffect
+    && !rewardStats.retrySafe);
   check('rect 参数编译为四元组', parameterToSchema({ type: 'rect' }).minItems === 4);
 
   const nested = parseManifest({

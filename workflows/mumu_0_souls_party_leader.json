@@ -1,0 +1,692 @@
+{
+  "schema_version": 3,
+  "id": "mumu_0_souls_party_leader",
+  "version": "3.0.1",
+  "resolution": [1920, 1080],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 1209600,
+    "max_steps": 1000
+  },
+  "blackboard": {
+    "rounds": {
+      "type": "integer",
+      "required": true,
+      "default": 9999,
+      "enum": [1, 9999]
+    }
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "mumu0 御魂组队队长",
+      "children": ["main"]
+    },
+    {
+      "id": "main",
+      "type": "sequence",
+      "name": "建队、邀请并完成 9999 轮",
+      "children": ["ensure_party_room", "ensure_member_invited", "battle_plan"]
+    },
+    {
+      "id": "wake_hidden_ui",
+      "type": "task",
+      "name": "确认庭院后唤醒隐藏界面",
+      "action": "input.tap",
+      "params": {
+        "x": 1300,
+        "y": 800,
+        "random_offset": 3,
+        "random_interval": [0.2, 0.4]
+      }
+    },
+    {
+      "id": "ensure_party_room",
+      "type": "selector",
+      "name": "恢复或创建协战房间",
+      "children": ["already_in_party_room", "create_party_room"]
+    },
+    {
+      "id": "already_in_party_room",
+      "type": "sequence",
+      "name": "已经在协战房间",
+      "children": ["detect_party_room"]
+    },
+    {
+      "id": "detect_party_room",
+      "type": "task",
+      "name": "检测协战房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 1,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "create_party_room",
+      "type": "sequence",
+      "name": "进入悲鸣并创建仅邀请队伍",
+      "children": [
+        "enter_souls_floor",
+        "wait_party_button",
+        "tap_party_button",
+        "wait_create_team",
+        "tap_create_team",
+        "ensure_create_dialog_open",
+        "wait_create_confirm",
+        "tap_private_permission",
+        "tap_create_confirm",
+        "wait_party_room_after_create"
+      ]
+    },
+    {
+      "id": "enter_souls_floor",
+      "type": "selector",
+      "name": "恢复到御魂悲鸣页面",
+      "children": ["at_souls_floor", "from_souls_type", "from_explore_map", "from_courtyard"]
+    },
+    {
+      "id": "at_souls_floor",
+      "type": "sequence",
+      "name": "已经在御魂副本页",
+      "children": ["detect_floor"]
+    },
+    {
+      "id": "detect_floor",
+      "type": "task",
+      "name": "检测挑战按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 1,
+        "roi": [1550, 750, 370, 330],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_souls_type",
+      "type": "sequence",
+      "name": "从御魂类型页进入悲鸣",
+      "children": ["detect_orochi_type", "tap_orochi_type", "wait_floor_from_type"]
+    },
+    {
+      "id": "detect_orochi_type",
+      "type": "task",
+      "name": "检测八岐大蛇入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 1,
+        "roi": [0, 80, 600, 850],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_type",
+      "type": "task",
+      "name": "进入八岐大蛇",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.detect_orochi_type.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_floor_from_type",
+      "type": "task",
+      "name": "等待御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [1550, 750, 370, 330],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_explore_map",
+      "type": "sequence",
+      "name": "从探索地图进入悲鸣",
+      "children": [
+        "detect_map_souls",
+        "tap_map_souls",
+        "wait_orochi_from_map",
+        "tap_orochi_from_map",
+        "wait_floor_from_map"
+      ]
+    },
+    {
+      "id": "detect_map_souls",
+      "type": "task",
+      "name": "检测地图御魂入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/map-souls.png",
+        "timeout_seconds": 1,
+        "roi": [150, 850, 250, 230],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_map_souls",
+      "type": "task",
+      "name": "点击地图御魂入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.detect_map_souls.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_orochi_from_map",
+      "type": "task",
+      "name": "等待八岐大蛇入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 20,
+        "roi": [0, 80, 600, 850],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_from_map",
+      "type": "task",
+      "name": "进入八岐大蛇",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_orochi_from_map.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_floor_from_map",
+      "type": "task",
+      "name": "等待御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [1550, 750, 370, 330],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_courtyard",
+      "type": "sequence",
+      "name": "从庭院进入悲鸣",
+      "children": [
+        "ensure_courtyard_ui_visible",
+        "wait_courtyard_explore",
+        "tap_courtyard_explore",
+        "wait_map_from_courtyard",
+        "tap_map_from_courtyard",
+        "wait_orochi_from_courtyard",
+        "tap_orochi_from_courtyard",
+        "wait_floor_from_courtyard"
+      ]
+    },
+    {
+      "id": "ensure_courtyard_ui_visible",
+      "type": "selector",
+      "name": "确认庭院探索入口可见",
+      "children": ["detect_courtyard_explore", "wake_hidden_courtyard"]
+    },
+    {
+      "id": "detect_courtyard_explore",
+      "type": "task",
+      "name": "快速检测庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/courtyard-explore/mumu-0.png",
+        "timeout_seconds": 1,
+        "roi": [250, 100, 1000, 250],
+        "threshold": 0.58,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "wake_hidden_courtyard",
+      "type": "sequence",
+      "name": "唤醒并确认隐藏的庭院界面",
+      "children": ["wake_hidden_ui", "detect_courtyard_explore_after_wake"]
+    },
+    {
+      "id": "detect_courtyard_explore_after_wake",
+      "type": "task",
+      "name": "确认唤醒后的庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/courtyard-explore/mumu-0.png",
+        "timeout_seconds": 5,
+        "roi": [250, 100, 1000, 250],
+        "threshold": 0.58,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "wait_courtyard_explore",
+      "type": "task",
+      "name": "等待庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/courtyard-explore/mumu-0.png",
+        "timeout_seconds": 5,
+        "roi": [250, 100, 1000, 250],
+        "threshold": 0.58,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_courtyard_explore",
+      "type": "task",
+      "name": "点击探索入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_courtyard_explore.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_map_from_courtyard",
+      "type": "task",
+      "name": "等待地图御魂入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/map-souls.png",
+        "timeout_seconds": 20,
+        "roi": [150, 850, 250, 230],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_map_from_courtyard",
+      "type": "task",
+      "name": "点击地图御魂入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_map_from_courtyard.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_orochi_from_courtyard",
+      "type": "task",
+      "name": "等待八岐大蛇入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 20,
+        "roi": [0, 80, 600, 850],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_from_courtyard",
+      "type": "task",
+      "name": "进入八岐大蛇",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_orochi_from_courtyard.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_floor_from_courtyard",
+      "type": "task",
+      "name": "等待御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [1550, 750, 370, 330],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "wait_party_button",
+      "type": "task",
+      "name": "等待组队按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/floor-party-button.png",
+        "timeout_seconds": 10,
+        "roi": [1350, 820, 300, 240],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_party_button",
+      "type": "task",
+      "name": "进入组队页面",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_party_button.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_create_team",
+      "type": "task",
+      "name": "等待创建队伍按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/create-team-button.png",
+        "timeout_seconds": 20,
+        "roi": [1400, 840, 400, 180],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_create_team",
+      "type": "task",
+      "name": "打开创建队伍弹窗",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_create_team.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "ensure_create_dialog_open",
+      "type": "selector",
+      "name": "确认创建队伍弹窗已打开",
+      "children": ["detect_create_dialog_quick", "retry_create_dialog"]
+    },
+    {
+      "id": "detect_create_dialog_quick",
+      "type": "task",
+      "name": "快速检测创建确认按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/create-confirm-button.png",
+        "timeout_seconds": 2,
+        "roi": [1150, 780, 350, 220],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "retry_create_dialog",
+      "type": "sequence",
+      "name": "重试打开创建队伍弹窗",
+      "children": ["tap_create_team_retry", "wait_create_confirm_after_retry"],
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 3,
+          "delay_seconds": 0.5
+        }
+      ]
+    },
+    {
+      "id": "tap_create_team_retry",
+      "type": "task",
+      "name": "再次打开创建队伍弹窗",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_create_team.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_create_confirm_after_retry",
+      "type": "task",
+      "name": "确认重试后弹窗已打开",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/create-confirm-button.png",
+        "timeout_seconds": 3,
+        "roi": [1150, 780, 350, 220],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "wait_create_confirm",
+      "type": "task",
+      "name": "等待创建确认按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/create-confirm-button.png",
+        "timeout_seconds": 20,
+        "roi": [1150, 780, 350, 220],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_private_permission",
+      "type": "task",
+      "name": "选择不公开仅邀请",
+      "action": "input.tap",
+      "params": {
+        "x": 1148,
+        "y": 765,
+        "random_offset": 3,
+        "random_interval": [0.2, 0.5]
+      }
+    },
+    {
+      "id": "tap_create_confirm",
+      "type": "task",
+      "name": "创建悲鸣队伍",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_create_confirm.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_party_room_after_create",
+      "type": "task",
+      "name": "等待协战房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 30,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "ensure_member_invited",
+      "type": "selector",
+      "name": "确认 mumu1 已加入或发送邀请",
+      "children": ["member_already_present", "send_initial_invite"]
+    },
+    {
+      "id": "member_already_present",
+      "type": "sequence",
+      "name": "mumu1 已在房间",
+      "children": ["detect_member_present"]
+    },
+    {
+      "id": "detect_member_present",
+      "type": "task",
+      "name": "检测 mumu1 账号条",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/member-present.png",
+        "timeout_seconds": 1,
+        "roi": [700, 100, 450, 180],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "send_initial_invite",
+      "type": "sequence",
+      "name": "邀请鱼不鲤窝",
+      "children": [
+        "tap_empty_member_slot",
+        "wait_invite_target",
+        "tap_invite_target",
+        "wait_invite_button",
+        "tap_invite_button"
+      ]
+    },
+    {
+      "id": "tap_empty_member_slot",
+      "type": "task",
+      "name": "打开好友邀请列表",
+      "action": "input.tap",
+      "params": {
+        "x": 970,
+        "y": 385,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_invite_target",
+      "type": "task",
+      "name": "等待鱼不鲤窝好友项",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/member-invite-target.png",
+        "timeout_seconds": 30,
+        "roi": [500, 220, 500, 230],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_invite_target",
+      "type": "task",
+      "name": "选择鱼不鲤窝",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_invite_target.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.5]
+      }
+    },
+    {
+      "id": "wait_invite_button",
+      "type": "task",
+      "name": "等待邀请按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/invite-button.png",
+        "timeout_seconds": 10,
+        "roi": [950, 760, 400, 220],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_invite_button",
+      "type": "task",
+      "name": "发送御魂悲鸣邀请",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_invite_button.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "battle_plan",
+      "type": "selector",
+      "name": "选择单轮验证或 9999 轮运行",
+      "children": ["single_round_plan", "long_run_plan"]
+    },
+    {
+      "id": "single_round_plan",
+      "type": "sequence",
+      "name": "单轮验证",
+      "children": ["single_final_round"],
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.rounds"}, 1]}
+        }
+      ]
+    },
+    {
+      "id": "single_final_round",
+      "type": "task",
+      "name": "完成单轮并停止续邀",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "souls_party_leader_round.json",
+        "inputs": {"phase": "finish"}
+      }
+    },
+    {
+      "id": "long_run_plan",
+      "type": "sequence",
+      "name": "首轮启用默认邀请后连续运行 9999 轮",
+      "children": ["setup_auto_invite_round", "repeat_auto_invite_rounds"],
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.rounds"}, 9999]}
+        }
+      ]
+    },
+    {
+      "id": "setup_auto_invite_round",
+      "type": "task",
+      "name": "首轮勾选默认邀请好友",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "souls_party_leader_round.json",
+        "inputs": {"phase": "setup_auto_invite"}
+      }
+    },
+    {
+      "id": "repeat_auto_invite_rounds",
+      "type": "task",
+      "name": "默认邀请下完成后 9998 轮",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "souls_party_leader_round.json",
+        "inputs": {"phase": "auto_invite"}
+      },
+      "decorators": [
+        {"type": "repeat", "count": 9998},
+        {"type": "timeout", "seconds": 1209000}
+      ]
+    }
+  ]
+}

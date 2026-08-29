@@ -13,12 +13,13 @@
   <span class="toolbar-separator"></span>
   <button id="btn-add-task" class="primary">＋ Task</button><button id="btn-add-selector">＋ Selector</button>
   <button id="btn-add-sequence">＋ Sequence</button><button id="btn-add-parallel">＋ Parallel</button>
-  <button id="btn-layout" class="icon-button" title="自动排列">⌘</button><button id="btn-fit" class="icon-button" title="适应视口">⌂</button>
+  <button id="btn-layout" class="icon-button" title="自动排列">⌘</button><button id="btn-fit" class="icon-button" title="适应视口">⌂</button><button id="btn-export-image" class="icon-button" title="导出完整画布为 PNG" aria-label="导出完整画布为图片">⇩</button>
   <span class="spacer"></span><button id="btn-workflow">设置</button><button id="btn-blackboard">黑板</button>
   <select id="instance-select" title="运行实例" aria-label="运行实例"></select>
-  <button id="btn-run" class="primary">▶ 运行</button><button id="btn-save" class="primary">保存</button><button id="btn-more" class="icon-button">⋯</button>
+  <button id="btn-run-log" class="icon-button">☷</button><button id="btn-run-party" class="primary">▶ 组队御魂</button><button id="btn-run" class="primary">▶ 运行</button><button id="btn-stop" class="icon-button">■</button><button id="btn-save" class="primary">保存</button><button id="btn-more" class="icon-button">⋯</button>
 </header>
 <div id="external-banner" class="hidden"></div>
+<img id="exported-canvas-preview" class="hidden" alt="">
 <main>
   <section id="canvas-wrap">
     <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -57,6 +58,40 @@ window.acquireVsCodeApi = () => ({
   postMessage(message) {
     if (message.type === 'ready') setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', document: { name: 'browser-acceptance.json', uri: 'harness://browser-acceptance', text: JSON.stringify(harnessWorkflow) }, catalog: harnessCatalog, refs: { blackboard: ['blackboard.template', 'blackboard.enabled', 'blackboard.target_x'], nodes: ['nodes.capture.output.width', 'nodes.capture.output.height'] }, issues: [], instances: [{ id: 'mumu-0', backend: 'mumu', displayName: '扫地工', adbSerial: '127.0.0.1:16384' }, { id: 'mumu-1', backend: 'mumu', displayName: '吃鱼', adbSerial: '127.0.0.1:16416' }], selectedInstance: 'mumu-0' } })), 0);
     if (message.type === 'save') document.title = 'Saved · Behavior Tree Editor Harness';
+    if (message.type === 'saveCanvasImage') {
+      window.exportedCanvasImage = message;
+      document.documentElement.dataset.canvasExport = JSON.stringify({
+        type: message.type,
+        filename: message.filename,
+        pngPrefix: message.dataUrl.slice(0, 22),
+        pngLength: message.dataUrl.length,
+        width: message.width,
+        height: message.height,
+        logicalWidth: message.logicalWidth,
+        logicalHeight: message.logicalHeight,
+      });
+      const preview = document.getElementById('exported-canvas-preview');
+      preview.onload = () => {
+        const sample = document.createElement('canvas');
+        sample.width = Math.max(1, Math.floor(preview.naturalWidth / 8));
+        sample.height = Math.max(1, Math.floor(preview.naturalHeight / 8));
+        const context = sample.getContext('2d', { willReadFrequently: true });
+        context.drawImage(preview, 0, 0, sample.width, sample.height);
+        const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
+        const colors = new Set();
+        let opaque = 0;
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index + 3] > 0) opaque += 1;
+          colors.add(`${pixels[index] >> 4},${pixels[index + 1] >> 4},${pixels[index + 2] >> 4},${pixels[index + 3] >> 4}`);
+        }
+        document.documentElement.dataset.canvasExportPixels = JSON.stringify({
+          opaqueRatio: opaque / (sample.width * sample.height),
+          quantizedColorCount: colors.size,
+        });
+      };
+      preview.src = message.dataUrl;
+      setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'canvasImageSaved', path: message.filename } })), 0);
+    }
   },
   getState() { return {}; }, setState() {}
 });

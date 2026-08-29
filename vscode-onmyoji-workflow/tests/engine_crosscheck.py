@@ -56,7 +56,7 @@ def main() -> int:
     failures = 0
     expected_actions = {
         "core.assert", "core.capture", "core.log", "core.save_frame", "core.sleep",
-        "input.tap", "input.tap_match", "vision.match_template", "vision.ocr",
+        "input.tap", "input.tap_match", "stats.enqueue_reward", "vision.match_template", "vision.ocr",
         "vision.wait_template", "vision.wait_text", "workflow.run", "workflow.select", "workflow.sequence",
     }
     checks: list[tuple[str, bool]] = [("shared Action catalog", set(REGISTRY.names()) == expected_actions)]

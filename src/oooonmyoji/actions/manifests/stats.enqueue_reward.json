@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "name": "stats.enqueue_reward",
+  "version": "1.0.0",
+  "entry": "builtin:EnqueueRewardStatsAction",
+  "description": "原生截取当前奖励页并投递后台 OCR 统计。统计失败只写记录，不中断主工作流。",
+  "parameters": {
+    "category": {
+      "type": "string",
+      "required": true,
+      "default": "souls",
+      "min_length": 1,
+      "description": "奖励分类标识"
+    },
+    "layer": {
+      "type": "integer",
+      "required": true,
+      "default": 1,
+      "min": 1,
+      "max": 9,
+      "description": "同一局结算中的奖励弹层编号"
+    },
+    "roi": {
+      "type": "rect",
+      "description": "后台材料模板匹配和数量 OCR 区域；不填时处理整张截图"
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "accepted": { "type": "boolean" },
+      "screenshot": { "type": "string" },
+      "battle_index": { "type": "integer" },
+      "layer": { "type": "integer" },
+      "error": { "type": "string" }
+    },
+    "required": ["accepted", "screenshot", "battle_index", "layer", "error"],
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

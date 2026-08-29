@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "mumu_1_souls_loop",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "resolution": [
     1920,
     1080
@@ -26,9 +26,165 @@
       "type": "sequence",
       "name": "进入副本并循环战斗",
       "children": [
+        "prepare_entry",
         "enter_souls",
         "battle_loop"
       ]
+    },
+    {
+      "id": "prepare_entry",
+      "type": "selector",
+      "name": "检查并恢复入口页面",
+      "children": [
+        "entry_page_supported",
+        "return_to_courtyard"
+      ]
+    },
+    {
+      "id": "entry_page_supported",
+      "type": "selector",
+      "name": "当前页面可直接进入御魂",
+      "children": [
+        "preflight_floor",
+        "preflight_souls_type",
+        "preflight_explore_map",
+        "preflight_courtyard"
+      ]
+    },
+    {
+      "id": "preflight_floor",
+      "type": "task",
+      "name": "预检御魂副本页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 0.5,
+        "roi": [
+          1550,
+          750,
+          370,
+          330
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "preflight_souls_type",
+      "type": "task",
+      "name": "预检御魂类型页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 0.5,
+        "roi": [
+          0,
+          80,
+          600,
+          850
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "preflight_explore_map",
+      "type": "task",
+      "name": "预检探索地图",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/map-souls.png",
+        "timeout_seconds": 0.5,
+        "roi": [
+          150,
+          850,
+          250,
+          230
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "preflight_courtyard",
+      "type": "task",
+      "name": "预检庭院",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
+        "timeout_seconds": 0.5,
+        "roi": [
+          650,
+          80,
+          300,
+          300
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "return_to_courtyard",
+      "type": "sequence",
+      "name": "点击快捷按钮返回庭院",
+      "children": [
+        "detect_return_courtyard",
+        "tap_return_courtyard",
+        "wait_courtyard_after_return"
+      ]
+    },
+    {
+      "id": "detect_return_courtyard",
+      "type": "task",
+      "name": "检测返回庭院按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/return-courtyard.png",
+        "timeout_seconds": 2,
+        "roi": [
+          100,
+          0,
+          140,
+          120
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_return_courtyard",
+      "type": "task",
+      "name": "返回庭院",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.detect_return_courtyard.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 3,
+        "random_interval": [
+          0.2,
+          0.6
+        ]
+      }
+    },
+    {
+      "id": "wait_courtyard_after_return",
+      "type": "task",
+      "name": "等待返回庭院",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
+        "timeout_seconds": 20,
+        "roi": [
+          650,
+          80,
+          300,
+          300
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
     },
     {
       "id": "enter_souls",
@@ -107,8 +263,8 @@
         "revalidate": true,
         "random_offset": 4,
         "random_interval": [
-          0.15,
-          0.3
+          0.2,
+          0.6
         ]
       }
     },
@@ -172,8 +328,8 @@
         "revalidate": true,
         "random_offset": 4,
         "random_interval": [
-          0.15,
-          0.3
+          0.2,
+          0.6
         ]
       }
     },
@@ -207,8 +363,8 @@
         "revalidate": true,
         "random_offset": 4,
         "random_interval": [
-          0.15,
-          0.3
+          0.2,
+          0.6
         ]
       }
     },
@@ -250,7 +406,7 @@
       "name": "等待庭院探索入口",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/souls/courtyard-explore.png",
+        "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 5,
         "roi": [
           650,
@@ -274,8 +430,8 @@
         "revalidate": true,
         "random_offset": 4,
         "random_interval": [
-          0.15,
-          0.3
+          0.2,
+          0.6
         ]
       }
     },
@@ -309,8 +465,8 @@
         "revalidate": true,
         "random_offset": 4,
         "random_interval": [
-          0.15,
-          0.3
+          0.2,
+          0.6
         ]
       }
     },
@@ -344,8 +500,8 @@
         "revalidate": true,
         "random_offset": 4,
         "random_interval": [
-          0.15,
-          0.3
+          0.2,
+          0.6
         ]
       }
     },
@@ -422,7 +578,7 @@
         "random_offset": 5,
         "random_interval": [
           0.2,
-          0.45
+          0.6
         ]
       }
     },
@@ -457,7 +613,7 @@
         "random_offset": 5,
         "random_interval": [
           0.2,
-          0.45
+          0.6
         ]
       }
     },
@@ -491,8 +647,8 @@
         "revalidate": false,
         "random_offset": 8,
         "random_interval": [
-          0.4,
-          0.8
+          0.2,
+          0.6
         ]
       }
     },
@@ -537,9 +693,23 @@
       "type": "sequence",
       "name": "关闭一层奖励",
       "children": [
+        "stats_reward_layer_1",
         "dismiss_reward_once",
         "wait_floor_after_one"
       ]
+    },
+    {
+      "id": "stats_reward_layer_1",
+      "type": "task",
+      "name": "后台统计第一层奖励",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "reward_statistics.json",
+        "inputs": {
+          "category": "souls",
+          "layer": 1
+        }
+      }
     },
     {
       "id": "dismiss_reward_once",
@@ -551,8 +721,8 @@
         "y": 850,
         "random_offset": 12,
         "random_interval": [
-          0.4,
-          0.8
+          0.2,
+          0.6
         ]
       }
     },
@@ -579,11 +749,26 @@
       "type": "sequence",
       "name": "关闭多层奖励",
       "children": [
+        "stats_reward_layer_2",
         "dismiss_reward_twice_a",
         "settlement_pause",
+        "stats_reward_layer_3",
         "dismiss_reward_twice_b",
         "wait_floor_after_more"
       ]
+    },
+    {
+      "id": "stats_reward_layer_2",
+      "type": "task",
+      "name": "后台统计第二层奖励",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "reward_statistics.json",
+        "inputs": {
+          "category": "souls",
+          "layer": 2
+        }
+      }
     },
     {
       "id": "dismiss_reward_twice_a",
@@ -595,8 +780,8 @@
         "y": 850,
         "random_offset": 12,
         "random_interval": [
-          0.4,
-          0.8
+          0.2,
+          0.6
         ]
       }
     },
@@ -610,6 +795,19 @@
       }
     },
     {
+      "id": "stats_reward_layer_3",
+      "type": "task",
+      "name": "后台统计第三层奖励",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "reward_statistics.json",
+        "inputs": {
+          "category": "souls",
+          "layer": 3
+        }
+      }
+    },
+    {
       "id": "dismiss_reward_twice_b",
       "type": "task",
       "name": "关闭第二层奖励",
@@ -619,8 +817,8 @@
         "y": 850,
         "random_offset": 12,
         "random_interval": [
-          0.4,
-          0.8
+          0.2,
+          0.6
         ]
       }
     },

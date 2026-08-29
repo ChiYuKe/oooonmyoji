@@ -296,9 +296,27 @@ def test_engine_sequence_stops_and_selector_falls_back() -> None:
         task("fail", "test.fail"),
         task("ok", "test.echo"),
     ], "selector")
-    result = WorkflowEngine(validate(selector, actions), actions, Context(), {}).run()
+    emitted: list[dict[str, Any]] = []
+    result = WorkflowEngine(validate(selector, actions), actions, Context(), {}, on_step=emitted.append).run()
     assert result.status == ActionStatus.SUCCEEDED
     assert [event["step_id"] for event in result.step_history][:2] == ["fail", "ok"]
+    recovered = next(event for event in result.step_history if event["step_id"] == "fail")
+    assert recovered["status"] == "branch_miss"
+    assert recovered["original_status"] == "failed"
+    assert recovered["recovered_by"] == "selector"
+    assert [event["status"] for event in emitted if event["step_id"] == "fail"] == ["failed", "branch_miss"]
+
+    all_failed = tree([
+        {"id": "selector", "type": "selector", "children": ["fail_one", "fail_two"]},
+        task("fail_one", "test.fail"),
+        task("fail_two", "test.fail"),
+    ], "selector")
+    failed_result = WorkflowEngine(validate(all_failed, actions), actions, Context(), {}).run()
+    assert failed_result.status == ActionStatus.FAILED
+    assert [
+        event["status"] for event in failed_result.step_history
+        if event["step_id"] in {"fail_one", "fail_two"}
+    ] == ["failed", "failed"]
 
     sequence = tree([
         {"id": "sequence", "type": "sequence", "children": ["fail", "never"]},
@@ -390,3 +408,51 @@ def test_workflow_loader_hash_paths_and_blackboard_defaults(tmp_path: Path) -> N
         loader.validate_input_paths(first, {"template": "../outside.png", "options": {"enabled": True}})
     with pytest.raises(ConfigError):
         loader.load("../outside")
+
+
+def test_workflow_loader_applies_required_top_level_default_before_validation(tmp_path: Path) -> None:
+    workflow_dir = tmp_path / "workflows"
+    workflow_dir.mkdir()
+    (tmp_path / "plugins" / "actions").mkdir(parents=True)
+    raw = tree(
+        [task("echo", "test.echo", {"value": {"ref": "blackboard.rounds"}})],
+        "echo",
+        blackboard={"rounds": {"type": "integer", "required": True, "default": 30}},
+    )
+    (workflow_dir / "defaults.json").write_text(json.dumps(raw), encoding="utf-8")
+    actions = registry(action_spec(EchoAction()))
+    loader = WorkflowLoader(workflow_dir, actions, project_root=tmp_path)
+
+    normalized = loader.normalize_inputs(loader.load("defaults"), {})
+
+    assert normalized == {"rounds": 30}
+
+
+def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> None:
+    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls_party_member_round.json"
+    raw = json.loads(workflow_path.read_text(encoding="utf-8"))
+    nodes = {node["id"]: node for node in raw["nodes"]}
+
+    assert nodes["settled_after_one_tap"]["children"][-3:] == [
+        "pause_after_reward_once",
+        "wait_reward_overlay_gone_after_one",
+        "done_after_one",
+    ]
+    assert nodes["settled_after_two_taps"]["children"][-3:] == [
+        "pause_after_reward_twice",
+        "wait_reward_overlay_gone_after_two",
+        "done_after_two",
+    ]
+    for node_id in ("wait_reward_overlay_gone_after_one", "wait_reward_overlay_gone_after_two"):
+        params = nodes[node_id]["params"]
+        assert params["template"] == "assets/templates/souls/souls-victory-continue.png"
+        assert params["present"] is False
+    invite_params = nodes["wait_auto_ready_invite"]["params"]
+    assert invite_params["threshold"] >= 0.9
+    assert invite_params["timeout_seconds"] >= 12
+    assert (workflow_path.parents[1] / invite_params["template"]).is_file()
+    assert nodes["complete_auto_ready_setup"]["children"] == [
+        "wait_lobby_without_confirmation",
+        "handle_auto_ready_confirmation",
+    ]
+    assert nodes["wait_lobby_without_confirmation"]["params"]["timeout_seconds"] <= 2

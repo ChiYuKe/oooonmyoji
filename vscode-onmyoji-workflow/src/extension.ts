@@ -11,12 +11,14 @@ import { ActionCatalog, discoverProjectRoot, loadActionCatalog } from './catalog
 import { WorkflowIntelligence } from './jsonProviders';
 import { RunLogManager } from './runLogManager';
 import { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment, RuntimeInstanceInfo } from './runtimeInstances';
+import { SidebarProvider } from './sidebarProvider';
 import { WebviewManager } from './webviewManager';
-import { buildWorkflowRunArguments } from './workflowProcess';
+import { buildPartySoulsRunArguments, buildWorkflowRunArguments } from './workflowProcess';
 
 let intelligence: WorkflowIntelligence;
 let webviewManager: WebviewManager;
 let runLogManager: RunLogManager;
+let sidebarProvider: SidebarProvider;
 let catalog: ActionCatalog;
 let projectRoot: string;
 let extensionContext: vscode.ExtensionContext;
@@ -66,6 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(intelligence, ...intelligence.registerProviders());
 
   runLogManager = new RunLogManager(context, () => projectRoot);
+  sidebarProvider = new SidebarProvider(context);
 
   webviewManager = new WebviewManager(
     context,
@@ -79,9 +82,13 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebarProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.commands.registerCommand('onmyoji.openWorkflowEditor', (uri?: vscode.Uri) => webviewManager.open(uri)),
     vscode.commands.registerCommand('onmyoji.createWorkflow', () => createWorkflow()),
     vscode.commands.registerCommand('onmyoji.runWorkflow', (uri?: vscode.Uri, instanceId?: string) => runWorkflow(uri, instanceId)),
+    vscode.commands.registerCommand('onmyoji.runPartySouls', (rounds?: number) => runPartySouls(rounds)),
     vscode.commands.registerCommand('onmyoji.stopWorkflow', () => stopWorkflow()),
     vscode.commands.registerCommand('onmyoji.openRunLog', () => runLogManager.open()),
     vscode.commands.registerCommand('onmyoji.validateCurrentWorkflow', () => validateCurrentWorkflow()),
@@ -405,6 +412,7 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
   });
   activeWorkflowProcess = child;
   workflowStopRequested = false;
+  sidebarProvider.setRunState('running', `${path.basename(uri.fsPath)} · ${instance}`);
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string | Buffer) => {
@@ -415,29 +423,130 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
     workflowOutput.append(String(chunk));
     runLogManager.appendOutput(String(chunk), 'stderr');
   });
+  let launchFailed = false;
   child.once('error', (error) => {
+    launchFailed = true;
     workflowOutput.appendLine(`\n启动失败：${error.message}`);
     runLogManager.appendOutput(`\n启动失败：${error.message}\n`, 'stderr');
+    webviewManager.finishRunWatcher();
     runLogManager.finishProcess(-1, null, false);
     if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
+    sidebarProvider.setRunState('error', '启动失败');
     void vscode.window.showErrorMessage(`工作流启动失败：${error.message}`);
   });
   child.once('close', (code, signal) => {
+    if (launchFailed) return;
     const stopped = workflowStopRequested;
     workflowOutput.appendLine(`\n进程结束：${stopped ? '已停止' : `退出代码 ${code ?? '未知'}`}${signal ? `，信号 ${signal}` : ''}`);
     if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
     workflowStopRequested = false;
+    webviewManager.finishRunWatcher();
     runLogManager.finishProcess(code, signal, stopped);
     if (stopped) {
+      sidebarProvider.setRunState('idle', '已停止');
       void vscode.window.setStatusBarMessage('工作流已停止', 3000);
     } else if (code === 0) {
+      sidebarProvider.setRunState('success', '执行完成');
       void vscode.window.setStatusBarMessage(`工作流执行完成：${path.basename(uri.fsPath)}`, 3000);
     } else {
+      sidebarProvider.setRunState('error', `失败 · 退出代码 ${code ?? '未知'}`);
       void runLogManager.open();
       void vscode.window.showErrorMessage(`工作流执行失败（退出代码 ${code ?? '未知'}），请查看“Onmyoji 工作流运行”输出。`);
     }
   });
   void vscode.window.setStatusBarMessage(`已启动工作流：${path.basename(uri.fsPath)}（实例：${instance}）`, 3000);
+}
+
+async function runPartySouls(requestedRounds?: number): Promise<void> {
+  if (activeWorkflowProcess && activeWorkflowProcess.exitCode === null) {
+    void vscode.window.showWarningMessage('已有自动化正在运行，请先停止后再启动组队御魂。');
+    return;
+  }
+
+  const configPath = resolveRuntimeConfigPath();
+  const pythonPath = resolvePythonExecutable();
+  const configuredRounds = vscode.workspace.getConfiguration('onmyoji').get<number>('partySoulsRounds', 9999);
+  const selectedRounds = requestedRounds === undefined ? configuredRounds : requestedRounds;
+  const rounds = selectedRounds === 1 ? 1 : 9999;
+  const eventStamp = Date.now();
+  const partyEventsDir = path.join(resolveArtifactDir(projectRoot), 'runs');
+  const leaderEventsFile = path.join(partyEventsDir, `events-party-${eventStamp}-leader.jsonl`);
+  const memberEventsFile = path.join(partyEventsDir, `events-party-${eventStamp}-member.jsonl`);
+  const args = buildPartySoulsRunArguments(
+    configPath,
+    'mumu-0',
+    'mumu-1',
+    rounds,
+    leaderEventsFile,
+    memberEventsFile,
+  );
+
+  await vscode.workspace.getConfiguration('onmyoji').update('partySoulsRounds', rounds, vscode.ConfigurationTarget.Workspace);
+  await runLogManager.beginMultiRun('组队御魂', [
+    { id: 'leader', label: '队长', workflow: 'mumu_0_souls_party_leader.json', instance: 'mumu-0' },
+    { id: 'member', label: '队员', workflow: 'mumu_1_souls_party_member.json', instance: 'mumu-1' },
+  ]);
+  runLogManager.startEventSources([
+    { id: 'leader', filePath: leaderEventsFile },
+    { id: 'member', filePath: memberEventsFile },
+  ]);
+
+  workflowOutput.clear();
+  workflowOutput.appendLine(`启动组队御魂：${rounds} 场`);
+  workflowOutput.appendLine('队长：mumu-0');
+  workflowOutput.appendLine('队员：mumu-1');
+  workflowOutput.appendLine('');
+
+  const child = spawn(pythonPath, args, {
+    cwd: projectRoot,
+    env: pythonUtf8Environment(process.env),
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  activeWorkflowProcess = child;
+  workflowStopRequested = false;
+  sidebarProvider.setRunState('running', `组队御魂 · ${rounds} 场`);
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string | Buffer) => {
+    workflowOutput.append(String(chunk));
+    runLogManager.appendOutput(String(chunk), 'stdout');
+  });
+  child.stderr?.on('data', (chunk: string | Buffer) => {
+    workflowOutput.append(String(chunk));
+    runLogManager.appendOutput(String(chunk), 'stderr');
+  });
+  let launchFailed = false;
+  child.once('error', (error) => {
+    launchFailed = true;
+    workflowOutput.appendLine(`\n启动失败：${error.message}`);
+    runLogManager.appendOutput(`\n启动失败：${error.message}\n`, 'stderr');
+    runLogManager.finishEventSources();
+    runLogManager.finishProcess(-1, null, false);
+    if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
+    sidebarProvider.setRunState('error', '组队御魂启动失败');
+    void vscode.window.showErrorMessage(`组队御魂启动失败：${error.message}`);
+  });
+  child.once('close', (code, signal) => {
+    if (launchFailed) return;
+    const stopped = workflowStopRequested;
+    workflowOutput.appendLine(`\n进程结束：${stopped ? '已停止' : `退出代码 ${code ?? '未知'}`}${signal ? `，信号 ${signal}` : ''}`);
+    if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
+    workflowStopRequested = false;
+    runLogManager.finishEventSources();
+    runLogManager.finishProcess(code, signal, stopped);
+    if (stopped) {
+      sidebarProvider.setRunState('idle', '组队御魂已停止');
+      void vscode.window.setStatusBarMessage('组队御魂已停止', 3000);
+    } else if (code === 0) {
+      sidebarProvider.setRunState('success', '组队御魂已完成');
+      void vscode.window.showInformationMessage('组队御魂已完成。');
+    } else {
+      sidebarProvider.setRunState('error', `组队失败 · 退出代码 ${code ?? '未知'}`);
+      void vscode.window.showErrorMessage(`组队御魂运行失败（退出代码 ${code ?? '未知'}），请查看“Onmyoji 工作流运行”输出。`);
+    }
+  });
+  void vscode.window.setStatusBarMessage(`组队御魂已启动：mumu-0 + mumu-1，共 ${rounds} 场`, 5000);
 }
 
 async function stopWorkflow(): Promise<void> {
@@ -447,6 +556,7 @@ async function stopWorkflow(): Promise<void> {
     return;
   }
   workflowStopRequested = true;
+  sidebarProvider.setRunState('stopping', '正在停止...');
   workflowOutput.appendLine('\n正在停止工作流...');
   if (process.platform === 'win32' && child.pid) {
     await new Promise<void>((resolve) => {

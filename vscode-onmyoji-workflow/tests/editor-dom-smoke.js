@@ -124,6 +124,7 @@ let ok = true;
 const check = (name, condition) => { console.log((condition ? '✓ ' : '✗ ') + name); if (!condition) ok = false; };
 
 check('初始化发送 ready', posted.some((message) => message.type === 'ready'));
+check('完整画布图片导出按钮已绑定', (els['btn-export-image']._listeners.click || []).length === 1);
 check('工具栏显示配置中的两个实例', els['instance-select'].children.length === 2 && els['instance-select'].value === 'mumu-0');
 for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'runtimeInstances', instances: [{ id: 'mumu-0', backend: 'mumu', displayName: 'primary' }, { id: 'mumu-1', backend: 'mumu', displayName: 'second' }, { id: 'mumu-2', backend: 'mumu', displayName: 'third' }], selectedInstance: 'mumu-0' } });
 check('自动发现刷新可追加第三个原生实例', els['instance-select'].children.length === 3 && els['instance-select'].children[2].textContent === 'mumu-2 · third (mumu)');
@@ -131,6 +132,8 @@ els['instance-select'].value = 'mumu-1'; fire(els['instance-select'], 'change');
 check('实例选择写回扩展工作区状态', posted.some((message) => message.type === 'selectInstance' && message.instanceId === 'mumu-1'));
 fire(els['btn-run'], 'click');
 check('运行使用工具栏所选实例', posted.some((message) => message.type === 'runWorkflow' && message.instanceId === 'mumu-1'));
+fire(els['btn-run-party'], 'click');
+check('组队按钮发送组队御魂消息', posted.some((message) => message.type === 'runPartySouls'));
 fire(els['btn-stop'], 'click');
 check('停止按钮发送停止工作流消息', posted.some((message) => message.type === 'stopWorkflow'));
 fire(els['btn-run-log'], 'click');

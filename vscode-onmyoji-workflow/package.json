@@ -2,7 +2,7 @@
   "name": "onmyoji-workflow-helper",
   "displayName": "Onmyoji Workflow Helper",
   "description": "为 oooonmyoji 自动化项目编写 Behavior Tree schema v3 工作流：智能补全、校验、悬停提示与可视化编辑器（支持内置与自定义 Action）",
-  "version": "0.2.7",
+  "version": "0.2.14",
   "publisher": "oooonmyoji",
   "license": "MIT",
   "engines": {
@@ -24,9 +24,11 @@
   "activationEvents": [
     "workspaceContains:workflows/*.json",
     "workspaceContains:plugins/actions/*/action.json",
+    "onView:onmyoji.controlPanel",
     "onCommand:onmyoji.openWorkflowEditor",
     "onCommand:onmyoji.createWorkflow",
     "onCommand:onmyoji.runWorkflow",
+    "onCommand:onmyoji.runPartySouls",
     "onCommand:onmyoji.stopWorkflow",
     "onCommand:onmyoji.openRunLog",
     "onCommand:onmyoji.validateCurrentWorkflow",
@@ -35,6 +37,24 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "onmyoji",
+          "title": "Onmyoji",
+          "icon": "media/onmyoji-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "onmyoji": [
+        {
+          "type": "webview",
+          "id": "onmyoji.controlPanel",
+          "name": "自动化控制"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "onmyoji.openWorkflowEditor",
@@ -54,6 +74,13 @@
         "title": "Onmyoji: 执行当前工作流",
         "category": "Onmyoji",
         "icon": "$(play)"
+      },
+      {
+        "command": "onmyoji.runPartySouls",
+        "title": "Onmyoji: 运行组队御魂",
+        "category": "Onmyoji",
+        "shortTitle": "组队御魂",
+        "icon": "$(organization)"
       },
       {
         "command": "onmyoji.stopWorkflow",
@@ -93,6 +120,9 @@
           "when": "onmyoji.workflowFile"
         },
         {
+          "command": "onmyoji.runPartySouls"
+        },
+        {
           "command": "onmyoji.validateCurrentWorkflow",
           "when": "editorLangId == json"
         },
@@ -111,6 +141,11 @@
           "command": "onmyoji.runWorkflow",
           "when": "onmyoji.workflowFile",
           "group": "navigation@2"
+        },
+        {
+          "command": "onmyoji.runPartySouls",
+          "when": "onmyoji.workflowFile",
+          "group": "navigation@3"
         }
       ],
       "editor/context": [
@@ -166,6 +201,12 @@
           "type": "string",
           "default": "config/config.json",
           "description": "引擎 CLI validate 使用的配置文件路径（相对项目根目录）。"
+        },
+        "onmyoji.partySoulsRounds": {
+          "type": "integer",
+          "enum": [1, 9999],
+          "default": 9999,
+          "description": "点击“组队御魂”按钮时运行的场数。"
         }
       }
     }

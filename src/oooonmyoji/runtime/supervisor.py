@@ -19,6 +19,7 @@ from ..vision.ocr import SharedOcrPool
 from ..workflows.loader import WorkflowLoader
 from .logging import EventLogger
 from .records import RunStatus
+from .reward_stats import RewardStatsProcessor
 from .runner import RemoteOcrEngine, TaskRunner
 
 
@@ -134,6 +135,9 @@ class Supervisor:
         self.workers: dict[str, _Worker] = {}
         self._runs: dict[str, str] = {}
         self._completed: dict[str, dict[str, Any]] = {}
+        self._ocr_lock = threading.Lock()
+        self._reward_stats: RewardStatsProcessor | None = None
+        self._stopping = False
 
     def start(self) -> None:
         if self.workers:
@@ -245,19 +249,95 @@ class Supervisor:
                 event = event_queue.get(timeout=remaining)
             except queue.Empty as exc:
                 raise TimeoutError(f"timed out waiting for run {run_id}") from exc
-            if event.get("type") == "ocr_request":
-                self._handle_ocr(event)
-                continue
+            record = self.handle_event(event)
             if event.get("type") == "result":
-                record = self.handle_event(event)
                 if event.get("run_id") == run_id:
                     return record
                 if isinstance(record, dict) and isinstance(event.get("run_id"), str):
                     self._completed[event["run_id"]] = record
 
+    def wait_for_all(
+        self,
+        run_ids: list[str] | tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
+        cancel_on_failure: bool = True,
+    ) -> dict[str, dict[str, Any] | None]:
+        """Wait for a coordinated set of runs and stop peers after one fails."""
+
+        ordered = list(run_ids)
+        if not ordered or len(set(ordered)) != len(ordered):
+            raise ValueError("run_ids must contain unique run IDs")
+        pending = set(ordered)
+        records: dict[str, dict[str, Any] | None] = {}
+        for run_id in ordered:
+            if run_id in self._completed:
+                records[run_id] = self._completed.pop(run_id)
+                pending.remove(run_id)
+
+        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
+        cancellation_requested = False
+
+        def cancel_pending() -> None:
+            nonlocal cancellation_requested
+            if cancellation_requested or not cancel_on_failure:
+                return
+            cancellation_requested = True
+            for pending_run_id in tuple(pending):
+                try:
+                    self.cancel(pending_run_id)
+                except KeyError:
+                    pass
+
+        if any(not record or record.get("status") != RunStatus.SUCCEEDED.value for record in records.values()):
+            cancel_pending()
+
+        while pending:
+            self.check_workers()
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if remaining == 0.0:
+                raise TimeoutError(f"timed out waiting for runs: {', '.join(sorted(pending))}")
+            try:
+                event_queue = self.event_queue
+                assert event_queue is not None
+                event = event_queue.get(timeout=remaining)
+            except queue.Empty as exc:
+                raise TimeoutError(f"timed out waiting for runs: {', '.join(sorted(pending))}") from exc
+            record = self.handle_event(event)
+            if event.get("type") != "result":
+                continue
+            event_run_id = event.get("run_id")
+            if not isinstance(event_run_id, str):
+                continue
+            if event_run_id not in pending:
+                if isinstance(record, dict):
+                    self._completed[event_run_id] = record
+                continue
+            records[event_run_id] = record
+            pending.remove(event_run_id)
+            if not isinstance(record, dict) or record.get("status") != RunStatus.SUCCEEDED.value:
+                cancel_pending()
+
+        return {run_id: records.get(run_id) for run_id in ordered}
+
     def handle_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
         if event.get("type") == "ocr_request":
             self._handle_ocr(event)
+            return None
+        if event.get("type") == "reward_stats_request":
+            if self._reward_stats is None:
+                self._reward_stats = RewardStatsProcessor(
+                    self.config.artifact_dir,
+                    self._recognize_reward_image,
+                    logger=self.logger,
+                    material_catalog=self.config.root_dir / "assets" / "templates" / "rewards" / "catalog.json",
+                )
+            if not self._reward_stats.submit(event):
+                self.logger.emit(
+                    "reward_stats.dropped",
+                    run_id=event.get("run_id"),
+                    screenshot=event.get("screenshot"),
+                )
             return None
         if event.get("type") != "result":
             return None
@@ -321,6 +401,19 @@ class Supervisor:
             worker.response_queue.put({"id": event["id"], "error": "OCR is disabled"})
             return
         try:
+            results = self._recognize_reward_image(event["image"])
+            worker.response_queue.put({"id": event["id"], "results": results})
+        except Exception as exc:
+            worker.response_queue.put({"id": event["id"], "error": str(exc)})
+
+    def _recognize_reward_image(self, image: object) -> list[Any]:
+        if not self.config.ocr.enabled:
+            raise RuntimeError("OCR is disabled")
+        if self._stopping:
+            raise RuntimeError("supervisor is stopping")
+        with self._ocr_lock:
+            if self._stopping:
+                raise RuntimeError("supervisor is stopping")
             if self.ocr_pool is None:
                 self.ocr_pool = SharedOcrPool(
                     language=self.config.ocr.language,
@@ -329,10 +422,7 @@ class Supervisor:
                     min_confidence=self.config.ocr.min_confidence,
                     use_gpu=self.config.ocr.use_gpu,
                 )
-            results = self.ocr_pool.recognize(event["image"])
-            worker.response_queue.put({"id": event["id"], "results": results})
-        except Exception as exc:
-            worker.response_queue.put({"id": event["id"], "error": str(exc)})
+            return self.ocr_pool.recognize(image)
 
     def cancel(self, run_id: str) -> None:
         instance_id = self._runs.get(run_id)
@@ -374,6 +464,16 @@ class Supervisor:
         self.workers.clear()
         self._runs.clear()
         self._completed.clear()
+        if self._reward_stats is not None:
+            drained = self._reward_stats.close(wait_seconds=15.0)
+            if not drained:
+                self._stopping = True
+                if self.ocr_pool is not None:
+                    self.ocr_pool.close(force=True)
+                    self.ocr_pool = None
+                self._reward_stats.close(wait_seconds=2.0)
+            self._reward_stats = None
+        self._stopping = True
         if self.ocr_pool is not None:
             self.ocr_pool.close(force=True)
             self.ocr_pool = None

@@ -1,0 +1,58 @@
+{
+  "schema_version": 3,
+  "id": "reward_statistics",
+  "version": "3.0.0",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 15,
+    "max_steps": 10
+  },
+  "blackboard": {
+    "category": {
+      "type": "string",
+      "required": true,
+      "default": "souls"
+    },
+    "layer": {
+      "type": "integer",
+      "required": true,
+      "default": 1,
+      "min": 1,
+      "max": 9
+    }
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "奖励统计入口",
+      "children": [
+        "enqueue_reward"
+      ]
+    },
+    {
+      "id": "enqueue_reward",
+      "type": "task",
+      "name": "截图并投递后台统计",
+      "action": "stats.enqueue_reward",
+      "params": {
+        "category": {
+          "ref": "blackboard.category"
+        },
+        "layer": {
+          "ref": "blackboard.layer"
+        },
+        "roi": [
+          320,
+          200,
+          1280,
+          640
+        ]
+      }
+    }
+  ]
+}

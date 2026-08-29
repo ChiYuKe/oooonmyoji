@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "id": "coin",
+      "name": "金币",
+      "template": "coin.png",
+      "threshold": 0.88,
+      "max_results": 2,
+      "default_quantity": null
+    },
+    {
+      "id": "experience_bonus",
+      "name": "经验加成",
+      "template": "experience.png",
+      "threshold": 0.88,
+      "max_results": 4,
+      "default_quantity": 1
+    },
+    {
+      "id": "orochi_scale_fragment",
+      "name": "八岐大蛇鳞片",
+      "template": "orochi-scale-fragment.png",
+      "threshold": 0.88,
+      "max_results": 20,
+      "default_quantity": 1
+    },
+    {
+      "id": "orochi_reverse_scale",
+      "name": "大蛇的逆鳞",
+      "template": "souls-gold-material.png",
+      "threshold": 0.88,
+      "max_results": 4,
+      "default_quantity": 1
+    },
+    {
+      "id": "soul_hanafuda",
+      "name": "御魂花札",
+      "template": "souls-red-scroll.png",
+      "threshold": 0.88,
+      "max_results": 4,
+      "default_quantity": 1
+    },
+    {
+      "id": "obsession_scroll",
+      "name": "痴念之卷",
+      "template": "obsession-scroll.png",
+      "threshold": 0.88,
+      "max_results": 4,
+      "default_quantity": 1
+    },
+    {
+      "id": "realm_raid_pass",
+      "name": "结界突破券",
+      "template": "realm-raid-pass.png",
+      "threshold": 0.88,
+      "max_results": 4,
+      "default_quantity": 1
+    },
+    {
+      "id": "parade_pass",
+      "name": "百鬼夜行门票",
+      "template": "parade-pass.png",
+      "threshold": 0.88,
+      "max_results": 4,
+      "default_quantity": 1
+    },
+    {
+      "id": "material_shikigami",
+      "name": "素材式神",
+      "template": "material-shikigami.png",
+      "threshold": 0.88,
+      "max_results": 8,
+      "default_quantity": 1
+    },
+    {
+      "id": "friendship_points",
+      "name": "友情点",
+      "template": "friendship-points.png",
+      "threshold": 0.88,
+      "max_results": 2,
+      "default_quantity": null
+    }
+  ]
+}

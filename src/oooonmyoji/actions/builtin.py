@@ -50,6 +50,30 @@ class LogAction(Action):
         return ActionResult.succeeded({"message": str(arguments["message"])})
 
 
+class EnqueueRewardStatsAction(Action):
+    """Capture and enqueue reward recognition without making statistics fatal."""
+
+    name = "stats.enqueue_reward"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        try:
+            output = context.enqueue_reward_statistics(
+                category=str(arguments.get("category", "reward")),
+                layer=int(arguments.get("layer", 1)),
+                roi=arguments.get("roi"),
+            )
+        except Exception as exc:
+            context.log("reward_stats.enqueue_failed", error=str(exc))
+            return ActionResult.succeeded({
+                "accepted": False,
+                "screenshot": "",
+                "battle_index": 0,
+                "layer": int(arguments.get("layer", 1)),
+                "error": str(exc),
+            })
+        return ActionResult.succeeded({**output, "error": ""})
+
+
 class AssertAction(Action):
     name = "core.assert"
 
@@ -334,6 +358,7 @@ class WaitTextAction(Action):
 __all__ = [
     "AssertAction",
     "CaptureAction",
+    "EnqueueRewardStatsAction",
     "LogAction",
     "MatchTemplateAction",
     "OcrAction",

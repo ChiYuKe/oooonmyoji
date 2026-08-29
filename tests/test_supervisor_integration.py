@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import queue
 
 import pytest
 
@@ -56,6 +57,34 @@ def test_supervisor_spawns_instance_worker_and_records_failure(tmp_path: Path) -
             supervisor.cancel(run_id)
     finally:
         supervisor.stop()
+
+
+def test_wait_for_all_cancels_peer_after_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    supervisor = Supervisor.__new__(Supervisor)
+    supervisor.event_queue = queue.Queue()
+    supervisor._completed = {}
+    supervisor._runs = {"member-run": "mumu-1", "leader-run": "mumu-0"}
+    supervisor.workers = {}
+    supervisor.check_workers = lambda: None
+    cancelled: list[str] = []
+    monkeypatch.setattr(supervisor, "cancel", cancelled.append)
+
+    supervisor.event_queue.put({
+        "type": "result",
+        "run_id": "leader-run",
+        "record": {"status": "failed"},
+    })
+    supervisor.event_queue.put({
+        "type": "result",
+        "run_id": "member-run",
+        "record": {"status": "cancelled"},
+    })
+
+    records = supervisor.wait_for_all(["member-run", "leader-run"], timeout_seconds=1)
+
+    assert records["leader-run"] == {"status": "failed"}
+    assert records["member-run"] == {"status": "cancelled"}
+    assert cancelled == ["member-run"]
 
 
 @pytest.mark.skipif(

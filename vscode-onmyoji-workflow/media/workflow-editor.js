@@ -1075,6 +1075,119 @@
     });
   }
 
+  const SVG_EXPORT_STYLE_PROPERTIES = [
+    'color', 'display', 'visibility', 'opacity',
+    'fill', 'fill-opacity', 'fill-rule',
+    'stroke', 'stroke-opacity', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray',
+    'font-family', 'font-size', 'font-style', 'font-variant', 'font-weight', 'letter-spacing',
+    'text-anchor', 'dominant-baseline', 'paint-order', 'shape-rendering', 'vector-effect', 'filter',
+  ];
+
+  function inlineSvgStyles(source, target) {
+    const computed = window.getComputedStyle(source);
+    for (const property of SVG_EXPORT_STYLE_PROPERTIES) {
+      const value = computed.getPropertyValue(property);
+      if (value) target.style.setProperty(property, value, computed.getPropertyPriority(property));
+    }
+    const sourceChildren = Array.from(source.children);
+    const targetChildren = Array.from(target.children);
+    sourceChildren.forEach((child, index) => inlineSvgStyles(child, targetChildren[index]));
+  }
+
+  function loadSvgImage(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('无法渲染工作流画布'));
+      image.src = dataUrl;
+    });
+  }
+
+  function encodeSvgDataUrl(value) {
+    const bytes = new TextEncoder().encode(value);
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+    }
+    return `data:image/svg+xml;base64,${btoa(binary)}`;
+  }
+
+  function setExportBusy(value) {
+    const button = $('btn-export-image');
+    button.disabled = value;
+    button.textContent = value ? '…' : '⇩';
+  }
+
+  async function exportFullCanvasImage() {
+    const button = $('btn-export-image');
+    if (!state.raw || button.disabled) return;
+    setExportBusy(true);
+    try {
+      const padding = 56;
+      const box = bounds();
+      const logicalWidth = Math.max(1, Math.ceil(box.maxX - box.minX + padding * 2));
+      const logicalHeight = Math.max(1, Math.ceil(box.maxY - box.minY + padding * 2));
+      const exported = graph.cloneNode(true);
+      inlineSvgStyles(graph, exported);
+      exported.removeAttribute('id');
+      exported.setAttribute('xmlns', NS);
+      exported.setAttribute('width', String(logicalWidth));
+      exported.setAttribute('height', String(logicalHeight));
+      exported.setAttribute('viewBox', `0 0 ${logicalWidth} ${logicalHeight}`);
+      exported.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+      const world = exported.querySelector('.graph-world');
+      if (!world) throw new Error('工作流画布尚未准备好');
+      world.setAttribute('transform', `translate(${padding - box.minX},${padding - box.minY})`);
+      exported.querySelectorAll('.connection-preview, .marquee, .step-thumb, .edge-hit, .edge-rewire').forEach((element) => element.remove());
+
+      const serialized = new XMLSerializer().serializeToString(exported);
+      const image = await loadSvgImage(encodeSvgDataUrl(serialized));
+      const maxDimension = 8192;
+      const maxPixels = 32 * 1024 * 1024;
+      const rasterScale = Math.min(
+        2,
+        maxDimension / logicalWidth,
+        maxDimension / logicalHeight,
+        Math.sqrt(maxPixels / (logicalWidth * logicalHeight)),
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(logicalWidth * rasterScale));
+      canvas.height = Math.max(1, Math.floor(logicalHeight * rasterScale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('浏览器无法创建图片画布');
+      const wrapStyle = window.getComputedStyle(wrap);
+      const rootStyle = window.getComputedStyle(document.documentElement);
+      context.fillStyle = wrapStyle.backgroundColor || '#1e1f22';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const gridStep = 24 * rasterScale;
+      if (gridStep >= 4) {
+        context.beginPath();
+        for (let x = 0.5; x < canvas.width; x += gridStep) { context.moveTo(x, 0); context.lineTo(x, canvas.height); }
+        for (let y = 0.5; y < canvas.height; y += gridStep) { context.moveTo(0, y); context.lineTo(canvas.width, y); }
+        context.strokeStyle = rootStyle.getPropertyValue('--grid').trim() || 'rgba(153, 157, 168, 0.1)';
+        context.lineWidth = 1;
+        context.stroke();
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const workflowName = String(state.raw.id || $('file-label').textContent || 'workflow')
+        .replace(/\.json$/i, '')
+        .replace(/[\\/\x00-\x1f<>:"|?*]/g, '_')
+        .trim() || 'workflow';
+      vscode.postMessage({
+        type: 'saveCanvasImage',
+        filename: `${workflowName}-layout.png`,
+        dataUrl: canvas.toDataURL('image/png'),
+        width: canvas.width,
+        height: canvas.height,
+        logicalWidth,
+        logicalHeight,
+      });
+    } catch (error) {
+      setExportBusy(false);
+      toast(`导出完整画布失败：${error instanceof Error ? error.message : String(error)}`, true);
+    }
+  }
+
   function requestRoi(nodeId, key, mode) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     state.roi = { requestId, nodeId, key, mode };
@@ -1141,6 +1254,7 @@
     $('btn-add-parallel').addEventListener('click', () => addNode('simple_parallel'));
     $('btn-layout').addEventListener('click', () => { autoLayout(); fitView(); });
     $('btn-fit').addEventListener('click', fitView);
+    $('btn-export-image').addEventListener('click', exportFullCanvasImage);
     $('btn-zoom-in').addEventListener('click', () => zoomAt(1.2));
     $('btn-zoom-out').addEventListener('click', () => zoomAt(1 / 1.2));
     $('btn-workflow').addEventListener('click', () => { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; renderInspector(); });
@@ -1151,6 +1265,7 @@
       vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
     });
     $('btn-run').addEventListener('click', () => vscode.postMessage({ type: 'runWorkflow', instanceId: state.instanceId }));
+    $('btn-run-party').addEventListener('click', () => vscode.postMessage({ type: 'runPartySouls' }));
     $('btn-stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
     $('btn-run-log').addEventListener('click', () => vscode.postMessage({ type: 'openRunLog' }));
     $('btn-save').addEventListener('click', () => { vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' }); setDirty(false); });
@@ -1221,6 +1336,9 @@
     else if (message.type === 'roiPickerImage') openRoiPicker(message);
     else if (message.type === 'roiPickerCancelled' || message.type === 'roiPickerError') { const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden'); state.roi = null; if (message.message) toast(message.message, true); }
     else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) { const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; }); state.roi = null; toast('模板已保存'); }
+    else if (message.type === 'canvasImageSaved') { setExportBusy(false); toast('完整画布图片已保存'); }
+    else if (message.type === 'canvasImageCancelled') { setExportBusy(false); }
+    else if (message.type === 'canvasImageError') { setExportBusy(false); toast(message.message || '保存完整画布图片失败', true); }
     else if (message.type === 'instanceSelected') { state.instanceId = String(message.instanceId || ''); renderInstancePicker(); }
     else if (message.type === 'externalChange') { const banner = $('external-banner'); banner.textContent = '文件已在外部修改'; banner.classList.remove('hidden'); }
   });
@@ -1229,6 +1347,6 @@
     const overlay = el('div', `overlay hidden`); overlay.id = id; document.body.appendChild(overlay);
   }
   bindToolbar();
-  window.__btEditor = { state, connect, disconnect, autoLayout, render, snapshot: () => clone(state.raw) };
+  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, snapshot: () => clone(state.raw) };
   vscode.postMessage({ type: 'ready' });
 })();

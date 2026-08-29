@@ -12,7 +12,7 @@
   - 校验：父级唯一性、未知子节点、环、孤立节点、无效绑定、非法装饰器和非安全重试
 - **可视化 Behavior Tree 编辑器**：蓝图式卡片、有序父子连线、重新连接/断开、
   参数表单（含 ROI 与模板截取）、装饰器、黑板、缩放平移、自动布局与小地图。
-- **独立运行日志**：节点时间线、状态/耗时统计、失败筛选、运行截图预览和原始引擎输出。
+- **独立运行日志**：节点时间线、状态/耗时统计、逐局与本次累计材料、失败筛选、运行截图预览和原始引擎输出。
 - **引擎校验**：一键在终端里运行 `python -m src.oooonmyoji.cli ... validate`。
 - **自定义 Action 零编辑**：插件只写一份 v2 manifest + Action 类，编辑器无需改代码。
 
@@ -21,7 +21,7 @@
 ### 方式一：直接安装打包好的 VSIX
 
 ```powershell
-code --install-extension onmyoji-workflow-helper-0.2.7.vsix
+code --install-extension onmyoji-workflow-helper-0.2.10.vsix
 ```
 
 ### 方式二：从源码运行（调试开发）
@@ -35,11 +35,14 @@ code --install-extension onmyoji-workflow-helper-0.2.7.vsix
 
 ## 使用
 
+- 点击 VS Code 左侧活动栏的 Onmyoji 工作流图标，可打开独立自动化控制页，直接选择
+  运行场数并启动/停止组队御魂，也可进入工作流编辑器、运行日志和引擎校验。
 - 打开任意 `workflows/*.json`，即可获得补全/悬停/波浪线诊断（错误=红）。
 - 打开工作流 JSON 后，可点击编辑器右上角的流程图按钮直接打开可视化编辑器。
 - 命令面板（`Ctrl+Shift+P`）：
   - `Onmyoji: 新建工作流`（自动创建 v3 Behavior Tree 骨架并打开可视化编辑器）
   - `Onmyoji: 执行当前工作流`（使用可视化编辑器最近选择的实例运行当前工作流）
+  - `Onmyoji: 运行组队御魂`（队长 `mumu-0` + 队员 `mumu-1`，直接启动双实例协调入口）
   - `Onmyoji: 停止当前工作流`
   - `Onmyoji: 打开运行日志`
   - `Onmyoji: 打开工作流可视化编辑器`
@@ -51,6 +54,8 @@ code --install-extension onmyoji-workflow-helper-0.2.7.vsix
     MuMu 官方管理器刷新已启动的原生实例；三开、四开无需修改配置。运行和模板截取
     都使用当前选择，并在工作区中记住上次选择。
   - 滚轮缩放，右键/中键拖拽平移，拖动卡片调整位置（持久化到 `_layout`）。
+  - 工具栏的「⇩」可把全部卡片和连线导出为 PNG；图片按完整节点边界自动留白，
+    不受当前缩放和平移影响。默认使用 2 倍清晰度，超大画布会自动降采样以避免导出失败。
   - 可从复合节点下方输出引脚拖到节点上方输入引脚，也可从输入引脚反向拖到输出引脚；
     输入只允许一个父级，新连接自动替换旧父级。
   - 拖动连线靠近目标端的手柄可重新连接；双击连线或选中后按 Delete 可断开。
@@ -63,8 +68,19 @@ code --install-extension onmyoji-workflow-helper-0.2.7.vsix
   - 「设置」编辑 ID、版本、参考分辨率与运行限制。
   - 「▶ 运行」会通过后台 Python 进程运行当前已保存的工作流，并自动在旁边打开独立
     运行日志窗口；有未保存修改时需先保存。「■」可停止当前运行，「☷」可随时重新打开日志。
+  - 「▶ 组队御魂」直接同时启动队长 `mumu-0` 和队员 `mumu-1`，不经过 BAT；默认运行
+    30 场，可通过 `onmyoji.partySoulsRounds` 改为 1 场测试。
   - 运行日志按时间线展示节点状态、Action、耗时、错误和截图，可在「任务 / 全部 / 失败」
-    间筛选；「引擎输出」保留清理 ANSI 控制码后的原始输出，关闭窗口后仍可回放本次运行。
+    间筛选；奖励识别完成后增加逐局材料行，顶部汇总当前这一次运行的累计数量；「引擎输出」
+    保留清理 ANSI 控制码后的原始输出，关闭窗口后仍可回放本次运行。Selector 中已由后续
+    分支恢复的失败会显示为“分支未命中”，不计入失败数和失败筛选。
+  - 组队御魂使用队长、队员两条独立事件流；运行日志提供实例页签，分别统计双方的步骤、
+    成功/失败、当前节点、局数和材料累计，不会把两个账号的数据合并。
+  - 御魂工作流在奖励弹层关闭前调用 `reward_statistics.json` 子工作流。子工作流用 MuMu
+    原生接口保存截图并立即返回；Supervisor 后台先匹配材料模板，再把邻近 OCR 数字绑定为
+    对应数量，不会再连接或点击模拟器。材料目录位于 `assets/templates/rewards/catalog.json`，
+    原始截图保存在当前 run 的 `rewards/` 目录，逐局 `items` 与累计 `material_totals` 位于
+    `artifacts/reward-stats/souls/<实例>/`；统计错误只写入记录，不会中断下一局战斗。
   - 保存会以 2 空格缩进输出 v3 JSON。
 
 ## 配置
@@ -75,6 +91,7 @@ code --install-extension onmyoji-workflow-helper-0.2.7.vsix
 | `onmyoji.workflowFiles` | `**/workflows/*.json` | 启用智能提示的文件 glob |
 | `onmyoji.pythonExecutable` | `""`（自动用 `.venv/Scripts/python.exe`） | 引擎校验使用的 Python |
 | `onmyoji.configPath` | `config/config.json` | 引擎 CLI validate 的配置文件 |
+| `onmyoji.partySoulsRounds` | `30` | 点击“组队御魂”按钮时运行 1 场或 30 场 |
 
 ## 自定义 Action
 

@@ -50,8 +50,7 @@ class WorkflowLoader:
             raise ConfigError(f"workflow {workflow.workflow_id} blackboard{('.' + location) if location else ''}: {error.message}")
 
     def normalize_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> dict[str, Any]:
-        """Apply JSON Schema defaults after validating the caller's input object."""
-        self.validate_inputs(workflow, inputs)
+        """Apply JSON Schema defaults, then validate the normalized input object."""
         normalized = deepcopy(inputs)
 
         def apply(value: Any, schema: Any) -> None:
@@ -69,6 +68,7 @@ class WorkflowLoader:
                     apply(item, schema["items"])
 
         apply(normalized, workflow.blackboard_schema)
+        self.validate_inputs(workflow, normalized)
         return normalized
 
     def validate_paths(self, workflow: WorkflowSpec) -> None:

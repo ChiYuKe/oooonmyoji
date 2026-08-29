@@ -151,11 +151,13 @@ export class WebviewManager implements vscode.Disposable {
   <button id="btn-add-parallel" title="添加 Simple Parallel">＋ Parallel</button>
   <button id="btn-layout" class="icon-button" title="自动排列">⌘</button>
   <button id="btn-fit" class="icon-button" title="适应视口">⌂</button>
+  <button id="btn-export-image" class="icon-button" title="导出完整画布为 PNG" aria-label="导出完整画布为图片">⇩</button>
   <span class="spacer"></span>
   <button id="btn-workflow" title="工作流设置">设置</button>
   <button id="btn-blackboard" title="黑板参数">黑板</button>
   <select id="instance-select" title="运行实例" aria-label="运行实例"></select>
   <button id="btn-run-log" class="icon-button" title="打开运行日志" aria-label="打开运行日志">☷</button>
+  <button id="btn-run-party" class="primary" title="队长 mumu-0 与队员 mumu-1 运行组队御魂">▶ 组队御魂</button>
   <button id="btn-run" class="primary" title="执行当前工作流">▶ 运行</button>
   <button id="btn-stop" class="icon-button" title="停止当前工作流" aria-label="停止当前工作流">■</button>
   <button id="btn-save" class="primary" title="保存到 JSON">保存</button>
@@ -287,6 +289,9 @@ export class WebviewManager implements vscode.Disposable {
         await vscode.commands.executeCommand('onmyoji.runWorkflow', this.docUri, instanceId);
         break;
       }
+      case 'runPartySouls':
+        await vscode.commands.executeCommand('onmyoji.runPartySouls');
+        break;
       case 'stopWorkflow':
         await vscode.commands.executeCommand('onmyoji.stopWorkflow');
         break;
@@ -367,6 +372,41 @@ export class WebviewManager implements vscode.Disposable {
         }
         break;
       }
+      case 'saveCanvasImage': {
+        const dataUrl = String(message.dataUrl ?? '');
+        const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+        if (!match) {
+          void this.panel.webview.postMessage({ type: 'canvasImageError', message: '画布图片数据无效' });
+          break;
+        }
+        let filename = String(message.filename ?? 'workflow-layout.png')
+          .replace(/[\\/\x00-\x1f<>:"|?*]/g, '_')
+          .trim();
+        if (!filename || filename === '.' || filename === '..') filename = 'workflow-layout.png';
+        if (!/\.png$/i.test(filename)) filename += '.png';
+        const defaultDirectory = this.docUri ? path.dirname(this.docUri.fsPath) : this.getProjectRoot();
+        const destination = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(path.join(defaultDirectory, filename)),
+          filters: { 'PNG 图片': ['png'] },
+          saveLabel: '保存画布图片',
+          title: '导出完整工作流画布',
+        });
+        if (!destination) {
+          void this.panel.webview.postMessage({ type: 'canvasImageCancelled' });
+          break;
+        }
+        try {
+          await vscode.workspace.fs.writeFile(destination, Buffer.from(match[1], 'base64'));
+          void this.panel.webview.postMessage({ type: 'canvasImageSaved', path: destination.fsPath });
+          vscode.window.setStatusBarMessage(`工作流完整画布已导出：${path.basename(destination.fsPath)}`, 4000);
+        } catch (error) {
+          void this.panel.webview.postMessage({
+            type: 'canvasImageError',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        break;
+      }
     case 'error':
         vscode.window.showErrorMessage(`Onmyoji 工作流编辑器：${String(message.message ?? '')}`);
         break;
@@ -381,6 +421,17 @@ export class WebviewManager implements vscode.Disposable {
     this.runEventsPath = filePath;
     this.runWatcherOffset = 0;
     this.runWatcherTimer = setInterval(() => this.tickRunWatcher(), 400);
+  }
+
+  /** 引擎进程退出前会等待后台奖励统计；退出后读完尾部事件再停止监听。 */
+  finishRunWatcher(): void {
+    if (!this.runEventsPath) return;
+    this.tickRunWatcher();
+    if (this.runStopTimer !== undefined) clearTimeout(this.runStopTimer);
+    this.runStopTimer = setTimeout(() => {
+      this.tickRunWatcher();
+      this.stopRunWatcher();
+    }, 1500);
   }
 
   private stopRunWatcher(): void {
@@ -434,7 +485,7 @@ export class WebviewManager implements vscode.Disposable {
   /** 把引擎事件转发给 webview：截图绝对路径先转成 webview URI。 */
   private convertRunEvent(event: Record<string, unknown>): Record<string, unknown> {
     const out: Record<string, unknown> = { ...event };
-    if (event.type === 'step' && typeof event.screenshot === 'string' && this.panel) {
+    if ((event.type === 'step' || event.type === 'reward_stats') && typeof event.screenshot === 'string' && this.panel) {
       try {
         out.screenshot = this.panel.webview.asWebviewUri(vscode.Uri.file(event.screenshot)).toString();
       } catch {
@@ -451,11 +502,6 @@ export class WebviewManager implements vscode.Disposable {
     this.onRunEvent(event);
     if (this.panel) {
       void this.panel.webview.postMessage({ type: 'runEvent', event: this.convertRunEvent(event) });
-    }
-    if (event.type === 'run_finished') {
-      // 执行结束：再等 1.5 秒收尾读余量，然后停止轮询；句柄受管，期间发起新运行不会被误停
-      if (this.runStopTimer !== undefined) clearTimeout(this.runStopTimer);
-      this.runStopTimer = setTimeout(() => this.stopRunWatcher(), 1500);
     }
   }
 

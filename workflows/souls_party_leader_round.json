@@ -1,0 +1,506 @@
+{
+  "schema_version": 3,
+  "id": "souls_party_leader_round",
+  "version": "3.0.0",
+  "resolution": [1920, 1080],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 600,
+    "max_steps": 100
+  },
+  "blackboard": {
+    "phase": {
+      "type": "string",
+      "required": true,
+      "default": "finish",
+      "enum": ["finish", "setup_auto_invite", "auto_invite"]
+    }
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "队长单轮战斗入口",
+      "children": ["round"]
+    },
+    {
+      "id": "round",
+      "type": "sequence",
+      "name": "等待队员、开战并处理结算",
+      "children": [
+        "wait_member_present",
+        "detect_lineup_state",
+        "tap_party_challenge",
+        "prepare_lineup_if_needed",
+        "wait_victory",
+        "tap_victory",
+        "settle_to_round_destination",
+        "choose_after_battle_action"
+      ]
+    },
+    {
+      "id": "wait_member_present",
+      "type": "task",
+      "name": "等待 mumu1 加入房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/member-present.png",
+        "timeout_seconds": 180,
+        "roi": [700, 100, 450, 180],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "detect_lineup_state",
+      "type": "selector",
+      "name": "识别队长阵容锁定状态",
+      "children": ["detect_locked_lineup", "detect_unlocked_lineup", "lineup_state_unknown"]
+    },
+    {
+      "id": "detect_unlocked_lineup",
+      "type": "task",
+      "name": "检测阵容未锁定",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/formation-unlocked.png",
+        "timeout_seconds": 2,
+        "roi": [130, 930, 140, 100],
+        "threshold": 0.4,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "detect_locked_lineup",
+      "type": "task",
+      "name": "检测阵容已锁定",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/formation-locked.png",
+        "timeout_seconds": 2,
+        "roi": [130, 930, 140, 100],
+        "threshold": 0.4,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "lineup_state_unknown",
+      "type": "task",
+      "name": "阵容锁定状态暂不明确",
+      "action": "core.log",
+      "params": {
+        "message": "未识别到阵容锁定图标，开战后继续检查准备按钮"
+      }
+    },
+    {
+      "id": "tap_party_challenge",
+      "type": "task",
+      "name": "队长点击挑战",
+      "action": "input.tap",
+      "params": {
+        "x": 1840,
+        "y": 930,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "prepare_lineup_if_needed",
+      "type": "selector",
+      "name": "未锁定阵容时点击准备",
+      "children": ["lineup_already_locked", "prepare_unlocked_lineup", "lineup_started_without_ready"]
+    },
+    {
+      "id": "prepare_unlocked_lineup",
+      "type": "sequence",
+      "name": "准备未锁定阵容",
+      "children": ["wait_ready", "tap_ready"]
+    },
+    {
+      "id": "wait_ready",
+      "type": "task",
+      "name": "短暂等待编队准备按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-ready.png",
+        "timeout_seconds": 10,
+        "roi": [1500, 700, 420, 380],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_ready",
+      "type": "task",
+      "name": "点击准备开始战斗",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_ready.output.0"},
+        "revalidate": false,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "lineup_already_locked",
+      "type": "task",
+      "name": "阵容已锁定自动开战",
+      "action": "core.log",
+      "params": {
+        "message": "阵容已锁定，直接等待战斗"
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"exists": {"ref": "nodes.detect_locked_lineup.output.0"}}
+        }
+      ]
+    },
+    {
+      "id": "lineup_started_without_ready",
+      "type": "task",
+      "name": "未出现准备按钮",
+      "action": "core.log",
+      "params": {
+        "message": "未出现准备按钮，按已自动开战继续等待"
+      }
+    },
+    {
+      "id": "wait_victory",
+      "type": "task",
+      "name": "等待组队战斗结束",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-victory-continue.png",
+        "timeout_seconds": 240,
+        "roi": [650, 900, 650, 180],
+        "threshold": 0.86,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_victory",
+      "type": "task",
+      "name": "点击胜利页继续",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_victory.output.0"},
+        "revalidate": false,
+        "random_offset": 8,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "settle_to_round_destination",
+      "type": "selector",
+      "name": "关闭奖励并等待续邀弹窗或协战房间",
+      "children": [
+        "destination_direct",
+        "destination_after_one_tap",
+        "destination_after_two_taps"
+      ]
+    },
+    {
+      "id": "destination_direct",
+      "type": "selector",
+      "name": "无需额外关闭奖励",
+      "children": ["wait_prompt_direct", "wait_lobby_direct"]
+    },
+    {
+      "id": "wait_prompt_direct",
+      "type": "task",
+      "name": "短暂等待续邀弹窗",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/continue-confirm-button.png",
+        "timeout_seconds": 3,
+        "roi": [900, 520, 450, 260],
+        "threshold": 0.9,
+        "scale_search": false
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "wait_lobby_direct",
+      "type": "task",
+      "name": "短暂等待协战房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 3,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "destination_after_one_tap",
+      "type": "sequence",
+      "name": "关闭一层奖励后等待目标界面",
+      "children": [
+        "stats_reward_layer_1",
+        "dismiss_reward_once",
+        "wait_destination_after_one"
+      ]
+    },
+    {
+      "id": "stats_reward_layer_1",
+      "type": "task",
+      "name": "后台统计第一层奖励",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "reward_statistics.json",
+        "inputs": {"category": "souls", "layer": 1}
+      }
+    },
+    {
+      "id": "dismiss_reward_once",
+      "type": "task",
+      "name": "关闭第一层奖励",
+      "action": "input.tap",
+      "params": {
+        "x": 1500,
+        "y": 850,
+        "random_offset": 12,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_destination_after_one",
+      "type": "selector",
+      "name": "等待续邀弹窗或协战房间",
+      "children": ["wait_prompt_after_one", "wait_lobby_after_one"]
+    },
+    {
+      "id": "wait_prompt_after_one",
+      "type": "task",
+      "name": "等待续邀弹窗",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/continue-confirm-button.png",
+        "timeout_seconds": 6,
+        "roi": [900, 520, 450, 260],
+        "threshold": 0.9,
+        "scale_search": false
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "wait_lobby_after_one",
+      "type": "task",
+      "name": "等待返回协战房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 6,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "destination_after_two_taps",
+      "type": "sequence",
+      "name": "再关闭一层奖励后等待目标界面",
+      "children": [
+        "stats_reward_layer_2",
+        "dismiss_reward_twice",
+        "wait_destination_after_two"
+      ]
+    },
+    {
+      "id": "stats_reward_layer_2",
+      "type": "task",
+      "name": "后台统计第二层奖励",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "reward_statistics.json",
+        "inputs": {"category": "souls", "layer": 2}
+      }
+    },
+    {
+      "id": "dismiss_reward_twice",
+      "type": "task",
+      "name": "关闭第二层奖励",
+      "action": "input.tap",
+      "params": {
+        "x": 1500,
+        "y": 850,
+        "random_offset": 12,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_destination_after_two",
+      "type": "selector",
+      "name": "再次等待续邀弹窗或协战房间",
+      "children": ["wait_prompt_after_two", "wait_lobby_after_two"]
+    },
+    {
+      "id": "wait_prompt_after_two",
+      "type": "task",
+      "name": "等待续邀弹窗",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/continue-confirm-button.png",
+        "timeout_seconds": 12,
+        "roi": [900, 520, 450, 260],
+        "threshold": 0.9,
+        "scale_search": false
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "wait_lobby_after_two",
+      "type": "task",
+      "name": "再次等待返回协战房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 12,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "choose_after_battle_action",
+      "type": "selector",
+      "name": "按阶段完成首轮设置或结束本轮",
+      "children": ["setup_auto_invite", "cancel_after_final", "auto_invite_settled"]
+    },
+    {
+      "id": "setup_auto_invite",
+      "type": "sequence",
+      "name": "首轮启用默认邀请好友",
+      "children": [
+        "wait_default_invite_checkbox",
+        "tap_default_invite_checkbox",
+        "tap_continue_confirm",
+        "wait_lobby_after_confirm"
+      ],
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.phase"}, "setup_auto_invite"]}
+        }
+      ]
+    },
+    {
+      "id": "wait_default_invite_checkbox",
+      "type": "task",
+      "name": "定位默认邀请好友复选框",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/default-invite-checkbox.png",
+        "timeout_seconds": 3,
+        "roi": [750, 470, 220, 150],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_default_invite_checkbox",
+      "type": "task",
+      "name": "勾选默认邀请好友",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_default_invite_checkbox.output.0"},
+        "revalidate": false,
+        "random_offset": 3,
+        "random_interval": [0.05, 0.15]
+      }
+    },
+    {
+      "id": "tap_continue_confirm",
+      "type": "task",
+      "name": "确认续邀",
+      "action": "input.tap",
+      "params": {
+        "x": 1135,
+        "y": 650,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_lobby_after_confirm",
+      "type": "task",
+      "name": "等待返回协战房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 30,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "cancel_after_final",
+      "type": "task",
+      "name": "最后一轮取消续邀",
+      "action": "input.tap",
+      "params": {
+        "x": 780,
+        "y": 650,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.phase"}, "finish"]}
+        }
+      ]
+    },
+    {
+      "id": "auto_invite_settled",
+      "type": "task",
+      "name": "自动续邀轮已返回协战房间",
+      "action": "core.log",
+      "params": {
+        "message": "默认邀请已启用，本轮结算后已自动返回协战房间"
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_invite"]}
+        }
+      ]
+    }
+  ]
+}

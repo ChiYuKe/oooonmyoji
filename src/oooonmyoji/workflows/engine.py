@@ -210,10 +210,19 @@ class WorkflowEngine:
             return self._run_node(node.children[0], deadline, branch_cancel)
         if node.type == "selector":
             last = _Outcome(ActionStatus.FAILED, error="all selector children failed", category="behavior")
+            failed_branches: list[tuple[int, int]] = []
             for child_id in node.children:
+                with self._lock:
+                    history_start = len(self.history)
                 last = self._run_node(child_id, deadline, branch_cancel)
-                if last.status == ActionStatus.SUCCEEDED or last.status == ActionStatus.CANCELLED or last.fatal:
+                with self._lock:
+                    history_end = len(self.history)
+                if last.status == ActionStatus.SUCCEEDED:
+                    self._recover_selector_failures(node.id, failed_branches)
                     return last
+                if last.status == ActionStatus.CANCELLED or last.fatal:
+                    return last
+                failed_branches.append((history_start, history_end))
             return last
         if node.type == "sequence":
             last = _Outcome(ActionStatus.SUCCEEDED)
@@ -402,6 +411,21 @@ class WorkflowEngine:
             self.history.append(dict(event))
             if self.on_step is not None:
                 self.on_step(dict(event))
+
+    def _recover_selector_failures(self, selector_id: str, ranges: list[tuple[int, int]]) -> None:
+        recovered: list[dict[str, Any]] = []
+        with self._lock:
+            for start, end in ranges:
+                for event in self.history[start:end]:
+                    if event.get("status") != ActionStatus.FAILED.value:
+                        continue
+                    event["status"] = "branch_miss"
+                    event["original_status"] = ActionStatus.FAILED.value
+                    event["recovered_by"] = selector_id
+                    recovered.append(dict(event))
+        if self.on_step is not None:
+            for event in recovered:
+                self.on_step(event)
 
     def _ensure_running(self, deadline: float, branch_cancel: threading.Event | None) -> None:
         if branch_cancel is not None and branch_cancel.is_set():

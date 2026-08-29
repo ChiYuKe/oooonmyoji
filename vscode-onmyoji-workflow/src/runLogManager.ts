@@ -1,5 +1,6 @@
 /** Dedicated structured run log webview. */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -13,6 +14,23 @@ interface RunDescriptor {
   instance: string;
   startedAt: number;
   status: string;
+  sources?: RunSourceDescriptor[];
+}
+
+export interface RunSourceDescriptor {
+  id: string;
+  label: string;
+  workflow: string;
+  instance: string;
+  startedAt: number;
+  status: string;
+}
+
+interface EventFileSource {
+  id: string;
+  filePath: string;
+  offset: number;
+  remainder: string;
 }
 
 export class RunLogManager implements vscode.Disposable {
@@ -22,6 +40,9 @@ export class RunLogManager implements vscode.Disposable {
   private descriptor: RunDescriptor | undefined;
   private processResult: { code: number | null; signal: string | null; stopped: boolean } | undefined;
   private disposables: vscode.Disposable[] = [];
+  private eventSources = new Map<string, EventFileSource>();
+  private eventSourceTimer: NodeJS.Timeout | undefined;
+  private eventSourceStopTimer: NodeJS.Timeout | undefined;
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -58,6 +79,7 @@ export class RunLogManager implements vscode.Disposable {
   }
 
   async beginRun(workflow: string, instance: string): Promise<void> {
+    this.stopEventSources();
     this.events = [];
     this.engineOutput = '';
     this.processResult = undefined;
@@ -66,16 +88,52 @@ export class RunLogManager implements vscode.Disposable {
     await this.sendInit();
   }
 
-  acceptEvent(event: Record<string, unknown>): void {
-    this.events.push(event);
+  async beginMultiRun(workflow: string, sources: Array<Omit<RunSourceDescriptor, 'startedAt' | 'status'>>): Promise<void> {
+    this.stopEventSources();
+    this.events = [];
+    this.engineOutput = '';
+    this.processResult = undefined;
+    const startedAt = Date.now();
+    this.descriptor = {
+      workflow,
+      instance: `${sources.length} 个实例`,
+      startedAt,
+      status: 'starting',
+      sources: sources.map((source) => ({ ...source, startedAt, status: 'starting' })),
+    };
+    await this.open(true);
+    await this.sendInit();
+  }
+
+  acceptEvent(event: Record<string, unknown>, sourceId?: string): void {
+    const tagged = sourceId ? { ...event, log_source: sourceId } : event;
+    this.events.push(tagged);
     if (this.events.length > 5000) this.events.shift();
-    if (event.type === 'run_started' && this.descriptor) this.descriptor.status = 'running';
+    if (event.type === 'run_started' && this.descriptor) this.updateSourceStatus(sourceId, 'running');
     if (event.type === 'run_finished' && this.descriptor && typeof event.status === 'string') {
-      this.descriptor.status = event.status;
+      this.updateSourceStatus(sourceId, event.status);
     }
     if (this.panel) {
-      void this.panel.webview.postMessage({ type: 'runEvent', event: this.convertEvent(event) });
+      void this.panel.webview.postMessage({ type: 'runEvent', event: this.convertEvent(tagged) });
     }
+  }
+
+  startEventSources(sources: Array<{ id: string; filePath: string }>): void {
+    this.stopEventSources();
+    for (const source of sources) {
+      this.eventSources.set(source.id, { ...source, offset: 0, remainder: '' });
+    }
+    this.eventSourceTimer = setInterval(() => this.tickEventSources(), 400);
+  }
+
+  finishEventSources(): void {
+    if (this.eventSources.size === 0) return;
+    this.tickEventSources();
+    if (this.eventSourceStopTimer !== undefined) clearTimeout(this.eventSourceStopTimer);
+    this.eventSourceStopTimer = setTimeout(() => {
+      this.tickEventSources();
+      this.stopEventSources();
+    }, 1500);
   }
 
   appendOutput(chunk: string, stream: 'stdout' | 'stderr'): void {
@@ -90,6 +148,65 @@ export class RunLogManager implements vscode.Disposable {
     if (this.descriptor && stopped) this.descriptor.status = 'cancelled';
     if (this.panel) {
       void this.panel.webview.postMessage({ type: 'processFinished', code, signal, stopped });
+    }
+  }
+
+  private updateSourceStatus(sourceId: string | undefined, status: string): void {
+    if (!this.descriptor) return;
+    this.descriptor.status = status;
+    const source = this.descriptor.sources?.find((item) => item.id === sourceId);
+    if (source) source.status = status;
+  }
+
+  private stopEventSources(): void {
+    if (this.eventSourceStopTimer !== undefined) {
+      clearTimeout(this.eventSourceStopTimer);
+      this.eventSourceStopTimer = undefined;
+    }
+    if (this.eventSourceTimer !== undefined) {
+      clearInterval(this.eventSourceTimer);
+      this.eventSourceTimer = undefined;
+    }
+    this.eventSources.clear();
+  }
+
+  private tickEventSources(): void {
+    for (const source of this.eventSources.values()) {
+      let size: number;
+      try {
+        size = fs.statSync(source.filePath).size;
+      } catch {
+        continue;
+      }
+      if (size < source.offset) {
+        source.offset = 0;
+        source.remainder = '';
+      }
+      if (size === source.offset) continue;
+      let chunk: string;
+      try {
+        const fd = fs.openSync(source.filePath, 'r');
+        try {
+          const buffer = Buffer.alloc(size - source.offset);
+          fs.readSync(fd, buffer, 0, buffer.length, source.offset);
+          chunk = source.remainder + buffer.toString('utf8');
+        } finally {
+          fs.closeSync(fd);
+        }
+        source.offset = size;
+      } catch {
+        continue;
+      }
+      const lines = chunk.split('\n');
+      source.remainder = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          this.acceptEvent(JSON.parse(line) as Record<string, unknown>, source.id);
+        } catch {
+          // Ignore incomplete or invalid event lines; the next complete line can still be read.
+        }
+      }
     }
   }
 
@@ -158,12 +275,18 @@ export class RunLogManager implements vscode.Disposable {
   <button id="btn-stop" class="icon-button danger" title="停止当前工作流" aria-label="停止当前工作流">■</button>
   <button id="btn-clear" class="icon-button" title="清空日志" aria-label="清空日志">⌫</button>
 </header>
+<nav id="source-tabs" class="source-tabs hidden" role="tablist" aria-label="组队实例"></nav>
 <section id="summary">
   <div class="status-block"><span id="status-dot"></span><span id="status-label">待命</span><strong id="elapsed">00:00.0</strong></div>
   <div class="metric"><span>已完成</span><strong id="completed-count">0</strong></div>
   <div class="metric"><span>失败</span><strong id="failed-count">0</strong></div>
   <div class="metric current"><span>当前节点</span><strong id="current-step">-</strong></div>
   <div id="progress"><span></span></div>
+</section>
+<section id="reward-summary" class="hidden" aria-label="本次材料统计">
+  <span class="reward-label">本次材料</span>
+  <div id="reward-totals"></div>
+  <span id="reward-battles">0 局</span>
 </section>
 <main>
   <section id="steps-view">
@@ -185,6 +308,7 @@ export class RunLogManager implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.stopEventSources();
     this.panel?.dispose();
     this.disposePanelSubscriptions();
   }
@@ -196,4 +320,3 @@ function getNonce(): string {
   for (let index = 0; index < 32; index += 1) value += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
   return value;
 }
-

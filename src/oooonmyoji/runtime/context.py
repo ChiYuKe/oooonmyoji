@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -34,6 +35,9 @@ class TaskContextImpl:
         retry_base_delay: float = 0.25,
         retry_max_delay: float = 3.0,
         subworkflow_runner: Callable[..., Any] | None = None,
+        run_id: str | None = None,
+        instance_id: str | None = None,
+        reward_stats_submitter: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.device = device
         self.mapper = mapper
@@ -48,9 +52,15 @@ class TaskContextImpl:
         self.retry_base_delay = retry_base_delay
         self.retry_max_delay = retry_max_delay
         self.subworkflow_runner = subworkflow_runner
+        self.run_id = run_id
+        self.instance_id = instance_id
+        self.reward_stats_submitter = reward_stats_submitter
         self._last_frame: DeviceFrame | None = None
         self._action_local = threading.local()
         self._state_lock = threading.RLock()
+        self._reward_lock = threading.Lock()
+        self._reward_capture_index = 0
+        self._reward_battle_index = 0
         self._deadline: float | None = None
 
     @property
@@ -133,6 +143,53 @@ class TaskContextImpl:
         if self.subworkflow_runner is None:
             raise WorkflowError("subworkflow execution is unavailable")
         return self.subworkflow_runner(workflow, inputs)
+
+    def enqueue_reward_statistics(
+        self,
+        *,
+        category: str,
+        layer: int,
+        roi: Sequence[int] | None = None,
+    ) -> dict[str, Any]:
+        """Capture a reward screen and enqueue only its saved path for OCR."""
+
+        if self.reward_stats_submitter is None:
+            raise RuntimeError("reward statistics queue is unavailable")
+        frame = self.capture()
+        with self._reward_lock:
+            self._reward_capture_index += 1
+            if layer == 1 or self._reward_battle_index == 0:
+                self._reward_battle_index += 1
+            capture_index = self._reward_capture_index
+            battle_index = self._reward_battle_index
+        name = f"rewards/reward-{battle_index:04d}-layer-{layer}-capture-{capture_index:04d}.png"
+        screenshot = self.save_frame(frame, name)
+        actual_roi = None
+        if roi is not None:
+            values = tuple(int(value) for value in roi)
+            if len(values) != 4:
+                raise ValueError("reward statistics ROI must contain x, y, width, height")
+            actual_roi = list(self.mapper.rect(Rect(*values)).as_tuple())
+        payload = {
+            "type": "reward_stats_request",
+            "run_id": self.run_id,
+            "instance_id": self.instance_id,
+            "category": category,
+            "battle_index": battle_index,
+            "layer": layer,
+            "capture_index": capture_index,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "captured_monotonic": time.monotonic(),
+            "screenshot": str(screenshot),
+            "roi": actual_roi,
+        }
+        self.reward_stats_submitter(payload)
+        return {
+            "accepted": True,
+            "screenshot": str(screenshot),
+            "battle_index": battle_index,
+            "layer": layer,
+        }
 
     def tap(self, x: int, y: int, *, hold_ms: int = 0) -> None:
         self.check_cancelled()

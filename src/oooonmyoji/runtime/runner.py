@@ -109,6 +109,11 @@ def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, sav
                 payload["thumbnail"] = thumbnail
         except Exception:
             pass
+    output = event.get("output")
+    if event.get("action") == "stats.enqueue_reward" and isinstance(output, dict):
+        screenshot = output.get("screenshot")
+        if isinstance(screenshot, str) and screenshot:
+            payload["screenshot"] = screenshot
     return payload
 
 
@@ -227,6 +232,14 @@ class TaskRunner:
                         subworkflow_stack.pop()
                     return result.status.value, result.output, result.error, result.error_category
 
+                def submit_reward_statistics(event: dict[str, Any]) -> None:
+                    if event_queue is None:
+                        return
+                    payload = dict(event)
+                    if events_file is not None:
+                        payload["events_file"] = str(events_file)
+                    event_queue.put(payload)
+
                 context = TaskContextImpl(
                     device=device,
                     mapper=mapper,
@@ -241,6 +254,9 @@ class TaskRunner:
                     retry_base_delay=self.config.retry.base_delay_seconds,
                     retry_max_delay=self.config.retry.max_delay_seconds,
                     subworkflow_runner=run_subworkflow,
+                    run_id=run_id,
+                    instance_id=instance.id,
+                    reward_stats_submitter=submit_reward_statistics if event_queue is not None else None,
                 )
 
                 def on_step(event: dict[str, Any]) -> None:

@@ -15,12 +15,18 @@
   <button id="btn-stop" class="icon-button danger" title="停止当前工作流">■</button>
   <button id="btn-clear" class="icon-button" title="清空日志">⌫</button>
 </header>
+<nav id="source-tabs" class="source-tabs hidden" role="tablist" aria-label="组队实例"></nav>
 <section id="summary">
   <div class="status-block"><span id="status-dot"></span><span id="status-label">待命</span><strong id="elapsed">00:00.0</strong></div>
   <div class="metric"><span>已完成</span><strong id="completed-count">0</strong></div>
   <div class="metric"><span>失败</span><strong id="failed-count">0</strong></div>
   <div class="metric current"><span>当前节点</span><strong id="current-step">-</strong></div>
   <div id="progress"><span></span></div>
+</section>
+<section id="reward-summary" class="hidden" aria-label="本次材料统计">
+  <span class="reward-label">本次材料</span>
+  <div id="reward-totals"></div>
+  <span id="reward-battles">0 局</span>
 </section>
 <main>
   <section id="steps-view">
@@ -47,6 +53,12 @@
     { type: 'step', step_id: 'wait_ready', ts: now - 14.4, thumbnail: thumb, step: { status: 'succeeded', execution_index: 26, node_kind: 'task', action: 'vision.wait_template', duration_ms: 2471.8 } },
     { type: 'step', step_id: 'tap_ready', ts: now - 14.3, step: { status: 'running', execution_index: 27, node_kind: 'task', action: 'input.tap_match' } },
     { type: 'step', step_id: 'tap_ready', ts: now - 14.0, step: { status: 'succeeded', execution_index: 27, node_kind: 'task', action: 'input.tap_match', duration_ms: 284.2 } },
+    { type: 'step', step_id: 'wait_floor_direct', ts: now - 13.8, step: { status: 'running', execution_index: 42, node_kind: 'task', action: 'vision.wait_template' } },
+    { type: 'step', step_id: 'wait_floor_direct', ts: now - 10.7, step: { status: 'failed', started_at: now - 13.8, execution_index: 42, node_kind: 'task', action: 'vision.wait_template', duration_ms: 3098.2, error: 'timed out waiting for template to appear: assets/templates/souls/souls-challenge.png' } },
+    { type: 'step', step_id: 'wait_floor_direct', ts: now - 10.6, step: { status: 'branch_miss', original_status: 'failed', recovered_by: 'settlement', started_at: now - 13.8, execution_index: 42, node_kind: 'task', action: 'vision.wait_template', duration_ms: 3098.2, error: 'timed out waiting for template to appear: assets/templates/souls/souls-challenge.png' } },
+    { type: 'reward_stats', run_id: 'workflow-3b6a12e7537b', instance_id: 'mumu-1', battle_index: 1, layer: 1, status: 'succeeded', ts: now - 10, screenshot: thumb,
+      items: [{ id: 'soul_hanafuda', name: '御魂花札', quantity: 2 }, { id: 'orochi_scale_fragment', name: '八岐大蛇鳞片', quantity: 3 }, { id: 'coin', name: '金币', quantity: 1683 }],
+      material_totals: { soul_hanafuda: { name: '御魂花札', quantity: 2 }, orochi_scale_fragment: { name: '八岐大蛇鳞片', quantity: 3 }, coin: { name: '金币', quantity: 1683 } } },
     { type: 'step', step_id: 'wait_victory', ts: now - 13.9, step: { status: 'running', execution_index: 28, node_kind: 'task', action: 'vision.wait_template' } },
   ];
   window.dispatchEvent(new MessageEvent('message', { data: {

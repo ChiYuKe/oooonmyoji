@@ -1,0 +1,96 @@
+:root {
+  color-scheme: light dark;
+  font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+}
+
+* { box-sizing: border-box; }
+html, body { min-width: 180px; margin: 0; padding: 0; background: var(--vscode-sideBar-background); }
+body { letter-spacing: 0; }
+main { width: 100%; }
+
+.product-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
+}
+.product-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border: 1px solid var(--vscode-focusBorder);
+  border-radius: 4px;
+  color: var(--vscode-textLink-foreground);
+  font-size: 15px;
+  font-weight: 700;
+}
+h1, h2 { margin: 0; letter-spacing: 0; }
+h1 { font-size: 14px; line-height: 19px; font-weight: 650; }
+.subtitle { color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 16px; }
+
+section { padding: 12px 14px 14px; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border)); }
+h2 { margin-bottom: 10px; font-size: 11px; line-height: 16px; font-weight: 700; text-transform: uppercase; color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground)); }
+.instance-row, .field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  color: var(--vscode-descriptionForeground);
+}
+.instance-row strong { color: var(--vscode-foreground); font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; font-weight: 500; }
+.field { margin-top: 3px; }
+
+button, select { min-height: 30px; border-radius: 3px; font: inherit; letter-spacing: 0; }
+select {
+  width: 104px;
+  padding: 3px 7px;
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  outline: none;
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+}
+select:focus { border-color: var(--vscode-focusBorder); }
+button {
+  border: 1px solid var(--vscode-button-border, transparent);
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
+button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: default; }
+.run-actions { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 6px; margin-top: 12px; }
+button.primary { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+button.primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+.icon-button { width: 32px; padding: 0; color: var(--vscode-errorForeground); font-size: 13px; }
+
+.status { display: flex; align-items: center; gap: 7px; min-height: 28px; margin-top: 6px; color: var(--vscode-descriptionForeground); font-size: 11px; overflow: hidden; }
+.status-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
+.status.running .status-dot, .status.stopping .status-dot { background: var(--vscode-charts-yellow); }
+.status.success .status-dot { background: var(--vscode-testing-iconPassed); }
+.status.error .status-dot { background: var(--vscode-testing-iconFailed); }
+#status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+button.command {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  margin-bottom: 4px;
+  padding: 3px 8px;
+  border-color: transparent;
+  color: var(--vscode-foreground);
+  background: transparent;
+  text-align: left;
+}
+button.command:hover { color: var(--vscode-list-hoverForeground); background: var(--vscode-list-hoverBackground); }
+.command-icon { color: var(--vscode-icon-foreground); font-size: 15px; text-align: center; }

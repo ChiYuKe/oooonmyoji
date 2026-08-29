@@ -353,3 +353,141 @@ VS Code 扩展新增 `Onmyoji: 打开运行日志` 命令和可视化编辑器�
 最终打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.7.vsix` 并通过 VS Code CLI
 强制覆盖安装；当前版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.7`，安装目录已核对
 包含 `out/runLogManager.js`、`media/run-log.css` 和 `media/run-log.js`。
+
+### 御魂奖励后台统计子工作流
+
+新增 `workflows/reward_statistics.json`，由 `mumu_1_souls_loop.json` 在关闭奖励弹层前通过
+`workflow.run` 同步调用。调用只负责原生截图、分配局号与奖励层号并投递队列，完成落盘后
+立即返回；耗时的模板匹配与 OCR 读取已保存的 PNG，由 Supervisor 的 `RewardStatsProcessor`
+后台线程执行，不再访问 MuMu 设备，因此不会与主流程争抢截图缓冲区或产生额外点击。
+
+新增内置 Action `stats.enqueue_reward` 及共享 manifest。第一层奖励递增局号，多层奖励继续
+沿用同一局号并记录 layer 2/3。截图保存在当前 run 的 `rewards/` 子目录，并通过运行事件
+显示在独立日志窗口。识别结果按日追加到
+`artifacts/reward-stats/souls/<instance>/rewards-YYYY-MM-DD.jsonl`；同目录
+`summary.json` 汇总总局数、截图数及识别成功/失败数。处理器先用
+`assets/templates/rewards/catalog.json` 确认材料图标，再将图标附近的 OCR 数字绑定为数量；
+逐局输出 `items`，累计输出 `material_totals`，同时保留完整 OCR、模板坐标、置信度及未绑定
+数字用于复核。远离材料图标的角色数值不会进入掉落数量。
+
+统计队列有容量上限和有界关闭等待。入队、截图或 OCR 失败会写错误日志/失败记录，但
+`stats.enqueue_reward` 对 Behavior Tree 返回成功，保证统计故障不会中断战斗。共享 OCR 池
+通过锁串行访问，避免后台统计与普通 OCR 请求互相取走响应。
+
+新增 `tests/test_reward_stats.py` 及 TaskContext 局号/ROI 回归测试。最终自动验收为 Python
+`87 passed, 2 skipped`、mypy 47 个源码文件、TypeScript 冒烟 42 项、编辑器和日志 DOM
+冒烟以及 Python/TypeScript 引擎规则对拍通过，CLI 同时识别 3 个工作流和 15 个 Action。
+
+实机验收临时将御魂循环改为 1 次，但 `mumu-1` 当时停在“式神寄养确认”弹窗，入口 Selector
+在 8.8 秒后按设计失败，未执行任何点击，也未到达奖励统计节点。事件保存在
+`artifacts/runs/mumu-1-reward-stats-acceptance.jsonl`，循环数随后已恢复为 30；因此本轮只确认
+后台截图/识别管道的自动化测试，不能将这次入口失败计为奖励统计失败或实机成功。
+
+随后通过 MuMu 原生接口关闭寄养弹窗并重新验收。最终 run
+`workflow-fe487d82ca6c-94f454e6185a` 在 26.3 秒内完成一局，`stats.enqueue_reward` 用约
+51 毫秒完成原生截图落盘和后台入队；主流程退出后约 4 秒 OCR 正常收尾。该局只有一页奖励，
+因此按结算 Selector 的单层分支只记录 layer 1，属于预期行为。运行事件保存在
+`artifacts/runs/mumu-1-reward-stats-acceptance-4.jsonl`，真实截图位于
+`artifacts/workflow-fe487d82ca6c-94f454e6185a/rewards/reward-0001-layer-1-capture-0001.png`。
+
+后续按“先匹配材料模板，再用 OCR 确认数量”的验收标准重构。材料区域扩大为
+`[320, 200, 1280, 460]`，覆盖两行奖励；目录内现有金币、经验加成、八岐大蛇鳞片、大蛇的逆鳞、
+痴念之卷、结界突破券、百鬼夜行门票和御魂花札 8 类模板。用户提供道具详情截图后，将原先
+暂定名称正式更正为“御魂花札”；另从新结算样本提取写有“痴”字的独立模板，两者不会互相
+命中。
+
+四张实机奖励截图离线端到端复验全部识别成功，0 张未识别、0 张失败，累计得到八岐大蛇鳞片
+16、金币 6732、御魂花札 3、大蛇的逆鳞 2，以及经验加成、痴念之卷、结界突破券和
+百鬼夜行门票各 1。结果位于
+`artifacts/reward-template-validation-v2/reward-stats/souls/mumu-1-validation/`。真实 Supervisor
+run `workflow-dac01afd5f01-b76e6706e244` 同样完成原生截图、后台模板匹配和数量 OCR；当次识别
+八岐大蛇鳞片 5、金币 1683。其后的入口失败均发生在用户正在查看商店/道具详情时，未执行奖励
+统计，不能计为识别失败。验收结束后正式循环数恢复为 30。
+
+### 非标准页面快捷返回庭院
+
+根据用户标注的“返回庭院”图标，从 `mumu-1` 原生截图裁取
+`assets/templates/souls/return-courtyard.png`。`mumu_1_souls_loop.json` 在原入口 Selector 前新增
+`prepare_entry`：当前已经处于副本层数页、御魂类型页、探索地图或庭院时保持原路径；否则在
+左上角 ROI 内检测该图标，复核后点击并等待庭院探索入口，再进入原有御魂流程。该恢复路径仍
+完全使用 MuMu 原生截图和输入接口。
+
+实机验收从商店的御魂花札详情页开始，先返回到商店页面，再由新增分支以置信度 `0.942437`
+命中图标并点击坐标 `(187, 55)`。run `workflow-d16115add4b6-2af03ace34d5` 在 46.6 秒内完成
+返回庭院、进入御魂、一局战斗、奖励截图和后台识别，最终状态为 `succeeded`。当局识别御魂
+花札 2、大蛇的逆鳞 1、八岐大蛇鳞片 3、金币 1683，与结算截图人工复核一致。事件记录保存在
+`artifacts/runs/mumu-1-return-home-reward-acceptance.jsonl`，奖励截图位于
+`artifacts/workflow-d16115add4b6-2af03ace34d5/rewards/reward-0001-layer-1-capture-0001.png`。
+验收时临时使用 1 次循环，结束后已恢复正式配置 30 次。最终回归为 Python
+`87 passed, 2 skipped`、TypeScript `42 checks`、编辑器 DOM、日志 DOM、Python/TypeScript
+规则对拍及 CLI validate 全部通过；本次未拉取任何外部文件或仓库内容。
+
+按后续要求统一御魂流程的点击节奏：13 个 `input.tap` / `input.tap_match` 节点全部保留非零
+随机坐标偏移，并将点击前随机等待统一为 `[0.2, 0.6]` 秒。偏移幅度继续按目标尺寸使用
+3/4/5/8/12 像素，避免小按钮因统一使用过大偏移而点出边界。回归测试会扫描全部点击节点，
+后续新增节点如果遗漏随机偏移或等待范围会直接失败。
+
+### 0.2.8 运行日志材料统计
+
+后台 `RewardStatsProcessor` 完成模板匹配和 OCR 后，除了写入按日统计 JSONL，还会向当前
+运行事件文件追加 `reward_stats` 事件。事件包含局号、奖励页、逐项材料数量、当前 run 的累计
+数量和原始奖励截图；累计范围按 `run_id` 隔离，不会混入当天之前运行的数据。失败也会生成
+结构化事件，但不会中断战斗流程。
+
+VS Code 独立日志窗口新增“本次材料”汇总栏，并把每个奖励页作为独立时间线条目显示，例如
+“第 1 局奖励：御魂花札 ×2 · 八岐大蛇鳞片 ×3 · 金币 ×1683”；条目继续使用奖励截图缩略图。
+事件监听不再在 `run_finished` 后固定 1.5 秒关闭，而是在 Python 进程等待后台统计完成并退出后
+再读取尾部数据，从而覆盖首次 OCR 模型初始化较慢的情况。820×960 日志 harness 验收确认汇总
+栏和时间线无重叠。
+
+最终验证为 Python `87 passed, 2 skipped`、mypy 47 个源码文件、TypeScript `42 checks`、
+编辑器 DOM、运行日志 DOM `11 checks`、Python/TypeScript 规则对拍和 CLI validate 全部通过。
+已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.8.vsix`（778358 bytes）并通过
+VS Code CLI 强制覆盖安装；安装版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.8`。
+
+用户提供道具详情截图后，将原临时分类 `soul_purple / 紫色御魂` 正式更正为
+`orochi_scale_fragment / 八岐大蛇鳞片`，模板同步改名为
+`assets/templates/rewards/orochi-scale-fragment.png`。该材料与
+`orochi_reverse_scale / 大蛇的逆鳞` 继续使用两套独立模板和统计键；不保留旧 ID 兼容映射。
+
+本机已生成的正式统计、逐局 JSONL、当前事件流和两组模板验证产物也完成同名迁移：历史
+`soul_purple` 统一改为 `orochi_scale_fragment`，显示名统一改为“八岐大蛇鳞片”，模板路径
+统一指向 `orochi-scale-fragment.png`。迁移仅修正标识信息，原数量、出现次数、置信度、坐标
+和 OCR 结果保持不变；正式累计仍为 42 个、24 次出现。迁移后 7 个 JSON/JSONL 产物均通过
+结构解析，`artifacts` 中已无旧 ID、旧名称或旧模板路径；Python 全量回归为
+`87 passed, 2 skipped`，使用 `config/config.example.json` 的 CLI validate 结果为 `valid: true`。
+
+### 0.2.9 Selector 恢复状态
+
+Behavior Tree 引擎现在会在 Selector 的后续分支成功后，把此前失败分支内的 `failed` 事件
+重新归类为 `branch_miss`，并记录 `original_status: failed` 与恢复它的 `recovered_by` Selector。
+只有确实被 Selector 恢复的分支才会转换；全部分支失败、取消或致命错误仍保持原状态。
+
+独立运行日志会把同一次节点执行的恢复事件合并到原行，使用黄色状态显示“分支未命中”，且
+不纳入失败总数与失败筛选。御魂流程的 `wait_floor_direct` 探测时长保持 3 秒不变。
+
+验收结果为 Python `87 passed, 2 skipped`、mypy 47 个源码文件、TypeScript `42 checks`、
+编辑器 DOM、运行日志 DOM `14 checks`、Python/TypeScript 规则对拍和 CLI validate 全部通过。
+本地日志 harness 复验确认“分支未命中”为黄色、失败数为 0、失败筛选结果为 0 行，且没有
+重复节点或布局重叠。已生成
+`vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.9.vsix`（778631 bytes）并通过 VS Code
+CLI 强制覆盖安装；安装版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.9`。
+
+### 0.2.10 完整画布 PNG 导出
+
+可视化编辑器工具栏新增完整画布导出按钮。导出时克隆当前 SVG，按全部节点的世界坐标边界
+自动计算图片尺寸并留出 56 像素边距，同时重置克隆画布的平移与缩放，因此当前视口位置不会
+影响结果。PNG 保留卡片、装饰器、有序连线、运行状态与网格背景；连接预览、框选区域、连线
+命中层、重连手柄和运行缩略图等临时交互元素不会进入图片。
+
+图片默认按 2 倍清晰度生成，并限制最长边为 8192 像素、总像素约 3200 万；超大工作流会
+自动降低倍率。生成后通过 VS Code 原生保存对话框选择位置，默认文件名为
+`<workflow-id>-layout.png`。浏览器 harness 使用 10 个节点验收：完整边界为
+`1700 x 1062`，PNG 为 `3400 x 2124`；连续放大视口后重复导出，逻辑尺寸、PNG 尺寸和数据
+长度均保持一致。此次实现未拉取任何外部文件或仓库内容。
+
+最终回归为 Python `87 passed, 2 skipped`、mypy 47 个源码文件、TypeScript `42 checks`、
+编辑器 DOM、运行日志 DOM `14 checks`、Python/TypeScript 规则对拍全部通过。PNG 解码尺寸与
+消息尺寸一致，1/8 缩略像素采样为全不透明且包含 125 种量化颜色，排除了空白或透明输出。
+已生成 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.10.vsix`（780826 bytes）并通过
+VS Code CLI 强制覆盖安装；安装版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.10`。

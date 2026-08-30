@@ -114,12 +114,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 0.5,
         "roi": [
-          650,
+          450,
           80,
-          300,
-          300
+          650,
+          350
         ],
-        "threshold": 0.88,
+        "threshold": 0.65,
         "scale_search": false
       }
     },
@@ -177,12 +177,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 20,
         "roi": [
-          650,
+          450,
           80,
-          300,
-          300
+          650,
+          350
         ],
-        "threshold": 0.88,
+        "threshold": 0.65,
         "scale_search": false
       }
     },
@@ -409,12 +409,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 5,
         "roi": [
-          650,
+          450,
           80,
-          300,
-          300
+          650,
+          350
         ],
-        "threshold": 0.88,
+        "threshold": 0.65,
         "scale_search": false
       }
     },

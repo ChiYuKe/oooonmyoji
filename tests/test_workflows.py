@@ -448,7 +448,7 @@ def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> 
         assert params["template"] == "assets/templates/souls/souls-victory-continue.png"
         assert params["present"] is False
     invite_params = nodes["wait_auto_ready_invite"]["params"]
-    assert invite_params["threshold"] >= 0.9
+    assert invite_params["threshold"] >= 0.85
     assert invite_params["timeout_seconds"] >= 12
     assert (workflow_path.parents[1] / invite_params["template"]).is_file()
     assert nodes["complete_auto_ready_setup"]["children"] == [
@@ -456,3 +456,39 @@ def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> 
         "handle_auto_ready_confirmation",
     ]
     assert nodes["wait_lobby_without_confirmation"]["params"]["timeout_seconds"] <= 2
+
+
+def test_party_member_setup_phase_accepts_return_to_lobby() -> None:
+    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls_party_member_round.json"
+    raw = json.loads(workflow_path.read_text(encoding="utf-8"))
+    nodes = {node["id"]: node for node in raw["nodes"]}
+    lobby_phase_condition = {
+        "type": "condition",
+        "expression": {"ne": [{"ref": "blackboard.phase"}, "finish"]},
+    }
+
+    for node_id in ("wait_lobby_direct", "wait_lobby_after_one", "wait_lobby_after_two"):
+        assert lobby_phase_condition in nodes[node_id]["decorators"]
+
+
+def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    workflow_nodes = []
+    for workflow_name in ("souls_party_member_round.json", "mumu_1_souls_loop.json"):
+        raw = json.loads((project_root / "workflows" / workflow_name).read_text(encoding="utf-8"))
+        workflow_nodes.extend(
+            node
+            for node in raw["nodes"]
+            if node.get("params", {}).get("template")
+            == "assets/templates/souls/courtyard-explore/mumu-1.png"
+        )
+
+    assert len(workflow_nodes) == 6
+    for node in workflow_nodes:
+        params = node["params"]
+        x, y, width, height = params["roi"]
+        assert x <= 567
+        assert x + width >= 835
+        assert y <= 145
+        assert y + height >= 265
+        assert params["threshold"] <= 0.65

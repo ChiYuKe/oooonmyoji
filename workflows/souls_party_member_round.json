@@ -2,7 +2,10 @@
   "schema_version": 3,
   "id": "souls_party_member_round",
   "version": "3.0.3",
-  "resolution": [1920, 1080],
+  "resolution": [
+    1920,
+    1080
+  ],
   "root": "root",
   "limits": {
     "timeout_seconds": 600,
@@ -13,7 +16,11 @@
       "type": "string",
       "required": true,
       "default": "finish",
-      "enum": ["finish", "setup_auto_ready", "auto_ready"]
+      "enum": [
+        "finish",
+        "setup_auto_ready",
+        "auto_ready"
+      ]
     }
   },
   "nodes": [
@@ -21,7 +28,9 @@
       "id": "root",
       "type": "root",
       "name": "队员单轮战斗入口",
-      "children": ["round"]
+      "children": [
+        "round"
+      ]
     },
     {
       "id": "round",
@@ -41,17 +50,30 @@
       "id": "choose_after_battle_action",
       "type": "selector",
       "name": "按阶段完成自动准备设置或结束本轮",
-      "children": ["setup_auto_ready", "finish_settled", "auto_ready_settled"]
+      "children": [
+        "setup_auto_ready",
+        "finish_settled",
+        "auto_ready_settled"
+      ]
     },
     {
       "id": "setup_auto_ready",
       "type": "sequence",
       "name": "首轮接受限时邀请并启用自动准备",
-      "children": ["prepare_auto_ready_setup"],
+      "children": [
+        "prepare_auto_ready_setup"
+      ],
       "decorators": [
         {
           "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.phase"}, "setup_auto_ready"]}
+          "expression": {
+            "eq": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "setup_auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -59,7 +81,10 @@
       "id": "prepare_auto_ready_setup",
       "type": "selector",
       "name": "设置自动准备或确认设置已生效",
-      "children": ["configure_auto_ready", "auto_ready_already_active"]
+      "children": [
+        "configure_auto_ready",
+        "auto_ready_already_active"
+      ]
     },
     {
       "id": "configure_auto_ready",
@@ -75,7 +100,10 @@
       "id": "complete_auto_ready_setup",
       "type": "selector",
       "name": "处理首次确认或直接进入队伍",
-      "children": ["wait_lobby_without_confirmation", "handle_auto_ready_confirmation"]
+      "children": [
+        "wait_lobby_without_confirmation",
+        "handle_auto_ready_confirmation"
+      ]
     },
     {
       "id": "handle_auto_ready_confirmation",
@@ -97,7 +125,12 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 2,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       }
@@ -110,7 +143,12 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 30,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       }
@@ -126,7 +164,14 @@
       "decorators": [
         {
           "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.phase"}, "finish"]}
+          "expression": {
+            "eq": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "finish"
+            ]
+          }
         }
       ]
     },
@@ -141,7 +186,14 @@
       "decorators": [
         {
           "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "eq": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -153,8 +205,13 @@
       "params": {
         "template": "assets/templates/souls/party/auto-ready-invite-button.png",
         "timeout_seconds": 12,
-        "roi": [250, 300, 220, 180],
-        "threshold": 0.9,
+        "roi": [
+          0,
+          304,
+          867,
+          168
+        ],
+        "threshold": 0.85,
         "scale_search": false
       }
     },
@@ -164,10 +221,15 @@
       "name": "接受邀请并启用战前自动准备",
       "action": "input.tap_match",
       "params": {
-        "match": {"ref": "nodes.wait_auto_ready_invite.output.0"},
+        "match": {
+          "ref": "nodes.wait_auto_ready_invite.output.0"
+        },
         "revalidate": false,
         "random_offset": 3,
-        "random_interval": [0.0, 0.05]
+        "random_interval": [
+          0,
+          0.05
+        ]
       }
     },
     {
@@ -178,7 +240,12 @@
       "params": {
         "template": "assets/templates/souls/party/continue-confirm-button.png",
         "timeout_seconds": 10,
-        "roi": [900, 520, 450, 260],
+        "roi": [
+          900,
+          520,
+          450,
+          260
+        ],
         "threshold": 0.9,
         "scale_search": false
       }
@@ -191,7 +258,12 @@
       "params": {
         "template": "assets/templates/souls/party/never-prompt-checkbox.png",
         "timeout_seconds": 3,
-        "roi": [780, 460, 250, 180],
+        "roi": [
+          780,
+          460,
+          250,
+          180
+        ],
         "threshold": 0.9,
         "scale_search": false
       }
@@ -202,10 +274,15 @@
       "name": "勾选不再提示",
       "action": "input.tap_match",
       "params": {
-        "match": {"ref": "nodes.wait_never_prompt_checkbox.output.0"},
+        "match": {
+          "ref": "nodes.wait_never_prompt_checkbox.output.0"
+        },
         "revalidate": false,
         "random_offset": 3,
-        "random_interval": [0.0, 0.05]
+        "random_interval": [
+          0,
+          0.05
+        ]
       }
     },
     {
@@ -214,10 +291,15 @@
       "name": "确认战前自动准备",
       "action": "input.tap_match",
       "params": {
-        "match": {"ref": "nodes.wait_auto_ready_confirmation.output.0"},
+        "match": {
+          "ref": "nodes.wait_auto_ready_confirmation.output.0"
+        },
         "revalidate": false,
         "random_offset": 3,
-        "random_interval": [0.0, 0.05]
+        "random_interval": [
+          0,
+          0.05
+        ]
       }
     },
     {
@@ -228,7 +310,12 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 30,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       }
@@ -237,13 +324,18 @@
       "id": "ensure_in_party",
       "type": "selector",
       "name": "确认已在协战房间",
-      "children": ["already_in_party", "accept_party_invite"]
+      "children": [
+        "already_in_party",
+        "accept_party_invite"
+      ]
     },
     {
       "id": "already_in_party",
       "type": "sequence",
       "name": "已经加入协战房间",
-      "children": ["detect_party_lobby"]
+      "children": [
+        "detect_party_lobby"
+      ]
     },
     {
       "id": "detect_party_lobby",
@@ -253,7 +345,12 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 1,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       }
@@ -262,7 +359,11 @@
       "id": "accept_party_invite",
       "type": "sequence",
       "name": "等待并接受 mumu0 邀请",
-      "children": ["wait_accept_invite", "tap_accept_invite", "wait_lobby_after_accept"]
+      "children": [
+        "wait_accept_invite",
+        "tap_accept_invite",
+        "wait_lobby_after_accept"
+      ]
     },
     {
       "id": "wait_accept_invite",
@@ -272,7 +373,12 @@
       "params": {
         "template": "assets/templates/souls/party/accept-invite-button.png",
         "timeout_seconds": 180,
-        "roi": [100, 280, 220, 220],
+        "roi": [
+          100,
+          280,
+          220,
+          220
+        ],
         "threshold": 0.9,
         "scale_search": false
       }
@@ -283,10 +389,15 @@
       "name": "接受组队邀请",
       "action": "input.tap_match",
       "params": {
-        "match": {"ref": "nodes.wait_accept_invite.output.0"},
+        "match": {
+          "ref": "nodes.wait_accept_invite.output.0"
+        },
         "revalidate": true,
         "random_offset": 4,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       }
     },
     {
@@ -297,7 +408,12 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 30,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       }
@@ -306,7 +422,11 @@
       "id": "detect_lineup_state",
       "type": "selector",
       "name": "识别队员阵容锁定状态",
-      "children": ["detect_locked_lineup", "detect_unlocked_lineup", "lineup_state_unknown"]
+      "children": [
+        "detect_locked_lineup",
+        "detect_unlocked_lineup",
+        "lineup_state_unknown"
+      ]
     },
     {
       "id": "detect_unlocked_lineup",
@@ -316,7 +436,12 @@
       "params": {
         "template": "assets/templates/souls/party/formation-unlocked.png",
         "timeout_seconds": 2,
-        "roi": [130, 930, 140, 100],
+        "roi": [
+          130,
+          930,
+          140,
+          100
+        ],
         "threshold": 0.4,
         "scale_search": false
       }
@@ -329,7 +454,12 @@
       "params": {
         "template": "assets/templates/souls/party/formation-locked.png",
         "timeout_seconds": 2,
-        "roi": [130, 930, 140, 100],
+        "roi": [
+          130,
+          930,
+          140,
+          100
+        ],
         "threshold": 0.4,
         "scale_search": false
       }
@@ -347,13 +477,20 @@
       "id": "prepare_lineup_if_needed",
       "type": "selector",
       "name": "未锁定阵容时点击准备",
-      "children": ["lineup_already_locked", "prepare_unlocked_lineup", "lineup_started_without_ready"]
+      "children": [
+        "lineup_already_locked",
+        "prepare_unlocked_lineup",
+        "lineup_started_without_ready"
+      ]
     },
     {
       "id": "prepare_unlocked_lineup",
       "type": "sequence",
       "name": "准备未锁定阵容",
-      "children": ["wait_ready", "tap_ready"]
+      "children": [
+        "wait_ready",
+        "tap_ready"
+      ]
     },
     {
       "id": "wait_ready",
@@ -363,7 +500,12 @@
       "params": {
         "template": "assets/templates/souls/souls-ready.png",
         "timeout_seconds": 10,
-        "roi": [1500, 700, 420, 380],
+        "roi": [
+          1500,
+          700,
+          420,
+          380
+        ],
         "threshold": 0.88,
         "scale_search": false
       }
@@ -374,10 +516,15 @@
       "name": "点击准备开始战斗",
       "action": "input.tap_match",
       "params": {
-        "match": {"ref": "nodes.wait_ready.output.0"},
+        "match": {
+          "ref": "nodes.wait_ready.output.0"
+        },
         "revalidate": false,
         "random_offset": 5,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       }
     },
     {
@@ -391,7 +538,11 @@
       "decorators": [
         {
           "type": "condition",
-          "expression": {"exists": {"ref": "nodes.detect_locked_lineup.output.0"}}
+          "expression": {
+            "exists": {
+              "ref": "nodes.detect_locked_lineup.output.0"
+            }
+          }
         }
       ]
     },
@@ -412,7 +563,12 @@
       "params": {
         "template": "assets/templates/souls/souls-victory-continue.png",
         "timeout_seconds": 240,
-        "roi": [650, 900, 650, 180],
+        "roi": [
+          650,
+          900,
+          650,
+          180
+        ],
         "threshold": 0.86,
         "scale_search": false
       }
@@ -423,23 +579,36 @@
       "name": "点击胜利页继续",
       "action": "input.tap_match",
       "params": {
-        "match": {"ref": "nodes.wait_victory.output.0"},
+        "match": {
+          "ref": "nodes.wait_victory.output.0"
+        },
         "revalidate": false,
         "random_offset": 8,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       }
     },
     {
       "id": "settle_to_round_destination",
       "type": "selector",
       "name": "关闭奖励并返回地图、庭院或协战房间",
-      "children": ["settled_direct", "settled_after_one_tap", "settled_after_two_taps"]
+      "children": [
+        "settled_direct",
+        "settled_after_one_tap",
+        "settled_after_two_taps"
+      ]
     },
     {
       "id": "settled_direct",
       "type": "selector",
       "name": "已直接返回目标界面",
-      "children": ["wait_map_direct", "wait_courtyard_direct", "wait_lobby_direct"]
+      "children": [
+        "wait_map_direct",
+        "wait_courtyard_direct",
+        "wait_lobby_direct"
+      ]
     },
     {
       "id": "wait_map_direct",
@@ -449,14 +618,26 @@
       "params": {
         "template": "assets/templates/souls/map-souls.png",
         "timeout_seconds": 3,
-        "roi": [150, 850, 250, 230],
+        "roi": [
+          150,
+          850,
+          250,
+          230
+        ],
         "threshold": 0.88,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -467,15 +648,27 @@
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
-        "timeout_seconds": 1,
-        "roi": [650, 80, 300, 300],
-        "threshold": 0.88,
+        "timeout_seconds": 2,
+        "roi": [
+          450,
+          80,
+          650,
+          350
+        ],
+        "threshold": 0.65,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -487,14 +680,26 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 3,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "finish"
+            ]
+          }
         }
       ]
     },
@@ -517,7 +722,10 @@
       "action": "workflow.run",
       "params": {
         "workflow": "reward_statistics.json",
-        "inputs": {"category": "souls", "layer": 1}
+        "inputs": {
+          "category": "souls",
+          "layer": 1
+        }
       }
     },
     {
@@ -529,7 +737,10 @@
         "x": 1500,
         "y": 850,
         "random_offset": 12,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       }
     },
     {
@@ -537,7 +748,9 @@
       "type": "task",
       "name": "等待奖励页切换稳定",
       "action": "core.sleep",
-      "params": {"seconds": 0.8}
+      "params": {
+        "seconds": 0.8
+      }
     },
     {
       "id": "wait_reward_overlay_gone_after_one",
@@ -548,7 +761,12 @@
         "template": "assets/templates/souls/souls-victory-continue.png",
         "timeout_seconds": 3,
         "present": false,
-        "roi": [650, 900, 650, 180],
+        "roi": [
+          650,
+          900,
+          650,
+          180
+        ],
         "threshold": 0.86,
         "scale_search": false
       }
@@ -557,7 +775,11 @@
       "id": "done_after_one",
       "type": "selector",
       "name": "确认一次点击后已返回",
-      "children": ["wait_map_after_one", "wait_courtyard_after_one", "wait_lobby_after_one"]
+      "children": [
+        "wait_map_after_one",
+        "wait_courtyard_after_one",
+        "wait_lobby_after_one"
+      ]
     },
     {
       "id": "wait_map_after_one",
@@ -567,14 +789,26 @@
       "params": {
         "template": "assets/templates/souls/map-souls.png",
         "timeout_seconds": 6,
-        "roi": [150, 850, 250, 230],
+        "roi": [
+          150,
+          850,
+          250,
+          230
+        ],
         "threshold": 0.88,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -585,15 +819,27 @@
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
-        "timeout_seconds": 1,
-        "roi": [650, 80, 300, 300],
-        "threshold": 0.88,
+        "timeout_seconds": 2,
+        "roi": [
+          450,
+          80,
+          650,
+          350
+        ],
+        "threshold": 0.65,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -605,14 +851,26 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 6,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "finish"
+            ]
+          }
         }
       ]
     },
@@ -635,7 +893,10 @@
       "action": "workflow.run",
       "params": {
         "workflow": "reward_statistics.json",
-        "inputs": {"category": "souls", "layer": 2}
+        "inputs": {
+          "category": "souls",
+          "layer": 2
+        }
       }
     },
     {
@@ -647,7 +908,10 @@
         "x": 1500,
         "y": 850,
         "random_offset": 12,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       }
     },
     {
@@ -655,7 +919,9 @@
       "type": "task",
       "name": "再次等待奖励页切换稳定",
       "action": "core.sleep",
-      "params": {"seconds": 0.8}
+      "params": {
+        "seconds": 0.8
+      }
     },
     {
       "id": "wait_reward_overlay_gone_after_two",
@@ -666,7 +932,12 @@
         "template": "assets/templates/souls/souls-victory-continue.png",
         "timeout_seconds": 3,
         "present": false,
-        "roi": [650, 900, 650, 180],
+        "roi": [
+          650,
+          900,
+          650,
+          180
+        ],
         "threshold": 0.86,
         "scale_search": false
       }
@@ -675,7 +946,11 @@
       "id": "done_after_two",
       "type": "selector",
       "name": "确认两次点击后已返回",
-      "children": ["wait_map_after_two", "wait_courtyard_after_two", "wait_lobby_after_two"]
+      "children": [
+        "wait_map_after_two",
+        "wait_courtyard_after_two",
+        "wait_lobby_after_two"
+      ]
     },
     {
       "id": "wait_map_after_two",
@@ -685,14 +960,26 @@
       "params": {
         "template": "assets/templates/souls/map-souls.png",
         "timeout_seconds": 12,
-        "roi": [150, 850, 250, 230],
+        "roi": [
+          150,
+          850,
+          250,
+          230
+        ],
         "threshold": 0.88,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -703,15 +990,27 @@
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
-        "timeout_seconds": 1,
-        "roi": [650, 80, 300, 300],
-        "threshold": 0.88,
+        "timeout_seconds": 2,
+        "roi": [
+          450,
+          80,
+          650,
+          350
+        ],
+        "threshold": 0.65,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"ne": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "auto_ready"
+            ]
+          }
         }
       ]
     },
@@ -723,16 +1022,274 @@
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
         "timeout_seconds": 12,
-        "roi": [80, 0, 350, 120],
+        "roi": [
+          80,
+          0,
+          350,
+          120
+        ],
         "threshold": 0.88,
         "scale_search": false
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.phase"}, "auto_ready"]}
+          "expression": {
+            "ne": [
+              {
+                "ref": "blackboard.phase"
+              },
+              "finish"
+            ]
+          }
         }
       ]
     }
-  ]
+  ],
+  "_layout": {
+    "detect_party_lobby": {
+      "x": 0,
+      "y": 832
+    },
+    "already_in_party": {
+      "x": 0,
+      "y": 624
+    },
+    "wait_accept_invite": {
+      "x": 332,
+      "y": 832
+    },
+    "tap_accept_invite": {
+      "x": 664,
+      "y": 832
+    },
+    "wait_lobby_after_accept": {
+      "x": 996,
+      "y": 832
+    },
+    "accept_party_invite": {
+      "x": 664,
+      "y": 624
+    },
+    "ensure_in_party": {
+      "x": 332,
+      "y": 416
+    },
+    "detect_locked_lineup": {
+      "x": 1328,
+      "y": 624
+    },
+    "detect_unlocked_lineup": {
+      "x": 1660,
+      "y": 624
+    },
+    "lineup_state_unknown": {
+      "x": 1992,
+      "y": 624
+    },
+    "detect_lineup_state": {
+      "x": 1660,
+      "y": 416
+    },
+    "lineup_already_locked": {
+      "x": 2324,
+      "y": 624
+    },
+    "wait_ready": {
+      "x": 2656,
+      "y": 832
+    },
+    "tap_ready": {
+      "x": 2988,
+      "y": 832
+    },
+    "prepare_unlocked_lineup": {
+      "x": 2822,
+      "y": 624
+    },
+    "lineup_started_without_ready": {
+      "x": 3320,
+      "y": 624
+    },
+    "prepare_lineup_if_needed": {
+      "x": 2822,
+      "y": 416
+    },
+    "wait_victory": {
+      "x": 3652,
+      "y": 416
+    },
+    "tap_victory": {
+      "x": 3984,
+      "y": 416
+    },
+    "wait_map_direct": {
+      "x": 4316,
+      "y": 832
+    },
+    "wait_courtyard_direct": {
+      "x": 4648,
+      "y": 832
+    },
+    "wait_lobby_direct": {
+      "x": 4980,
+      "y": 832
+    },
+    "settled_direct": {
+      "x": 4648,
+      "y": 624
+    },
+    "stats_reward_layer_1": {
+      "x": 5312,
+      "y": 832
+    },
+    "dismiss_reward_once": {
+      "x": 5644,
+      "y": 832
+    },
+    "pause_after_reward_once": {
+      "x": 5976,
+      "y": 832
+    },
+    "wait_reward_overlay_gone_after_one": {
+      "x": 6308,
+      "y": 832
+    },
+    "wait_map_after_one": {
+      "x": 6640,
+      "y": 1040
+    },
+    "wait_courtyard_after_one": {
+      "x": 6972,
+      "y": 1040
+    },
+    "wait_lobby_after_one": {
+      "x": 7304,
+      "y": 1040
+    },
+    "done_after_one": {
+      "x": 6972,
+      "y": 832
+    },
+    "settled_after_one_tap": {
+      "x": 6142,
+      "y": 624
+    },
+    "stats_reward_layer_2": {
+      "x": 7636,
+      "y": 832
+    },
+    "dismiss_reward_twice": {
+      "x": 7968,
+      "y": 832
+    },
+    "pause_after_reward_twice": {
+      "x": 8300,
+      "y": 832
+    },
+    "wait_reward_overlay_gone_after_two": {
+      "x": 8632,
+      "y": 832
+    },
+    "wait_map_after_two": {
+      "x": 8964,
+      "y": 1040
+    },
+    "wait_courtyard_after_two": {
+      "x": 9296,
+      "y": 1040
+    },
+    "wait_lobby_after_two": {
+      "x": 9628,
+      "y": 1040
+    },
+    "done_after_two": {
+      "x": 9296,
+      "y": 832
+    },
+    "settled_after_two_taps": {
+      "x": 8466,
+      "y": 624
+    },
+    "settle_to_round_destination": {
+      "x": 6557,
+      "y": 416
+    },
+    "wait_auto_ready_invite": {
+      "x": 9960,
+      "y": 1248
+    },
+    "tap_auto_ready_invite": {
+      "x": 10292,
+      "y": 1248
+    },
+    "wait_lobby_without_confirmation": {
+      "x": 10624,
+      "y": 1456
+    },
+    "wait_auto_ready_confirmation": {
+      "x": 10956,
+      "y": 1664
+    },
+    "wait_never_prompt_checkbox": {
+      "x": 11288,
+      "y": 1664
+    },
+    "tap_never_prompt_checkbox": {
+      "x": 11620,
+      "y": 1664
+    },
+    "tap_auto_ready_confirm": {
+      "x": 11952,
+      "y": 1664
+    },
+    "wait_lobby_after_auto_ready_confirm": {
+      "x": 12284,
+      "y": 1664
+    },
+    "handle_auto_ready_confirmation": {
+      "x": 11620,
+      "y": 1456
+    },
+    "complete_auto_ready_setup": {
+      "x": 11122,
+      "y": 1248
+    },
+    "configure_auto_ready": {
+      "x": 10541,
+      "y": 1040
+    },
+    "auto_ready_already_active": {
+      "x": 12616,
+      "y": 1040
+    },
+    "prepare_auto_ready_setup": {
+      "x": 11579,
+      "y": 832
+    },
+    "setup_auto_ready": {
+      "x": 11579,
+      "y": 624
+    },
+    "finish_settled": {
+      "x": 12948,
+      "y": 624
+    },
+    "auto_ready_settled": {
+      "x": 13280,
+      "y": 624
+    },
+    "choose_after_battle_action": {
+      "x": 12429,
+      "y": 416
+    },
+    "round": {
+      "x": 6381,
+      "y": 208
+    },
+    "root": {
+      "x": 6381,
+      "y": 0
+    }
+  }
 }

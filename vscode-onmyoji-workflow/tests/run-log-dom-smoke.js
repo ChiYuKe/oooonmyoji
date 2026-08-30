@@ -208,15 +208,15 @@ send({
   descriptor: { workflow: 'soak.json', instance: 'mumu-0', startedAt: Date.now(), status: 'running' },
   events: [
     { type: 'run_started', run_id: 'soak-run', instance_id: 'mumu-0', status: 'running', ts: 300 },
-    ...Array.from({ length: 105 }, (_, index) => ({
+    ...Array.from({ length: 305 }, (_, index) => ({
       type: 'step', step_id: `soak_${index}`, ts: 301 + index / 10,
       step: { status: 'succeeded', name: `任务 ${index}`, execution_index: index + 1, node_kind: 'task', action: 'core.log', duration_ms: 5 },
     })),
   ],
 });
-check('超出行数上限只渲染最新 100 行', elements['step-list'].children.length === 100);
-check('行数提示显示总数', !elements['cap-note'].classList.contains('hidden') && elements['cap-note'].textContent === '仅显示最新 100 行 · 共 105 条');
-check('超限后统计仍按全部行计算', elements['completed-count'].textContent === '105');
+check('超出行数上限只渲染最新 300 行', elements['step-list'].children.length === 300);
+check('行数提示显示总数', !elements['cap-note'].classList.contains('hidden') && elements['cap-note'].textContent === '仅显示最新 300 行 · 共 305 条');
+check('超限后统计仍按全部行计算', elements['completed-count'].textContent === '305');
 fire(filters[2], 'click');
 check('筛选后行数不超过上限且未超限时隐藏提示', elements['step-list'].children.length === 0 && elements['cap-note'].classList.contains('hidden'));
 

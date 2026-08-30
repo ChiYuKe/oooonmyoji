@@ -7,6 +7,9 @@
   --fg: var(--vscode-foreground, #d8d8d8);
   --muted: var(--vscode-descriptionForeground, #9a9ca3);
   --focus: var(--vscode-focusBorder, #4ba3d3);
+  --guide: var(--vscode-tree-indentGuidesStroke, #3d4148);
+  --hover: var(--vscode-list-hoverBackground, #33363d);
+  --active: var(--vscode-list-activeSelectionBackground, #2b3a4a);
   --ui-font: "Segoe UI Variable Text", "Microsoft YaHei UI", "Microsoft YaHei", var(--vscode-font-family, sans-serif);
   --mono-font: var(--vscode-editor-font-family, "Cascadia Mono", "Cascadia Code", Consolas, monospace);
   font-family: var(--ui-font);
@@ -14,7 +17,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); text-rendering: optimizeLegibility; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 button, select { font: inherit; letter-spacing: 0; }
 button {
   min-height: 28px;
@@ -56,10 +59,12 @@ button:hover { border-color: var(--focus); }
 .picker { flex: 0 1 320px; min-width: 140px; }
 .picker select { width: 100%; min-height: 28px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-2); color: var(--fg); }
 .picker select:focus { outline: none; border-color: var(--focus); }
-.icon-button { flex: none; width: 32px; padding: 0; font-size: 14px; }
+.icon-button { flex: none; width: 32px; height: 28px; padding: 0; display: grid; place-items: center; }
+.btn-glyph { width: 14px; height: 14px; color: var(--muted); }
+.icon-button:hover .btn-glyph { color: var(--fg); }
 
 main { height: calc(100% - 52px); min-height: 0; position: relative; }
-#tree { height: 100%; overflow: auto; padding: 8px 6px 28px; user-select: none; }
+#tree { height: 100%; overflow: auto; padding: 10px 8px 28px; user-select: none; }
 #empty-state {
   position: absolute;
   inset: 0;
@@ -68,27 +73,58 @@ main { height: calc(100% - 52px); min-height: 0; position: relative; }
   color: var(--muted);
   font-size: 13px;
 }
+
+/* ---- 树：层级引导线缩进，VS Code 风格行 ---- */
 .bt-tree { margin: 0; padding: 0; list-style: none; }
-.tree-children { margin: 0; padding: 0; list-style: none; display: none; }
+.tree-children { margin: 0 0 0 11px; padding: 0 0 0 12px; list-style: none; display: none; border-left: 1px solid var(--guide); }
 .tree-node.open > .tree-children { display: block; }
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding-right: 8px;
-  padding-left: 6px;
-  border-radius: 3px;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 2px;
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 90ms ease;
 }
-.tree-row:hover { background: #33363d; }
-.tree-row:active { background: #2b3a4a; }
-.tree-caret { flex: none; width: 15px; color: var(--muted); font-size: 10px; text-align: center; }
-.tree-icon { flex: none; width: 15px; color: #a9adb5; font-size: 11px; text-align: center; }
-.tree-row .tree-icon.type-root { color: #e06c75; }
-.tree-row .tree-icon.type-selector { color: #7ed28a; }
-.tree-row .tree-icon.type-sequence { color: #e4b84c; }
-.tree-row .tree-icon.type-simple_parallel { color: #7cc6d8; }
-.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
-.tree-meta { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 10px; font-family: var(--mono-font); }
+.tree-row:hover { background: var(--hover); }
+.tree-row:active { background: var(--active); }
+.tree-caret {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: #8b909a;
+  border-radius: 3px;
+}
+.tree-caret:hover { background: #3d4047; color: var(--fg); }
+.caret-glyph { width: 12px; height: 12px; transform: rotate(0deg); transition: transform 120ms ease; }
+.tree-node.open > .tree-row .caret-glyph { transform: rotate(90deg); }
+.tree-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; color: #a9adb5; }
+.type-glyph { width: 14px; height: 14px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35)); }
+.tree-node.type-root .tree-icon { color: #e06c75; }
+.tree-node.type-selector .tree-icon { color: #7ed28a; }
+.tree-node.type-sequence .tree-icon { color: #e4b84c; }
+.tree-node.type-simple_parallel .tree-icon { color: #7cc6d8; }
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  line-height: 1;
+}
+.tree-node.branch > .tree-row .tree-name { font-weight: 600; }
+.tree-meta {
+  flex: none;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 10px;
+  font-family: var(--mono-font);
+  opacity: 0.9;
+}

@@ -15,7 +15,7 @@
 
   const $ = (id) => document.getElementById(id);
   /** 时间线最多渲染的行数：超出时只显示最新的这一数量，统计数据仍按全部行计算。 */
-  const MAX_VISIBLE_ROWS = 100;
+  const MAX_VISIBLE_ROWS = 300;
   const statusText = {
     idle: '待命', starting: '正在启动', queued: '排队中', running: '运行中', retrying: '重试中',
     succeeded: '已完成', failed: '失败', cancelled: '已停止', interrupted: '已中断',

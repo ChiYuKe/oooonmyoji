@@ -36,6 +36,7 @@ const documentStub = {
   body,
   getElementById: (id) => elements[id],
   createElement: (tag) => new Element(tag),
+  createElementNS: (namespace, tag) => new Element(tag),
 };
 const windowStub = { _listeners: {}, addEventListener(type, listener) { (this._listeners[type] = this._listeners[type] || []).push(listener); } };
 const posted = [];

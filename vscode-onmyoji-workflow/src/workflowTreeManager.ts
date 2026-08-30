@@ -140,8 +140,8 @@ export class WorkflowTreeManager implements vscode.Disposable {
     <select id="workflow-select" aria-label="工作流"></select>
   </label>
   <div class="spacer"></div>
-  <button id="btn-collapse" class="icon-button" title="收起全部" aria-label="收起全部">▸</button>
-  <button id="btn-expand" class="icon-button" title="展开全部" aria-label="展开全部">▾</button>
+  <button id="btn-collapse" class="icon-button" title="收起全部" aria-label="收起全部"></button>
+  <button id="btn-expand" class="icon-button" title="展开全部" aria-label="展开全部"></button>
   <button id="btn-refresh" class="icon-button" title="重新读取结构" aria-label="重新读取结构">⟳</button>
 </header>
 <main>

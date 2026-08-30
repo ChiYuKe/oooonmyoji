@@ -2,10 +2,50 @@
   'use strict';
 
   const vscode = acquireVsCodeApi();
-  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', task: '▣' };
+  const NS = 'http://www.w3.org/2000/svg';
   const state = { workflows: [], currentUri: '', currentName: '', nodes: [], open: new Set() };
 
   const $ = (id) => document.getElementById(id);
+
+  function svgEl(tag, attrs, parent) {
+    const element = document.createElementNS(NS, tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value !== undefined && value !== null) element.setAttribute(key, String(value));
+    }
+    if (parent) parent.appendChild(element);
+    return element;
+  }
+
+  /** 由形状描述（[tag, attrs] 列表）构建 16×16 的 SVG 图标。 */
+  function svgIcon(shape, className, parent) {
+    const svg = svgEl('svg', { class: className, viewBox: '0 0 16 16', 'aria-hidden': 'true' }, parent);
+    for (const [tag, attrs] of shape) svgEl(tag, attrs, svg);
+    return svg;
+  }
+
+  /** 节点类型徽章：描边式几何图形，颜色由 CSS 按类型分配。 */
+  const SHAPES = {
+    root: [['path', { d: 'M8 1.8 L14.2 8 L8 14.2 L1.8 8 Z' }]],
+    selector: [['circle', { cx: 8, cy: 8, r: 6.2 }]],
+    sequence: [['path', { d: 'M8 1.8 L14.2 13.2 H1.8 Z' }]],
+    simple_parallel: [
+      ['rect', { x: 4.2, y: 2.4, width: 2.6, height: 11.2, rx: 1.3 }],
+      ['rect', { x: 9.2, y: 2.4, width: 2.6, height: 11.2, rx: 1.3 }],
+    ],
+    task: [['rect', { x: 2.6, y: 2.6, width: 10.8, height: 10.8, rx: 2.2 }]],
+  };
+  const CARET_ICON = [[
+    'path',
+    { d: 'M5 3.5 L10.5 8 L5 12.5', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' },
+  ]];
+  const EXPAND_ALL_ICON = [
+    ['path', { d: 'M4 3.8 L8 7.8 L12 3.8', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
+    ['path', { d: 'M4 8.2 L8 12.2 L12 8.2', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
+  ];
+  const COLLAPSE_ALL_ICON = [
+    ['path', { d: 'M4 12.2 L8 8.2 L12 12.2', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
+    ['path', { d: 'M4 7.8 L8 3.8 L12 7.8', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
+  ];
 
   function renderPicker() {
     const select = $('workflow-select');
@@ -37,8 +77,10 @@
     row.className = 'tree-row';
     const caret = document.createElement('span');
     caret.className = 'tree-caret';
-    caret.textContent = children.length > 0 ? (open ? '▾' : '▸') : '';
     if (children.length > 0) {
+      caret.setAttribute('role', 'button');
+      caret.setAttribute('aria-label', open ? '收起' : '展开');
+      svgIcon(CARET_ICON, 'caret-glyph', caret);
       caret.addEventListener('click', (event) => {
         event.stopPropagation();
         if (state.open.has(node.id)) state.open.delete(node.id); else state.open.add(node.id);
@@ -47,8 +89,8 @@
     }
     row.appendChild(caret);
     const icon = document.createElement('span');
-    icon.className = `tree-icon type-${node.type}`;
-    icon.textContent = TYPE_ICON[node.type] || '•';
+    icon.className = 'tree-icon';
+    svgIcon(SHAPES[node.type] || SHAPES.task, 'type-glyph', icon);
     row.appendChild(icon);
     const name = document.createElement('span');
     name.className = 'tree-name';
@@ -104,6 +146,8 @@
     renderTree();
   }
 
+  svgIcon(EXPAND_ALL_ICON, 'btn-glyph', $('btn-expand'));
+  svgIcon(COLLAPSE_ALL_ICON, 'btn-glyph', $('btn-collapse'));
   $('workflow-select').addEventListener('change', () => {
     const uri = $('workflow-select').value;
     if (!uri || uri === state.currentUri) return;

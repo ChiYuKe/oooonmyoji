@@ -168,13 +168,17 @@ def validate(raw: dict[str, Any], actions: ActionRegistry) -> Any:
 
 def test_validator_and_compiler_enforce_tree_invariants() -> None:
     actions = registry(action_spec(EchoAction()))
-    raw = tree([task("a", "test.echo")], "a", _layout={"a": {"x": 1, "y": 2}})
+    raw = tree([task("a", "test.echo")], "a", description="用于测试工作流描述", _layout={"a": {"x": 1, "y": 2}})
     parsed = validate(raw, actions)
     compiled = compile_workflow(parsed, actions)
     assert parsed.schema_version == 3
+    assert parsed.description == "用于测试工作流描述"
     assert parsed.root == "root"
     assert compiled.parent_map == {"a": "root"}
     assert compiled.execution_index == {"root": 0, "a": 1}
+
+    with pytest.raises(ConfigError, match="description"):
+        validate(tree([task("a", "test.echo")], "a", description=123), actions)
 
     duplicate = tree([task("a", "test.echo"), task("a", "test.echo")], "a")
     with pytest.raises(ConfigError, match="duplicate node IDs"):
@@ -258,6 +262,44 @@ def test_bindings_are_typed_and_use_blackboard_and_nodes_namespaces() -> None:
     with pytest.raises(ConfigError, match="incompatible"):
         validate(bad_type, actions)
 
+    self_ref = clone_tree(valid)
+    self_ref["nodes"][-1]["params"]["count"] = {"ref": "nodes.typed.output.count"}
+    with pytest.raises(ConfigError, match="unavailable at this execution point"):
+        validate(self_ref, actions)
+
+    forward_ref = clone_tree(valid)
+    forward_ref["nodes"][-2]["params"]["value"] = {"ref": "nodes.typed.output.count"}
+    with pytest.raises(ConfigError, match="unavailable at this execution point"):
+        validate(forward_ref, actions)
+
+    selector_branch_ref = tree([
+        {"id": "choice", "type": "selector", "children": ["producer", "typed"]},
+        task("producer", "test.echo", {"value": 1}),
+        task("typed", "test.typed", {"count": {"ref": "nodes.producer.output.value"}}),
+    ], "choice")
+    with pytest.raises(ConfigError, match="unavailable at this execution point"):
+        validate(selector_branch_ref, actions)
+
+    nested_sequence_ref = tree([
+        {"id": "outer", "type": "sequence", "children": ["prepare", "typed"]},
+        {"id": "prepare", "type": "sequence", "children": ["producer"]},
+        task("producer", "test.echo", {"value": 1}),
+        task("typed", "test.typed", {"count": {"ref": "nodes.producer.output.value"}}),
+    ], "outer")
+    validate(nested_sequence_ref, actions)
+
+    optional_selector_output = tree([
+        {"id": "outer", "type": "sequence", "children": ["choice", "check"]},
+        {"id": "choice", "type": "selector", "children": ["producer", "fallback"]},
+        task("producer", "test.echo", {"value": 1}),
+        task("fallback", "test.echo", {"value": 2}),
+        task("check", "test.echo", decorators=[{
+            "type": "condition",
+            "expression": {"exists": {"ref": "nodes.producer.output.value"}},
+        }]),
+    ], "outer")
+    validate(optional_selector_output, actions)
+
 
 def clone_tree(raw: dict[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(raw))
@@ -280,9 +322,18 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
         task("blocked", "test.echo", decorators=[{"type": "condition", "expression": {"eq": [{"ref": "blackboard.enabled"}, True]}}]),
         task("retry", "test.retry", decorators=[{"type": "retry", "attempts": 2}]),
     ], "seq", blackboard={"value": {"type": "any"}, "enabled": {"type": "boolean"}})
-    result = WorkflowEngine(validate(raw, actions), actions, Context(), {"value": "ok", "enabled": False}).run()
+    started: list[dict[str, Any]] = []
+    result = WorkflowEngine(
+        validate(raw, actions),
+        actions,
+        Context(),
+        {"value": "ok", "enabled": False},
+        on_step_start=started.append,
+    ).run()
     assert result.status == ActionStatus.SUCCEEDED
     assert result.output["first"] == {"value": "ok"}
+    assert next(item for item in started if item["step_id"] == "first")["params"] == {"value": "ok"}
+    assert next(item for item in result.step_history if item["step_id"] == "first")["params"] == {"value": "ok"}
     assert retry_action.calls == 2
     assert next(item for item in result.step_history if item["step_id"] == "blocked")["decorator"] == "condition"
     assert next(item for item in result.step_history if item["step_id"] == "retry")["attempts"] == 2
@@ -292,18 +343,25 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
 def test_engine_sequence_stops_and_selector_falls_back() -> None:
     actions = registry(action_spec(EchoAction()), action_spec(FailAction()))
     selector = tree([
-        {"id": "selector", "type": "selector", "children": ["fail", "ok"]},
-        task("fail", "test.fail"),
+        {"id": "selector", "name": "选择可用分支", "type": "selector", "children": ["fail", "ok"]},
+        {**task("fail", "test.fail"), "name": "失败分支"},
         task("ok", "test.echo"),
     ], "selector")
     emitted: list[dict[str, Any]] = []
-    result = WorkflowEngine(validate(selector, actions), actions, Context(), {}, on_step=emitted.append).run()
+    started: list[dict[str, Any]] = []
+    result = WorkflowEngine(
+        validate(selector, actions), actions, Context(), {},
+        on_step=emitted.append, on_step_start=started.append,
+    ).run()
     assert result.status == ActionStatus.SUCCEEDED
     assert [event["step_id"] for event in result.step_history][:2] == ["fail", "ok"]
     recovered = next(event for event in result.step_history if event["step_id"] == "fail")
     assert recovered["status"] == "branch_miss"
     assert recovered["original_status"] == "failed"
     assert recovered["recovered_by"] == "selector"
+    assert recovered["recovered_by_name"] == "选择可用分支"
+    assert recovered["name"] == "失败分支"
+    assert next(event for event in started if event["step_id"] == "fail")["name"] == "失败分支"
     assert [event["status"] for event in emitted if event["step_id"] == "fail"] == ["failed", "branch_miss"]
 
     all_failed = tree([

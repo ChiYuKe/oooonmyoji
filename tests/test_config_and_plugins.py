@@ -53,6 +53,20 @@ def test_config_and_workflow_manifest_validate(tmp_path: Path) -> None:
     assert workflows["simple"].resolution == (1920, 1080)
 
 
+def test_template_match_actions_declare_structured_array_items(tmp_path: Path) -> None:
+    action_dir = tmp_path / "plugins" / "actions"
+    action_dir.mkdir(parents=True)
+    registry = build_action_registry(action_dir)
+    for action_name in ("vision.match_template", "vision.wait_template"):
+        output = registry.get(action_name).output_schema
+        assert output["type"] == "array"
+        item = output["items"]
+        assert item["type"] == "object"
+        assert item["properties"]["confidence"]["type"] == "number"
+        assert item["properties"]["reference"]["minItems"] == 4
+        assert item["properties"]["center"]["maxItems"] == 2
+
+
 def test_config_rejects_unknown_instance_reference(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="unknown instance"):
         load_config(_write_config(tmp_path, tasks=[{"id": "bad", "workflow": "simple", "instance": "missing"}]))

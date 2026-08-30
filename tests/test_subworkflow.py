@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ def _write_workflow(
     nodes: list[dict[str, object]],
     edges: list[dict[str, object]] | None = None,
     inputs: dict[str, object] | None = None,
+    limits: dict[str, object] | None = None,
 ) -> None:
     del edges
     tasks = [
@@ -67,6 +69,8 @@ def _write_workflow(
     }
     if inputs is not None:
         payload["blackboard"] = inputs
+    if limits is not None:
+        payload["limits"] = limits
     (path / "workflows" / f"{workflow_id}.json").write_text(
         json.dumps(payload, ensure_ascii=False), encoding="utf-8"
     )
@@ -155,6 +159,131 @@ def test_subworkflow_missing_input_fails_call(tmp_path: Path, monkeypatch: pytes
     step = _step(record, "exec_sub")
     assert step is not None and step["status"] == "failed"
     assert step["error_category"] == "config"
+    assert step["output"]["workflow"] == "sub"
+    assert step["output"]["status"] == "failed"
+    assert step["output"]["error_category"] == "config"
+
+
+def test_subworkflow_action_failure_is_reported_to_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    _write_workflow(tmp_path, "child_fail", [
+        {"id": "reject", "action": "core.assert", "params": {"value": False, "message": "child rejected"}},
+    ])
+    _write_workflow(tmp_path, "parent_child_fail", [
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "child_fail"}},
+    ])
+
+    record = _run(config, "parent_child_fail")
+
+    assert record.status.value == "failed"
+    parent_step = _step(record, "exec_sub")
+    assert parent_step is not None
+    assert parent_step["status"] == "failed"
+    assert parent_step["error_category"] == "assertion"
+    assert parent_step["output"]["status"] == "failed"
+    assert parent_step["output"]["error"] == "child rejected"
+    child_step = _step(record, "reject")
+    assert child_step is not None
+    assert child_step["workflow_id"] == "child_fail"
+    assert child_step["workflow_path"] == ["parent_child_fail", "child_fail"]
+    assert child_step["workflow_depth"] == 1
+
+
+def test_selector_recovery_reclassifies_failed_subworkflow_descendants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    _write_workflow(tmp_path, "child_fail", [
+        {"id": "reject", "action": "core.assert", "params": {"value": False, "message": "child rejected"}},
+    ])
+    parent = {
+        "schema_version": 3,
+        "id": "parent_fallback",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["choose"]},
+            {"id": "choose", "type": "selector", "children": ["exec_sub", "fallback"]},
+            {"id": "exec_sub", "type": "task", "action": "workflow.run", "params": {"workflow": "child_fail"}},
+            {"id": "fallback", "type": "task", "action": "core.log", "params": {"message": "fallback"}},
+        ],
+    }
+    (tmp_path / "workflows" / "parent_fallback.json").write_text(
+        json.dumps(parent, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    record = _run(config, "parent_fallback")
+
+    assert record.status.value == "succeeded"
+    child_events = [event for event in record.step_history if event.get("step_id") == "reject"]
+    assert [event["status"] for event in child_events] == ["failed", "branch_miss"]
+    assert child_events[-1]["original_status"] == "failed"
+    assert child_events[-1]["recovered_by"] == "choose"
+    assert child_events[-1]["recovered_via"] == "exec_sub"
+
+
+def test_subworkflow_timeout_is_reported_to_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    _write_workflow(
+        tmp_path,
+        "child_timeout",
+        [{"id": "wait", "action": "core.sleep", "params": {"seconds": 1}}],
+        limits={"timeout_seconds": 0.05, "max_steps": 100},
+    )
+    _write_workflow(tmp_path, "parent_child_timeout", [
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "child_timeout"}},
+    ])
+
+    record = _run(config, "parent_child_timeout")
+
+    assert record.status.value == "failed"
+    parent_step = _step(record, "exec_sub")
+    assert parent_step is not None
+    assert parent_step["status"] == "failed"
+    assert parent_step["error_category"] == "workflow_timeout"
+    assert parent_step["output"]["status"] == "failed"
+    assert parent_step["output"]["error_category"] == "workflow_timeout"
+
+
+def test_subworkflow_cancellation_reaches_parent_with_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    _write_workflow(tmp_path, "child_cancel", [
+        {"id": "wait", "action": "core.sleep", "params": {"seconds": 1}},
+    ])
+    _write_workflow(tmp_path, "parent_child_cancel", [
+        {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "child_cancel"}},
+    ])
+    cancel_event = threading.Event()
+    timer = threading.Timer(0.2, cancel_event.set)
+    job = JobConfig(
+        id="run-parent-child-cancel",
+        workflow="parent_child_cancel",
+        instance="fake",
+        inputs={},
+        schedule={"type": "manual"},
+        enabled=True,
+        retry_enabled=False,
+    )
+
+    timer.start()
+    try:
+        record = TaskRunner(config).execute(job, config.instance("fake"), cancel_event=cancel_event)
+    finally:
+        timer.cancel()
+
+    assert record.status.value == "cancelled"
+    parent_step = _step(record, "exec_sub")
+    assert parent_step is not None
+    assert parent_step["status"] == "cancelled"
+    assert parent_step["output"]["status"] == "cancelled"
+    assert parent_step["output"]["error_category"] == "cancelled"
 
 
 def test_subworkflow_missing_file_fails_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

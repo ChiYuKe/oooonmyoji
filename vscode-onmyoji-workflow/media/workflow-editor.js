@@ -7,14 +7,22 @@
   const BASE_H = 96;
   const DECO_H = 22;
   const PORT_R = 7;
+  const PREVIEW = { x: 154, y: 38, width: 92, height: 44 };
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'task'];
   const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', task: 'TASK' };
   const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', task: '▣' };
+  const RUN_LABEL = {
+    running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
+    failed: '失败', cancelled: '已取消', branch_miss: '分支跳过',
+  };
   const state = {
     raw: null,
     catalog: [],
     refs: { blackboard: [], nodes: [] },
     issues: [],
+    workflows: [],
+    docUri: '',
+    documentName: '',
     instances: [],
     instanceId: '',
     selected: new Set(),
@@ -32,7 +40,21 @@
     run: new Map(),
     activeRun: null,
     roi: null,
+    assetBrowser: null,
+    workflowBrowser: null,
+    assetsBaseUri: '',
+    templateCheck: null,
+    exportBusy: false,
+    nodeSearch: { query: '', ids: [], index: -1 },
+    clipboard: null,
+    clipboardLayout: null,
+    mouse: null,
   };
+  // 双击检测（原生 dblclick 会被 mousedown 后的 render() 重建 DOM 破坏，改用两次按下计时）
+  let lastClickTime = 0;
+  let lastClickNode = '';
+  let lastClickX = -1;
+  let lastClickY = -1;
 
   const $ = (id) => document.getElementById(id);
   const graph = $('graph');
@@ -208,6 +230,100 @@
     });
   }
 
+  /** 收集选中节点及其全部子树（排除 root），返回 id 集合。 */
+  function selectionTreeIds() {
+    const ids = new Set();
+    for (const id of state.selected) {
+      if (id === state.raw.root || (nodeById(id)?.type === 'root')) continue;
+      ids.add(id);
+      for (const descendant of descendants(id)) ids.add(descendant);
+    }
+    return ids;
+  }
+
+  /** 把选中节点及其子树复制到内部剪贴板。 */
+  function copySelection() {
+    const ids = selectionTreeIds();
+    if (ids.size === 0) { toast('请先选择要复制的节点', true); return false; }
+    state.clipboard = clone(nodes().filter((node) => ids.has(node.id)));
+    state.clipboardLayout = {};
+    for (const id of ids) if (layout()[id]) state.clipboardLayout[id] = { ...layout()[id] };
+    toast(`已复制 ${ids.size} 个节点`);
+    return true;
+  }
+
+  /** 剪切：复制选中子树后从图中移除。 */
+  function cutSelection() {
+    const ids = selectionTreeIds();
+    if (ids.size === 0) { toast('请先选择要剪切的节点', true); return false; }
+    state.clipboard = clone(nodes().filter((node) => ids.has(node.id)));
+    state.clipboardLayout = {};
+    for (const id of ids) if (layout()[id]) state.clipboardLayout[id] = { ...layout()[id] };
+    mutate(() => {
+      state.raw.nodes = nodes().filter((node) => !ids.has(node.id));
+      for (const node of nodes()) if (Array.isArray(node.children)) node.children = node.children.filter((id) => !ids.has(id));
+      for (const id of ids) delete layout()[id];
+      state.selected.clear();
+    });
+    toast(`已剪切 ${ids.size} 个节点`);
+    return true;
+  }
+
+  /** 粘贴剪贴板内容：生成新 ID、重映射 children/refs、放置到目标位置（默认鼠标处）。 */
+  function pasteClipboard(at) {
+    if (!state.clipboard || state.clipboard.length === 0) { toast('剪贴板为空', true); return false; }
+    const used = new Set(nodes().map((node) => node.id));
+    const idMap = new Map();
+    for (const src of state.clipboard) {
+      const prefix = (src.id || 'node').replace(/_\d+$/, '') || 'node';
+      let index = 1;
+      let candidate = `${prefix}_${index}`;
+      while (used.has(candidate)) { index += 1; candidate = `${prefix}_${index}`; }
+      used.add(candidate);
+      idMap.set(src.id, candidate);
+    }
+    // 以剪贴板内容的包围盒左上角为锚点，把整组移动到目标位置。
+    const positions = Object.values(state.clipboardLayout || {});
+    let minX = 0;
+    let minY = 0;
+    if (positions.length) {
+      minX = Math.min(...positions.map((p) => p.x));
+      minY = Math.min(...positions.map((p) => p.y));
+    }
+    const target = at || state.mouse || null;
+    let dx = 40;
+    let dy = 40;
+    if (target && Number.isFinite(target.x) && Number.isFinite(target.y)) {
+      dx = Math.round(target.x - minX);
+      dy = Math.round(target.y - minY);
+    }
+    mutate(() => {
+      const created = [];
+      const remap = (item) => {
+        if (Array.isArray(item)) return item.forEach(remap);
+        if (!item || typeof item !== 'object') return;
+        if (typeof item.ref === 'string') {
+          for (const [oldId, newId] of idMap) item.ref = item.ref.replace(`nodes.${oldId}.output.`, `nodes.${newId}.output.`);
+        }
+        Object.values(item).forEach(remap);
+      };
+      for (const src of state.clipboard) {
+        const copy = clone(src);
+        copy.id = idMap.get(src.id);
+        if (Array.isArray(copy.children)) copy.children = copy.children.filter((id) => idMap.has(id)).map((id) => idMap.get(id));
+        remap(copy);
+        const base = state.clipboardLayout[src.id] || { x: 0, y: 0 };
+        layout()[copy.id] = { x: base.x + dx, y: base.y + dy };
+        nodes().push(copy);
+        created.push(copy.id);
+      }
+      state.selected = new Set(created);
+      state.inspector = 'node';
+    });
+    toast(`已粘贴 ${idMap.size} 个节点`);
+    return true;
+  }
+
   function autoLayout(record = true) {
     const run = () => {
       const map = new Map(nodes().map((node) => [node.id, node]));
@@ -331,11 +447,15 @@
     const x2 = to.x + NODE_W / 2;
     const y2 = to.y;
     const selected = state.selectedEdge && state.selectedEdge.parent === parent.id && state.selectedEdge.child === childId;
-    const group = svgEl('g', { class: `edge${selected ? ' selected' : ''}`, 'data-parent': parent.id, 'data-child': childId }, layer);
+    const run = state.run.get(childId);
+    const runStatus = run && ['running', 'succeeded', 'matched', 'failed', 'not_matched', 'branch_miss', 'cancelled'].includes(run.status) ? run.status : '';
+    const group = svgEl('g', { class: `edge${selected ? ' selected' : ''}${runStatus ? ` run-${runStatus}` : ''}`, 'data-parent': parent.id, 'data-child': childId }, layer);
     group.dataset.parent = parent.id;
     group.dataset.child = childId;
     const path = svgEl('path', { class: 'edge-hit', d: bezier(x1, y1, x2, y2) }, group);
-    svgEl('path', { class: 'edge-line', d: bezier(x1, y1, x2, y2) }, group);
+    const edgePath = bezier(x1, y1, x2, y2);
+    svgEl('path', { class: 'edge-line', d: edgePath }, group);
+    svgEl('path', { class: 'edge-flow', d: edgePath }, group);
     const midY = (y1 + y2) / 2;
     svgEl('circle', { class: 'edge-order-bg', cx: (x1 + x2) / 2, cy: midY, r: 10 }, group);
     svgEl('text', { class: 'edge-order', x: (x1 + x2) / 2, y: midY + 4, 'text-anchor': 'middle' }, group).textContent = String(order + 1);
@@ -345,6 +465,7 @@
       event.stopPropagation();
       state.selected.clear();
       state.selectedEdge = { parent: parent.id, child: childId };
+      state.inspector = 'node';
       render();
     });
     group.addEventListener('dblclick', (event) => {
@@ -374,11 +495,53 @@
     svgEl('path', { class: classes, d: bezier(pos.x + NODE_W / 2, pos.y + nodeHeight(parent), state.connect.x, state.connect.y) }, layer);
   }
 
+  function templatePreview(node) {
+    if (!node || node.type !== 'task' || !['vision.match_template', 'vision.wait_template'].includes(node.action)) return null;
+    let value = node.params && node.params.template;
+    if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.')) {
+      const definition = state.raw && state.raw.blackboard && state.raw.blackboard[value.ref.slice('blackboard.'.length)];
+      value = definition && typeof definition === 'object' && Object.prototype.hasOwnProperty.call(definition, 'default')
+        ? definition.default
+        : '';
+    }
+    if (typeof value !== 'string' || !state.assetsBaseUri) return null;
+    const path = value.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+    const parts = path.split('/');
+    if (parts[0] !== 'assets' || parts.length < 2 || parts.some((part) => !part || part === '.' || part === '..')) return null;
+    return {
+      path,
+      uri: `${state.assetsBaseUri}${parts.slice(1).map((part) => encodeURIComponent(part)).join('/')}`,
+    };
+  }
+
+  function renderNodePreview(group, preview, className, preserveAspectRatio, onOpen) {
+    const frame = svgEl('rect', { class: 'node-preview-frame', x: PREVIEW.x, y: PREVIEW.y, width: PREVIEW.width, height: PREVIEW.height, rx: 3 }, group);
+    const image = svgEl('image', {
+      class: `node-preview-image ${className}`,
+      href: preview.uri,
+      x: PREVIEW.x + 1,
+      y: PREVIEW.y + 1,
+      width: PREVIEW.width - 2,
+      height: PREVIEW.height - 2,
+      preserveAspectRatio,
+      'data-template-path': preview.path || undefined,
+    }, group);
+    const stop = (event) => event.stopPropagation();
+    image.addEventListener('mousedown', stop);
+    image.addEventListener('pointerdown', stop);
+    image.addEventListener('click', (event) => { event.stopPropagation(); openLightbox(onOpen || preview.uri); });
+    image.addEventListener('error', () => { image.remove(); frame.remove(); });
+    const title = svgEl('title', {}, image); title.textContent = preview.path || '运行截图';
+  }
+
   function renderNode(layer, node) {
     const pos = position(node);
     const height = nodeHeight(node);
     const run = state.run.get(node.id);
+    const subRef = subWorkflowRef(node);
+    const template = templatePreview(node);
     const classes = ['node', `type-${node.type}`];
+    if (subRef) classes.push('node-subworkflow');
     if (state.selected.has(node.id)) classes.push('selected');
     if (state.connect && state.connect.hover === node.id) classes.push('connect-hover');
     if (run && run.status) classes.push(`run-${run.status}`);
@@ -389,15 +552,23 @@
     svgEl('rect', { class: 'node-head-square', y: 26, width: NODE_W, height: 8 }, group);
     svgEl('text', { class: 'node-icon', x: 13, y: 21 }, group).textContent = TYPE_ICON[node.type] || '•';
     svgEl('text', { class: 'node-type', x: 34, y: 20 }, group).textContent = TYPE_LABEL[node.type] || node.type;
-    if (run && run.status) svgEl('circle', { class: 'run-dot', cx: NODE_W - 14, cy: 16, r: 5 }, group);
-    svgEl('text', { class: 'node-name', x: 14, y: 53 }, group).textContent = node.name || node.id;
-    const subtitle = node.type === 'task' ? (node.action || '未选择 Action') : compositeSubtitle(node);
-    svgEl('text', { class: 'node-subtitle', x: 14, y: 72 }, group).textContent = subtitle;
-    if (run && Number.isFinite(run.duration)) svgEl('text', { class: 'node-duration', x: NODE_W - 12, y: 72, 'text-anchor': 'end' }, group).textContent = `${run.duration} ms`;
-    if (run && run.thumbnail) {
-      const image = svgEl('image', { class: 'step-thumb', href: run.thumbnail.startsWith('data:') ? run.thumbnail : `data:image/png;base64,${run.thumbnail}`, x: NODE_W - 62, y: 38, width: 48, height: 28, preserveAspectRatio: 'xMidYMid slice' }, group);
-      image.addEventListener('click', (event) => { event.stopPropagation(); openLightbox(run.screenshot || image.getAttribute('href')); });
+    if (run && run.status) {
+      svgEl('rect', { class: 'run-badge', x: NODE_W - 72, y: 7, width: 62, height: 18, rx: 3 }, group);
+      svgEl('circle', { class: 'run-dot', cx: NODE_W - 63, cy: 16, r: 4 }, group);
+      svgEl('text', { class: 'run-label', x: NODE_W - 15, y: 20, 'text-anchor': 'end' }, group).textContent = RUN_LABEL[run.status] || run.status;
+      const title = svgEl('title', {}, group);
+      title.textContent = [RUN_LABEL[run.status] || run.status, run.error].filter(Boolean).join('：');
     }
+    svgEl('text', { class: 'node-name', x: 14, y: 53 }, group).textContent = node.name || node.id;
+    const subtitle = node.type === 'task'
+      ? (subRef ? `⇢ ${subRef.split(/[\\/]/).pop()}` : (node.action || '未选择 Action'))
+      : compositeSubtitle(node);
+    svgEl('text', { class: 'node-subtitle', x: 14, y: 72 }, group).textContent = subtitle;
+    if (run && run.thumbnail) {
+      const uri = run.thumbnail.startsWith('data:') ? run.thumbnail : `data:image/png;base64,${run.thumbnail}`;
+      renderNodePreview(group, { uri, path: '' }, 'step-thumb', 'xMidYMid slice', run.screenshot || uri);
+    } else if (template) renderNodePreview(group, template, 'template-thumb', 'xMidYMid meet');
+    else if (run && Number.isFinite(run.duration)) svgEl('text', { class: 'node-duration', x: NODE_W - 12, y: 72, 'text-anchor': 'end' }, group).textContent = `${run.duration} ms`;
     const decorators = Array.isArray(node.decorators) ? node.decorators : [];
     decorators.forEach((decorator, index) => {
       const y = BASE_H + index * DECO_H;
@@ -413,8 +584,59 @@
       const output = svgEl('circle', { class: 'port port-out', cx: NODE_W / 2, cy: height, r: PORT_R, 'data-node': node.id }, group);
       output.addEventListener('pointerdown', (event) => startConnection(event, node.id));
     }
-    body.addEventListener('mousedown', (event) => startNodeDrag(event, node.id));
-    body.addEventListener('dblclick', () => { state.selected = new Set([node.id]); state.inspector = 'node'; render(); });
+    body.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) { startNodeDrag(event, node.id); return; }
+      const now = Date.now();
+      const sameNode = lastClickNode === node.id;
+      const nearby = Math.abs(event.clientX - lastClickX) < 8 && Math.abs(event.clientY - lastClickY) < 8;
+      const isDouble = now - lastClickTime < 300 && sameNode && nearby;
+      lastClickTime = now; lastClickNode = node.id; lastClickX = event.clientX; lastClickY = event.clientY;
+      if (isDouble) {
+        event.preventDefault(); event.stopPropagation();
+        if (subRef) { requestOpenSubWorkflow(node.id); return; }
+        state.selected = new Set([node.id]); state.inspector = 'node'; render();
+        return;
+      }
+      startNodeDrag(event, node.id);
+    });
+    if (subRef) {
+      // 子流程节点右键菜单：直接进入子工作流视图
+      body.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        state.selected = new Set([node.id]); render();
+        showMenu(event.clientX, event.clientY, [
+          { label: '进入子工作流视图', run: () => requestOpenSubWorkflow(node.id) },
+          'separator',
+          { label: '复制 (Ctrl+C)', run: () => copySelection() },
+          { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
+          { label: '删除节点', danger: true, run: () => deleteSelection() },
+        ]);
+      });
+    }
+  }
+
+  /** 若节点是子流程 task（workflow.run），返回子工作流引用，否则返回空字符串。 */
+  function subWorkflowRef(node) {
+    if (!node || node.type !== 'task' || node.action !== 'workflow.run') return '';
+    const value = node.params && typeof node.params.workflow === 'string' ? node.params.workflow : '';
+    return value.trim();
+  }
+
+  /** 请求打开子工作流视图；当前有未保存修改时先询问保存/放弃。 */
+  function requestOpenSubWorkflow(nodeId) {
+    const doOpen = (saveText) => vscode.postMessage({ type: 'openSubWorkflow', nodeId, saveText });
+    if (state.dirty) {
+      const rect = $('workflow-select').getBoundingClientRect();
+      showMenu(rect.left, rect.bottom + 4, [
+        { label: '保存并进入子工作流', run: () => doOpen(JSON.stringify(state.raw, null, 2) + '\n') },
+        { label: '放弃修改并进入', run: () => doOpen(undefined) },
+        'separator',
+        { label: '取消', run: () => {} },
+      ]);
+    } else {
+      doOpen(undefined);
+    }
   }
 
   function compositeSubtitle(node) {
@@ -542,6 +764,7 @@
       const point = worldPoint(event);
       if (!event.shiftKey) state.selected.clear();
       state.selectedEdge = null;
+      state.inspector = 'node';
       state.marquee = { x1: point.x, y1: point.y, x2: point.x, y2: point.y, additive: event.shiftKey };
       state.drag = { kind: 'marquee' };
       render();
@@ -758,6 +981,26 @@
     $('btn-run').title = `在 ${state.instanceId} 执行当前工作流`;
   }
 
+  function renderWorkflowPicker() {
+    const picker = $('workflow-select');
+    picker.innerHTML = '';
+    const workflows = Array.isArray(state.workflows) ? state.workflows : [];
+    const all = workflows.slice();
+    if (state.docUri && !all.some((item) => item.uri === state.docUri)) {
+      // 当前文件不在已发现列表（如新建未保存）时仍保留为可切换项。
+      const current = state.documentName || '当前工作流';
+      all.unshift({ uri: state.docUri, name: current, rel: '' });
+    }
+    for (const item of all) {
+      const option = el('option', '', item.name);
+      option.value = item.uri;
+      if (item.rel) option.title = item.rel;
+      picker.appendChild(option);
+    }
+    picker.value = state.docUri || '';
+    picker.title = '切换工作流（无需重新打开）';
+  }
+
   function checkbox(value, onChange) {
     const input = el('input'); input.type = 'checkbox'; input.checked = !!value;
     input.addEventListener('change', () => onChange(input.checked));
@@ -766,17 +1009,25 @@
 
   function renderInspector() {
     if (!state.raw) return;
+    const selected = [...state.selected];
+    const selectedNode = selected.length === 1 ? nodeById(selected[0]) : null;
+    const open = state.inspector === 'workflow'
+      || state.inspector === 'blackboard'
+      || Boolean(state.selectedEdge)
+      || Boolean(selectedNode);
+    $('inspector').classList.toggle('hidden', !open);
+    $('editor-main').classList.toggle('inspector-open', open);
+    if (!open) return;
     if (state.inspector === 'workflow') { renderWorkflowInspector(); return; }
     if (state.inspector === 'blackboard') { renderBlackboardInspector(); return; }
     if (state.selectedEdge) { renderEdgeInspector(); return; }
-    const selected = [...state.selected];
     if (selected.length !== 1) {
       $('inspector-title').textContent = selected.length ? `${selected.length} 个节点` : '详细信息';
       $('inspector-empty').textContent = selected.length ? '可拖动或按 Delete 删除所选节点' : '选择一个节点';
       $('inspector-empty').classList.remove('hidden'); $('inspector-body').classList.add('hidden');
       return;
     }
-    const node = nodeById(selected[0]);
+    const node = selectedNode;
     if (!node) return;
     const body = clearInspector(node.name || node.id);
     section(body, '节点');
@@ -854,8 +1105,172 @@
     return '';
   }
 
-  function allRefs() {
-    return [...(state.refs.blackboard || []), ...(state.refs.nodes || [])];
+  function definitionSchema(definition) {
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return {};
+    const type = definition.type;
+    if (type === 'asset' || type === 'path') return { type: 'string' };
+    if (type === 'rect') return { type: 'array', items: { type: 'integer' } };
+    if (type === 'any') return {};
+    const schema = typeof type === 'string' ? { type } : {};
+    if (type === 'object' && definition.properties && typeof definition.properties === 'object') {
+      schema.properties = Object.fromEntries(Object.entries(definition.properties).map(([key, child]) => [key, definitionSchema(child)]));
+    }
+    if (type === 'array') schema.items = definitionSchema(definition.items || {});
+    return schema;
+  }
+
+  function schemaTypes(schema) {
+    if (!schema || typeof schema !== 'object') return new Set();
+    if (typeof schema.type === 'string') return new Set([schema.type]);
+    if (Array.isArray(schema.type)) return new Set(schema.type.filter((item) => typeof item === 'string'));
+    return new Set();
+  }
+
+  function compatibleRefType(expected, actual) {
+    const wanted = schemaTypes(expected);
+    const offered = schemaTypes(actual);
+    if (!wanted.size || !offered.size) return true;
+    if (wanted.has('number') && offered.has('integer')) offered.add('number');
+    return [...wanted].some((type) => offered.has(type));
+  }
+
+  function appendNestedRefs(prefix, schema, out, depth = 0) {
+    if (!schema || typeof schema !== 'object' || depth >= 12) return;
+    if (schema.type === 'object' && schema.properties && typeof schema.properties === 'object') {
+      for (const [key, child] of Object.entries(schema.properties)) {
+        if (!child || typeof child !== 'object' || Array.isArray(child)) continue;
+        const ref = `${prefix}.${key}`;
+        out.push({ ref, schema: child });
+        appendNestedRefs(ref, child, out, depth + 1);
+      }
+    }
+    if (schema.type === 'array') {
+      const item = Array.isArray(schema.prefixItems) && schema.prefixItems[0] && typeof schema.prefixItems[0] === 'object'
+        ? schema.prefixItems[0]
+        : schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)
+          ? schema.items
+          : {};
+      const ref = `${prefix}.0`;
+      out.push({ ref, schema: item });
+      appendNestedRefs(ref, item, out, depth + 1);
+    }
+  }
+
+  function guaranteedOutputIds(nodeId, map, visiting = new Set()) {
+    if (visiting.has(nodeId)) return new Set();
+    const node = map.get(nodeId);
+    if (!node) return new Set();
+    if (node.type === 'task') return node.action ? new Set([node.id]) : new Set();
+    const nested = new Set(visiting); nested.add(nodeId);
+    if (node.type === 'root' && Array.isArray(node.children) && node.children.length === 1) {
+      return guaranteedOutputIds(node.children[0], map, nested);
+    }
+    if (node.type === 'sequence') {
+      const result = new Set();
+      for (const child of node.children || []) for (const id of guaranteedOutputIds(child, map, nested)) result.add(id);
+      return result;
+    }
+    if (node.type === 'selector' && Array.isArray(node.children) && node.children.length === 1) {
+      return guaranteedOutputIds(node.children[0], map, nested);
+    }
+    if (node.type === 'simple_parallel' && Array.isArray(node.children) && node.children.length === 2) {
+      return guaranteedOutputIds(node.children[0], map, nested);
+    }
+    return new Set();
+  }
+
+  function availableOutputIds(targetNodeId) {
+    const map = new Map(nodes().filter((node) => node && node.id).map((node) => [node.id, node]));
+    const parents = new Map();
+    for (const parent of nodes()) {
+      for (const child of parent.children || []) {
+        const entries = parents.get(child) || [];
+        entries.push(parent.id);
+        parents.set(child, entries);
+      }
+    }
+    const result = new Set();
+    const visited = new Set();
+    let current = targetNodeId;
+    while (!visited.has(current)) {
+      visited.add(current);
+      const parentIds = parents.get(current) || [];
+      if (parentIds.length !== 1) break;
+      const parent = map.get(parentIds[0]);
+      if (!parent) break;
+      if (parent.type === 'sequence') {
+        const index = (parent.children || []).indexOf(current);
+        for (const sibling of (parent.children || []).slice(0, Math.max(0, index))) {
+          for (const id of guaranteedOutputIds(sibling, map)) result.add(id);
+        }
+      }
+      current = parent.id;
+    }
+    return result;
+  }
+
+  function possibleOutputIdsInSubtree(nodeId, map, visiting = new Set()) {
+    if (visiting.has(nodeId)) return new Set();
+    const node = map.get(nodeId);
+    if (!node) return new Set();
+    if (node.type === 'task') return node.action ? new Set([node.id]) : new Set();
+    const nested = new Set(visiting); nested.add(nodeId);
+    const result = new Set();
+    for (const child of node.children || []) for (const id of possibleOutputIdsInSubtree(child, map, nested)) result.add(id);
+    return result;
+  }
+
+  function possiblyAvailableOutputIds(targetNodeId) {
+    const map = new Map(nodes().filter((node) => node && node.id).map((node) => [node.id, node]));
+    const parents = new Map();
+    for (const parent of nodes()) {
+      for (const child of parent.children || []) {
+        const entries = parents.get(child) || [];
+        entries.push(parent.id);
+        parents.set(child, entries);
+      }
+    }
+    const result = availableOutputIds(targetNodeId);
+    const visited = new Set();
+    let current = targetNodeId;
+    while (!visited.has(current)) {
+      visited.add(current);
+      const parentIds = parents.get(current) || [];
+      if (parentIds.length !== 1) break;
+      const parent = map.get(parentIds[0]);
+      if (!parent) break;
+      if (parent.type === 'sequence' || parent.type === 'selector') {
+        const index = (parent.children || []).indexOf(current);
+        for (const sibling of (parent.children || []).slice(0, Math.max(0, index))) {
+          for (const id of possibleOutputIdsInSubtree(sibling, map)) result.add(id);
+        }
+      }
+      current = parent.id;
+    }
+    return result;
+  }
+
+  function allRefs(node, definition, includePossible = false) {
+    const expected = definition ? definitionSchema(definition) : undefined;
+    const candidates = [];
+    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
+      ? state.raw.blackboard
+      : {};
+    for (const [name, rawDefinition] of Object.entries(blackboard)) {
+      const schema = definitionSchema(rawDefinition);
+      const ref = `blackboard.${name}`;
+      candidates.push({ ref, schema });
+      appendNestedRefs(ref, schema, candidates);
+    }
+    const available = node
+      ? includePossible ? possiblyAvailableOutputIds(node.id) : availableOutputIds(node.id)
+      : null;
+    for (const source of nodes()) {
+      if (!source || !source.id || !source.action || (available && !available.has(source.id))) continue;
+      const spec = catalogByName(source.action);
+      if (spec && spec.outputSchema) appendNestedRefs(`nodes.${source.id}.output`, spec.outputSchema, candidates);
+    }
+    return candidates.filter((candidate) => compatibleRefType(expected, candidate.schema)).map((candidate) => candidate.ref);
   }
 
   function renderParameter(body, node, name, definition) {
@@ -868,6 +1283,17 @@
       const toggleLabel = el('label', 'parameter-enable'); toggleLabel.appendChild(enabled); toggleLabel.appendChild(el('span', '', '启用'));
       heading.appendChild(toggleLabel);
     }
+    if (name === 'threshold' && ['vision.match_template', 'vision.wait_template'].includes(node.action)) {
+      const check = el('button', 'parameter-check', '检查'); check.title = '获取当前画面并执行模板匹配';
+      let pointerPending = false;
+      check.addEventListener('mousedown', (event) => {
+        if (event.button !== 0) return;
+        pointerPending = true;
+        setTimeout(() => { if (pointerPending) { pointerPending = false; requestTemplateCheck(node.id); } }, 0);
+      });
+      check.addEventListener('click', () => { if (!pointerPending) requestTemplateCheck(node.id); });
+      heading.appendChild(check);
+    }
     block.appendChild(heading);
     if (definition.description) block.appendChild(el('div', 'field-hint', definition.description));
     if (!exists && !definition.required && definition.default === undefined) { body.appendChild(block); return; }
@@ -878,14 +1304,17 @@
         : defaultValue(definition);
     const bound = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && Object.keys(value).length === 1;
     const mode = selectInput(bound ? 'binding' : 'literal', [{ value: 'literal', label: '固定值' }, { value: 'binding', label: '引用' }], (next) => mutate(() => {
-      node.params[name] = next === 'binding' ? { ref: allRefs()[0] || 'blackboard.key' } : defaultValue(definition);
+      node.params[name] = next === 'binding' ? { ref: allRefs(node, definition)[0] || '' } : defaultValue(definition);
     }), 'value-mode');
     block.appendChild(mode);
     if (bound) {
-      const refs = allRefs();
+      const refs = allRefs(node, definition);
       const ref = value.ref;
       const options = refs.includes(ref) ? refs : [ref, ...refs];
-      block.appendChild(selectInput(ref, options.map((item) => ({ value: item, label: item })), (next) => mutate(() => { node.params[name] = { ref: next }; }), 'full'));
+      block.appendChild(selectInput(ref, options.map((item) => ({
+        value: item,
+        label: item || '无可用引用',
+      })), (next) => mutate(() => { node.params[name] = { ref: next }; }), 'full'));
     } else {
       block.appendChild(literalControl(node, name, definition, value));
     }
@@ -914,9 +1343,13 @@
       return area;
     }
     const shell = el('div', 'inline-control');
-    shell.appendChild(textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : '' }));
+    const workflowParameter = node.action === 'workflow.run' && name === 'workflow';
+    shell.appendChild(textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : workflowParameter ? '_folder/workflow.json' : '' }));
     if (definition.type === 'asset') {
+      const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片'; browse.addEventListener('click', () => openAssetBrowser(node.id, name, value)); shell.appendChild(browse);
       const pick = el('button', '', '截取'); pick.addEventListener('click', () => requestRoi(node.id, name, 'asset')); shell.appendChild(pick);
+    } else if (workflowParameter) {
+      const browse = el('button', '', '浏览'); browse.title = '浏览 workflows 中的脚本'; browse.addEventListener('click', () => openWorkflowBrowser(node.id, name, value)); shell.appendChild(browse);
     }
     return shell;
   }
@@ -990,19 +1423,23 @@
     const choices = ['literal', 'exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'];
     shell.appendChild(selectInput(op, choices.map((value) => ({ value, label: value.toUpperCase() })), (next) => mutate(() => {
       if (next === 'literal') decorator.expression = true;
-      else if (next === 'exists') decorator.expression = { exists: { ref: allRefs()[0] || 'blackboard.key' } };
+      else if (next === 'exists') decorator.expression = { exists: { ref: allRefs(node, undefined, true)[0] || '' } };
       else if (next === 'and' || next === 'or') decorator.expression = { [next]: [true, true] };
       else if (next === 'not') decorator.expression = { not: true };
-      else decorator.expression = { [next]: [{ ref: allRefs()[0] || 'blackboard.key' }, null] };
+      else decorator.expression = { [next]: [{ ref: allRefs(node)[0] || '' }, null] };
     }), 'when-op'));
     if (op === 'literal') shell.appendChild(checkbox(!!expression, (value) => mutate(() => { decorator.expression = value; })));
     else if (op === 'exists') {
       const ref = expression.exists && expression.exists.ref;
-      shell.appendChild(selectInput(ref || '', allRefs().map((value) => ({ value, label: value })), (value) => mutate(() => { decorator.expression = { exists: { ref: value } }; }), 'full'));
+      const refs = allRefs(node, undefined, true);
+      const options = ref && !refs.includes(ref) ? [ref, ...refs] : refs;
+      shell.appendChild(selectInput(ref || '', (options.length ? options : ['']).map((value) => ({ value, label: value || '无可用引用' })), (value) => mutate(() => { decorator.expression = { exists: { ref: value } }; }), 'full'));
     } else if (['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'].includes(op)) {
-      const operands = Array.isArray(expression[op]) ? expression[op] : [{ ref: allRefs()[0] || 'blackboard.key' }, null];
-      const left = operands[0] && operands[0].ref ? operands[0].ref : allRefs()[0] || 'blackboard.key';
-      shell.appendChild(selectInput(left, allRefs().map((value) => ({ value, label: value })), (value) => mutate(() => { decorator.expression[op][0] = { ref: value }; }), 'full'));
+      const refs = allRefs(node);
+      const operands = Array.isArray(expression[op]) ? expression[op] : [{ ref: refs[0] || '' }, null];
+      const left = operands[0] && operands[0].ref ? operands[0].ref : refs[0] || '';
+      const options = left && !refs.includes(left) ? [left, ...refs] : refs;
+      shell.appendChild(selectInput(left, (options.length ? options : ['']).map((value) => ({ value, label: value || '无可用引用' })), (value) => mutate(() => { decorator.expression[op][0] = { ref: value }; }), 'full'));
       const right = textInput(JSON.stringify(operands[1]), (value) => { try { mutate(() => { decorator.expression[op][1] = JSON.parse(value); }); } catch { toast('比较值不是有效 JSON', true); } });
       shell.appendChild(right);
     } else {
@@ -1028,6 +1465,12 @@
     section(body, '标识');
     field(body, 'ID').appendChild(textInput(state.raw.id || '', (value) => mutate(() => { state.raw.id = value.trim(); })));
     field(body, '版本').appendChild(textInput(state.raw.version || '3.0.0', (value) => mutate(() => { state.raw.version = value.trim(); })));
+    const descriptionRow = field(body, '描述', '用于说明脚本用途，并显示在子工作流选择器中');
+    const description = el('textarea', 'workflow-description-input');
+    description.value = typeof state.raw.description === 'string' ? state.raw.description : '';
+    description.placeholder = '说明这个工作流的用途';
+    description.addEventListener('change', () => mutate(() => { state.raw.description = description.value.trim(); }));
+    descriptionRow.appendChild(description);
     section(body, '运行限制');
     if (!state.raw.limits) state.raw.limits = { timeout_seconds: 300, max_steps: 1000 };
     field(body, '总超时（秒）').appendChild(textInput(state.raw.limits.timeout_seconds || 300, (value) => mutate(() => { state.raw.limits.timeout_seconds = Math.max(0.001, parseFloat(value || '300')); }), { type: 'number', min: 0.001 }));
@@ -1113,14 +1556,11 @@
   }
 
   function setExportBusy(value) {
-    const button = $('btn-export-image');
-    button.disabled = value;
-    button.textContent = value ? '…' : '⇩';
+    state.exportBusy = value;
   }
 
   async function exportFullCanvasImage() {
-    const button = $('btn-export-image');
-    if (!state.raw || button.disabled) return;
+    if (!state.raw || state.exportBusy) return;
     setExportBusy(true);
     try {
       const padding = 56;
@@ -1138,7 +1578,7 @@
       const world = exported.querySelector('.graph-world');
       if (!world) throw new Error('工作流画布尚未准备好');
       world.setAttribute('transform', `translate(${padding - box.minX},${padding - box.minY})`);
-      exported.querySelectorAll('.connection-preview, .marquee, .step-thumb, .edge-hit, .edge-rewire').forEach((element) => element.remove());
+      exported.querySelectorAll('.connection-preview, .marquee, .node-preview-frame, .node-preview-image, .edge-hit, .edge-rewire').forEach((element) => element.remove());
 
       const serialized = new XMLSerializer().serializeToString(exported);
       const image = await loadSvgImage(encodeSvgDataUrl(serialized));
@@ -1169,7 +1609,7 @@
         context.stroke();
       }
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const workflowName = String(state.raw.id || $('file-label').textContent || 'workflow')
+      const workflowName = String(state.raw.id || state.documentName || 'workflow')
         .replace(/\.json$/i, '')
         .replace(/[\\/\x00-\x1f<>:"|?*]/g, '_')
         .trim() || 'workflow';
@@ -1188,16 +1628,440 @@
     }
   }
 
-  function requestRoi(nodeId, key, mode) {
+  function requestRoi(nodeId, key, mode, options = {}) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    state.roi = { requestId, nodeId, key, mode };
-    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
+    state.roi = { requestId, nodeId, key, mode, ...options };
+    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, targetPath: options.targetPath, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
+  }
+
+  function templateCheckParam(node, name, fallback) {
+    const definition = catalogByName(node.action)?.parameters?.[name] || {};
+    let value = Object.prototype.hasOwnProperty.call(node.params || {}, name)
+      ? node.params[name]
+      : definition.default !== undefined ? clone(definition.default) : fallback;
+    if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') {
+      const prefix = 'blackboard.';
+      if (value.ref.startsWith(prefix)) {
+        const entry = state.raw.blackboard && state.raw.blackboard[value.ref.slice(prefix.length)];
+        if (entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'default')) value = entry.default;
+        else if (entry !== undefined && (typeof entry !== 'object' || entry === null)) value = entry;
+        else throw new Error(`${name} 引用没有可用的默认值`);
+      } else {
+        throw new Error(`${name} 使用了运行时引用，无法即时检查`);
+      }
+    }
+    return value;
+  }
+
+  function requestTemplateCheck(nodeId) {
+    const node = nodeById(nodeId);
+    if (!node) return;
+    try {
+      const template = templateCheckParam(node, 'template', '');
+      const roi = templateCheckParam(node, 'roi', null);
+      const threshold = Number(templateCheckParam(node, 'threshold', 0.85));
+      const maxResults = Number(templateCheckParam(node, 'max_results', 20));
+      const scaleSearch = Boolean(templateCheckParam(node, 'scale_search', false));
+      if (typeof template !== 'string' || !template.trim()) throw new Error('请先选择模板图片');
+      if (roi !== null && (!Array.isArray(roi) || roi.length !== 4 || !roi.every((value) => Number.isInteger(value)))) throw new Error('ROI 必须是 [x, y, width, height]');
+      if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new Error('匹配阈值必须在 0 到 1 之间');
+      if (!Number.isInteger(maxResults) || maxResults < 1) throw new Error('最大匹配数必须为正整数');
+      const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      state.templateCheck = { requestId, nodeId, template: template.trim(), threshold, status: 'loading', result: null, error: '' };
+      $('template-check').classList.remove('hidden');
+      renderTemplateCheck();
+      vscode.postMessage({
+        type: 'checkTemplate',
+        requestId,
+        nodeId,
+        template: template.trim(),
+        roi,
+        threshold,
+        maxResults,
+        scaleSearch,
+        instanceId: state.instanceId,
+        referenceResolution: state.raw.resolution || [1920, 1080],
+      });
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  function closeTemplateCheck() {
+    const overlay = $('template-check');
+    if (overlay) overlay.classList.add('hidden');
+    state.templateCheck = null;
+  }
+
+  function templateCheckBox(className, rect, width, height, label) {
+    const box = el('div', className);
+    box.style.left = `${Math.max(0, rect[0]) / width * 100}%`;
+    box.style.top = `${Math.max(0, rect[1]) / height * 100}%`;
+    box.style.width = `${Math.max(0, Math.min(width - rect[0], rect[2])) / width * 100}%`;
+    box.style.height = `${Math.max(0, Math.min(height - rect[1], rect[3])) / height * 100}%`;
+    box.appendChild(el('span', 'template-check-box-label', label));
+    return box;
+  }
+
+  function renderTemplateCheck() {
+    const check = state.templateCheck;
+    const overlay = $('template-check');
+    if (!check || !overlay) return;
+    overlay.innerHTML = '';
+    const dialog = el('div', 'template-check-dialog'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', '模板检查');
+    const head = el('div', 'template-check-head');
+    const heading = el('div', 'template-check-heading'); heading.appendChild(el('strong', '', '模板检查')); heading.appendChild(el('span', '', check.template));
+    const headActions = el('div', 'template-check-head-actions');
+    if (check.status !== 'loading') {
+      const refresh = el('button', 'icon-button', '↻'); refresh.title = '重新检查'; refresh.setAttribute('aria-label', '重新检查'); refresh.addEventListener('click', () => requestTemplateCheck(check.nodeId)); headActions.appendChild(refresh);
+    }
+    const close = el('button', 'icon-button', '×'); close.title = '关闭'; close.setAttribute('aria-label', '关闭'); close.addEventListener('click', closeTemplateCheck); headActions.appendChild(close);
+    head.appendChild(heading); head.appendChild(headActions); dialog.appendChild(head);
+
+    if (check.status === 'loading') {
+      dialog.appendChild(el('div', 'template-check-status', '正在获取当前画面并匹配…'));
+      overlay.appendChild(dialog);
+      return;
+    }
+    if (check.status === 'error') {
+      const status = el('div', 'template-check-status error', check.error || '模板检查失败'); dialog.appendChild(status);
+      overlay.appendChild(dialog);
+      return;
+    }
+
+    const result = check.result;
+    const matches = Array.isArray(result.matches) ? result.matches : [];
+    const summary = el('div', 'template-check-summary');
+    summary.appendChild(el('span', 'template-check-chip roi', result.roi[0] === 0 && result.roi[1] === 0 && result.roi[2] === result.width && result.roi[3] === result.height ? '全画面 ROI' : 'ROI'));
+    summary.appendChild(el('span', 'template-check-chip', `阈值 ${check.threshold.toFixed(3)}`));
+    summary.appendChild(el('span', `template-check-chip ${matches.length ? 'matched' : 'missed'}`, `命中 ${matches.length}`));
+    if (matches.length) summary.appendChild(el('span', 'template-check-chip matched', `最高 ${Math.max(...matches.map((item) => item.confidence)).toFixed(3)}`));
+    dialog.appendChild(summary);
+
+    const viewport = el('div', 'template-check-viewport');
+    const stage = el('div', 'template-check-stage'); stage.style.aspectRatio = `${result.width} / ${result.height}`;
+    const image = el('img'); image.src = result.dataUrl; image.alt = '当前实例画面'; stage.appendChild(image);
+    stage.appendChild(templateCheckBox('template-check-roi', result.roi, result.width, result.height, 'ROI'));
+    matches.forEach((match, index) => stage.appendChild(templateCheckBox(
+      'template-check-match',
+      [match.x, match.y, match.width, match.height],
+      result.width,
+      result.height,
+      `${index + 1}  ${match.confidence.toFixed(3)}`,
+    )));
+    viewport.appendChild(stage); dialog.appendChild(viewport);
+    const message = matches.length
+      ? `找到 ${matches.length} 个达到阈值的匹配结果`
+      : `未找到达到阈值 ${check.threshold.toFixed(3)} 的匹配结果`;
+    dialog.appendChild(el('div', `template-check-footer ${matches.length ? 'matched' : 'missed'}`, message));
+    overlay.appendChild(dialog);
+  }
+
+  function openAssetBrowser(nodeId, key, currentPath) {
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const normalized = typeof currentPath === 'string' ? currentPath.replace(/\\/g, '/') : '';
+    const slash = normalized.lastIndexOf('/');
+    state.assetBrowser = {
+      requestId,
+      nodeId,
+      key,
+      images: null,
+      folder: slash > 0 ? normalized.slice(0, slash) : 'assets',
+      query: '',
+      selectedPath: normalized,
+    };
+    $('asset-browser').classList.remove('hidden');
+    renderAssetBrowser();
+    vscode.postMessage({ type: 'listAssetImages', requestId });
+  }
+
+  function closeAssetBrowser() {
+    const overlay = $('asset-browser');
+    if (overlay) overlay.classList.add('hidden');
+    state.assetBrowser = null;
+  }
+
+  function assetFolders(images) {
+    const counts = new Map([['assets', 0]]);
+    for (const image of images) {
+      const parts = image.path.split('/');
+      for (let index = 1; index < parts.length; index += 1) {
+        const folder = parts.slice(0, index).join('/');
+        counts.set(folder, (counts.get(folder) || 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((left, right) => left[0].localeCompare(right[0], 'zh-CN'));
+  }
+
+  function applyAssetSelection(assetPath) {
+    const browser = state.assetBrowser;
+    if (!browser || !assetPath) return;
+    const node = nodeById(browser.nodeId);
+    if (!node) { closeAssetBrowser(); toast('目标节点已不存在', true); return; }
+    mutate(() => { node.params[browser.key] = assetPath; });
+    closeAssetBrowser();
+    toast('已选择模板');
+  }
+
+  function restoreAssetBrowserAfterRoi() {
+    if (!state.assetBrowser) return;
+    const overlay = $('asset-browser');
+    if (overlay) overlay.classList.remove('hidden');
+    renderAssetBrowser();
+  }
+
+  function recaptureAsset(assetPath) {
+    const browser = state.assetBrowser;
+    if (!browser || !assetPath) return;
+    if (!/\.(?:png|jpe?g|webp)$/i.test(assetPath)) {
+      toast('重新截取仅支持 PNG、JPG 和 WebP 模板', true);
+      return;
+    }
+    browser.selectedPath = assetPath;
+    $('asset-browser').classList.add('hidden');
+    requestRoi(browser.nodeId, browser.key, 'asset', { targetPath: assetPath, returnToAssetBrowser: true });
+  }
+
+  function renderAssetBrowser() {
+    const browser = state.assetBrowser;
+    const overlay = $('asset-browser');
+    if (!browser || !overlay) return;
+    overlay.innerHTML = '';
+
+    const dialog = el('div', 'asset-browser-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', '选择模板');
+    const head = el('div', 'asset-browser-head');
+    const title = el('div', 'asset-browser-title', '选择模板');
+    const close = el('button', 'icon-button', '×'); close.title = '关闭'; close.setAttribute('aria-label', '关闭'); close.addEventListener('click', closeAssetBrowser);
+    head.appendChild(title); head.appendChild(close); dialog.appendChild(head);
+
+    const toolbar = el('div', 'asset-browser-toolbar');
+    const search = el('input', 'asset-search'); search.type = 'search'; search.placeholder = '搜索图片名称或路径'; search.value = browser.query;
+    search.addEventListener('input', () => { browser.query = search.value; renderAssetBrowser(); const next = $('asset-browser').children[0]; if (next) { const input = next.children[1] && next.children[1].children[0]; if (input) { input.focus(); input.setSelectionRange?.(input.value.length, input.value.length); } } });
+    toolbar.appendChild(search);
+    const total = Array.isArray(browser.images) ? browser.images.length : 0;
+    toolbar.appendChild(el('span', 'asset-total', browser.images === null ? '正在读取…' : `${total} 张图片`));
+    dialog.appendChild(toolbar);
+
+    const content = el('div', 'asset-browser-content');
+    const folders = el('nav', 'asset-folders'); folders.setAttribute('aria-label', '资源文件夹');
+    const grid = el('div', 'asset-grid');
+    content.appendChild(folders); content.appendChild(grid); dialog.appendChild(content);
+
+    const footer = el('div', 'asset-browser-footer');
+    const selectedValue = el('div', 'asset-selected-path', browser.selectedPath || '未选择图片'); selectedValue.title = browser.selectedPath || '';
+    const cancel = el('button', '', '取消'); cancel.addEventListener('click', closeAssetBrowser);
+    const confirm = el('button', 'primary', '选择'); confirm.disabled = !browser.selectedPath; confirm.addEventListener('click', () => applyAssetSelection(browser.selectedPath));
+    const actions = el('div', 'asset-browser-actions'); actions.appendChild(cancel); actions.appendChild(confirm);
+    footer.appendChild(selectedValue); footer.appendChild(actions); dialog.appendChild(footer);
+    overlay.appendChild(dialog);
+
+    if (browser.images === null) {
+      grid.appendChild(el('div', 'asset-browser-status', '正在读取 assets 图片…'));
+      return;
+    }
+
+    const folderEntries = assetFolders(browser.images);
+    if (!folderEntries.some(([folder]) => folder === browser.folder)) browser.folder = 'assets';
+    for (const [folder, count] of folderEntries) {
+      const button = el('button', `asset-folder${folder === browser.folder ? ' selected' : ''}`);
+      button.style.paddingLeft = `${10 + Math.max(0, folder.split('/').length - 1) * 14}px`;
+      const label = el('span', 'asset-folder-name', folder === 'assets' ? '全部图片' : folder.slice(folder.lastIndexOf('/') + 1)); label.title = folder;
+      button.appendChild(label); button.appendChild(el('span', 'asset-folder-count', String(count)));
+      button.addEventListener('click', () => { browser.folder = folder; renderAssetBrowser(); });
+      folders.appendChild(button);
+    }
+
+    const query = browser.query.trim().toLocaleLowerCase('zh-CN');
+    const visible = browser.images.filter((image) => {
+      const inFolder = browser.folder === 'assets' || image.path.startsWith(`${browser.folder}/`);
+      return inFolder && (!query || image.path.toLocaleLowerCase('zh-CN').includes(query));
+    });
+    if (!visible.length) {
+      grid.appendChild(el('div', 'asset-browser-status', browser.images.length ? '没有匹配的图片' : 'assets 中暂无图片'));
+      return;
+    }
+
+    const setSelection = (assetPath) => {
+      browser.selectedPath = assetPath;
+      selectedValue.textContent = assetPath;
+      selectedValue.title = assetPath;
+      confirm.disabled = false;
+      for (const tile of grid.children) tile.classList.toggle('selected', tile.dataset.path === assetPath);
+    };
+    for (const asset of visible) {
+      const tile = el('button', `asset-tile${asset.path === browser.selectedPath ? ' selected' : ''}`);
+      tile.dataset.path = asset.path; tile.title = asset.path;
+      const preview = el('span', 'asset-preview');
+      const image = el('img'); image.src = asset.uri; image.alt = ''; image.loading = 'lazy';
+      if (browser.cacheBust) image.src += `${image.src.includes('?') ? '&' : '?'}v=${browser.cacheBust}`;
+      image.addEventListener('error', () => { preview.classList.add('failed'); image.remove(); preview.appendChild(el('span', '', '无法预览')); });
+      preview.appendChild(image); tile.appendChild(preview);
+      const filename = asset.path.slice(asset.path.lastIndexOf('/') + 1);
+      tile.appendChild(el('span', 'asset-name', filename));
+      tile.appendChild(el('span', 'asset-path', asset.path));
+      tile.addEventListener('click', () => setSelection(asset.path));
+      tile.addEventListener('dblclick', () => applyAssetSelection(asset.path));
+      tile.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setSelection(asset.path);
+        showMenu(event.clientX, event.clientY, [
+          { label: '重新截取', run: () => recaptureAsset(asset.path) },
+        ]);
+      });
+      grid.appendChild(tile);
+    }
+  }
+
+  function workflowReference(file) {
+    const rel = typeof file.rel === 'string' ? file.rel.replace(/\\/g, '/') : '';
+    const match = rel.match(/(?:^|\/)workflows\/(.+)$/i);
+    return match ? match[1] : String(file.name || '').replace(/\\/g, '/');
+  }
+
+  function workflowBrowserFiles() {
+    return (Array.isArray(state.workflows) ? state.workflows : [])
+      .filter((file) => file && file.uri !== state.docUri)
+      .map((file) => ({ ...file, reference: workflowReference(file) }))
+      .filter((file) => file.reference);
+  }
+
+  function openWorkflowBrowser(nodeId, key, currentReference) {
+    const normalized = typeof currentReference === 'string' ? currentReference.replace(/\\/g, '/').replace(/^workflows\//i, '') : '';
+    const slash = normalized.lastIndexOf('/');
+    state.workflowBrowser = {
+      nodeId,
+      key,
+      folder: slash > 0 ? `workflows/${normalized.slice(0, slash)}` : 'workflows',
+      query: '',
+      selectedReference: normalized,
+    };
+    $('workflow-browser').classList.remove('hidden');
+    renderWorkflowBrowser();
+  }
+
+  function closeWorkflowBrowser() {
+    const overlay = $('workflow-browser');
+    if (overlay) overlay.classList.add('hidden');
+    state.workflowBrowser = null;
+  }
+
+  function workflowFolders(files) {
+    const counts = new Map([['workflows', files.length]]);
+    for (const file of files) {
+      const parts = file.reference.split('/');
+      for (let index = 1; index < parts.length; index += 1) {
+        const folder = `workflows/${parts.slice(0, index).join('/')}`;
+        counts.set(folder, (counts.get(folder) || 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((left, right) => left[0].localeCompare(right[0], 'zh-CN'));
+  }
+
+  function applyWorkflowSelection(reference) {
+    const browser = state.workflowBrowser;
+    if (!browser || !reference) return;
+    const node = nodeById(browser.nodeId);
+    if (!node) { closeWorkflowBrowser(); toast('目标节点已不存在', true); return; }
+    mutate(() => { node.params[browser.key] = reference; });
+    closeWorkflowBrowser();
+    toast('已选择子工作流');
+  }
+
+  function renderWorkflowBrowser() {
+    const browser = state.workflowBrowser;
+    const overlay = $('workflow-browser');
+    if (!browser || !overlay) return;
+    overlay.innerHTML = '';
+
+    const files = workflowBrowserFiles();
+    const dialog = el('div', 'workflow-browser-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', '选择子工作流');
+    const head = el('div', 'workflow-browser-head');
+    const title = el('div', 'workflow-browser-title', '选择子工作流');
+    const close = el('button', 'icon-button', '×'); close.title = '关闭'; close.setAttribute('aria-label', '关闭'); close.addEventListener('click', closeWorkflowBrowser);
+    head.appendChild(title); head.appendChild(close); dialog.appendChild(head);
+
+    const toolbar = el('div', 'workflow-browser-toolbar');
+    const search = el('input', 'workflow-search'); search.type = 'search'; search.placeholder = '搜索脚本名称或路径'; search.value = browser.query;
+    search.addEventListener('input', () => {
+      browser.query = search.value;
+      renderWorkflowBrowser();
+      const next = $('workflow-browser').children[0];
+      const input = next && next.children[1] && next.children[1].children[0];
+      if (input) { input.focus(); input.setSelectionRange?.(input.value.length, input.value.length); }
+    });
+    toolbar.appendChild(search);
+    toolbar.appendChild(el('span', 'workflow-total', `${files.length} 个脚本`));
+    dialog.appendChild(toolbar);
+
+    const content = el('div', 'workflow-browser-content');
+    const folders = el('nav', 'workflow-folders'); folders.setAttribute('aria-label', '工作流文件夹');
+    const list = el('div', 'workflow-list');
+    content.appendChild(folders); content.appendChild(list); dialog.appendChild(content);
+
+    const footer = el('div', 'workflow-browser-footer');
+    const selectedValue = el('div', 'workflow-selected-path', browser.selectedReference || '未选择脚本'); selectedValue.title = browser.selectedReference || '';
+    const cancel = el('button', '', '取消'); cancel.addEventListener('click', closeWorkflowBrowser);
+    const confirm = el('button', 'primary', '选择'); confirm.disabled = !browser.selectedReference; confirm.addEventListener('click', () => applyWorkflowSelection(browser.selectedReference));
+    const actions = el('div', 'workflow-browser-actions'); actions.appendChild(cancel); actions.appendChild(confirm);
+    footer.appendChild(selectedValue); footer.appendChild(actions); dialog.appendChild(footer);
+    overlay.appendChild(dialog);
+
+    const folderEntries = workflowFolders(files);
+    if (!folderEntries.some(([folder]) => folder === browser.folder)) browser.folder = 'workflows';
+    for (const [folder, count] of folderEntries) {
+      const button = el('button', `workflow-folder${folder === browser.folder ? ' selected' : ''}`);
+      button.style.paddingLeft = `${10 + Math.max(0, folder.split('/').length - 1) * 14}px`;
+      const label = el('span', 'workflow-folder-name', folder === 'workflows' ? '全部脚本' : folder.slice(folder.lastIndexOf('/') + 1)); label.title = folder;
+      button.appendChild(label); button.appendChild(el('span', 'workflow-folder-count', String(count)));
+      button.addEventListener('click', () => { browser.folder = folder; renderWorkflowBrowser(); });
+      folders.appendChild(button);
+    }
+
+    const query = browser.query.trim().toLocaleLowerCase('zh-CN');
+    const folderPrefix = browser.folder === 'workflows' ? '' : `${browser.folder.slice('workflows/'.length)}/`;
+    const visible = files.filter((file) => file.reference.startsWith(folderPrefix)
+      && (!query
+        || file.reference.toLocaleLowerCase('zh-CN').includes(query)
+        || String(file.name || '').toLocaleLowerCase('zh-CN').includes(query)
+        || String(file.description || '').toLocaleLowerCase('zh-CN').includes(query)));
+    if (!visible.length) {
+      list.appendChild(el('div', 'workflow-browser-status', files.length ? '没有匹配的脚本' : '没有其他可用的工作流脚本'));
+      return;
+    }
+
+    const setSelection = (reference) => {
+      browser.selectedReference = reference;
+      selectedValue.textContent = reference;
+      selectedValue.title = reference;
+      confirm.disabled = false;
+      for (const item of list.children) item.classList.toggle('selected', item.dataset.reference === reference);
+    };
+    for (const file of visible) {
+      const item = el('button', `workflow-file${file.reference === browser.selectedReference ? ' selected' : ''}`);
+      item.dataset.reference = file.reference; item.title = [file.description, file.rel || file.reference].filter(Boolean).join('\n');
+      item.appendChild(el('span', 'workflow-file-icon', '{ }'));
+      const detail = el('span', 'workflow-file-detail');
+      detail.appendChild(el('span', 'workflow-file-name', file.name || file.reference.slice(file.reference.lastIndexOf('/') + 1)));
+      if (file.description) detail.appendChild(el('span', 'workflow-file-description', file.description));
+      detail.appendChild(el('span', 'workflow-file-path', file.reference));
+      item.appendChild(detail);
+      item.addEventListener('click', () => setSelection(file.reference));
+      item.addEventListener('dblclick', () => applyWorkflowSelection(file.reference));
+      list.appendChild(item);
+    }
   }
 
   function openRoiPicker(message) {
     if (!state.roi || state.roi.requestId !== message.requestId) return;
     let overlay = $('roi-picker'); overlay.innerHTML = ''; overlay.classList.remove('hidden');
-    const dialog = el('div', 'roi-dialog'); const head = el('div', 'roi-head', state.roi.mode === 'asset' ? '截取模板' : '选择区域'); dialog.appendChild(head);
+    const dialog = el('div', 'roi-dialog'); const head = el('div', 'roi-head', state.roi.targetPath ? '重新截取模板' : state.roi.mode === 'asset' ? '截取模板' : '选择区域'); dialog.appendChild(head);
     const stage = el('div', 'roi-stage'); const image = el('img'); image.src = message.dataUrl; stage.appendChild(image); const selection = el('div', 'roi-selection'); stage.appendChild(selection); dialog.appendChild(stage);
     const actions = el('div', 'roi-actions'); const cancel = el('button', '', '取消'); const confirm = el('button', 'primary', '确认'); actions.appendChild(cancel); actions.appendChild(confirm); dialog.appendChild(actions); overlay.appendChild(dialog);
     const data = { x1: 0, y1: 0, x2: 0, y2: 0, dragging: false };
@@ -1207,7 +2071,12 @@
     const move = (event) => { if (!data.dragging) return; const p = point(event); data.x2 = p.x; data.y2 = p.y; update(); };
     const up = () => { data.dragging = false; };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-    cancel.addEventListener('click', () => { overlay.classList.add('hidden'); state.roi = null; });
+    cancel.addEventListener('click', () => {
+      const request = state.roi;
+      overlay.classList.add('hidden');
+      state.roi = null;
+      if (request && request.returnToAssetBrowser) restoreAssetBrowserAfterRoi();
+    });
     confirm.addEventListener('click', () => {
       const rect = stage.getBoundingClientRect(); const ref = message.referenceResolution || state.raw.resolution || [1920, 1080];
       const x = Math.round(Math.min(data.x1, data.x2) * ref[0] / rect.width); const y = Math.round(Math.min(data.y1, data.y2) * ref[1] / rect.height);
@@ -1220,7 +2089,9 @@
         const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
         try {
           const context = canvas.getContext('2d'); context.drawImage(image, x * message.width / ref[0], y * message.height / ref[1], width * message.width / ref[0], height * message.height / ref[1], 0, 0, width, height);
-          vscode.postMessage({ type: 'saveTemplate', requestId: request.requestId, nodeId: request.nodeId, key: request.key, filename: `${request.nodeId}-${request.key}.png`, dataUrl: canvas.toDataURL('image/png') });
+          const extension = String(request.targetPath || '').slice(String(request.targetPath || '').lastIndexOf('.')).toLocaleLowerCase();
+          const mime = extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png';
+          vscode.postMessage({ type: 'saveTemplate', requestId: request.requestId, nodeId: request.nodeId, key: request.key, filename: `${request.nodeId}-${request.key}.png`, targetPath: request.targetPath, dataUrl: canvas.toDataURL(mime) });
         } catch (error) { toast(String(error), true); }
       }
       overlay.classList.add('hidden'); if (request.mode === 'rect') state.roi = null;
@@ -1232,7 +2103,20 @@
     if (event.type === 'run_started') { state.activeRun = event.run_id; state.run.clear(); }
     if (event.type === 'step' && event.step_id) {
       const step = event.step || {};
-      state.run.set(String(event.step_id), { status: step.status, duration: step.duration_ms, thumbnail: event.thumbnail, screenshot: event.screenshot });
+      const workflowId = typeof step.workflow_id === 'string' ? step.workflow_id : '';
+      if (workflowId && state.raw && workflowId !== state.raw.id) return;
+      let status = String(step.status || '');
+      if (status === 'succeeded' && step.action === 'vision.match_template') status = 'matched';
+      if (status === 'failed' && step.error_category === 'not_matched') status = 'not_matched';
+      state.run.set(String(event.step_id), {
+        status,
+        engineStatus: step.status,
+        duration: step.duration_ms,
+        error: step.error,
+        errorCategory: step.error_category,
+        thumbnail: event.thumbnail,
+        screenshot: event.screenshot,
+      });
     }
     if (event.type === 'run_finished') state.activeRun = null;
     render();
@@ -1240,7 +2124,7 @@
 
   function normalizeRaw(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {
-      schema_version: 3, id: 'new_behavior_tree', version: '3.0.0', resolution: [1920, 1080], root: 'root', blackboard: {}, limits: { timeout_seconds: 300, max_steps: 1000 },
+      schema_version: 3, id: 'new_behavior_tree', version: '3.0.0', description: '', resolution: [1920, 1080], root: 'root', blackboard: {}, limits: { timeout_seconds: 300, max_steps: 1000 },
       nodes: [{ id: 'root', type: 'root', children: ['main'] }, { id: 'main', type: 'sequence', children: ['task_1'] }, { id: 'task_1', type: 'task', action: 'core.capture', params: {} }],
     };
     if (!raw._layout || typeof raw._layout !== 'object') raw._layout = {};
@@ -1248,37 +2132,106 @@
   }
 
   function bindToolbar() {
-    $('btn-add-task').addEventListener('click', () => addNode('task'));
-    $('btn-add-selector').addEventListener('click', () => addNode('selector'));
-    $('btn-add-sequence').addEventListener('click', () => addNode('sequence'));
-    $('btn-add-parallel').addEventListener('click', () => addNode('simple_parallel'));
-    $('btn-layout').addEventListener('click', () => { autoLayout(); fitView(); });
-    $('btn-fit').addEventListener('click', fitView);
-    $('btn-export-image').addEventListener('click', exportFullCanvasImage);
     $('btn-zoom-in').addEventListener('click', () => zoomAt(1.2));
     $('btn-zoom-out').addEventListener('click', () => zoomAt(1 / 1.2));
-    $('btn-workflow').addEventListener('click', () => { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; renderInspector(); });
-    $('btn-blackboard').addEventListener('click', () => { state.inspector = 'blackboard'; state.selected.clear(); state.selectedEdge = null; renderInspector(); });
+    $('btn-back').addEventListener('click', () => {
+      const goBack = (saveText) => vscode.postMessage({ type: 'goBackWorkflow', saveText });
+      if (state.dirty) {
+        const rect = $('btn-back').getBoundingClientRect();
+        showMenu(rect.left, rect.bottom + 4, [
+          { label: '保存并返回', run: () => goBack(JSON.stringify(state.raw, null, 2) + '\n') },
+          { label: '放弃修改并返回', run: () => goBack(undefined) },
+          'separator',
+          { label: '取消', run: () => {} },
+        ]);
+      } else {
+        goBack(undefined);
+      }
+    });
+    $('workflow-select').addEventListener('change', () => {
+      const picker = $('workflow-select');
+      const uri = picker.value;
+      if (!uri || uri === state.docUri) return;
+      const switchTo = (saveText) => {
+        state.docUri = uri; // 乐观更新，切换失败由 init 纠正
+        vscode.postMessage({ type: 'switchWorkflow', uri, saveText });
+      };
+      if (state.dirty) {
+        const rect = picker.getBoundingClientRect();
+        showMenu(rect.left, rect.bottom + 4, [
+          { label: '保存并切换', run: () => switchTo(JSON.stringify(state.raw, null, 2) + '\n') },
+          { label: '放弃修改并切换', run: () => switchTo(undefined) },
+          'separator',
+          { label: '取消', run: () => { picker.value = state.docUri; } },
+        ]);
+      } else {
+        switchTo(undefined);
+      }
+    });
     $('instance-select').addEventListener('change', () => {
       state.instanceId = $('instance-select').value;
       renderInstancePicker();
       vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
     });
     $('btn-run').addEventListener('click', () => vscode.postMessage({ type: 'runWorkflow', instanceId: state.instanceId }));
-    $('btn-run-party').addEventListener('click', () => vscode.postMessage({ type: 'runPartySouls' }));
     $('btn-stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
-    $('btn-run-log').addEventListener('click', () => vscode.postMessage({ type: 'openRunLog' }));
     $('btn-save').addEventListener('click', () => { vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' }); setDirty(false); });
     $('btn-more').addEventListener('click', (event) => showMenu(event.clientX || window.innerWidth - 180, event.clientY || 40, [
       { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
+      { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },
       { label: '打开 JSON', run: () => vscode.postMessage({ type: 'openFile' }) },
+      'separator',
+      { label: '查看引用', run: () => vscode.postMessage({ type: 'openReferences' }) },
+      'separator',
       { label: '重新加载', run: () => vscode.postMessage({ type: 'reloadRequest' }) },
     ]));
+  }
+
+  function searchNodeByName(value) {
+    const query = String(value || '').trim();
+    if (!query) { toast('请输入卡片 name', true); return; }
+    const normalized = query.toLocaleLowerCase();
+    const matches = nodes().filter((node) => String(node && node.name || '').trim().toLocaleLowerCase().includes(normalized));
+    if (matches.length === 0) {
+      state.nodeSearch = { query: normalized, ids: [], index: -1 };
+      toast(`没有找到 name 包含“${query}”的卡片`, true);
+      return;
+    }
+    const ids = matches.map((node) => node.id);
+    const sameResults = state.nodeSearch.query === normalized
+      && ids.length === state.nodeSearch.ids.length
+      && ids.every((id, index) => id === state.nodeSearch.ids[index]);
+    const index = sameResults ? (state.nodeSearch.index + 1) % matches.length : 0;
+    const target = matches[index];
+    state.nodeSearch = { query: normalized, ids, index };
+    state.selected = new Set([target.id]);
+    state.selectedEdge = null;
+    state.inspector = 'node';
+    const pos = position(target);
+    const rect = wrap.getBoundingClientRect();
+    state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom;
+    state.panY = rect.height / 2 - (pos.y + nodeHeight(target) / 2) * state.zoom;
+    render();
+    toast(`卡片 ${index + 1}/${matches.length}：${String(target.name).trim()}`);
+  }
+
+  function executeEditorCommand(command, value) {
+    if (command === 'addTask') addNode('task');
+    else if (command === 'addSelector') addNode('selector');
+    else if (command === 'addSequence') addNode('sequence');
+    else if (command === 'addParallel') addNode('simple_parallel');
+    else if (command === 'autoLayout') { autoLayout(); fitView(); }
+    else if (command === 'fitView') fitView();
+    else if (command === 'exportImage') exportFullCanvasImage();
+    else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; renderInspector(); }
+    else if (command === 'blackboard') { state.inspector = 'blackboard'; state.selected.clear(); state.selectedEdge = null; renderInspector(); }
+    else if (command === 'searchNodeByName') searchNodeByName(value);
   }
 
   graph.addEventListener('mousedown', onPointerDown);
   graph.addEventListener('mousemove', onPointerMove);
   graph.addEventListener('mouseup', onPointerUp);
+  graph.addEventListener('mousemove', (event) => { state.mouse = worldPoint(event); });
   graph.addEventListener('pointermove', (event) => { if (state.connect) onPointerMove(event); });
   graph.addEventListener('pointerup', (event) => { if (state.connect) onPointerUp(event); });
   graph.addEventListener('pointercancel', () => cancelConnection());
@@ -1287,19 +2240,33 @@
   graph.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     const point = worldPoint(event);
-    showMenu(event.clientX, event.clientY, [
+    const items = [
       { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
       { label: '＋ Sequence', run: () => addNode('sequence', point) }, { label: '＋ Simple Parallel', run: () => addNode('simple_parallel', point) },
-      'separator', { label: '自动排列', run: () => { autoLayout(); fitView(); } },
-    ]);
+      'separator',
+    ];
+    if (state.selected.size > 0) {
+      items.push(
+        { label: '复制 (Ctrl+C)', run: () => copySelection() },
+        { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
+      );
+    }
+    if (state.clipboard && state.clipboard.length > 0) {
+      items.push({ label: `粘贴 (Ctrl+V) · ${state.clipboard.length} 个节点`, run: () => pasteClipboard(point) });
+    }
+    items.push('separator', { label: '自动排列', run: () => { autoLayout(); fitView(); } });
+    showMenu(event.clientX, event.clientY, items);
   });
   window.addEventListener('mousemove', (event) => { if (state.drag || state.connect) onPointerMove(event); });
   window.addEventListener('mouseup', onPointerUp);
   window.addEventListener('keydown', (event) => {
     const tag = event.target && event.target.tagName;
     const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-    if (event.key === 'Escape') { if (state.connect) cancelConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); render(); }
+    if (event.key === 'Escape') { if (state.connect) cancelConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
     if (!editing && event.key === 'Delete') { event.preventDefault(); deleteSelection(); }
+    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); }
+    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection(); }
+    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); }
     if (!editing && event.key === 'Home') { event.preventDefault(); fitView(); }
@@ -1319,13 +2286,21 @@
     if (message.type === 'init') {
       let raw = null;
       try { raw = JSON.parse(message.document.text); } catch { raw = null; }
+      // 同一文档的重复初始化（如保存后的外部变更同步）保留当前视口；
+      // 只有切换/重新打开其他工作流时才重新适配。
+      const sameDocument = Boolean(message.document && message.document.uri && message.document.uri === state.docUri);
       state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
+      state.assetsBaseUri = typeof message.assetsBaseUri === 'string' ? message.assetsBaseUri.replace(/\/?$/, '/') : '';
       state.refs = message.refs || { blackboard: [], nodes: [] }; state.issues = message.issues || [];
+      state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item) => item && typeof item.uri === 'string') : [];
+      state.docUri = message.document.uri || '';
+      state.documentName = message.document.name || '';
       state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
       state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
-      state.selected.clear(); state.selectedEdge = null; state.undo = []; state.redo = []; state.run.clear(); state.inspector = 'node';
-      $('file-label').textContent = message.document.name || ''; $('file-label').title = message.document.uri || '';
-      renderInstancePicker(); ensureLayout(); setDirty(false); render(); setTimeout(fitView, 0);
+      state.selected.clear(); state.selectedEdge = null; state.undo = []; state.redo = []; state.run.clear(); state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
+      $('btn-back').classList.toggle('hidden', !message.canGoBack);
+      renderWorkflowPicker(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
+      setTimeout(() => { if (!sameDocument) fitView(); }, 0);
     } else if (message.type === 'runEvent') handleRunEvent(message.event);
     else if (message.type === 'runtimeInstances') {
       state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
@@ -1334,19 +2309,51 @@
     }
     else if (message.type === 'runReplay') { state.run.clear(); (message.events || []).forEach(handleRunEvent); }
     else if (message.type === 'roiPickerImage') openRoiPicker(message);
-    else if (message.type === 'roiPickerCancelled' || message.type === 'roiPickerError') { const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden'); state.roi = null; if (message.message) toast(message.message, true); }
-    else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) { const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; }); state.roi = null; toast('模板已保存'); }
+    else if (message.type === 'roiPickerCancelled' || message.type === 'roiPickerError') {
+      const request = state.roi;
+      const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden');
+      state.roi = null;
+      if (request && request.returnToAssetBrowser) restoreAssetBrowserAfterRoi();
+      if (message.message) toast(message.message, true);
+    }
+    else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) {
+      const request = state.roi;
+      const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; });
+      state.roi = null;
+      if (request.returnToAssetBrowser && state.assetBrowser) {
+        state.assetBrowser.selectedPath = message.path;
+        state.assetBrowser.cacheBust = Date.now();
+        restoreAssetBrowserAfterRoi();
+      }
+      toast(request.targetPath ? '模板已重新截取' : '模板已保存');
+    }
+    else if (message.type === 'assetImages' && state.assetBrowser && state.assetBrowser.requestId === message.requestId) {
+      state.assetBrowser.images = Array.isArray(message.images) ? message.images.filter((item) => item && typeof item.path === 'string' && typeof item.uri === 'string') : [];
+      renderAssetBrowser();
+    }
+    else if (message.type === 'assetImagesError' && state.assetBrowser && state.assetBrowser.requestId === message.requestId) { closeAssetBrowser(); toast(message.message || '读取 assets 图片失败', true); }
+    else if (message.type === 'templateCheckResult' && state.templateCheck && state.templateCheck.requestId === message.requestId) {
+      const matches = Array.isArray(message.matches) ? message.matches.filter((item) => item && [item.x, item.y, item.width, item.height, item.confidence].every(Number.isFinite)) : [];
+      state.templateCheck.status = 'success';
+      state.templateCheck.result = { dataUrl: message.dataUrl, width: message.width, height: message.height, roi: message.roi, matches };
+      renderTemplateCheck();
+    }
+    else if (message.type === 'templateCheckError' && state.templateCheck && state.templateCheck.requestId === message.requestId) { state.templateCheck.status = 'error'; state.templateCheck.error = message.message || '模板检查失败'; renderTemplateCheck(); }
     else if (message.type === 'canvasImageSaved') { setExportBusy(false); toast('完整画布图片已保存'); }
     else if (message.type === 'canvasImageCancelled') { setExportBusy(false); }
     else if (message.type === 'canvasImageError') { setExportBusy(false); toast(message.message || '保存完整画布图片失败', true); }
     else if (message.type === 'instanceSelected') { state.instanceId = String(message.instanceId || ''); renderInstancePicker(); }
     else if (message.type === 'externalChange') { const banner = $('external-banner'); banner.textContent = '文件已在外部修改'; banner.classList.remove('hidden'); }
+    else if (message.type === 'editorCommand') executeEditorCommand(String(message.command || ''), message.value);
   });
 
-  for (const id of ['lightbox', 'roi-picker']) {
+  for (const id of ['lightbox', 'roi-picker', 'asset-browser', 'workflow-browser', 'template-check']) {
     const overlay = el('div', `overlay hidden`); overlay.id = id; document.body.appendChild(overlay);
+    if (id === 'asset-browser') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeAssetBrowser(); });
+    if (id === 'workflow-browser') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeWorkflowBrowser(); });
+    if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
-  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, snapshot: () => clone(state.raw) };
+  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw) };
   vscode.postMessage({ type: 'ready' });
 })();

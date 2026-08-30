@@ -1,0 +1,208 @@
+{
+  "schema_version": 3,
+  "id": "task_in_souls",
+  "version": "3.0.0",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 300,
+    "max_steps": 1000
+  },
+  "blackboard": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "sequence_1"
+      ]
+    },
+    {
+      "id": "selector_1",
+      "type": "selector",
+      "children": [
+        "task_1",
+        "sequence_2"
+      ],
+      "name": "已经在御魂界面"
+    },
+    {
+      "id": "sequence_1",
+      "type": "sequence",
+      "children": [
+        "selector_1"
+      ]
+    },
+    {
+      "id": "task_1",
+      "type": "task",
+      "action": "vision.match_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "roi": [
+          1343,
+          766,
+          577,
+          314
+        ],
+        "threshold": 0.95
+      },
+      "name": "看到御魂挑战"
+    },
+    {
+      "id": "sequence_2",
+      "type": "sequence",
+      "children": [
+        "selector_2",
+        "task_6",
+        "task_4"
+      ],
+      "name": "看到八岐大蛇卡片"
+    },
+    {
+      "id": "selector_2",
+      "type": "selector",
+      "children": [
+        "task_3",
+        "sequence_3"
+      ],
+      "name": "找到八岐大蛇卡片"
+    },
+    {
+      "id": "task_3",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "roi": [
+          333,
+          98,
+          226,
+          619
+        ],
+        "timeout_seconds": 1
+      },
+      "name": "匹配八岐大蛇模板"
+    },
+    {
+      "id": "task_4",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.task_6.output.0"
+        },
+        "random_offset": 5
+      },
+      "name": "点击八岐大蛇卡片"
+    },
+    {
+      "id": "sequence_3",
+      "type": "sequence",
+      "children": [
+        "task_2",
+        "task_5"
+      ],
+      "name": "在地图界面"
+    },
+    {
+      "id": "task_2",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets\\templates\\souls\\souls-yuhun.png",
+        "timeout_seconds": 1,
+        "roi": [
+          66,
+          924,
+          702,
+          154
+        ]
+      },
+      "name": "匹配御魂选项"
+    },
+    {
+      "id": "task_5",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.task_2.output.0"
+        },
+        "random_offset": 5,
+        "hold_ms": 1
+      },
+      "name": "点击御魂选项"
+    },
+    {
+      "id": "task_6",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 5,
+        "roi": [
+          123,
+          123,
+          407,
+          603
+        ],
+        "threshold": 0.9
+      },
+      "name": "匹配八岐大蛇卡片"
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 664,
+      "y": 0
+    },
+    "selector_1": {
+      "x": 664,
+      "y": 416
+    },
+    "sequence_1": {
+      "x": 664,
+      "y": 208
+    },
+    "task_1": {
+      "x": 0,
+      "y": 624
+    },
+    "sequence_2": {
+      "x": 824,
+      "y": 608
+    },
+    "selector_2": {
+      "x": 96,
+      "y": 832
+    },
+    "task_3": {
+      "x": 64,
+      "y": 1040
+    },
+    "task_4": {
+      "x": 1160,
+      "y": 816
+    },
+    "sequence_3": {
+      "x": 424,
+      "y": 1040
+    },
+    "task_2": {
+      "x": 264,
+      "y": 1248
+    },
+    "task_5": {
+      "x": 592,
+      "y": 1248
+    },
+    "task_6": {
+      "x": 824,
+      "y": 816
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": 3,
+  "id": "test_workflow",
+  "version": "3.0.0",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 300,
+    "max_steps": 1000
+  },
+  "blackboard": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "task_in_souls"
+      ]
+    },
+    {
+      "id": "task_in_souls",
+      "type": "task",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "task_in_souls.json"
+      },
+      "name": "进入御魂挑战界面"
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 0,
+      "y": 0
+    },
+    "task_in_souls": {
+      "x": 0,
+      "y": 216
+    }
+  }
+}

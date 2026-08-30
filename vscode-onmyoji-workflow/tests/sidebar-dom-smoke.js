@@ -24,7 +24,7 @@ class ElementStub {
   }
 }
 
-const ids = ['run-party', 'stop', 'open-editor', 'open-log', 'open-refs', 'validate', 'rounds', 'run-status', 'status-text', 'node-search', 'find-node'];
+const ids = ['run-party', 'stop', 'open-editor', 'open-log', 'open-tree', 'open-refs', 'validate', 'rounds', 'run-status', 'status-text', 'node-search', 'find-node'];
 const elements = Object.fromEntries(ids.map((id) => [id, new ElementStub(id)]));
 const editorCommands = ['workflowSettings', 'blackboard', 'addTask', 'addSelector', 'addSequence', 'addParallel', 'autoLayout', 'fitView', 'exportImage'];
 const editorButtons = editorCommands.map((command) => new ElementStub(`editor-${command}`, command));
@@ -60,9 +60,10 @@ check('组队按钮发送所选场数', posted.some((message) => message.type ==
 elements.stop.fire('click');
 elements['open-editor'].fire('click');
 elements['open-log'].fire('click');
+elements['open-tree'].fire('click');
 elements['open-refs'].fire('click');
 elements.validate.fire('click');
-check('侧边栏常用命令全部绑定', ['stopWorkflow', 'openWorkflowEditor', 'openRunLog', 'openWorkflowReferences', 'runEngineValidate']
+check('侧边栏常用命令全部绑定', ['stopWorkflow', 'openWorkflowEditor', 'openRunLog', 'openWorkflowTree', 'openWorkflowReferences', 'runEngineValidate']
   .every((type) => posted.some((message) => message.type === type)));
 for (const button of editorButtons) button.fire('click');
 check('侧边栏编辑命令全部转发', editorCommands.every((command) => posted.some((message) => message.type === 'editorCommand' && message.command === command)));

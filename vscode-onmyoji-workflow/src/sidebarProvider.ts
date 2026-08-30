@@ -67,6 +67,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'openWorkflowReferences':
         await vscode.commands.executeCommand('onmyoji.openWorkflowReferences');
         break;
+      case 'openWorkflowTree':
+        await vscode.commands.executeCommand('onmyoji.openWorkflowTree');
+        break;
       case 'runEngineValidate':
         await vscode.commands.executeCommand('onmyoji.runEngineValidate');
         break;
@@ -150,6 +153,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     <section aria-labelledby="tools-heading">
       <h2 id="tools-heading">工具</h2>
       <button id="open-log" class="command"><span class="command-icon" aria-hidden="true">☷</span><span>运行日志</span></button>
+      <button id="open-tree" class="command"><span class="command-icon" aria-hidden="true">≣</span><span>结构树</span></button>
       <button id="open-refs" class="command"><span class="command-icon" aria-hidden="true">⇄</span><span>引用查看</span></button>
       <button id="validate" class="command"><span class="command-icon" aria-hidden="true">✓</span><span>引擎校验</span></button>
     </section>

@@ -437,6 +437,17 @@
     renderInspector();
   }
 
+  /** 把画布视野中心移到指定节点（搜索定位与结构树窗口共用）。 */
+  function focusNode(id) {
+    const node = nodeById(id);
+    if (!node) return;
+    const pos = position(node);
+    const rect = wrap.getBoundingClientRect();
+    state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom;
+    state.panY = rect.height / 2 - (pos.y + nodeHeight(node) / 2) * state.zoom;
+    render();
+  }
+
   function renderEdge(layer, parent, childId, order) {
     const child = nodeById(childId);
     if (!child) return;
@@ -2181,6 +2192,8 @@
       { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },
       { label: '打开 JSON', run: () => vscode.postMessage({ type: 'openFile' }) },
       'separator',
+      { label: '在结构树窗口查看', run: () => vscode.postMessage({ type: 'openWorkflowTree' }) },
+      'separator',
       { label: '查看引用', run: () => vscode.postMessage({ type: 'openReferences' }) },
       'separator',
       { label: '重新加载', run: () => vscode.postMessage({ type: 'reloadRequest' }) },
@@ -2207,11 +2220,7 @@
     state.selected = new Set([target.id]);
     state.selectedEdge = null;
     state.inspector = 'node';
-    const pos = position(target);
-    const rect = wrap.getBoundingClientRect();
-    state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom;
-    state.panY = rect.height / 2 - (pos.y + nodeHeight(target) / 2) * state.zoom;
-    render();
+    focusNode(target.id);
     toast(`卡片 ${index + 1}/${matches.length}：${String(target.name).trim()}`);
   }
 
@@ -2226,6 +2235,15 @@
     else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; renderInspector(); }
     else if (command === 'blackboard') { state.inspector = 'blackboard'; state.selected.clear(); state.selectedEdge = null; renderInspector(); }
     else if (command === 'searchNodeByName') searchNodeByName(value);
+    else if (command === 'focusNode') {
+      const id = String(value ?? '');
+      const node = nodeById(id);
+      if (!node) return;
+      state.selected = new Set([id]);
+      state.selectedEdge = null;
+      state.inspector = 'node';
+      focusNode(id);
+    }
   }
 
   graph.addEventListener('mousedown', onPointerDown);

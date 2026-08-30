@@ -9,6 +9,7 @@
   byId('stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
   byId('open-editor').addEventListener('click', () => vscode.postMessage({ type: 'openWorkflowEditor' }));
   byId('open-log').addEventListener('click', () => vscode.postMessage({ type: 'openRunLog' }));
+  byId('open-tree').addEventListener('click', () => vscode.postMessage({ type: 'openWorkflowTree' }));
   byId('open-refs').addEventListener('click', () => vscode.postMessage({ type: 'openWorkflowReferences' }));
   byId('validate').addEventListener('click', () => vscode.postMessage({ type: 'runEngineValidate' }));
   for (const button of document.querySelectorAll('[data-editor-command]')) {

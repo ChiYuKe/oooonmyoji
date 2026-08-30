@@ -76,6 +76,7 @@ const editorCommands = new Set([
   'workflowSettings',
   'blackboard',
   'searchNodeByName',
+  'focusNode',
 ]);
 
 export class WebviewManager implements vscode.Disposable {
@@ -94,6 +95,11 @@ export class WebviewManager implements vscode.Disposable {
   private pendingEditorCommands: EditorCommandPayload[] = [];
   /** 进入子工作流视图时记录上级工作流 URI（支持多级嵌套返回）。 */
   private workflowBackStack: string[] = [];
+
+  /** 编辑器当前打开的工作流文件（供结构树等面板判断是否需要切换）。 */
+  get currentUri(): vscode.Uri | undefined {
+    return this.docUri;
+  }
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -492,6 +498,9 @@ export class WebviewManager implements vscode.Disposable {
        break;
      case 'openReferences':
        await vscode.commands.executeCommand('onmyoji.openWorkflowReferences', this.docUri?.toString());
+       break;
+     case 'openWorkflowTree':
+       await vscode.commands.executeCommand('onmyoji.openWorkflowTree', this.docUri?.toString());
        break;
      case 'newWorkflow':
        await vscode.commands.executeCommand('onmyoji.createWorkflow');

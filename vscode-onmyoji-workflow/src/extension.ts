@@ -11,6 +11,7 @@ import { ActionCatalog, discoverProjectRoot, loadActionCatalog } from './catalog
 import { WorkflowIntelligence } from './jsonProviders';
 import { ReferenceViewerManager } from './referenceViewerManager';
 import { RunLogManager } from './runLogManager';
+import { WorkflowTreeManager } from './workflowTreeManager';
 import { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment, RuntimeInstanceInfo } from './runtimeInstances';
 import { SidebarProvider } from './sidebarProvider';
 import { TemplateCheckOptions, TemplateCheckResult, WebviewManager } from './webviewManager';
@@ -71,6 +72,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   runLogManager = new RunLogManager(context, () => projectRoot);
   referenceViewerManager = new ReferenceViewerManager(context, () => projectRoot);
+  let workflowTreeManager: WorkflowTreeManager | undefined;
   sidebarProvider = new SidebarProvider(context);
 
   webviewManager = new WebviewManager(
@@ -84,6 +86,7 @@ export function activate(context: vscode.ExtensionContext): void {
     checkTemplate,
     (event) => runLogManager.acceptEvent(event),
   );
+  workflowTreeManager = new WorkflowTreeManager(context, () => projectRoot, webviewManager);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebarProvider, {
@@ -97,6 +100,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('onmyoji.stopWorkflow', () => stopWorkflow()),
     vscode.commands.registerCommand('onmyoji.openRunLog', () => runLogManager.open()),
     vscode.commands.registerCommand('onmyoji.openWorkflowReferences', (uri?: string) => referenceViewerManager.open(false, uri)),
+    vscode.commands.registerCommand('onmyoji.openWorkflowTree', (uri?: string) => workflowTreeManager?.open(false, uri)),
     vscode.commands.registerCommand('onmyoji.validateCurrentWorkflow', () => validateCurrentWorkflow()),
     vscode.commands.registerCommand('onmyoji.reloadActionCatalog', () => {
       refreshCatalog();
@@ -110,6 +114,7 @@ export function activate(context: vscode.ExtensionContext): void {
     workflowOutput,
     runLogManager,
     referenceViewerManager,
+    { dispose: () => workflowTreeManager?.dispose() },
     { dispose: () => activeWorkflowProcess?.kill() },
   );
   updateWorkflowFileContext();

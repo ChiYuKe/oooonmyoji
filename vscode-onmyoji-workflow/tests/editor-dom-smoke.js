@@ -162,6 +162,7 @@ check('父子边来自 children（5 条）', allGraph((item) => item.tagName ===
 check('非 Root 都有单输入引脚', allGraph((item) => hasClass(item, 'port-in')).length === 5);
 check('复合节点有输出引脚', allGraph((item) => hasClass(item, 'port-out')).length === 3);
 check('装饰器嵌入卡片', within(nodeGroup('find'), (item) => hasClass(item, 'decorator-label')).some((item) => String(item.textContent).includes('Time Limit')));
+
 check('未选择内容时默认隐藏详情栏', els.inspector.classList.contains('hidden') && !els['editor-main'].classList.contains('inspector-open'));
 
 sendEditorCommand('workflowSettings');
@@ -182,6 +183,9 @@ sendEditorCommand('searchNodeByName', 'TARGET');
 check('重复搜索不区分大小写并循环到下一张', windowStub.__btEditor.state.selected.has('fallback') && els.toast.textContent.includes('2/2'));
 sendEditorCommand('searchNodeByName', 'selector');
 check('卡片搜索不使用节点 id', els.toast.textContent.includes('没有找到') && windowStub.__btEditor.state.nodeSearch.ids.length === 0);
+sendEditorCommand('focusNode', 'find');
+check('聚焦命令选中结构树/引用查看器定位的节点', windowStub.__btEditor.state.selected.has('find')
+  && hasClass(nodeGroup('find'), 'selected'));
 
 selectNode('find');
 check('选择单个节点时显示详情栏', !els.inspector.classList.contains('hidden') && els['editor-main'].classList.contains('inspector-open'));

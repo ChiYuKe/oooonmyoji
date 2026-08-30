@@ -13,7 +13,7 @@ const {
   parameterToSchema,
   applyParameterDefaults,
 } = require('../out/catalog');
-const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions, matchWorkflowReference, collectWorkflowRunReferences, resolveWorkflowReference } = require('../out/workflow');
+const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions, matchWorkflowReference, collectWorkflowRunReferences, resolveWorkflowReference, buildTreeNode } = require('../out/workflow');
 const { computeLayout } = require('../out/layout');
 const { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment } = require('../out/runtimeInstances');
 const { buildPartySoulsRunArguments, buildWorkflowRunArguments } = require('../out/workflowProcess');
@@ -247,6 +247,17 @@ async function main() {
   const nonRun = parseWorkflow(FIXTURE);
   check('非 workflow.run 工作流无引用', collectWorkflowRunReferences(nonRun.raw).length === 0);
   check('非对象输入无引用', collectWorkflowRunReferences(null).length === 0 && collectWorkflowRunReferences([1, 2]).length === 0);
+
+  // 结构树：真实项目文件构建层级（与独立结构树窗口同一函数）。
+  const flattenTree = (nodes, out = []) => { for (const node of nodes) { out.push(node); flattenTree(node.children, out); } return out; };
+  const leaderTree = buildTreeNode(JSON.parse(await projectRead('file:///workflows/mumu_0_souls_party_leader.json')));
+  const leaderLeaves = flattenTree(leaderTree);
+  check('结构树从 root 构建完整层级', leaderTree.length === 1 && leaderTree[0].type === 'root' && leaderTree[0].id === 'root' && leaderLeaves.length > 10);
+  check('结构树标记子流程引用节点', leaderLeaves.some((node) => node.meta.startsWith('⇢ ')));
+  check('结构树节点 ID 与类型齐全', leaderLeaves.every((node) => node.id && node.type));
+  const roundTree = buildTreeNode(JSON.parse(await projectRead('file:///workflows/souls_party_leader_round.json')));
+  check('结构树子流程引用显示目标文件名', flattenTree(roundTree).some((node) => node.meta === '⇢ reward_statistics.json'));
+  check('空输入构建空树', buildTreeNode(null).length === 0 && buildTreeNode({ nodes: 'x' }).length === 0);
 
   const text = JSON.stringify(FIXTURE, null, 2);
   const document = TextDocument.create('file:///workflow.json', 'json', 1, text);

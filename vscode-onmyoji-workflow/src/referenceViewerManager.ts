@@ -235,25 +235,14 @@ export class ReferenceViewerManager implements vscode.Disposable {
   <button id="btn-refresh" class="icon-button" title="重新扫描引用" aria-label="重新扫描引用">⟳</button>
 </header>
 <section id="summary">
-  <div class="metric"><span>引用脚本</span><strong id="outgoing-count">0</strong></div>
-  <div class="metric"><span>被谁引用</span><strong id="incoming-count">0</strong></div>
+  <div class="metric"><span>引用脚本</span><strong id="outgoing-count">0</strong><span class="metric-sub" id="outgoing-total"></span></div>
+  <div class="metric"><span>被谁引用</span><strong id="incoming-count">0</strong><span class="metric-sub" id="incoming-total"></span></div>
   <div class="metric current"><span>悬空引用</span><strong id="unresolved-count">0</strong></div>
 </section>
 <main>
-  <section id="outgoing-block">
-    <h2>引用的脚本 <span class="hint">（本工作流 workflow.run 指向的文件）</span></h2>
-    <div id="outgoing-empty" class="empty hidden">暂无引用</div>
-    <div id="outgoing-list"></div>
-  </section>
-  <section id="incoming-block">
-    <h2>被谁引用 <span class="hint">（引用本工作流的文件）</span></h2>
-    <div id="incoming-empty" class="empty hidden">暂无人引用</div>
-    <div id="incoming-list"></div>
-  </section>
-  <section id="unresolved-block" class="hidden">
-    <h2>悬空引用 <span class="hint">（未能匹配到文件）</span></h2>
-    <div id="unresolved-list"></div>
-  </section>
+  <svg id="graph" xmlns="http://www.w3.org/2000/svg" aria-label="工作流引用图"></svg>
+  <div id="empty-state" class="hidden">未找到工作流文件</div>
+  <div id="tooltip" class="hidden" role="tooltip"></div>
 </main>
 <script nonce="${nonce}" src="${jsUri}"></script>
 </body>

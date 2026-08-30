@@ -101,6 +101,12 @@
         "icon": "$(references)"
       },
       {
+        "command": "onmyoji.openWorkflowTree",
+        "title": "Onmyoji: 打开工作流结构树",
+        "category": "Onmyoji",
+        "icon": "$(symbol-structure)"
+      },
+      {
         "command": "onmyoji.validateCurrentWorkflow",
         "title": "Onmyoji: 校验当前工作流 JSON",
         "category": "Onmyoji"
@@ -138,6 +144,10 @@
         },
         {
           "command": "onmyoji.openWorkflowReferences",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "onmyoji.openWorkflowTree",
           "when": "resourceScheme == file"
         }
       ],

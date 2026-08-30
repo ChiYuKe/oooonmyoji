@@ -27,8 +27,8 @@ python -m venv .venv
 ```
 
 PaddleOCR 3.x 需要同时安装 PaddleOCR 包和 PaddlePaddle 推理引擎，二者已
-一并列在 `requirements.txt` 中。首次创建 OCR 引擎时会下载中文模型；首版
-使用 CPU，并在 OCR 工作进程中共享一份模型。
+一并列在 `requirements.txt` 中。当前使用 CUDA 12.9 GPU 推理包；首次创建
+OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模型。
 
 复制 `config/config.example.json` 为 `config/config.json`，然后填写 MuMu
 安装路径和任务输入。应用配置使用
@@ -222,6 +222,7 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
   "schema_version": 3,
   "id": "my_workflow",
   "version": "3.0.0",
+  "description": "查找目标并点击",
   "resolution": [1920, 1080],
   "root": "root",
   "blackboard": { "template": { "type": "asset", "default": "assets/templates/x.png" } },
@@ -240,6 +241,7 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 - 条件、冷却、超时、重试、重复都作为 `decorators` 挂在节点或子树上。
 - 参数绑定使用 `{"ref": "blackboard.<键>"}` 或
   `{"ref": "nodes.<节点id>.output.<字段>"}`。
+- 顶层可选字段 `description` 用于说明工作流用途，并显示在子工作流选择器中。
 - 每次运行使用启动时读取的不可变文件哈希快照；修改 JSON 只影响下一次运行。
 
 自定义 Action 放在 `plugins/actions/<name>/`，清单是 v2 manifest

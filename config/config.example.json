@@ -28,7 +28,7 @@
     "workers": 1,
     "request_timeout_seconds": 60,
     "min_confidence": 0.6,
-    "use_gpu": false
+    "use_gpu": true
   },
   "tasks": [],
   "scheduler": {

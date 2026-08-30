@@ -10,6 +10,7 @@ v3 是破坏式迁移。旧的 `entry`、`edges`、独立条件节点和 `policy
   "schema_version": 3,
   "id": "example",
   "version": "3.0.0",
+  "description": "示例工作流的用途说明",
   "resolution": [1920, 1080],
   "root": "root",
   "limits": { "timeout_seconds": 300, "max_steps": 1000 },

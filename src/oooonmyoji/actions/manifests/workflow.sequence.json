@@ -21,10 +21,27 @@
     "type": "object",
     "properties": {
       "workflow": { "type": "string" },
-      "status": { "type": "string" },
-      "output": { "type": "object" },
-      "attempts": { "type": "array" }
+      "status": { "enum": ["succeeded", "failed", "cancelled"] },
+      "output": {},
+      "error": { "type": ["string", "null"] },
+      "error_category": { "type": ["string", "null"] },
+      "attempts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "workflow": { "type": "string" },
+            "status": { "enum": ["succeeded", "failed", "cancelled"] },
+            "output": {},
+            "error": { "type": ["string", "null"] },
+            "error_category": { "type": ["string", "null"] }
+          },
+          "required": ["workflow", "status", "output", "error", "error_category"],
+          "additionalProperties": false
+        }
+      }
     },
+    "required": ["workflow", "status", "output", "error", "error_category", "attempts"],
     "additionalProperties": false
   },
   "effects": { "side_effect": true, "retry": "unsafe" }

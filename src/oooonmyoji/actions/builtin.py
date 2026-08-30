@@ -7,7 +7,7 @@ import random
 import time
 from typing import Any
 
-from ..exceptions import CancelledError, VisionError, WorkflowError
+from ..exceptions import AutomationError, CancelledError
 from .base import Action, ActionResult
 
 
@@ -102,6 +102,12 @@ class MatchTemplateAction(Action):
             if arguments.get("roi") is not None:
                 value["roi"] = list(arguments["roi"])
             output.append(value)
+        if not output:
+            return ActionResult.failed(
+                f"template not matched: {arguments['template']}",
+                category="not_matched",
+                output=[],
+            )
         return ActionResult.succeeded(output)
 
 
@@ -229,13 +235,16 @@ class RunWorkflowAction(Action):
             return ActionResult.failed("inputs must be an object", category="workflow")
         try:
             status, output, error, error_category = context.run_subworkflow(reference, inputs)
-        except WorkflowError as exc:
-            return ActionResult.failed(str(exc), category=exc.category.value, output={"workflow": reference, "status": "failed"})
-        receipt = {"workflow": reference, "status": status, "output": output}
+        except CancelledError:
+            raise
+        except AutomationError as exc:
+            receipt = _subworkflow_receipt(reference, "failed", None, str(exc), exc.category.value)
+            return ActionResult.failed(str(exc), category=exc.category.value, output=receipt)
+        receipt = _subworkflow_receipt(reference, status, output, error, error_category)
         if status == "succeeded":
             return ActionResult.succeeded(receipt)
         if status == "cancelled":
-            return ActionResult.cancelled(error or "subworkflow cancelled")
+            return ActionResult.cancelled(error or "subworkflow cancelled", output=receipt)
         return ActionResult.failed(
             f"subworkflow {reference} failed: {error or 'unknown error'}",
             category=error_category or "subworkflow",
@@ -259,23 +268,40 @@ class SelectWorkflowAction(Action):
         for reference in refs:
             try:
                 status, output, error, error_category = context.run_subworkflow(reference, inputs)
-            except WorkflowError as exc:
-                attempts.append({"workflow": reference, "status": "failed", "error": str(exc)})
+            except CancelledError:
+                raise
+            except AutomationError as exc:
+                attempts.append(_subworkflow_receipt(reference, "failed", None, str(exc), exc.category.value))
                 continue
-            attempts.append({"workflow": reference, "status": status, "error": error})
+            receipt = _subworkflow_receipt(reference, status, output, error, error_category)
+            attempts.append(receipt)
             if status == "succeeded":
                 return ActionResult.succeeded({
                     "workflow": reference,
                     "status": "succeeded",
                     "output": output,
+                    "error": None,
+                    "error_category": None,
                     "attempts": attempts,
                 })
             if status == "cancelled":
-                return ActionResult.cancelled(error or "subworkflow cancelled")
+                return ActionResult.cancelled(
+                    error or "subworkflow cancelled",
+                    output={**receipt, "attempts": attempts},
+                )
+        final = attempts[-1]
+        message = "workflow.select: all branches failed"
         return ActionResult.failed(
-            "workflow.select: all branches failed",
+            message,
             category="subworkflow",
-            output={"attempts": attempts},
+            output={
+                "workflow": final["workflow"],
+                "status": "failed",
+                "output": final["output"],
+                "error": message,
+                "error_category": "subworkflow",
+                "attempts": attempts,
+            },
         )
 
 
@@ -296,28 +322,63 @@ class SequenceWorkflowAction(Action):
         for reference in refs:
             try:
                 status, output, error, error_category = context.run_subworkflow(reference, inputs)
-            except WorkflowError as exc:
-                attempts.append({"workflow": reference, "status": "failed", "error": str(exc)})
+            except CancelledError:
+                raise
+            except AutomationError as exc:
+                receipt = _subworkflow_receipt(reference, "failed", None, str(exc), exc.category.value)
+                attempts.append(receipt)
+                message = f"workflow.sequence aborted at {reference}: {exc}"
                 return ActionResult.failed(
-                    f"workflow.sequence aborted at {reference}: {exc}",
+                    message,
                     category=exc.category.value,
-                    output={"attempts": attempts},
+                    output={**receipt, "error": message, "attempts": attempts},
                 )
-            attempts.append({"workflow": reference, "status": status, "error": error})
+            receipt = _subworkflow_receipt(reference, status, output, error, error_category)
+            attempts.append(receipt)
             if status == "cancelled":
-                return ActionResult.cancelled(error or "subworkflow cancelled")
+                return ActionResult.cancelled(
+                    error or "subworkflow cancelled",
+                    output={**receipt, "attempts": attempts},
+                )
             if status != "succeeded":
+                message = f"workflow.sequence aborted at {reference}: {error or 'failed'}"
                 return ActionResult.failed(
-                    f"workflow.sequence aborted at {reference}: {error or 'failed'}",
+                    message,
                     category=error_category or "subworkflow",
-                    output={"attempts": attempts},
+                    output={
+                        **receipt,
+                        "status": "failed",
+                        "error": message,
+                        "error_category": error_category or "subworkflow",
+                        "attempts": attempts,
+                    },
                 )
         return ActionResult.succeeded({
             "workflow": refs[-1],
             "status": "succeeded",
             "output": output,
+            "error": None,
+            "error_category": None,
             "attempts": attempts,
         })
+
+
+def _subworkflow_receipt(
+    workflow: str,
+    status: str,
+    output: Any,
+    error: str | None,
+    error_category: str | None,
+) -> dict[str, Any]:
+    """Build the stable parent/child workflow completion contract."""
+
+    return {
+        "workflow": workflow,
+        "status": status,
+        "output": output,
+        "error": error,
+        "error_category": error_category,
+    }
 
 
 class WaitTextAction(Action):

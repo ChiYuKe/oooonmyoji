@@ -125,6 +125,7 @@ def command_list_workflows(args: argparse.Namespace) -> int:
     _, _, _, workflows = _load_validated(_config_path(args.config))
     _print({workflow_id: {
         "version": spec.version,
+        "description": spec.description,
         "file": str(spec.path),
         "file_hash": spec.file_hash,
         "resolution": list(spec.resolution),

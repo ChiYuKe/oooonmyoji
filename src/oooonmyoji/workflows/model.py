@@ -47,6 +47,7 @@ class WorkflowSpec:
     schema_version: int
     workflow_id: str
     version: str
+    description: str
     resolution: tuple[int, int]
     root: str
     timeout_seconds: float

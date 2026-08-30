@@ -123,6 +123,75 @@ def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, sav
     return payload
 
 
+def _step_identity(event: dict[str, Any]) -> tuple[tuple[str, ...], str, int, float]:
+    path = event.get("workflow_path")
+    workflow_path = tuple(str(item) for item in path) if isinstance(path, list) else ()
+    return (
+        workflow_path,
+        str(event.get("step_id") or ""),
+        int(event.get("execution_index") or 0),
+        float(event.get("started_at") or 0.0),
+    )
+
+
+def _nested_branch_recovery_events(
+    history: list[dict[str, Any]],
+    parent_event: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Reclassify failed descendants when a workflow.run branch is recovered."""
+
+    if parent_event.get("status") != "branch_miss" or parent_event.get("action") != "workflow.run":
+        return []
+    parent_path_value = parent_event.get("workflow_path")
+    if not isinstance(parent_path_value, list):
+        return []
+    parent_path = tuple(str(item) for item in parent_path_value)
+    parent_started = float(parent_event.get("started_at") or 0.0)
+    parent_duration = max(0.0, float(parent_event.get("duration_ms") or 0.0)) / 1000.0
+    parent_finished = parent_started + parent_duration + 0.001
+
+    reference_id = ""
+    output = parent_event.get("output")
+    if isinstance(output, dict):
+        reference = output.get("workflow")
+        if isinstance(reference, str) and reference.strip():
+            reference_id = Path(reference.replace("\\", "/")).stem
+
+    latest: dict[tuple[tuple[str, ...], str, int, float], dict[str, Any]] = {}
+    order: list[tuple[tuple[str, ...], str, int, float]] = []
+    for event in history:
+        path_value = event.get("workflow_path")
+        if not isinstance(path_value, list):
+            continue
+        path = tuple(str(item) for item in path_value)
+        if len(path) <= len(parent_path) or path[: len(parent_path)] != parent_path:
+            continue
+        if reference_id and path[len(parent_path)] != reference_id:
+            continue
+        started_at = float(event.get("started_at") or 0.0)
+        if started_at < parent_started or started_at > parent_finished:
+            continue
+        identity = _step_identity(event)
+        if identity not in latest:
+            order.append(identity)
+        latest[identity] = event
+
+    recovered: list[dict[str, Any]] = []
+    for identity in order:
+        event = latest[identity]
+        if event.get("status") != ActionStatus.FAILED.value:
+            continue
+        replacement = dict(event)
+        replacement["status"] = "branch_miss"
+        replacement["original_status"] = ActionStatus.FAILED.value
+        replacement["recovered_by"] = parent_event.get("recovered_by")
+        if parent_event.get("recovered_by_name"):
+            replacement["recovered_by_name"] = parent_event.get("recovered_by_name")
+        replacement["recovered_via"] = parent_event.get("step_id")
+        recovered.append(replacement)
+    return recovered
+
+
 class TaskRunner:
     def __init__(
         self,
@@ -247,6 +316,7 @@ class TaskRunner:
                             on_step=on_step,
                             on_step_start=on_step_start,
                             cancel_event=cancel_event,
+                            workflow_path=tuple(subworkflow_stack),
                         )
                         result = sub_engine.run()
                     finally:
@@ -282,17 +352,19 @@ class TaskRunner:
                 def on_step(event: dict[str, Any]) -> None:
                     nonlocal steps_since_checkpoint
                     with record_lock:
-                        record.current_step = str(event.get("step_id")) if event.get("step_id") is not None else None
-                        record.append_step(event)
-                        if context is not None and context.last_frame is not None:
-                            if self.config.save_screenshots:
-                                try:
-                                    record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
-                                except Exception as artifact_error:
-                                    record.details["last_frame_error"] = str(artifact_error)
-                        writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
-                        self._emit(event_queue, {"type": "step", "run_id": run_id, "step": dict(event)})
-                        steps_since_checkpoint += 1
+                        nested_recoveries = _nested_branch_recovery_events(record.step_history, event)
+                        for step_event in (*nested_recoveries, event):
+                            record.current_step = str(step_event.get("step_id")) if step_event.get("step_id") is not None else None
+                            record.append_step(step_event)
+                            if context is not None and context.last_frame is not None:
+                                if self.config.save_screenshots:
+                                    try:
+                                        record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
+                                    except Exception as artifact_error:
+                                        record.details["last_frame_error"] = str(artifact_error)
+                            writer.write(_step_event_payload(run_id, context, step_event, save_screenshots=self.config.save_screenshots))
+                            self._emit(event_queue, {"type": "step", "run_id": run_id, "step": dict(step_event)})
+                            steps_since_checkpoint += 1
                         checkpoint_record()
 
                 def on_step_start(event: dict[str, Any]) -> None:
@@ -306,6 +378,7 @@ class TaskRunner:
                     on_step=on_step,
                     on_step_start=on_step_start,
                     cancel_event=cancel_event,
+                    workflow_path=(workflow.workflow_id,),
                 )
                 result = engine.run()
                 if result.requires_worker_restart:

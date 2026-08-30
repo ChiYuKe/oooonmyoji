@@ -70,6 +70,7 @@ class WorkflowEngine:
         on_step_start: Callable[[dict[str, Any]], None] | None = None,
         cancel_event: Any | None = None,
         cancel_grace_seconds: float = 1.0,
+        workflow_path: tuple[str, ...] | None = None,
     ) -> None:
         self.workflow = workflow
         self.registry = registry
@@ -79,6 +80,7 @@ class WorkflowEngine:
         self.on_step_start = on_step_start
         self.cancel_event = cancel_event
         self.cancel_grace_seconds = cancel_grace_seconds
+        self.workflow_path = workflow_path or (workflow.workflow_id,)
         self.outputs: dict[str, Any] = {}
         self.history: list[dict[str, Any]] = []
         self.requires_worker_restart = False
@@ -281,18 +283,26 @@ class WorkflowEngine:
             return _Outcome(ActionStatus.FAILED, error=str(exc), category=getattr(exc.category, "value", "action"))
         except Exception as exc:
             return _Outcome(ActionStatus.FAILED, error=str(exc), category="internal")
-        if result.status == ActionStatus.SUCCEEDED:
+        output = None
+        if result.output is not None:
             try:
                 output = _json_safe(result.output)
             except AutomationError as exc:
                 return _Outcome(ActionStatus.FAILED, error=str(exc), category=getattr(exc.category, "value", "workflow"))
+        if result.status == ActionStatus.SUCCEEDED:
             with self._lock:
                 self.outputs[node.id] = output
             return _Outcome(ActionStatus.SUCCEEDED, output=output)
         if result.status == ActionStatus.CANCELLED:
-            return _Outcome(ActionStatus.CANCELLED, error=result.error, category=result.error_category or "cancelled")
+            return _Outcome(
+                ActionStatus.CANCELLED,
+                output=output,
+                error=result.error,
+                category=result.error_category or "cancelled",
+            )
         return _Outcome(
             ActionStatus.FAILED,
+            output=output,
             error=result.error,
             category=result.error_category or "action",
             fatal=self.requires_worker_restart,
@@ -327,6 +337,10 @@ class WorkflowEngine:
                 thread.join(self.cancel_grace_seconds)
                 if thread.is_alive():
                     self.requires_worker_restart = True
+                else:
+                    completed = result_queue.get_nowait()
+                    if isinstance(completed, ActionResult) and completed.status == ActionStatus.CANCELLED:
+                        return completed
                 return ActionResult.cancelled("Behavior Tree branch cancellation requested")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -361,18 +375,36 @@ class WorkflowEngine:
     def _decorator(self, node: WorkflowNode, kind: str) -> BehaviorDecorator | None:
         return next((decorator for decorator in node.decorators if decorator.type == kind), None)
 
+    def _event_params(self, node: WorkflowNode) -> Any:
+        if not node.is_task:
+            return None
+        try:
+            with self._lock:
+                resolver = ReferenceResolver(self.blackboard, dict(self.outputs))
+            return _summary(resolver.value(node.params))
+        except Exception:
+            # A failed reference is still useful in the event as its unresolved source.
+            return _summary(node.params)
+
     def _notify_start(self, node: WorkflowNode) -> None:
         if self.on_step_start is None:
             return
-        self.on_step_start({
+        event = {
             "step_id": node.id,
+            "name": node.name,
             "action": node.action,
             "node_kind": node.type,
             "node_type": node.type,
             "execution_index": self.compiled.execution_index[node.id],
             "status": "running",
+            "workflow_id": self.workflow.workflow_id,
+            "workflow_path": list(self.workflow_path),
+            "workflow_depth": len(self.workflow_path) - 1,
             "ts": time.time(),
-        })
+        }
+        if node.is_task:
+            event["params"] = self._event_params(node)
+        self.on_step_start(event)
 
     def _record_node(
         self,
@@ -387,11 +419,15 @@ class WorkflowEngine:
     ) -> None:
         event: dict[str, Any] = {
             "step_id": node.id,
+            "name": node.name,
             "action": node.action,
             "node_kind": node.type,
             "node_type": node.type,
             "execution_index": self.compiled.execution_index[node.id],
             "status": outcome.status.value,
+            "workflow_id": self.workflow.workflow_id,
+            "workflow_path": list(self.workflow_path),
+            "workflow_depth": len(self.workflow_path) - 1,
             "started_at": started_at,
             "duration_ms": round((time.perf_counter() - started_perf) * 1000, 3),
         }
@@ -401,7 +437,9 @@ class WorkflowEngine:
             event["repeats"] = repeats
         if decorator is not None:
             event["decorator"] = decorator
-        if outcome.status == ActionStatus.SUCCEEDED and node.is_task:
+        if node.is_task:
+            event["params"] = self._event_params(node)
+        if outcome.output is not None and node.is_task:
             event["output"] = _summary(outcome.output)
         if outcome.error:
             event["error"] = outcome.error
@@ -414,6 +452,8 @@ class WorkflowEngine:
 
     def _recover_selector_failures(self, selector_id: str, ranges: list[tuple[int, int]]) -> None:
         recovered: list[dict[str, Any]] = []
+        selector = self.compiled.node_map.get(selector_id)
+        selector_name = selector.name if selector is not None else None
         with self._lock:
             for start, end in ranges:
                 for event in self.history[start:end]:
@@ -422,6 +462,8 @@ class WorkflowEngine:
                     event["status"] = "branch_miss"
                     event["original_status"] = ActionStatus.FAILED.value
                     event["recovered_by"] = selector_id
+                    if selector_name:
+                        event["recovered_by_name"] = selector_name
                     recovered.append(dict(event))
         if self.on_step is not None:
             for event in recovered:

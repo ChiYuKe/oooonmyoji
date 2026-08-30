@@ -31,8 +31,8 @@ class ActionResult:
         return cls(ActionStatus.FAILED, output=output, error_category=category, error=error)
 
     @classmethod
-    def cancelled(cls, error: str = "cancelled") -> "ActionResult":
-        return cls(ActionStatus.CANCELLED, error_category="cancelled", error=error)
+    def cancelled(cls, error: str = "cancelled", *, output: Any = None) -> "ActionResult":
+        return cls(ActionStatus.CANCELLED, output=output, error_category="cancelled", error=error)
 
 
 class Action:

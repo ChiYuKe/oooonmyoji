@@ -3,7 +3,7 @@
   "name": "vision.match_template",
   "version": "1.0.0",
   "entry": "builtin:MatchTemplateAction",
-  "description": "在画面中匹配模板图，返回匹配对象数组（不等待）。输出数组，元素含 x/y/width/height/confidence/reference/center。",
+  "description": "在画面中匹配模板图（不等待）。命中时成功并返回匹配对象数组；0 命中时以 not_matched 失败，便于 Selector 回退或由 workflow.run 向主流程报告。",
   "parameters": {
     "template": {
       "type": "asset",
@@ -34,6 +34,64 @@
       "description": "是否启用多尺度搜索"
     }
   },
-  "outputs": { "type": "array" },
+  "outputs": {
+    "type": "array",
+    "minItems": 1,
+    "items": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "confidence",
+        "reference",
+        "center",
+        "template",
+        "threshold"
+      ],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reference": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "center": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer" },
+            { "type": "integer" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "template": { "type": "string" },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "roi": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer" },
+            { "type": "integer" },
+            { "type": "integer" },
+            { "type": "integer" }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "effects": { "side_effect": false, "retry": "safe" }
 }

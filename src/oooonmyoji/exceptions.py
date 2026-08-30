@@ -15,6 +15,7 @@ class ErrorCategory(StrEnum):
     DEVICE_INPUT = "device_input"
     OCR = "ocr"
     VISION = "vision"
+    NOT_MATCHED = "not_matched"
     CANCELLED = "cancelled"
     INTERNAL = "internal"
     WORKFLOW_TIMEOUT = "workflow_timeout"

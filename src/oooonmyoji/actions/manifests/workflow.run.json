@@ -3,7 +3,7 @@
   "name": "workflow.run",
   "version": "1.0.0",
   "entry": "builtin:RunWorkflowAction",
-  "description": "运行另一个工作流（脚本嵌套调用）。子脚本完成后返回“回执”输出 { workflow, status, output }：status 为 succeeded/failed/cancelled，供分支与后续节点绑定判断。递归调用会被拦截。",
+  "description": "同步运行另一个工作流。子流程结束后返回完整回执 { workflow, status, output, error, error_category }；失败和取消也会把回执写入运行事件。递归调用会被拦截。",
   "parameters": {
     "workflow": {
       "type": "string",
@@ -20,9 +20,12 @@
     "type": "object",
     "properties": {
       "workflow": { "type": "string" },
-      "status": { "type": "string" },
-      "output": { "type": "object" }
+      "status": { "enum": ["succeeded", "failed", "cancelled"] },
+      "output": {},
+      "error": { "type": ["string", "null"] },
+      "error_category": { "type": ["string", "null"] }
     },
+    "required": ["workflow", "status", "output", "error", "error_category"],
     "additionalProperties": false
   },
   "effects": { "side_effect": true, "retry": "unsafe" }

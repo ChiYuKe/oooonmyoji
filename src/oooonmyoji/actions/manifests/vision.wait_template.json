@@ -39,6 +39,63 @@
       "description": "是否启用多尺度搜索"
     }
   },
-  "outputs": { "type": "array" },
+  "outputs": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "confidence",
+        "reference",
+        "center",
+        "template",
+        "threshold"
+      ],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reference": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" },
+            { "type": "number" }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "center": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer" },
+            { "type": "integer" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "template": { "type": "string" },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "roi": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer" },
+            { "type": "integer" },
+            { "type": "integer" },
+            { "type": "integer" }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "effects": { "side_effect": false, "retry": "safe" }
 }

@@ -2,7 +2,7 @@
   "name": "onmyoji-workflow-helper",
   "displayName": "Onmyoji Workflow Helper",
   "description": "为 oooonmyoji 自动化项目编写 Behavior Tree schema v3 工作流：智能补全、校验、悬停提示与可视化编辑器（支持内置与自定义 Action）",
-  "version": "0.2.14",
+  "version": "0.2.27",
   "publisher": "oooonmyoji",
   "license": "MIT",
   "engines": {
@@ -22,7 +22,7 @@
     "automation"
   ],
   "activationEvents": [
-    "workspaceContains:workflows/*.json",
+    "workspaceContains:workflows/**/*.json",
     "workspaceContains:plugins/actions/*/action.json",
     "onView:onmyoji.controlPanel",
     "onCommand:onmyoji.openWorkflowEditor",
@@ -95,6 +95,12 @@
         "icon": "$(output)"
       },
       {
+        "command": "onmyoji.openWorkflowReferences",
+        "title": "Onmyoji: 打开工作流引用",
+        "category": "Onmyoji",
+        "icon": "$(references)"
+      },
+      {
         "command": "onmyoji.validateCurrentWorkflow",
         "title": "Onmyoji: 校验当前工作流 JSON",
         "category": "Onmyoji"
@@ -128,6 +134,10 @@
         },
         {
           "command": "onmyoji.openWorkflowEditor",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "onmyoji.openWorkflowReferences",
           "when": "resourceScheme == file"
         }
       ],
@@ -189,7 +199,7 @@
         },
         "onmyoji.workflowFiles": {
           "type": "string",
-          "default": "**/workflows/*.json",
+          "default": "**/workflows/**/*.json",
           "description": "匹配工作流 JSON 文件的 glob，用于启用智能提示。"
         },
         "onmyoji.pythonExecutable": {
@@ -204,7 +214,10 @@
         },
         "onmyoji.partySoulsRounds": {
           "type": "integer",
-          "enum": [1, 9999],
+          "enum": [
+            1,
+            9999
+          ],
           "default": 9999,
           "description": "点击“组队御魂”按钮时运行的场数。"
         }

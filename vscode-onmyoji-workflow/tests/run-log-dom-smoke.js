@@ -33,6 +33,7 @@ const ids = [
   'source-tabs',
   'reward-summary', 'reward-totals', 'reward-battles',
   'tab-steps', 'tab-engine', 'auto-scroll', 'btn-stop', 'btn-clear', 'steps-view', 'engine-view', 'empty-state',
+  'cap-note',
   'step-list', 'engine-output', 'lightbox', 'lightbox-close', 'lightbox-image',
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, new Element(id === 'auto-scroll' ? 'input' : 'div')]));
@@ -50,6 +51,15 @@ const posted = [];
 const vscodeStub = { postMessage(message) { posted.push(message); } };
 const fire = (element, type, values = {}) => { for (const listener of element._listeners[type] || []) listener({ target: element, ...values }); };
 const send = (data) => { for (const listener of windowStub._listeners.message || []) listener({ data }); };
+const childWithClass = (element, className) => element.children.find((child) => child.classList.contains(className));
+const descendantsWithClass = (element, className) => {
+  const found = [];
+  for (const child of element.children) {
+    if (child.classList.contains(className)) found.push(child);
+    found.push(...descendantsWithClass(child, className));
+  }
+  return found;
+};
 
 const code = fs.readFileSync(path.join(__dirname, '..', 'media', 'run-log.js'), 'utf8');
 vm.runInNewContext(code, {
@@ -68,15 +78,23 @@ send({
   events: [
     { type: 'run_started', run_id: 'run-1', instance_id: 'mumu-1', status: 'running', ts: 100 },
     { type: 'step', step_id: 'root', ts: 100.1, step: { status: 'running', execution_index: 0, node_kind: 'root' } },
-    { type: 'step', step_id: 'tap_ready', ts: 100.2, step: { status: 'running', execution_index: 1, node_kind: 'task', action: 'input.tap_match' } },
-    { type: 'step', step_id: 'tap_ready', ts: 100.3, step: { status: 'succeeded', execution_index: 1, node_kind: 'task', action: 'input.tap_match', duration_ms: 123.4 } },
+    { type: 'step', step_id: 'tap_ready', ts: 100.2, step: { status: 'running', name: '点击准备', execution_index: 1, node_kind: 'task', action: 'input.tap_match', params: { match: { template: 'assets/templates/souls/ready.png' }, revalidate: true } } },
+    { type: 'step', step_id: 'tap_ready', ts: 100.3, step: { status: 'succeeded', name: '点击准备', execution_index: 1, node_kind: 'task', action: 'input.tap_match', duration_ms: 123.4, params: { match: { template: 'assets/templates/souls/ready.png' }, revalidate: true }, output: { x: 1774, y: 891, offset_x: 2, offset_y: -1, interval_seconds: 0.2, revalidated: true } } },
   ],
 });
 
 check('显示工作流与实例', elements['workflow-name'].textContent === 'mumu_1_souls_loop.json' && elements['run-meta'].textContent.includes('mumu-1'));
 check('默认只显示 Task 时间线', elements['step-list'].children.length === 1 && elements['step-list'].children[0].dataset.stepId === 'tap_ready');
+check('任务标题只显示节点名称', elements['step-list'].children[0].children[1].children[0].children[0].textContent === '点击准备');
+const tapRow = elements['step-list'].children[0];
+check('点击节点显示动作目标和实际结果', childWithClass(tapRow.children[1], 'step-operation').textContent === '点击匹配位置：ready.png'
+  && childWithClass(tapRow.children[1], 'step-facts').children.some((child) => child.textContent === '实际坐标 (1774, 891)'));
+check('完成状态与实际耗时同时显示', tapRow.children[2].children[0].textContent === '已完成' && tapRow.children[2].children[1].textContent === '123 ms');
+check('完整参数与输出可以展开查看', descendantsWithClass(tapRow, 'detail-value').some((child) => child.textContent.includes('"revalidate": true'))
+  && descendantsWithClass(tapRow, 'detail-value').some((child) => child.textContent.includes('"x": 1774')));
 check('汇总成功任务数量', elements['completed-count'].textContent === '1');
 check('引擎输出移除 ANSI 控制码', elements['engine-output'].textContent === 'engine line\n');
+check('未超限时隐藏行数提示', elements['cap-note'].classList.contains('hidden'));
 
 send({ type: 'runEvent', event: {
   type: 'reward_stats', run_id: 'run-1', battle_index: 1, layer: 1, status: 'succeeded', ts: 100.8, screenshot: 'reward.png',
@@ -89,18 +107,72 @@ check('顶部显示本次累计材料', !elements['reward-summary'].classList.co
 check('奖励统计不改变已完成任务计数', elements['completed-count'].textContent === '1');
 
 send({ type: 'runEvent', event: { type: 'step', step_id: 'wait_floor_direct', ts: 100.9, step: { status: 'running', execution_index: 2, node_kind: 'task', action: 'vision.wait_template' } } });
+check('旧事件缺少名称时不显示内部 ID', elements['current-step'].textContent === '未命名任务');
 send({ type: 'runEvent', event: { type: 'step', step_id: 'wait_floor_direct', ts: 101, step: { status: 'failed', started_at: 100.9, execution_index: 2, node_kind: 'task', action: 'vision.wait_template', duration_ms: 100, error: 'timeout' } } });
 check('Selector 分支恢复前仍暂记失败', elements['failed-count'].textContent === '1');
 send({ type: 'runEvent', event: { type: 'step', step_id: 'wait_floor_direct', ts: 101.1, step: { status: 'branch_miss', original_status: 'failed', recovered_by: 'settlement', started_at: 100.9, execution_index: 2, node_kind: 'task', action: 'vision.wait_template', duration_ms: 100, error: 'timeout' } } });
 const branchMissRows = elements['step-list'].children.filter((item) => item.dataset.stepId === 'wait_floor_direct');
-check('恢复失败合并为分支未命中', branchMissRows.length === 1 && branchMissRows[0].classList.contains('branch_miss') && branchMissRows[0].children[2].children[0].textContent === '分支未命中');
+check('恢复失败合并为分支跳过', branchMissRows.length === 1 && branchMissRows[0].classList.contains('branch_miss') && branchMissRows[0].children[2].children[0].textContent === '分支跳过');
+check('分支跳过显示语义原因并保留耗时', childWithClass(branchMissRows[0].children[1], 'step-note').textContent.includes('跳过原因')
+  && branchMissRows[0].children[2].children[1].textContent === '100 ms');
 check('分支未命中不计入失败数', elements['failed-count'].textContent === '0');
+
+send({ type: 'runEvent', event: { type: 'run_started', run_id: 'run-2', status: 'running', ts: 101.2 } });
+send({ type: 'runEvent', event: { type: 'step', run_id: 'run-2', step_id: 'task_1', ts: 101.3, step: { status: 'running', workflow_id: 'task_in_souls', workflow_path: ['task_in_souls'], execution_index: 3, node_kind: 'task', action: 'vision.match_template' } } });
+send({ type: 'runEvent', event: { type: 'step', run_id: 'run-2', step_id: 'task_1', ts: 101.4, step: { status: 'failed', workflow_id: 'task_in_souls', workflow_path: ['task_in_souls'], started_at: 101.3, execution_index: 3, node_kind: 'task', action: 'vision.match_template', duration_ms: 100, error_category: 'not_matched', error: 'template not matched' } } });
+send({ type: 'runEvent', event: { type: 'step', run_id: 'run-2', step_id: 'task_1', ts: 101.5, step: { status: 'branch_miss', original_status: 'failed', recovered_by: 'selector_1', workflow_id: 'task_in_souls', workflow_path: ['task_in_souls'], started_at: 101.3, execution_index: 3, node_kind: 'task', action: 'vision.match_template', duration_ms: 100, error_category: 'not_matched', error: 'template not matched' } } });
+const recoveredMatchRows = elements['step-list'].children.filter((item) => item.dataset.stepId === 'task_1');
+check('模板未匹配恢复后只保留一条分支跳过记录', recoveredMatchRows.length === 1
+  && recoveredMatchRows[0].classList.contains('branch_miss')
+  && recoveredMatchRows[0].children[2].children[0].textContent === '分支跳过'
+  && elements['failed-count'].textContent === '0');
 
 send({ type: 'runEvent', event: { type: 'step', step_id: 'wait_victory', ts: 102, step: { status: 'running', execution_index: 3, node_kind: 'task', action: 'vision.wait_template' } } });
 send({ type: 'runEvent', event: { type: 'step', step_id: 'wait_victory', ts: 103, step: { status: 'failed', started_at: 102, execution_index: 3, node_kind: 'task', action: 'vision.wait_template', duration_ms: 1000, error: 'timeout' } } });
 fire(filters[2], 'click');
 check('失败筛选只保留失败节点', elements['step-list'].children.length === 1 && elements['step-list'].children[0].dataset.stepId === 'wait_victory');
-check('失败计数与错误详情更新', elements['failed-count'].textContent === '1' && elements['step-list'].children[0].children[1].children.some((child) => child.textContent === 'timeout'));
+check('失败计数与错误详情更新', elements['failed-count'].textContent === '1' && elements['step-list'].children[0].children[1].children.some((child) => child.textContent === '失败原因：timeout'));
+
+send({
+  type: 'init',
+  descriptor: { workflow: 'parent.json', instance: 'mumu-0', startedAt: Date.now(), status: 'running' },
+  events: [
+    { type: 'run_started', run_id: 'match-run', instance_id: 'mumu-0', status: 'running', ts: 150 },
+    { type: 'step', step_id: 'match_ok', ts: 151, step: { status: 'succeeded', name: '检查准备按钮', workflow_id: 'parent', workflow_path: ['parent'], workflow_depth: 0, execution_index: 1, node_kind: 'task', action: 'vision.match_template', duration_ms: 18, params: { template: 'assets/templates/souls/ready.png', roi: [1500, 700, 400, 300], threshold: 0.85 }, output: [{ template: 'assets/templates/souls/ready.png', confidence: 0.963, threshold: 0.85, roi: [1500, 700, 400, 300] }] } },
+    { type: 'step', step_id: 'match_miss', ts: 152, step: { status: 'failed', name: '检查结束按钮', workflow_id: 'child', workflow_path: ['parent', 'child'], workflow_depth: 1, execution_index: 1, node_kind: 'task', action: 'vision.match_template', duration_ms: 21, params: { template: 'assets/templates/souls/end.png', threshold: 0.9 }, output: [], error_category: 'not_matched', error: 'template not matched' } },
+  ],
+});
+fire(filters[0], 'click');
+const matchedRow = elements['step-list'].children.find((item) => item.dataset.stepId === 'match_ok');
+const missedRow = elements['step-list'].children.find((item) => item.dataset.stepId === 'match_miss');
+check('模板结果区分已匹配和未匹配', matchedRow.classList.contains('matched') && missedRow.classList.contains('not_matched')
+  && matchedRow.children[2].children[0].textContent === '已匹配' && missedRow.children[2].children[0].textContent === '未匹配');
+check('模板节点显示目标、ROI、阈值和置信度', childWithClass(matchedRow.children[1], 'step-operation').textContent === '匹配模板：ready.png'
+  && childWithClass(matchedRow.children[1], 'step-facts').children.map((child) => child.textContent).join('|').includes('ROI [1500, 700, 400, 300]')
+  && childWithClass(matchedRow.children[1], 'step-facts').children.map((child) => child.textContent).join('|').includes('最高匹配 96.3%'));
+check('匹配状态不会遮住节点耗时', matchedRow.children[2].children[0].textContent === '已匹配' && matchedRow.children[2].children[1].textContent === '18 ms');
+check('子工作流节点显示调用路径且不与主流程节点混淆', missedRow.children[1].children[0].children.some((child) => child.classList.contains('step-workflow') && child.textContent === 'parent > child'));
+check('未匹配计入失败而匹配计入完成', elements['completed-count'].textContent === '1' && elements['failed-count'].textContent === '1');
+
+send({
+  type: 'init',
+  descriptor: { workflow: 'parent.json', instance: 'mumu-0', startedAt: Date.now(), status: 'running' },
+  events: [
+    { type: 'run_started', run_id: 'nested-run', instance_id: 'mumu-0', status: 'running', ts: 160 },
+    { type: 'step', step_id: 'run_child', ts: 160.1, step: { status: 'running', name: '进入御魂挑战界面', workflow_id: 'parent', workflow_path: ['parent'], workflow_depth: 0, execution_index: 1, node_kind: 'task', action: 'workflow.run' } },
+    { type: 'step', step_id: 'probe', ts: 160.2, step: { status: 'failed', name: '看到御魂挑战', workflow_id: 'child', workflow_path: ['parent', 'child'], workflow_depth: 1, started_at: 160.15, execution_index: 1, node_kind: 'task', action: 'vision.match_template', duration_ms: 50, error_category: 'not_matched', error: 'template not matched' } },
+    { type: 'step', step_id: 'wait', ts: 160.4, step: { status: 'failed', name: '匹配御魂选项', workflow_id: 'child', workflow_path: ['parent', 'child'], workflow_depth: 1, started_at: 160.25, execution_index: 2, node_kind: 'task', action: 'vision.wait_template', duration_ms: 150, error: 'timeout' } },
+    { type: 'step', step_id: 'run_child', ts: 160.5, step: { status: 'failed', name: '进入御魂挑战界面', workflow_id: 'parent', workflow_path: ['parent'], workflow_depth: 0, started_at: 160.1, execution_index: 1, node_kind: 'task', action: 'workflow.run', duration_ms: 400, error: 'subworkflow child failed', output: { workflow: 'child.json', status: 'failed' } } },
+    { type: 'step', step_id: 'run_child', ts: 160.6, step: { status: 'branch_miss', original_status: 'failed', recovered_by: 'choose', recovered_by_name: '选择进入方式', name: '进入御魂挑战界面', workflow_id: 'parent', workflow_path: ['parent'], workflow_depth: 0, started_at: 160.1, execution_index: 1, node_kind: 'task', action: 'workflow.run', duration_ms: 400, params: { workflow: 'child.json' }, error: 'subworkflow child failed', output: { workflow: 'child.json', status: 'failed' } } },
+  ],
+});
+const nestedRows = elements['step-list'].children.filter((item) => ['run_child', 'probe', 'wait'].includes(item.dataset.stepId));
+check('外层子工作流分支恢复会降级全部失败后代', nestedRows.length === 3
+  && nestedRows.every((item) => item.classList.contains('branch_miss'))
+  && elements['failed-count'].textContent === '0');
+check('分支跳过不显示原始失败文案', nestedRows.every((item) => !item.children[1].children.some((child) => child.classList.contains('step-error'))));
+check('子工作流节点显示调用目标和选择器名称', childWithClass(nestedRows[0].children[1], 'step-operation').textContent === '运行子工作流：child'
+  && childWithClass(nestedRows[0].children[1], 'step-note').textContent.includes('选择进入方式'));
 
 send({
   type: 'init',
@@ -130,5 +202,22 @@ check('队员材料累计与队长分离', elements['reward-totals'].children[0]
 fire(elements['btn-stop'], 'click');
 fire(elements['btn-clear'], 'click');
 check('停止与清空命令可用', posted.some((message) => message.type === 'stopWorkflow') && posted.some((message) => message.type === 'clear'));
+
+send({
+  type: 'init',
+  descriptor: { workflow: 'soak.json', instance: 'mumu-0', startedAt: Date.now(), status: 'running' },
+  events: [
+    { type: 'run_started', run_id: 'soak-run', instance_id: 'mumu-0', status: 'running', ts: 300 },
+    ...Array.from({ length: 105 }, (_, index) => ({
+      type: 'step', step_id: `soak_${index}`, ts: 301 + index / 10,
+      step: { status: 'succeeded', name: `任务 ${index}`, execution_index: index + 1, node_kind: 'task', action: 'core.log', duration_ms: 5 },
+    })),
+  ],
+});
+check('超出行数上限只渲染最新 100 行', elements['step-list'].children.length === 100);
+check('行数提示显示总数', !elements['cap-note'].classList.contains('hidden') && elements['cap-note'].textContent === '仅显示最新 100 行 · 共 105 条');
+check('超限后统计仍按全部行计算', elements['completed-count'].textContent === '105');
+fire(filters[2], 'click');
+check('筛选后行数不超过上限且未超限时隐藏提示', elements['step-list'].children.length === 0 && elements['cap-note'].classList.contains('hidden'));
 
 console.log(`RUN LOG DOM SMOKE OK (${passed} checks)`);

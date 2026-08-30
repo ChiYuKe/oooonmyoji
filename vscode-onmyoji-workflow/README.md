@@ -50,14 +50,26 @@ code --install-extension onmyoji-workflow-helper-0.2.10.vsix
   - `Onmyoji: 用自动化引擎校验 (CLI validate)`
   - `Onmyoji: 重新加载 Action 目录`
 - 可视化编辑器：
+  - 工具栏左侧工作流下拉框会列出项目内全部工作流（`onmyoji.workflowFiles`），可直接切换
+    到其他工作流，无需重新打开；有未保存修改时会先询问“保存并切换 / 放弃修改并切换”。
   - 工具栏实例下拉框读取运行配置，并在启用 `discover_mumu_instances` 时每 4 秒通过
     MuMu 官方管理器刷新已启动的原生实例；三开、四开无需修改配置。运行和模板截取
     都使用当前选择，并在工作区中记住上次选择。
   - 滚轮缩放，右键/中键拖拽平移，拖动卡片调整位置（持久化到 `_layout`）。
+  - 选中卡片后 `Ctrl+C` 复制、`Ctrl+X` 剪切、`Ctrl+V` 粘贴（也可在画布右键菜单操作）；
+    复制会连同选中节点及其子树一起，粘贴时自动生成新 ID、重映射 `children` 与
+    `nodes.<id>.output` 引用，并把整组放到当前鼠标位置（右键菜单粘贴放到点击位置）。
   - 工具栏的「⇩」可把全部卡片和连线导出为 PNG；图片按完整节点边界自动留白，
     不受当前缩放和平移影响。默认使用 2 倍清晰度，超大画布会自动降采样以避免导出失败。
-  - 可从复合节点下方输出引脚拖到节点上方输入引脚，也可从输入引脚反向拖到输出引脚；
+  - 从复合节点下方输出引脚拖到节点上方输入引脚，也可从输入引脚反向拖到输出引脚；
     输入只允许一个父级，新连接自动替换旧父级。
+  - `workflow.run` 子流程卡片会以蓝色标题和 `⇢ 子工作流名` 标记；双击卡片或右键选择
+    「进入子工作流视图」可直接切换到对应子工作流文件，切换后会自动回放最近一次运行的
+    步骤事件，子流程各节点的运行状态（成功/失败/未匹配等）会直接显示在卡片上；
+    工具栏出现的「← 返回」按钮可逐级返回上级工作流（支持多级嵌套），有未保存修改时
+    会先询问「保存并返回 / 放弃修改并返回」。
+  - 工作流设置可编辑顶层 `description`；`workflow.run` 的浏览弹窗会在文件名下显示描述，
+    并支持按描述、文件名或相对路径搜索。
   - 拖动连线靠近目标端的手柄可重新连接；双击连线或选中后按 Delete 可断开。
   - 右侧详情栏编辑 Action 参数、Condition/Cooldown/Time Limit/Retry/Repeat 装饰器、
     Simple Parallel 结束模式和子节点优先级。
@@ -66,8 +78,9 @@ code --install-extension onmyoji-workflow-helper-0.2.10.vsix
     `assets/templates/` 下的模板图。
   - 参数可在固定值与结构化引用间切换；黑板面板编辑 `blackboard` 类型化键。
   - 「设置」编辑 ID、版本、参考分辨率与运行限制。
-  - 「▶ 运行」会通过后台 Python 进程运行当前已保存的工作流，并自动在旁边打开独立
-    运行日志窗口；有未保存修改时需先保存。「■」可停止当前运行，「☷」可随时重新打开日志。
+  - 「▶ 运行」会通过后台 Python 进程运行当前已保存的工作流；有未保存修改时需先保存。
+    运行开始不再自动弹出日志窗口（避免打断编辑），需要时可点「☷」或运行日志命令随时打开；
+    仅当运行失败时自动弹出日志窗口。「■」可停止当前运行。
   - 「▶ 组队御魂」直接同时启动队长 `mumu-0` 和队员 `mumu-1`，不经过 BAT；默认运行
     30 场，可通过 `onmyoji.partySoulsRounds` 改为 1 场测试。
   - 运行日志按时间线展示节点状态、Action、耗时、错误和截图，可在「任务 / 全部 / 失败」
@@ -88,7 +101,7 @@ code --install-extension onmyoji-workflow-helper-0.2.10.vsix
 | 配置项 | 默认 | 说明 |
 | --- | --- | --- |
 | `onmyoji.projectRoot` | `""`（自动探测） | oooonmyoji 项目根目录 |
-| `onmyoji.workflowFiles` | `**/workflows/*.json` | 启用智能提示的文件 glob |
+| `onmyoji.workflowFiles` | `**/workflows/**/*.json` | 启用智能提示的文件 glob（包含子目录） |
 | `onmyoji.pythonExecutable` | `""`（自动用 `.venv/Scripts/python.exe`） | 引擎校验使用的 Python |
 | `onmyoji.configPath` | `config/config.json` | 引擎 CLI validate 的配置文件 |
 | `onmyoji.partySoulsRounds` | `30` | 点击“组队御魂”按钮时运行 1 场或 30 场 |

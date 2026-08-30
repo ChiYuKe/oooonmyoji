@@ -49,6 +49,7 @@ export interface WorkflowInfo {
   raw: Record<string, unknown> | null;
   id?: string;
   version?: string;
+  description?: string;
   root?: string;
   resolution?: number[];
   limits?: Record<string, unknown>;
@@ -95,6 +96,7 @@ export function parseWorkflow(raw: unknown): WorkflowInfo {
   info.raw = raw;
   if (typeof raw.id === 'string') info.id = raw.id;
   if (typeof raw.version === 'string') info.version = raw.version;
+  if (typeof raw.description === 'string') info.description = raw.description;
   if (typeof raw.root === 'string') info.root = raw.root;
   if (Array.isArray(raw.resolution)) info.resolution = raw.resolution as number[];
   if (isObject(raw.limits)) info.limits = raw.limits;
@@ -134,6 +136,119 @@ interface RefContext {
   info: WorkflowInfo;
   catalog: ActionCatalog;
   nodeIds: Set<string>;
+}
+
+function guaranteedOutputNodeIds(
+  nodeId: string,
+  nodeMap: Map<string, NodeInfo>,
+  visiting = new Set<string>(),
+): Set<string> {
+  if (visiting.has(nodeId)) return new Set();
+  const node = nodeMap.get(nodeId);
+  if (!node) return new Set();
+  if (node.type === 'task') return node.action ? new Set([node.id]) : new Set();
+  const nested = new Set(visiting);
+  nested.add(nodeId);
+  if (node.type === 'root' && node.children.length === 1) {
+    return guaranteedOutputNodeIds(node.children[0], nodeMap, nested);
+  }
+  if (node.type === 'sequence') {
+    const result = new Set<string>();
+    for (const child of node.children) {
+      for (const id of guaranteedOutputNodeIds(child, nodeMap, nested)) result.add(id);
+    }
+    return result;
+  }
+  if (node.type === 'selector' && node.children.length === 1) {
+    return guaranteedOutputNodeIds(node.children[0], nodeMap, nested);
+  }
+  if (node.type === 'simple_parallel' && node.children.length === 2) {
+    // Parallel success is determined by the main (first) task. The background
+    // branch can still be running, fail, or be cancelled, so it contributes no
+    // guaranteed outputs.
+    return guaranteedOutputNodeIds(node.children[0], nodeMap, nested);
+  }
+  return new Set();
+}
+
+/** Outputs guaranteed to exist immediately before targetNodeId starts. */
+export function availableOutputNodeIds(info: WorkflowInfo, targetNodeId: string): Set<string> {
+  const nodeMap = new Map(info.nodes.filter((node) => node.id).map((node) => [node.id, node]));
+  const parents = new Map<string, string[]>();
+  for (const node of info.nodes) {
+    for (const child of node.children) {
+      const entries = parents.get(child) ?? [];
+      entries.push(node.id);
+      parents.set(child, entries);
+    }
+  }
+  const result = new Set<string>();
+  const visited = new Set<string>();
+  let current = targetNodeId;
+  while (!visited.has(current)) {
+    visited.add(current);
+    const parentIds = parents.get(current) ?? [];
+    if (parentIds.length !== 1) break;
+    const parent = nodeMap.get(parentIds[0]);
+    if (!parent) break;
+    if (parent.type === 'sequence') {
+      const currentIndex = parent.children.indexOf(current);
+      for (const sibling of parent.children.slice(0, Math.max(0, currentIndex))) {
+        for (const id of guaranteedOutputNodeIds(sibling, nodeMap)) result.add(id);
+      }
+    }
+    current = parent.id;
+  }
+  return result;
+}
+
+function possibleOutputNodeIdsInSubtree(
+  nodeId: string,
+  nodeMap: Map<string, NodeInfo>,
+  visiting = new Set<string>(),
+): Set<string> {
+  if (visiting.has(nodeId)) return new Set();
+  const node = nodeMap.get(nodeId);
+  if (!node) return new Set();
+  if (node.type === 'task') return node.action ? new Set([node.id]) : new Set();
+  const nested = new Set(visiting);
+  nested.add(nodeId);
+  const result = new Set<string>();
+  for (const child of node.children) {
+    for (const id of possibleOutputNodeIdsInSubtree(child, nodeMap, nested)) result.add(id);
+  }
+  return result;
+}
+
+/** Outputs that may have been produced before targetNodeId, for safe exists checks. */
+export function possiblyAvailableOutputNodeIds(info: WorkflowInfo, targetNodeId: string): Set<string> {
+  const nodeMap = new Map(info.nodes.filter((node) => node.id).map((node) => [node.id, node]));
+  const parents = new Map<string, string[]>();
+  for (const node of info.nodes) {
+    for (const child of node.children) {
+      const entries = parents.get(child) ?? [];
+      entries.push(node.id);
+      parents.set(child, entries);
+    }
+  }
+  const result = availableOutputNodeIds(info, targetNodeId);
+  const visited = new Set<string>();
+  let current = targetNodeId;
+  while (!visited.has(current)) {
+    visited.add(current);
+    const parentIds = parents.get(current) ?? [];
+    if (parentIds.length !== 1) break;
+    const parent = nodeMap.get(parentIds[0]);
+    if (!parent) break;
+    if (parent.type === 'sequence' || parent.type === 'selector') {
+      const currentIndex = parent.children.indexOf(current);
+      for (const sibling of parent.children.slice(0, Math.max(0, currentIndex))) {
+        for (const id of possibleOutputNodeIdsInSubtree(sibling, nodeMap)) result.add(id);
+      }
+    }
+    current = parent.id;
+  }
+  return result;
 }
 
 function schemaAtPath(schema: Record<string, unknown>, segments: string[]): Record<string, unknown> | undefined {
@@ -182,7 +297,13 @@ function bindingTypesCompatible(expected: Record<string, unknown> | undefined, a
   return [...expectedTypes].some((type) => actualTypes.has(type));
 }
 
-function resolveRefSchema(ref: string, context: RefContext, path: (string | number)[], issues: ValidationIssue[]): Record<string, unknown> | undefined {
+function resolveRefSchema(
+  ref: string,
+  context: RefContext,
+  path: (string | number)[],
+  issues: ValidationIssue[],
+  availableNodeIds?: Set<string>,
+): Record<string, unknown> | undefined {
   const parts = ref.split('.');
   if (parts.length >= 2 && parts[0] === 'blackboard' && parts.slice(1).every(Boolean)) {
     const parameter = context.info.blackboard[parts[1]];
@@ -192,6 +313,10 @@ function resolveRefSchema(ref: string, context: RefContext, path: (string | numb
     return undefined;
   }
   if (parts.length >= 4 && parts[0] === 'nodes' && parts[2] === 'output' && context.nodeIds.has(parts[1]) && parts.slice(3).every(Boolean)) {
+    if (availableNodeIds && !availableNodeIds.has(parts[1])) {
+      issues.push({ path, message: `绑定引用了执行到此节点时尚不可用的输出：${ref}`, severity: 'error', code: 'unavailable-ref' });
+      return undefined;
+    }
     const source = context.info.nodes.find((node) => node.id === parts[1]);
     const spec = source?.action ? context.catalog.byName(source.action) : undefined;
     const resolved = spec ? schemaAtPath(spec.outputSchema, parts.slice(3)) : undefined;
@@ -223,9 +348,11 @@ function validateBindings(
   issues: ValidationIssue[],
   condition = false,
   expectedSchema?: Record<string, unknown>,
+  availableNodeIds?: Set<string>,
+  possiblyAvailableNodeIds?: Set<string>,
 ): void {
   if (Array.isArray(value)) {
-    value.forEach((child, index) => validateBindings(child, context, [...path, index], issues, condition, schemaChild(expectedSchema, index)));
+    value.forEach((child, index) => validateBindings(child, context, [...path, index], issues, condition, schemaChild(expectedSchema, index), availableNodeIds, possiblyAvailableNodeIds));
     return;
   }
   if (!isObject(value)) {
@@ -237,7 +364,7 @@ function validateBindings(
       issues.push({ path, message: '绑定对象必须只含字符串 ref', severity: 'error', code: 'invalid-binding' });
       return;
     }
-    const actual = resolveRefSchema(value.ref, context, [...path, 'ref'], issues);
+    const actual = resolveRefSchema(value.ref, context, [...path, 'ref'], issues, availableNodeIds);
     if (actual && !bindingTypesCompatible(expectedSchema, actual)) {
       issues.push({ path, message: `绑定类型与 Action 参数不兼容：${value.ref}`, severity: 'error', code: 'binding-type' });
     }
@@ -254,20 +381,20 @@ function validateBindings(
     if (op === 'and' || op === 'or') {
       if (!Array.isArray(operand) || operand.length === 0) {
         issues.push({ path: [...path, op], message: `${op} 必须是非空数组`, severity: 'error', code: 'invalid-condition' });
-      } else operand.forEach((child, index) => validateBindings(child, context, [...path, op, index], issues, true));
+      } else operand.forEach((child, index) => validateBindings(child, context, [...path, op, index], issues, true, undefined, availableNodeIds, possiblyAvailableNodeIds));
     } else if (op === 'not') {
-      validateBindings(operand, context, [...path, op], issues, true);
+      validateBindings(operand, context, [...path, op], issues, true, undefined, availableNodeIds, possiblyAvailableNodeIds);
     } else if (op === 'exists') {
       if (!isObject(operand) || Object.keys(operand).length !== 1 || typeof operand.ref !== 'string') {
         issues.push({ path: [...path, op], message: 'exists 需要绑定引用', severity: 'error', code: 'invalid-condition' });
-      } else resolveRefSchema(operand.ref, context, [...path, op, 'ref'], issues);
+      } else resolveRefSchema(operand.ref, context, [...path, op, 'ref'], issues, possiblyAvailableNodeIds ?? availableNodeIds);
     } else if (!Array.isArray(operand) || operand.length !== 2) {
       issues.push({ path: [...path, op], message: `${op} 需要两个操作数`, severity: 'error', code: 'invalid-condition' });
-    } else operand.forEach((child, index) => validateBindings(child, context, [...path, op, index], issues));
+    } else operand.forEach((child, index) => validateBindings(child, context, [...path, op, index], issues, false, undefined, availableNodeIds, possiblyAvailableNodeIds));
     return;
   }
   for (const [key, child] of Object.entries(value)) {
-    validateBindings(child, context, [...path, key], issues, false, schemaChild(expectedSchema, key));
+    validateBindings(child, context, [...path, key], issues, false, schemaChild(expectedSchema, key), availableNodeIds, possiblyAvailableNodeIds);
   }
 }
 
@@ -289,7 +416,14 @@ function issue(path: (string | number)[], message: string, code: string): Valida
   return { path, message, severity: 'error', code };
 }
 
-function validateDecorator(item: Record<string, unknown>, path: (string | number)[], context: RefContext, issues: ValidationIssue[]): void {
+function validateDecorator(
+  item: Record<string, unknown>,
+  path: (string | number)[],
+  context: RefContext,
+  issues: ValidationIssue[],
+  availableNodeIds: Set<string>,
+  possiblyAvailableNodeIds: Set<string>,
+): void {
   const type = item.type;
   if (typeof type !== 'string' || !(DECORATOR_TYPES as readonly string[]).includes(type)) {
     issues.push(issue([...path, 'type'], `未知装饰器类型：${String(type)}`, 'invalid-decorator'));
@@ -305,7 +439,7 @@ function validateDecorator(item: Record<string, unknown>, path: (string | number
   const extras = Object.keys(item).filter((key) => !allowed[type].includes(key));
   if (extras.length) issues.push(issue(path, `装饰器包含未知字段：${extras.join(', ')}`, 'invalid-decorator'));
   for (const key of required[type]) if (!(key in item)) issues.push(issue(path, `装饰器缺少 ${key}`, 'invalid-decorator'));
-  if (type === 'condition') validateBindings(item.expression, context, [...path, 'expression'], issues, true);
+  if (type === 'condition') validateBindings(item.expression, context, [...path, 'expression'], issues, true, undefined, availableNodeIds, possiblyAvailableNodeIds);
   if ((type === 'cooldown' || type === 'timeout') && (typeof item.seconds !== 'number' || item.seconds <= 0)) issues.push(issue([...path, 'seconds'], 'seconds 必须大于 0', 'invalid-decorator'));
   if (type === 'retry' && (!Number.isInteger(item.attempts) || Number(item.attempts) < 1)) issues.push(issue([...path, 'attempts'], 'attempts 必须是正整数', 'invalid-decorator'));
   if (type === 'retry' && item.delay_seconds !== undefined && (typeof item.delay_seconds !== 'number' || item.delay_seconds < 0)) issues.push(issue([...path, 'delay_seconds'], 'delay_seconds 不能小于 0', 'invalid-decorator'));
@@ -320,6 +454,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
   if (root.schema_version !== 3) issues.push(issue(['schema_version'], '仅支持 schema_version 3', 'schema-version'));
   if (typeof root.id !== 'string' || !root.id) issues.push(issue(['id'], '缺少 id', 'missing-id'));
   if (typeof root.version !== 'string' || !root.version) issues.push(issue(['version'], '缺少 version', 'missing-version'));
+  if (root.description !== undefined && typeof root.description !== 'string') issues.push(issue(['description'], 'description 必须是字符串', 'invalid-description'));
   if (typeof root.root !== 'string' || !root.root) issues.push(issue(['root'], '缺少 root', 'missing-root'));
   if (!Array.isArray(root.resolution) || root.resolution.length !== 2 || !root.resolution.every((value) => Number.isInteger(value) && Number(value) > 0)) issues.push(issue(['resolution'], 'resolution 必须包含两个正整数', 'invalid-resolution'));
   if (!Array.isArray(root.nodes) || root.nodes.length < 2) issues.push(issue(['nodes'], 'Behavior Tree 至少需要 Root 和一个子节点', 'invalid-nodes'));
@@ -342,6 +477,8 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
     const path = ['nodes', index];
     if (!isObject(rawNode)) { issues.push(issue(path, '节点必须是对象', 'invalid-node')); return; }
     const node = info.nodes[index];
+    const availableNodeIds = availableOutputNodeIds(info, node.id);
+    const possiblyAvailableNodeIds = possiblyAvailableOutputNodeIds(info, node.id);
     if (!node.id) issues.push(issue([...path, 'id'], '节点缺少 id', 'missing-node-id'));
     if (!(NODE_TYPES as readonly string[]).includes(String(rawNode.type))) issues.push(issue([...path, 'type'], `未知节点类型：${String(rawNode.type)}`, 'invalid-node-type'));
     const decoratorsRaw = rawNode.decorators;
@@ -349,7 +486,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
     if (decoratorsRaw !== undefined && !Array.isArray(decoratorsRaw)) issues.push(issue([...path, 'decorators'], 'decorators 必须是数组', 'invalid-decorator'));
     if (Array.isArray(decoratorsRaw)) decoratorsRaw.forEach((decorator, decoratorIndex) => {
       if (!isObject(decorator)) { issues.push(issue([...path, 'decorators', decoratorIndex], '装饰器必须是对象', 'invalid-decorator')); return; }
-      validateDecorator(decorator, [...path, 'decorators', decoratorIndex], context, issues);
+      validateDecorator(decorator, [...path, 'decorators', decoratorIndex], context, issues, availableNodeIds, possiblyAvailableNodeIds);
       if (decorator.type !== 'condition' && typeof decorator.type === 'string') {
         if (singletons.has(decorator.type)) issues.push(issue([...path, 'decorators', decoratorIndex], `重复的 ${decorator.type} 装饰器`, 'duplicate-decorator'));
         singletons.add(decorator.type);
@@ -365,7 +502,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
           const params = rawNode.params === undefined ? {} : rawNode.params;
           if (!isObject(params)) issues.push(issue([...path, 'params'], 'params 必须是对象', 'invalid-params'));
           else {
-            validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema);
+            validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema, availableNodeIds);
             const validate = workflowAjv.compile(bindingAwareParameterSchema(spec.inputSchema));
             const normalized = applyParameterDefaults(spec.parameters, params);
             if (!validate(normalized)) {
@@ -427,6 +564,7 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog):
       schema_version: { const: 3 },
       id: { type: 'string', minLength: 1 },
       version: { type: 'string', minLength: 1 },
+      description: { type: 'string', description: '工作流用途说明，会显示在子工作流选择器中' },
       resolution: { type: 'array', prefixItems: [{ type: 'integer', minimum: 1 }, { type: 'integer', minimum: 1 }], minItems: 2, maxItems: 2 },
       root: { type: 'string', enum: info.nodeIds },
       blackboard: { type: 'object' },
@@ -452,27 +590,146 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog):
   };
 }
 
-function parameterPaths(prefix: string, parameter: ParameterInfo, out: string[]): void {
-  if (parameter.type !== 'object' || !parameter.properties) return;
-  for (const [key, child] of Object.entries(parameter.properties)) {
-    const next = `${prefix}.${key}`;
-    out.push(next);
-    parameterPaths(next, child, out);
+interface RefCandidate {
+  ref: string;
+  schema: Record<string, unknown>;
+}
+
+function nestedRefCandidates(
+  prefix: string,
+  schema: Record<string, unknown>,
+  out: RefCandidate[],
+  depth = 0,
+): void {
+  if (depth >= 12) return;
+  if (schema.type === 'object' && isObject(schema.properties)) {
+    for (const [name, rawChild] of Object.entries(schema.properties)) {
+      if (!isObject(rawChild)) continue;
+      const ref = `${prefix}.${name}`;
+      out.push({ ref, schema: rawChild });
+      nestedRefCandidates(ref, rawChild, out, depth + 1);
+    }
+  }
+  if (schema.type === 'array') {
+    const prefixItems = Array.isArray(schema.prefixItems) ? schema.prefixItems : [];
+    const item = isObject(prefixItems[0]) ? prefixItems[0] as Record<string, unknown>
+      : isObject(schema.items) ? schema.items as Record<string, unknown>
+        : {};
+    const ref = `${prefix}.0`;
+    out.push({ ref, schema: item });
+    nestedRefCandidates(ref, item, out, depth + 1);
   }
 }
 
-export function collectRefSuggestions(info: WorkflowInfo, catalog: ActionCatalog): { blackboard: string[]; nodes: string[] } {
-  const blackboard: string[] = [];
+export function collectRefSuggestions(
+  info: WorkflowInfo,
+  catalog: ActionCatalog,
+  targetNodeId?: string,
+  expectedSchema?: Record<string, unknown>,
+): { blackboard: string[]; nodes: string[] } {
+  const blackboardCandidates: RefCandidate[] = [];
   for (const name of info.blackboardProps) {
     const prefix = `blackboard.${name}`;
-    blackboard.push(prefix);
-    parameterPaths(prefix, info.blackboard[name], blackboard);
+    const schema = parameterToSchema(info.blackboard[name]);
+    blackboardCandidates.push({ ref: prefix, schema });
+    nestedRefCandidates(prefix, schema, blackboardCandidates);
   }
-  const nodes: string[] = [];
+  const nodeCandidates: RefCandidate[] = [];
+  const available = targetNodeId ? availableOutputNodeIds(info, targetNodeId) : undefined;
   for (const node of info.nodes) {
-    if (!node.id || !node.action) continue;
+    if (!node.id || !node.action || (available && !available.has(node.id))) continue;
     const spec = catalog.byName(node.action);
-    if (spec) for (const field of spec.outputFields) nodes.push(`nodes.${node.id}.output.${field}`);
+    if (spec) nestedRefCandidates(`nodes.${node.id}.output`, spec.outputSchema, nodeCandidates);
   }
-  return { blackboard, nodes };
+  const compatible = (candidate: RefCandidate): boolean => bindingTypesCompatible(expectedSchema, candidate.schema);
+  return {
+    blackboard: blackboardCandidates.filter(compatible).map((candidate) => candidate.ref),
+    nodes: nodeCandidates.filter(compatible).map((candidate) => candidate.ref),
+  };
+}
+
+export interface WorkflowFileDescriptor {
+  uri: string;
+  name: string;
+  rel: string;
+  description?: string;
+}
+
+/**
+ * 把 workflow.run 的子工作流引用（工作流 ID、JSON 文件名或 workflows/ 下的路径）
+ * 匹配到具体工作流文件。ID 匹配需要读取文件内容，由调用方在找不到时逐文件比对 id。
+ */
+export function matchWorkflowReference(reference: string, files: WorkflowFileDescriptor[]): string | undefined {
+  const ref = String(reference ?? '').trim();
+  if (!ref) return undefined;
+  const norm = ref.replace(/\\/g, '/');
+  const withExt = norm.toLowerCase().endsWith('.json') ? norm : `${norm}.json`;
+  for (const file of files) {
+    if (file.name === norm || file.name === withExt) return file.uri;
+    const rel = file.rel.replace(/\\/g, '/');
+    if (rel === norm || rel === withExt || rel.endsWith(`/${norm}`) || rel.endsWith(`/${withExt}`)) return file.uri;
+  }
+  return undefined;
+}
+
+/** 一个 workflow.run 节点对子工作流的一次引用（引用原文 `params.workflow`）。 */
+export interface WorkflowRunReference {
+  /** 引用节点 id。 */
+  nodeId: string;
+  /** 引用节点 name（未命名时缺省）。 */
+  nodeName?: string;
+  /** `params.workflow` 的原始引用值（工作流 ID、JSON 文件名或 workflows/ 下路径）。 */
+  reference: string;
+}
+
+/**
+ * 收集一个工作流 JSON 里全部 `workflow.run` 节点引用。
+ * @param raw - 已解析的工作流对象。
+ * @returns 按节点出现顺序排列的引用条目。
+ */
+export function collectWorkflowRunReferences(raw: unknown): WorkflowRunReference[] {
+  const out: WorkflowRunReference[] = [];
+  if (!isObject(raw) || !Array.isArray(raw.nodes)) return out;
+  for (const item of raw.nodes) {
+    if (!isObject(item)) continue;
+    if (String(item.type) !== 'task' || String(item.action) !== 'workflow.run') continue;
+    const params = isObject(item.params) ? item.params : {};
+    const reference = typeof params.workflow === 'string' ? params.workflow.trim() : '';
+    if (!reference) continue;
+    out.push({
+      nodeId: typeof item.id === 'string' ? item.id : '',
+      nodeName: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : undefined,
+      reference,
+    });
+  }
+  return out;
+}
+
+/**
+ * 把 workflow.run 的子工作流引用（工作流 ID、JSON 文件名或 workflows/ 下的路径）
+ * 解析到具体工作流文件 URI。先按文件名/路径匹配；未命中时把引用当作工作流 ID，
+ * 通过 `readText` 读取各文件内容逐文件比对 `id`。
+ * @param reference - 引用原文（节点 `params.workflow`）。
+ * @param files - 项目内全部工作流文件描述。
+ * @param readText - 读取指定 URI 文件文本的异步回调。
+ * @returns 命中文件的 URI，找不到时返回 undefined。
+ */
+export async function resolveWorkflowReference(
+  reference: string,
+  files: WorkflowFileDescriptor[],
+  readText: (uri: string) => Promise<string>,
+): Promise<string | undefined> {
+  const byPath = matchWorkflowReference(reference, files);
+  if (byPath) return byPath;
+  const ref = String(reference ?? '').trim();
+  if (!ref) return undefined;
+  for (const file of files) {
+    try {
+      const raw = JSON.parse(await readText(file.uri)) as { id?: unknown };
+      if (raw && typeof raw === 'object' && !Array.isArray(raw) && raw.id === ref) return file.uri;
+    } catch {
+      // 忽略读取/解析失败的文件；下一个候选仍可继续匹配。
+    }
+  }
+  return undefined;
 }

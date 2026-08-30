@@ -210,10 +210,10 @@ export class WorkflowIntelligence implements vscode.Disposable {
 
   isWorkflowFile(uri: vscode.Uri): boolean {
     if (uri.scheme !== 'file') return false;
-    const config = vscode.workspace.getConfiguration('onmyoji').get<string>('workflowFiles', '**/workflows/*.json');
+    const config = vscode.workspace.getConfiguration('onmyoji').get<string>('workflowFiles', '**/workflows/**/*.json');
     const path = uri.path;
-    const defaultMatch = /\/workflows\/[^/]+\.json$/i.test(path);
-    if (config === '**/workflows/*.json') return defaultMatch;
+    const defaultMatch = /\/workflows\/(?:.+\/)*[^/]+\.json$/i.test(path);
+    if (config === '**/workflows/**/*.json') return defaultMatch;
     return globToRegExp(config).test(path);
   }
 

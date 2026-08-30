@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import { ActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
 import { RuntimeInstanceInfo } from './runtimeInstances';
-import { collectRefSuggestions, parseWorkflow, validateWorkflow } from './workflow';
+import { WorkflowFileDescriptor, collectRefSuggestions, parseWorkflow, resolveWorkflowReference, validateWorkflow } from './workflow';
 
 interface WebviewPayload {
   type: string;
@@ -25,10 +25,58 @@ interface RuntimeInstanceState {
   selectedInstance: string;
 }
 
+interface AssetImageInfo {
+  path: string;
+  uri: string;
+}
+
+export interface TemplateCheckOptions {
+  template: string;
+  roi?: [number, number, number, number];
+  threshold: number;
+  maxResults: number;
+  scaleSearch: boolean;
+  referenceResolution: [number, number];
+  instanceId?: string;
+}
+
+export interface TemplateCheckResult {
+  dataUrl: string;
+  width: number;
+  height: number;
+  roi: [number, number, number, number];
+  matches: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    confidence: number;
+  }>;
+}
+
 type RoiPicker = (referenceResolution: [number, number], instanceId?: string) => Promise<RoiCapture | undefined>;
+type TemplateChecker = (options: TemplateCheckOptions) => Promise<TemplateCheckResult>;
 type InstanceSelector = (instanceId: string) => Promise<string>;
 type RuntimeInstanceProvider = () => Promise<RuntimeInstanceState>;
 type RunEventListener = (event: Record<string, unknown>) => void;
+
+interface EditorCommandPayload {
+  command: string;
+  value?: unknown;
+}
+
+const editorCommands = new Set([
+  'addTask',
+  'addSelector',
+  'addSequence',
+  'addParallel',
+  'autoLayout',
+  'fitView',
+  'exportImage',
+  'workflowSettings',
+  'blackboard',
+  'searchNodeByName',
+]);
 
 export class WebviewManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -42,6 +90,10 @@ export class WebviewManager implements vscode.Disposable {
   private latestRunEvents: Record<string, unknown>[] = [];
   private instanceRefreshTimer: NodeJS.Timeout | undefined;
   private instanceRefreshPending = false;
+  private editorReady = false;
+  private pendingEditorCommands: EditorCommandPayload[] = [];
+  /** 进入子工作流视图时记录上级工作流 URI（支持多级嵌套返回）。 */
+  private workflowBackStack: string[] = [];
 
   constructor(
     private context: vscode.ExtensionContext,
@@ -51,6 +103,7 @@ export class WebviewManager implements vscode.Disposable {
     private getRuntimeInstanceState: RuntimeInstanceProvider,
     private selectRuntimeInstance: InstanceSelector,
     private pickRoi: RoiPicker,
+    private checkTemplate: TemplateChecker,
     private onRunEvent: RunEventListener,
   ) {}
 
@@ -64,6 +117,7 @@ export class WebviewManager implements vscode.Disposable {
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.One);
     } else {
+      this.editorReady = false;
       this.panel = vscode.window.createWebviewPanel(
         'onmyojiWorkflow',
         'Onmyoji 工作流编辑器',
@@ -85,6 +139,8 @@ export class WebviewManager implements vscode.Disposable {
           this.stopInstanceRefresh();
           this.panel = undefined;
           this.docUri = undefined;
+          this.editorReady = false;
+          this.pendingEditorCommands = [];
           this.disposePanelSubscriptions();
         }),
       );
@@ -93,6 +149,37 @@ export class WebviewManager implements vscode.Disposable {
     this.docUri = uri;
     this.dirty = false;
     await this.sendInit();
+  }
+
+  /** 从活动栏侧边面板调用画布编辑命令。 */
+  async executeEditorCommand(command: string, value?: unknown): Promise<void> {
+    if (!editorCommands.has(command)) return;
+    const payload: EditorCommandPayload = { command, value };
+    const queued = !this.panel || !this.editorReady;
+    if (queued) this.pendingEditorCommands.push(payload);
+    if (!this.panel) await this.open();
+    if (!this.panel) {
+      this.pendingEditorCommands = this.pendingEditorCommands.filter((item) => item !== payload);
+      return;
+    }
+    this.panel.reveal(vscode.ViewColumn.One);
+    if (this.editorReady) {
+      const index = this.pendingEditorCommands.indexOf(payload);
+      if (index >= 0) {
+        this.pendingEditorCommands.splice(index, 1);
+        void this.panel.webview.postMessage({ type: 'editorCommand', ...payload });
+      } else if (!queued) {
+        void this.panel.webview.postMessage({ type: 'editorCommand', ...payload });
+      }
+    }
+  }
+
+  private flushEditorCommands(): void {
+    if (!this.panel || !this.editorReady) return;
+    const commands = this.pendingEditorCommands.splice(0);
+    for (const command of commands) {
+      void this.panel.webview.postMessage({ type: 'editorCommand', ...command });
+    }
   }
 
   private disposePanelSubscriptions(): void {
@@ -111,17 +198,61 @@ export class WebviewManager implements vscode.Disposable {
   }
 
   private async pickWorkflow(): Promise<vscode.Uri | undefined> {
-    const pattern = vscode.workspace.getConfiguration('onmyoji').get<string>('workflowFiles', '**/workflows/*.json');
-    const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
+    const files = await this.listWorkflowFiles();
     if (files.length === 0) {
-      vscode.window.showInformationMessage('未找到工作流 JSON 文件（默认匹配 **/workflows/*.json）。');
+      vscode.window.showInformationMessage('未找到工作流 JSON 文件（默认匹配 **/workflows/**/*.json）。');
       return undefined;
     }
     const picked = await vscode.window.showQuickPick(
-      files.map((f) => ({ label: path.basename(f.fsPath), description: vscode.workspace.asRelativePath(f), uri: f })),
+      files.map((f) => ({ label: f.name, description: f.rel, detail: f.description || undefined, uri: vscode.Uri.parse(f.uri) })),
       { placeHolder: '选择要编辑的工作流' },
     );
     return picked?.uri;
+  }
+
+  /** 枚举项目内所有工作流文件，供工具栏下拉框与打开对话框使用。 */
+  private async listWorkflowFiles(): Promise<WorkflowFileDescriptor[]> {
+    const pattern = vscode.workspace.getConfiguration('onmyoji').get<string>('workflowFiles', '**/workflows/**/*.json');
+    const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
+    const descriptors = await Promise.all(files.map(async (file): Promise<WorkflowFileDescriptor> => {
+      let description = '';
+      try {
+        const contents = await vscode.workspace.fs.readFile(file);
+        const raw: unknown = JSON.parse(Buffer.from(contents).toString('utf8'));
+        if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { description?: unknown }).description === 'string') {
+          description = (raw as { description: string }).description.trim();
+        }
+      } catch {
+        // 无法解析的脚本仍列出，只是不显示描述。
+      }
+      return {
+        uri: file.toString(),
+        name: path.basename(file.fsPath),
+        rel: vscode.workspace.asRelativePath(file),
+        ...(description ? { description } : {}),
+      };
+    }));
+    return descriptors.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.rel.localeCompare(b.rel, 'zh-CN'));
+  }
+
+  /** 把 webview 传来的工作流文本写入当前文件，并同步开放文本编辑器与智能提示。 */
+  private async saveCurrentText(text: string): Promise<void> {
+    if (!this.docUri) return;
+    await vscode.workspace.fs.writeFile(this.docUri, Buffer.from(text, 'utf8'));
+    this.dirty = false;
+    const doc = await vscode.workspace.openTextDocument(this.docUri);
+    this.intelligence.refreshDocument(doc);
+    if (doc.isDirty) {
+      // 如果用户在编辑器里打开了同一文件，尝试用工作区文档同步写入
+      const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === this.docUri?.toString());
+      if (editor) {
+        const edit = new vscode.WorkspaceEdit();
+        const full = new vscode.Range(0, 0, editor.document.lineCount, 0);
+        edit.replace(this.docUri, full, text);
+        await vscode.workspace.applyEdit(edit);
+      }
+    }
+    vscode.window.setStatusBarMessage('工作流已保存', 3000);
   }
 
   private buildHtml(webview: vscode.Webview): string {
@@ -140,31 +271,19 @@ export class WebviewManager implements vscode.Disposable {
 </head>
 <body>
 <header id="topbar">
-  <span id="brand">Behavior Tree</span>
-  <span id="file-label" title=""></span>
+  <button id="btn-back" class="icon-button hidden" title="返回上一级工作流（从子工作流视图返回）" aria-label="返回上一级">←</button>
+  <select id="workflow-select" title="切换工作流（无需重新打开）" aria-label="切换工作流"></select>
   <span id="dirty-badge" class="badge hidden">未保存</span>
   <span id="issue-badge" class="badge"></span>
-  <span class="toolbar-separator"></span>
-  <button id="btn-add-task" class="primary" title="添加 Task">＋ Task</button>
-  <button id="btn-add-selector" title="添加 Selector">＋ Selector</button>
-  <button id="btn-add-sequence" title="添加 Sequence">＋ Sequence</button>
-  <button id="btn-add-parallel" title="添加 Simple Parallel">＋ Parallel</button>
-  <button id="btn-layout" class="icon-button" title="自动排列">⌘</button>
-  <button id="btn-fit" class="icon-button" title="适应视口">⌂</button>
-  <button id="btn-export-image" class="icon-button" title="导出完整画布为 PNG" aria-label="导出完整画布为图片">⇩</button>
   <span class="spacer"></span>
-  <button id="btn-workflow" title="工作流设置">设置</button>
-  <button id="btn-blackboard" title="黑板参数">黑板</button>
   <select id="instance-select" title="运行实例" aria-label="运行实例"></select>
-  <button id="btn-run-log" class="icon-button" title="打开运行日志" aria-label="打开运行日志">☷</button>
-  <button id="btn-run-party" class="primary" title="队长 mumu-0 与队员 mumu-1 运行组队御魂">▶ 组队御魂</button>
   <button id="btn-run" class="primary" title="执行当前工作流">▶ 运行</button>
   <button id="btn-stop" class="icon-button" title="停止当前工作流" aria-label="停止当前工作流">■</button>
   <button id="btn-save" class="primary" title="保存到 JSON">保存</button>
   <button id="btn-more" class="icon-button" title="更多操作">⋯</button>
 </header>
 <div id="external-banner" class="hidden"></div>
-<main>
+<main id="editor-main">
   <section id="canvas-wrap">
     <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="viewport-tools"><button id="btn-zoom-out" class="icon-button" title="缩小">−</button><span id="zoom-label">100%</span><button id="btn-zoom-in" class="icon-button" title="放大">＋</button></div>
@@ -197,16 +316,59 @@ export class WebviewManager implements vscode.Disposable {
     const refs = collectRefSuggestions(info, catalog);
     const issues = validateWorkflow(raw, catalog).map((i) => ({ path: i.path, message: i.message, severity: i.severity, code: i.code }));
     const runtime = await this.getRuntimeInstanceState();
+    const assetsBaseUri = this.panel.webview
+      .asWebviewUri(vscode.Uri.file(path.join(this.getProjectRoot(), 'assets')))
+      .toString()
+      .replace(/\/?$/, '/');
     await this.panel.webview.postMessage({
       type: 'init',
       document: { uri: this.docUri.toString(), name: path.basename(this.docUri.fsPath), text },
+      workflows: await this.listWorkflowFiles(),
+      canGoBack: this.workflowBackStack.length > 0,
       catalog: catalog.all(),
       refs,
       issues,
       projectRoot: this.getProjectRoot(),
+      assetsBaseUri,
       instances: runtime.instances,
       selectedInstance: runtime.selectedInstance,
     });
+  }
+
+  /** 回放最近一次运行的步骤事件（刷新面板、切换工作流后运行状态仍可见）。 */
+  private replayRunEvents(): void {
+    if (this.panel && this.latestRunEvents.length > 0) {
+      void this.panel.webview.postMessage({ type: 'runReplay', events: this.latestRunEvents.map((e) => this.convertRunEvent(e)) });
+    }
+  }
+
+  /**
+   * 解析 workflow.run 的子工作流引用（ID、JSON 文件名或 workflows/ 下路径）到文件 URI。
+   * 先按文件名/路径匹配，再读取各工作流文件按 id 匹配。
+   */
+  private async resolveSubWorkflowUri(reference: string): Promise<vscode.Uri | undefined> {
+    const files = await this.listWorkflowFiles();
+    const uri = await resolveWorkflowReference(reference, files, async (fileUri) => {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(fileUri));
+      return doc.getText();
+    });
+    return uri ? vscode.Uri.parse(uri) : undefined;
+  }
+
+  /** 从当前工作流 JSON 中读取指定节点的 workflow.run 子工作流引用。 */
+  private subWorkflowReferenceOf(nodeId: string): string {
+    if (!this.docUri) return '';
+    try {
+      const rawText = fs.readFileSync(this.docUri.fsPath, 'utf8');
+      const raw = JSON.parse(rawText) as { nodes?: Array<{ id?: string; type?: string; action?: string; params?: Record<string, unknown> }> };
+      const node = (raw.nodes ?? []).find((n) => n.id === nodeId && n.type === 'task');
+      if (node && node.action === 'workflow.run' && typeof node.params?.workflow === 'string') {
+        return node.params.workflow;
+      }
+    } catch {
+      // 忽略读取/解析失败
+    }
+    return '';
   }
 
   private startInstanceRefresh(): void {
@@ -242,34 +404,84 @@ export class WebviewManager implements vscode.Disposable {
     if (!this.panel) return;
     switch (message.type) {
       case 'ready':
+        this.editorReady = true;
         await this.sendInit();
         // 回放最近一次运行的步骤事件（刷新/重开面板后缩略图仍在）
-        if (this.latestRunEvents.length > 0) {
-          void this.panel.webview.postMessage({ type: 'runReplay', events: this.latestRunEvents.map((e) => this.convertRunEvent(e)) });
-        }
+        this.replayRunEvents();
+        this.flushEditorCommands();
         break;
       case 'reloadRequest':
         this.dirty = false;
         await this.sendInit();
         break;
       case 'save': {
-        if (!this.docUri) return;
         const text = String(message.text ?? '');
-        await vscode.workspace.fs.writeFile(this.docUri, Buffer.from(text, 'utf8'));
+        if (!this.docUri) return;
+        await this.saveCurrentText(text);
+        break;
+      }
+      case 'switchWorkflow': {
+        const uri = String(message.uri ?? '');
+        if (!uri || !this.docUri) break;
+        // 前端在脏状态时先确认保存；这里统一保存当前文件后切换到目标工作流。
+        const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
+        if (saveText !== undefined) await this.saveCurrentText(saveText);
+        this.docUri = vscode.Uri.parse(uri);
         this.dirty = false;
-        const doc = await vscode.workspace.openTextDocument(this.docUri);
-        this.intelligence.refreshDocument(doc);
-        if (doc.isDirty) {
-          // 如果用户在编辑器里打开了同一文件，尝试用工作区文档同步写入
-          const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === this.docUri?.toString());
-          if (editor) {
-            const edit = new vscode.WorkspaceEdit();
-            const full = new vscode.Range(0, 0, editor.document.lineCount, 0);
-            edit.replace(this.docUri, full, text);
-            await vscode.workspace.applyEdit(edit);
-          }
+        await this.sendInit();
+        // 切换后回放最近运行事件，让子工作流视图也能看到运行情况
+        this.replayRunEvents();
+        break;
+      }
+      case 'openWorkflowPicker': {
+        const uri = await this.pickWorkflow();
+        if (uri && this.docUri) {
+          this.docUri = uri;
+          this.dirty = false;
+          await this.sendInit();
+          this.replayRunEvents();
         }
-        vscode.window.setStatusBarMessage('工作流已保存', 3000);
+        break;
+      }
+      case 'openSubWorkflow': {
+        // 从当前工作流 JSON 中解析节点引用的子工作流，并切换过去。
+        if (!this.docUri) break;
+        const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
+        if (saveText !== undefined) await this.saveCurrentText(saveText);
+        const reference = this.subWorkflowReferenceOf(String(message.nodeId ?? ''));
+        if (!reference) {
+          vscode.window.showWarningMessage('该节点不是子工作流节点（workflow.run）。');
+          break;
+        }
+        const target = await this.resolveSubWorkflowUri(reference);
+        if (!target) {
+          vscode.window.showWarningMessage(`未找到子工作流：${reference}`);
+          break;
+        }
+        // 记录上级工作流，供「返回上一级」使用（目标与当前相同则不重复压栈）
+        if (target.toString() !== this.docUri.toString()) {
+          this.workflowBackStack.push(this.docUri.toString());
+        }
+        this.docUri = target;
+        this.dirty = false;
+        await this.sendInit();
+        // 回放最近运行事件，子工作流步骤（workflow_id 匹配）会显示在画布上
+        this.replayRunEvents();
+        break;
+      }
+      case 'goBackWorkflow': {
+        // 返回上一级工作流视图；栈为空时提示。
+        const previous = this.workflowBackStack.pop();
+        if (!previous || !this.docUri) {
+          vscode.window.showInformationMessage('已在最顶层工作流，没有可返回的上级。');
+          break;
+        }
+        const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
+        if (saveText !== undefined) await this.saveCurrentText(saveText);
+        this.docUri = vscode.Uri.parse(previous);
+        this.dirty = false;
+        await this.sendInit();
+        this.replayRunEvents();
         break;
       }
      case 'openFile':
@@ -277,6 +489,9 @@ export class WebviewManager implements vscode.Disposable {
          const doc = await vscode.workspace.openTextDocument(this.docUri);
          await vscode.window.showTextDocument(doc, { preview: false });
        }
+       break;
+     case 'openReferences':
+       await vscode.commands.executeCommand('onmyoji.openWorkflowReferences', this.docUri?.toString());
        break;
      case 'newWorkflow':
        await vscode.commands.executeCommand('onmyoji.createWorkflow');
@@ -341,10 +556,68 @@ export class WebviewManager implements vscode.Disposable {
         }
         break;
       }
+      case 'checkTemplate': {
+        const requestId = String(message.requestId ?? '');
+        try {
+          const template = String(message.template ?? '').trim();
+          if (!template) throw new Error('请先选择模板图片');
+          const rawResolution = message.referenceResolution;
+          const referenceResolution: [number, number] = Array.isArray(rawResolution) && rawResolution.length === 2
+            && rawResolution.every((value) => typeof value === 'number' && Number.isInteger(value) && value > 0)
+            ? [rawResolution[0] as number, rawResolution[1] as number]
+            : [1920, 1080];
+          const rawRoi = message.roi;
+          let roi: [number, number, number, number] | undefined;
+          if (rawRoi !== undefined && rawRoi !== null) {
+            if (!Array.isArray(rawRoi) || rawRoi.length !== 4
+              || !rawRoi.every((value) => typeof value === 'number' && Number.isInteger(value))) {
+              throw new Error('ROI 必须是 [x, y, width, height]');
+            }
+            roi = [rawRoi[0] as number, rawRoi[1] as number, rawRoi[2] as number, rawRoi[3] as number];
+          }
+          const threshold = Number(message.threshold ?? 0.85);
+          if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new Error('匹配阈值必须在 0 到 1 之间');
+          const maxResults = Number(message.maxResults ?? 20);
+          if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 100) throw new Error('最大匹配数必须在 1 到 100 之间');
+          const instanceId = await this.selectRuntimeInstance(String(message.instanceId ?? ''));
+          const result = await this.checkTemplate({
+            template,
+            roi,
+            threshold,
+            maxResults,
+            scaleSearch: Boolean(message.scaleSearch),
+            referenceResolution,
+            instanceId,
+          });
+          if (this.panel) void this.panel.webview.postMessage({ type: 'templateCheckResult', requestId, ...result });
+        } catch (error) {
+          if (this.panel) void this.panel.webview.postMessage({
+            type: 'templateCheckError',
+            requestId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        break;
+      }
+      case 'listAssetImages': {
+        const requestId = String(message.requestId ?? '');
+        try {
+          const images = await this.listAssetImages(this.panel.webview);
+          void this.panel.webview.postMessage({ type: 'assetImages', requestId, images });
+        } catch (error) {
+          void this.panel.webview.postMessage({
+            type: 'assetImagesError',
+            requestId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        break;
+      }
       case 'saveTemplate': {
         const requestId = String(message.requestId ?? '');
         const nodeId = String(message.nodeId ?? message.stepId ?? '');
         const key = String(message.key ?? 'template');
+        const requestedTarget = String(message.targetPath ?? '').replace(/\\/g, '/').trim();
         let filename = String(message.filename ?? 'template.png')
           .replace(/\\/g, '/')
           .replace(/[\x00-\x1f<>:"|?*]/g, '_')
@@ -354,18 +627,34 @@ export class WebviewManager implements vscode.Disposable {
         if (!filename || filename === '.' || filename === '..' || filename.startsWith('../') || filename.includes('/../')) filename = 'template.png';
         if (!/\.png$/i.test(filename)) filename += '.png';
         const dataUrl = String(message.dataUrl ?? '');
-        const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+        const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
         if (!requestId || !nodeId || !match) {
           void this.panel.webview.postMessage({ type: 'roiPickerError', requestId, message: '模板图片数据无效' });
           break;
         }
         try {
-          const relativePath = path.posix.join('assets/templates', filename);
+          let relativePath = path.posix.join('assets/templates', filename);
+          if (requestedTarget) {
+            const normalizedTarget = path.posix.normalize(requestedTarget);
+            if (/^[\/]|[\x00-\x1f<>:"|?*]/.test(requestedTarget)
+              || normalizedTarget === 'assets'
+              || !normalizedTarget.startsWith('assets/')) {
+              throw new Error('模板覆盖路径无效');
+            }
+            const extension = path.posix.extname(normalizedTarget).toLocaleLowerCase();
+            const expectedMime = extension === '.png' ? 'png'
+              : extension === '.jpg' || extension === '.jpeg' ? 'jpeg'
+                : extension === '.webp' ? 'webp' : '';
+            if (!expectedMime || expectedMime !== match[1]) throw new Error('模板图片格式与原文件扩展名不一致');
+            relativePath = normalizedTarget;
+          } else if (match[1] !== 'png') {
+            throw new Error('新模板必须使用 PNG 格式');
+          }
           const outputPath = path.resolve(this.getProjectRoot(), relativePath);
           const root = path.resolve(this.getProjectRoot());
           if (outputPath !== root && !outputPath.startsWith(root + path.sep)) throw new Error('模板路径无效');
           await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(outputPath)));
-          await vscode.workspace.fs.writeFile(vscode.Uri.file(outputPath), Buffer.from(match[1], 'base64'));
+          await vscode.workspace.fs.writeFile(vscode.Uri.file(outputPath), Buffer.from(match[2], 'base64'));
           void this.panel.webview.postMessage({ type: 'templateSaved', requestId, nodeId, key, path: relativePath });
         } catch (error) {
           void this.panel.webview.postMessage({ type: 'roiPickerError', requestId, message: error instanceof Error ? error.message : String(error) });
@@ -413,6 +702,38 @@ export class WebviewManager implements vscode.Disposable {
       default:
         break;
     }
+  }
+
+  private async listAssetImages(webview: vscode.Webview): Promise<AssetImageInfo[]> {
+    const projectRoot = path.resolve(this.getProjectRoot());
+    const assetsRoot = path.join(projectRoot, 'assets');
+    const supported = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+    const images: AssetImageInfo[] = [];
+
+    const visit = async (directory: string): Promise<void> => {
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' && directory === assetsRoot) return;
+        throw error;
+      }
+      entries.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+      for (const entry of entries) {
+        const absolutePath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await visit(absolutePath);
+        } else if (entry.isFile() && supported.has(path.extname(entry.name).toLowerCase())) {
+          images.push({
+            path: path.relative(projectRoot, absolutePath).split(path.sep).join('/'),
+            uri: webview.asWebviewUri(vscode.Uri.file(absolutePath)).toString(),
+          });
+        }
+      }
+    };
+
+    await visit(assetsRoot);
+    return images;
   }
 
   /** 开始监听运行事件文件（引擎写入 JSONL，本方法尾随并转发给 webview）。 */

@@ -6,6 +6,7 @@
       "  \"schema_version\": 3,",
       "  \"id\": \"${1:my_behavior_tree}\",",
       "  \"version\": \"3.0.0\",",
+      "  \"description\": \"${2:工作流用途说明}\",",
       "  \"resolution\": [1920, 1080],",
       "  \"root\": \"root\",",
       "  \"limits\": { \"timeout_seconds\": 300, \"max_steps\": 1000 },",

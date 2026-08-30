@@ -6,6 +6,8 @@ type RunState = 'idle' | 'running' | 'stopping' | 'success' | 'error';
 interface SidebarMessage {
   type: string;
   rounds?: unknown;
+  command?: unknown;
+  value?: unknown;
 }
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -62,8 +64,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'openRunLog':
         await vscode.commands.executeCommand('onmyoji.openRunLog');
         break;
+      case 'openWorkflowReferences':
+        await vscode.commands.executeCommand('onmyoji.openWorkflowReferences');
+        break;
       case 'runEngineValidate':
         await vscode.commands.executeCommand('onmyoji.runEngineValidate');
+        break;
+      case 'editorCommand':
+        await vscode.commands.executeCommand('onmyoji.editorCommand', String(message.command ?? ''), message.value);
         break;
     }
   }
@@ -106,7 +114,43 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     <section aria-labelledby="workflow-heading">
       <h2 id="workflow-heading">工作流</h2>
       <button id="open-editor" class="command"><span class="command-icon" aria-hidden="true">◇</span><span>打开工作流编辑器</span></button>
+      <div class="tool-grid compact-grid">
+        <button data-editor-command="workflowSettings"><span class="tool-icon" aria-hidden="true">⚙</span><span>工作流设置</span></button>
+        <button data-editor-command="blackboard"><span class="tool-icon" aria-hidden="true">▦</span><span>黑板参数</span></button>
+      </div>
+    </section>
+
+    <section aria-labelledby="search-heading">
+      <h2 id="search-heading">查找卡片</h2>
+      <div class="node-search-row">
+        <input id="node-search" type="search" placeholder="输入卡片 name" aria-label="按 name 查找卡片">
+        <button id="find-node" class="primary">查找</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="node-heading">
+      <h2 id="node-heading">添加节点</h2>
+      <div class="tool-grid">
+        <button data-editor-command="addTask"><span class="node-swatch task" aria-hidden="true"></span><span>Task</span></button>
+        <button data-editor-command="addSelector"><span class="node-swatch selector" aria-hidden="true"></span><span>Selector</span></button>
+        <button data-editor-command="addSequence"><span class="node-swatch sequence" aria-hidden="true"></span><span>Sequence</span></button>
+        <button data-editor-command="addParallel"><span class="node-swatch parallel" aria-hidden="true"></span><span>Parallel</span></button>
+      </div>
+    </section>
+
+    <section aria-labelledby="canvas-heading">
+      <h2 id="canvas-heading">画布</h2>
+      <div class="tool-grid compact-grid">
+        <button data-editor-command="autoLayout"><span class="tool-icon" aria-hidden="true">⌘</span><span>自动排列</span></button>
+        <button data-editor-command="fitView"><span class="tool-icon" aria-hidden="true">⌂</span><span>适应视口</span></button>
+      </div>
+      <button data-editor-command="exportImage" class="command"><span class="command-icon" aria-hidden="true">⇩</span><span>导出完整画布</span></button>
+    </section>
+
+    <section aria-labelledby="tools-heading">
+      <h2 id="tools-heading">工具</h2>
       <button id="open-log" class="command"><span class="command-icon" aria-hidden="true">☷</span><span>运行日志</span></button>
+      <button id="open-refs" class="command"><span class="command-icon" aria-hidden="true">⇄</span><span>引用查看</span></button>
       <button id="validate" class="command"><span class="command-icon" aria-hidden="true">✓</span><span>引擎校验</span></button>
     </section>
   </main>

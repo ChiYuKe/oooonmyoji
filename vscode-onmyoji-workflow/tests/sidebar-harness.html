@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onmyoji Sidebar Harness</title>
+  <link rel="stylesheet" href="../media/sidebar.css">
+  <style>
+    :root {
+      --vscode-font-family: "Segoe UI", sans-serif;
+      --vscode-foreground: #cccccc;
+      --vscode-descriptionForeground: #9d9d9d;
+      --vscode-sideBar-background: #181818;
+      --vscode-sideBarSectionHeader-border: #2b2b2b;
+      --vscode-panel-border: #2b2b2b;
+      --vscode-focusBorder: #0078d4;
+      --vscode-textLink-foreground: #4daafc;
+      --vscode-dropdown-foreground: #cccccc;
+      --vscode-dropdown-background: #313131;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-background: #0e639c;
+      --vscode-button-hoverBackground: #1177bb;
+      --vscode-button-secondaryForeground: #cccccc;
+      --vscode-button-secondaryBackground: #313131;
+      --vscode-button-secondaryHoverBackground: #3c3c3c;
+      --vscode-editorWidget-background: #202020;
+      --vscode-list-hoverForeground: #ffffff;
+      --vscode-list-hoverBackground: #2a2d2e;
+      --vscode-icon-foreground: #c5c5c5;
+      --vscode-charts-yellow: #cca700;
+      --vscode-testing-iconPassed: #73c991;
+      --vscode-testing-iconFailed: #f14c4c;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="product-header">
+      <span class="product-mark" aria-hidden="true">O</span>
+      <div><h1>Onmyoji</h1><div class="subtitle">自动化控制</div></div>
+    </header>
+    <section aria-labelledby="party-heading">
+      <h2 id="party-heading">组队御魂</h2>
+      <div class="instance-row"><span>队长</span><strong>mumu-0</strong></div>
+      <div class="instance-row"><span>队员</span><strong>mumu-1</strong></div>
+      <label class="field" for="rounds"><span>运行场数</span>
+        <select id="rounds"><option value="9999">9999 场</option><option value="1">1 场测试</option></select>
+      </label>
+      <div class="run-actions">
+        <button id="run-party" class="primary"><span aria-hidden="true">▶</span><span>运行组队御魂</span></button>
+        <button id="stop" class="icon-button" title="停止当前自动化" aria-label="停止当前自动化">■</button>
+      </div>
+      <div id="run-status" class="status idle" role="status"><span class="status-dot"></span><span id="status-text">就绪</span></div>
+    </section>
+    <section aria-labelledby="workflow-heading">
+      <h2 id="workflow-heading">工作流</h2>
+      <button id="open-editor" class="command"><span class="command-icon" aria-hidden="true">◇</span><span>打开工作流编辑器</span></button>
+      <div class="tool-grid compact-grid">
+        <button data-editor-command="workflowSettings"><span class="tool-icon" aria-hidden="true">⚙</span><span>工作流设置</span></button>
+        <button data-editor-command="blackboard"><span class="tool-icon" aria-hidden="true">▦</span><span>黑板参数</span></button>
+      </div>
+    </section>
+    <section aria-labelledby="search-heading">
+      <h2 id="search-heading">查找卡片</h2>
+      <div class="node-search-row">
+        <input id="node-search" type="search" placeholder="输入卡片 name" aria-label="按 name 查找卡片">
+        <button id="find-node" class="primary">查找</button>
+      </div>
+    </section>
+    <section aria-labelledby="node-heading">
+      <h2 id="node-heading">添加节点</h2>
+      <div class="tool-grid">
+        <button data-editor-command="addTask"><span class="node-swatch task" aria-hidden="true"></span><span>Task</span></button>
+        <button data-editor-command="addSelector"><span class="node-swatch selector" aria-hidden="true"></span><span>Selector</span></button>
+        <button data-editor-command="addSequence"><span class="node-swatch sequence" aria-hidden="true"></span><span>Sequence</span></button>
+        <button data-editor-command="addParallel"><span class="node-swatch parallel" aria-hidden="true"></span><span>Parallel</span></button>
+      </div>
+    </section>
+    <section aria-labelledby="canvas-heading">
+      <h2 id="canvas-heading">画布</h2>
+      <div class="tool-grid compact-grid">
+        <button data-editor-command="autoLayout"><span class="tool-icon" aria-hidden="true">⌘</span><span>自动排列</span></button>
+        <button data-editor-command="fitView"><span class="tool-icon" aria-hidden="true">⌂</span><span>适应视口</span></button>
+      </div>
+      <button data-editor-command="exportImage" class="command"><span class="command-icon" aria-hidden="true">⇩</span><span>导出完整画布</span></button>
+    </section>
+    <section aria-labelledby="tools-heading">
+      <h2 id="tools-heading">工具</h2>
+      <button id="open-log" class="command"><span class="command-icon" aria-hidden="true">☷</span><span>运行日志</span></button>
+      <button id="validate" class="command"><span class="command-icon" aria-hidden="true">✓</span><span>引擎校验</span></button>
+    </section>
+  </main>
+  <script>
+    window.acquireVsCodeApi = () => ({
+      postMessage(message) { document.documentElement.dataset.lastMessage = JSON.stringify(message); }
+    });
+  </script>
+  <script src="../media/sidebar.js"></script>
+</body>
+</html>

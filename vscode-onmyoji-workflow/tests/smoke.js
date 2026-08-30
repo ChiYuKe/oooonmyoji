@@ -1,6 +1,7 @@
 /* Pure Node smoke test for Action manifests and Behavior Tree v3 logic. */
 'use strict';
 const assert = require('assert');
+const fs = require('fs');
 const path = require('path');
 const { TextDocument } = require('vscode-languageserver-textdocument');
 const { getLanguageService } = require('vscode-json-languageservice');
@@ -12,7 +13,7 @@ const {
   parameterToSchema,
   applyParameterDefaults,
 } = require('../out/catalog');
-const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions } = require('../out/workflow');
+const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions, matchWorkflowReference, collectWorkflowRunReferences, resolveWorkflowReference } = require('../out/workflow');
 const { computeLayout } = require('../out/layout');
 const { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment } = require('../out/runtimeInstances');
 const { buildPartySoulsRunArguments, buildWorkflowRunArguments } = require('../out/workflowProcess');
@@ -23,6 +24,7 @@ const FIXTURE = {
   schema_version: 3,
   id: 'fixture_tree',
   version: '3.0.0',
+  description: '用于扩展冒烟测试的工作流',
   resolution: [1920, 1080],
   root: 'root',
   limits: { timeout_seconds: 180, max_steps: 100 },
@@ -101,6 +103,11 @@ async function main() {
   check('模板匹配 Action 暴露完整参数', match
     && match.parameters.template.type === 'asset'
     && JSON.stringify(Object.keys(match.parameters)) === JSON.stringify(['template', 'roi', 'threshold', 'max_results', 'scale_search']));
+  check('模板匹配输出声明匹配对象结构', match
+    && match.outputSchema.type === 'array'
+    && match.outputSchema.items.type === 'object'
+    && match.outputSchema.items.properties.reference.type === 'array'
+    && match.outputSchema.items.properties.confidence.type === 'number');
   check('重试安全元数据可用', match && match.retrySafe === true);
   const tap = builtin.actions.find((action) => action.name === 'input.tap');
   check('副作用 Action 不可安全重试', tap && !tap.retrySafe && tap.sideEffect);
@@ -132,6 +139,7 @@ async function main() {
   const info = parseWorkflow(FIXTURE);
   check('解析 7 个树节点', info.nodes.length === 7);
   check('解析 Root', info.root === 'root' && info.nodes[0].type === 'root');
+  check('解析工作流描述', info.description === '用于扩展冒烟测试的工作流');
   check('解析有序 children', JSON.stringify(info.nodes.find((node) => node.id === 'main').children) === JSON.stringify(['capture', 'wait', 'choice']));
   check('解析黑板键', info.blackboardProps.includes('verify_timeout'));
   check('解析装饰器', info.nodes.find((node) => node.id === 'wait').decorators[0].type === 'timeout');
@@ -149,6 +157,17 @@ async function main() {
   check('拒绝旧引用命名空间', errorsOf(badRef, catalog).some((item) => item.code === 'invalid-ref'));
   const wrongType = clone(FIXTURE); wrongType.blackboard.name = { type: 'string' }; wrongType.nodes.find((node) => node.id === 'tap').params.x = { ref: 'blackboard.name' };
   check('拒绝绑定类型不兼容', errorsOf(wrongType, catalog).some((item) => item.code === 'binding-type'));
+  const selfRef = clone(FIXTURE); selfRef.nodes.find((node) => node.id === 'tap').params.x = { ref: 'nodes.tap.output.x' };
+  check('拒绝节点自引用', errorsOf(selfRef, catalog).some((item) => item.code === 'unavailable-ref'));
+  const forwardRef = clone(FIXTURE); forwardRef.nodes.find((node) => node.id === 'wait').params.timeout_seconds = { ref: 'nodes.tap.output.interval_seconds' };
+  check('拒绝前向引用', errorsOf(forwardRef, catalog).some((item) => item.code === 'unavailable-ref'));
+  const priorRef = clone(FIXTURE); priorRef.nodes.find((node) => node.id === 'tap').params.x = { ref: 'nodes.capture.output.width' };
+  check('接受前置 Sequence 输出引用', errorsOf(priorRef, catalog).length === 0);
+  const branchRef = clone(FIXTURE);
+  const branchSource = branchRef.nodes.find((node) => node.id === 'tap');
+  branchSource.action = 'core.log'; branchSource.params = { message: 'first branch' };
+  branchRef.nodes.find((node) => node.id === 'log').params.message = { ref: 'nodes.tap.output.message' };
+  check('拒绝 Selector 分支间普通参数引用', errorsOf(branchRef, catalog).some((item) => item.code === 'unavailable-ref'));
   const unsafeRetry = clone(FIXTURE); unsafeRetry.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'retry', attempts: 3 });
   check('拒绝副作用 Action 重试', errorsOf(unsafeRetry, catalog).some((item) => item.code === 'unsafe-retry'));
   const parallel = clone(FIXTURE); parallel.nodes.find((node) => node.id === 'choice').type = 'simple_parallel'; parallel.nodes.find((node) => node.id === 'choice').children[0] = 'main';
@@ -157,15 +176,77 @@ async function main() {
 
   const schema = buildWorkflowSchema(info, catalog);
   check('Schema 固定 v3', schema.properties.schema_version.const === 3);
+  check('Schema 支持工作流描述', schema.properties.description.type === 'string');
   check('Schema children 使用节点枚举', schema.properties.nodes.items.properties.children.items.enum.includes('tap'));
   const refs = collectRefSuggestions(info, catalog);
   check('黑板引用补全', refs.blackboard.includes('blackboard.verify_timeout'));
   check('节点输出引用补全', refs.nodes.includes('nodes.capture.output.width'));
+  check('数组输出补全首个匹配对象与字段', refs.nodes.includes('nodes.wait.output.0') && refs.nodes.includes('nodes.wait.output.0.confidence'));
+  const matchRefs = collectRefSuggestions(info, catalog, 'tap', { type: 'object' });
+  check('对象参数只列出此前可用且类型兼容的匹配对象',
+    matchRefs.nodes.includes('nodes.wait.output.0')
+    && !matchRefs.nodes.some((ref) => ref.startsWith('nodes.tap.'))
+    && !matchRefs.nodes.some((ref) => ref.startsWith('nodes.log.'))
+    && !matchRefs.nodes.includes('nodes.capture.output.width'));
 
   const layout = computeLayout(info);
   check('布局包含 6 条父子边', layout.edges.length === 6);
   check('父节点位于子节点上方', layout.positions.root.y < layout.positions.main.y && layout.positions.main.y < layout.positions.capture.y);
   check('兄弟节点横向展开', layout.positions.capture.x !== layout.positions.wait.x);
+
+  const subFiles = [
+    { uri: 'file:///workflows/reward_statistics.json', name: 'reward_statistics.json', rel: 'workflows/reward_statistics.json' },
+    { uri: 'file:///workflows/souls/main_loop.json', name: 'main_loop.json', rel: 'workflows/souls/main_loop.json' },
+  ];
+  check('子流程引用按文件名匹配', matchWorkflowReference('reward_statistics', subFiles) === 'file:///workflows/reward_statistics.json');
+  check('子流程引用按带扩展名文件名匹配', matchWorkflowReference('reward_statistics.json', subFiles) === 'file:///workflows/reward_statistics.json');
+  check('子流程引用按相对路径匹配', matchWorkflowReference('workflows/souls/main_loop.json', subFiles) === 'file:///workflows/souls/main_loop.json');
+  check('子流程引用匹配路径末尾片段', matchWorkflowReference('souls/main_loop', subFiles) === 'file:///workflows/souls/main_loop.json');
+  check('未知子流程引用不匹配', matchWorkflowReference('missing_flow', subFiles) === undefined);
+  check('空子流程引用不匹配', matchWorkflowReference('', subFiles) === undefined);
+
+  // 引用关系：真实项目文件上的收集与解析（与引用查看器使用同一套共享函数）。
+  const workflowsDir = path.join(PROJECT_ROOT, 'workflows');
+  const projectFiles = fs.readdirSync(workflowsDir, { recursive: true })
+    .filter((name) => String(name).toLowerCase().endsWith('.json'))
+    .map((name) => `workflows/${String(name).replace(/\\/g, '/')}`)
+    .sort()
+    .map((rel) => ({ uri: `file:///${rel}`, name: rel.split('/').pop(), rel }));
+  const projectRead = async (uri) => fs.readFileSync(path.join(PROJECT_ROOT, uri.replace('file:///', '')), 'utf8');
+  const leaderRaw = JSON.parse(await projectRead('file:///workflows/mumu_0_souls_party_leader.json'));
+  const leaderRefs = collectWorkflowRunReferences(leaderRaw);
+  check('队长工作流收集 4 处子流程引用且节点 ID 齐全', leaderRefs.length === 4 && leaderRefs.every((entry) => entry.nodeId && entry.reference));
+  const leaderResolved = [];
+  for (const entry of leaderRefs) leaderResolved.push(await resolveWorkflowReference(entry.reference, projectFiles, projectRead));
+  check('队长引用全部解析到文件', leaderResolved.length === 4 && leaderResolved.every(Boolean));
+  check('文件名引用解析到回合脚本', leaderResolved.filter((uri) => uri === 'file:///workflows/souls_party_leader_round.json').length === 3);
+  check('_souls 路径引用解析到子目录脚本', leaderResolved.includes('file:///workflows/_souls/task_in_souls.json'));
+
+  const backRefs = [];
+  const rewardUri = 'file:///workflows/reward_statistics.json';
+  for (const file of projectFiles) {
+    if (file.uri === rewardUri) continue;
+    for (const entry of collectWorkflowRunReferences(JSON.parse(await projectRead(file.uri)))) {
+      if ((await resolveWorkflowReference(entry.reference, projectFiles, projectRead)) === rewardUri) {
+        backRefs.push({ file: file.rel, nodeId: entry.nodeId });
+      }
+    }
+  }
+  check('奖励统计脚本被多个工作流引用（含回合脚本）', backRefs.length >= 3
+    && backRefs.some((item) => item.file === 'workflows/souls_party_leader_round.json')
+    && backRefs.some((item) => item.file === 'workflows/mumu_1_souls_loop.json'));
+  const testRaw = JSON.parse(await projectRead('file:///workflows/test_workflow.json'));
+  check('悬空引用在收集层仍是条目、解析层返回 undefined', collectWorkflowRunReferences(testRaw).length > 0
+    && (await resolveWorkflowReference('no_such_flow.json', projectFiles, projectRead)) === undefined);
+
+  const idFiles = [{ uri: 'file:///w/renamed.json', name: 'renamed.json', rel: 'w/renamed.json' }];
+  const idResolved = await resolveWorkflowReference('fixture_tree', idFiles, async () => JSON.stringify(FIXTURE));
+  check('工作流 ID 引用回退到文件内容匹配', idResolved === 'file:///w/renamed.json');
+  check('未知 ID 引用不匹配', (await resolveWorkflowReference('no_such_id', idFiles, async () => JSON.stringify(FIXTURE))) === undefined);
+
+  const nonRun = parseWorkflow(FIXTURE);
+  check('非 workflow.run 工作流无引用', collectWorkflowRunReferences(nonRun.raw).length === 0);
+  check('非对象输入无引用', collectWorkflowRunReferences(null).length === 0 && collectWorkflowRunReferences([1, 2]).length === 0);
 
   const text = JSON.stringify(FIXTURE, null, 2);
   const document = TextDocument.create('file:///workflow.json', 'json', 1, text);

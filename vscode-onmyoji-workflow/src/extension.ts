@@ -9,15 +9,17 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ActionCatalog, discoverProjectRoot, loadActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
+import { ReferenceViewerManager } from './referenceViewerManager';
 import { RunLogManager } from './runLogManager';
 import { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment, RuntimeInstanceInfo } from './runtimeInstances';
 import { SidebarProvider } from './sidebarProvider';
-import { WebviewManager } from './webviewManager';
+import { TemplateCheckOptions, TemplateCheckResult, WebviewManager } from './webviewManager';
 import { buildPartySoulsRunArguments, buildWorkflowRunArguments } from './workflowProcess';
 
 let intelligence: WorkflowIntelligence;
 let webviewManager: WebviewManager;
 let runLogManager: RunLogManager;
+let referenceViewerManager: ReferenceViewerManager;
 let sidebarProvider: SidebarProvider;
 let catalog: ActionCatalog;
 let projectRoot: string;
@@ -68,6 +70,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(intelligence, ...intelligence.registerProviders());
 
   runLogManager = new RunLogManager(context, () => projectRoot);
+  referenceViewerManager = new ReferenceViewerManager(context, () => projectRoot);
   sidebarProvider = new SidebarProvider(context);
 
   webviewManager = new WebviewManager(
@@ -78,6 +81,7 @@ export function activate(context: vscode.ExtensionContext): void {
     getRuntimeInstanceState,
     rememberRuntimeInstance,
     pickRoi,
+    checkTemplate,
     (event) => runLogManager.acceptEvent(event),
   );
 
@@ -86,11 +90,13 @@ export function activate(context: vscode.ExtensionContext): void {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.commands.registerCommand('onmyoji.openWorkflowEditor', (uri?: vscode.Uri) => webviewManager.open(uri)),
+    vscode.commands.registerCommand('onmyoji.editorCommand', (command: string, value?: unknown) => webviewManager.executeEditorCommand(command, value)),
     vscode.commands.registerCommand('onmyoji.createWorkflow', () => createWorkflow()),
     vscode.commands.registerCommand('onmyoji.runWorkflow', (uri?: vscode.Uri, instanceId?: string) => runWorkflow(uri, instanceId)),
     vscode.commands.registerCommand('onmyoji.runPartySouls', (rounds?: number) => runPartySouls(rounds)),
     vscode.commands.registerCommand('onmyoji.stopWorkflow', () => stopWorkflow()),
     vscode.commands.registerCommand('onmyoji.openRunLog', () => runLogManager.open()),
+    vscode.commands.registerCommand('onmyoji.openWorkflowReferences', (uri?: string) => referenceViewerManager.open(false, uri)),
     vscode.commands.registerCommand('onmyoji.validateCurrentWorkflow', () => validateCurrentWorkflow()),
     vscode.commands.registerCommand('onmyoji.reloadActionCatalog', () => {
       refreshCatalog();
@@ -103,6 +109,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor(() => updateWorkflowFileContext()),
     workflowOutput,
     runLogManager,
+    referenceViewerManager,
     { dispose: () => activeWorkflowProcess?.kill() },
   );
   updateWorkflowFileContext();
@@ -147,6 +154,7 @@ async function createWorkflow(): Promise<void> {
     schema_version: 3,
     id: workflowId,
     version: '3.0.0',
+    description: '',
     resolution: [1920, 1080],
     root: 'root',
     limits: { timeout_seconds: 300, max_steps: 1000 },
@@ -358,6 +366,115 @@ async function pickRoi(_referenceResolution: [number, number], requestedInstance
       fs.rmSync(tempDir, { recursive: true, force: true });
     } catch {
       // 临时目录清理失败不应覆盖已完成的 ROI 选择结果。
+    }
+  }
+}
+
+async function checkTemplate(options: TemplateCheckOptions): Promise<TemplateCheckResult> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oooonmyoji-template-check-'));
+  const resultFile = path.join(tempDir, 'result.json');
+  const args = [
+    '-m',
+    'src.oooonmyoji.tools.template_check',
+    '--config',
+    resolveRuntimeConfigPath(),
+    '--project-root',
+    projectRoot,
+    '--instance',
+    options.instanceId ?? 'mumu-0',
+    '--template',
+    options.template,
+    '--threshold',
+    String(options.threshold),
+    '--max-results',
+    String(options.maxResults),
+    '--reference-width',
+    String(options.referenceResolution[0]),
+    '--reference-height',
+    String(options.referenceResolution[1]),
+    '--result-file',
+    resultFile,
+  ];
+  if (options.roi) args.push('--roi', ...options.roi.map(String));
+  if (options.scaleSearch) args.push('--scale-search');
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(resolvePythonExecutable(), args, {
+        cwd: projectRoot,
+        env: pythonUtf8Environment(process.env),
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error); else resolve();
+      };
+      const timer = setTimeout(() => {
+        child.kill();
+        finish(new Error('模板检查超时'));
+      }, 30_000);
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        stderr += String(chunk);
+        if (stderr.length > 8000) stderr = stderr.slice(-8000);
+      });
+      child.once('error', (error) => finish(error));
+      child.once('close', (code) => {
+        if (code !== 0 || !fs.existsSync(resultFile)) {
+          finish(new Error(stderr.trim() || `模板检查退出（代码 ${code ?? '未知'}）`));
+          return;
+        }
+        finish();
+      });
+    });
+
+    const parsed = JSON.parse(fs.readFileSync(resultFile, 'utf8')) as {
+      image_base64?: unknown;
+      image_size?: unknown;
+      roi_image?: unknown;
+      matches?: unknown;
+    };
+    const imageSize = parsed.image_size;
+    const roi = parsed.roi_image;
+    if (typeof parsed.image_base64 !== 'string' || !parsed.image_base64
+      || !Array.isArray(imageSize) || imageSize.length !== 2
+      || !imageSize.every((value) => typeof value === 'number' && Number.isInteger(value) && value > 0)
+      || !Array.isArray(roi) || roi.length !== 4
+      || !roi.every((value) => typeof value === 'number' && Number.isInteger(value))) {
+      throw new Error('模板检查返回了无效画面数据');
+    }
+    const rawMatches = Array.isArray(parsed.matches) ? parsed.matches : [];
+    const matches = rawMatches.map((value) => {
+      if (!value || typeof value !== 'object') throw new Error('模板检查返回了无效匹配数据');
+      const item = value as Record<string, unknown>;
+      const numbers = ['x', 'y', 'width', 'height', 'confidence'] as const;
+      if (!numbers.every((key) => typeof item[key] === 'number' && Number.isFinite(item[key]))) {
+        throw new Error('模板检查返回了无效匹配数据');
+      }
+      return {
+        x: item.x as number,
+        y: item.y as number,
+        width: item.width as number,
+        height: item.height as number,
+        confidence: item.confidence as number,
+      };
+    });
+    return {
+      dataUrl: `data:image/png;base64,${parsed.image_base64}`,
+      width: imageSize[0] as number,
+      height: imageSize[1] as number,
+      roi: [roi[0] as number, roi[1] as number, roi[2] as number, roi[3] as number],
+      matches,
+    };
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Temporary check results are best-effort cleanup only.
     }
   }
 }

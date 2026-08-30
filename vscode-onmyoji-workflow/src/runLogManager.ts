@@ -84,8 +84,10 @@ export class RunLogManager implements vscode.Disposable {
     this.engineOutput = '';
     this.processResult = undefined;
     this.descriptor = { workflow, instance, startedAt: Date.now(), status: 'starting' };
-    await this.open(true);
-    await this.sendInit();
+    // 运行开始不自动弹出日志窗口；若用户已手动打开过日志面板，仅刷新其内容。
+    if (this.panel) {
+      await this.sendInit();
+    }
   }
 
   async beginMultiRun(workflow: string, sources: Array<Omit<RunSourceDescriptor, 'startedAt' | 'status'>>): Promise<void> {
@@ -101,8 +103,10 @@ export class RunLogManager implements vscode.Disposable {
       status: 'starting',
       sources: sources.map((source) => ({ ...source, startedAt, status: 'starting' })),
     };
-    await this.open(true);
-    await this.sendInit();
+    // 运行开始不自动弹出日志窗口；若用户已手动打开过日志面板，仅刷新其内容。
+    if (this.panel) {
+      await this.sendInit();
+    }
   }
 
   acceptEvent(event: Record<string, unknown>, sourceId?: string): void {
@@ -292,6 +296,7 @@ export class RunLogManager implements vscode.Disposable {
   <section id="steps-view">
     <div id="filters" class="filterbar"><button data-filter="tasks" class="active">任务</button><button data-filter="all">全部</button><button data-filter="failed">失败</button></div>
     <div id="empty-state">暂无运行记录</div>
+    <div id="cap-note" class="hidden"></div>
     <div id="step-list"></div>
   </section>
   <section id="engine-view" class="hidden"><pre id="engine-output"></pre></section>

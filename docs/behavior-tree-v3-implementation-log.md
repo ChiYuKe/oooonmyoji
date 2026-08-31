@@ -491,3 +491,81 @@ CLI 强制覆盖安装；安装版本确认为 `oooonmyoji.onmyoji-workflow-help
 消息尺寸一致，1/8 缩略像素采样为全不透明且包含 125 种量化颜色，排除了空白或透明输出。
 已生成 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.10.vsix`（780826 bytes）并通过
 VS Code CLI 强制覆盖安装；安装版本确认为 `oooonmyoji.onmyoji-workflow-helper@0.2.10`。
+
+### Do Once 装饰器
+
+新增 `{"type": "do_once"}` 装饰器，让被装饰节点在整个运行期间只真正执行一次。
+这是用户在 `repeat` 之外提出的“只执行一次”语义，用于恢复/准备等只需做一次的分支。
+
+实现内容：
+
+- `workflows/model.py`：`DECORATOR_TYPES` 加入 `do_once`。
+- `workflows/validator.py`：`do_once` 只允许 `type` 字段，同一节点不允许重复；
+  无额外参数需要解析。
+- `workflows/engine.py`：运行时新增单次运行隔离的 `_done_once` 集合，在 `run()`
+  重置。首次进入正常执行并把节点记入集合；之后的每次进入都不再执行，直接返回
+  `succeeded`，历史事件标注 `decorator: "do_once"`。失败也计入“已执行”，属于真正
+  的一次性语义（未提供可配置的重置开关，保持最简单形态）。
+- `workflows/resolver.py`：无需改动，`do_once` 不引入新的引用命名空间。
+- TypeScript `workflow.ts`：`DECORATOR_TYPES` 与校验/JSON Schema 同步加入 `do_once`。
+- 编辑器 `workflow-editor.js`：装饰器标签 “Do Once · 整个运行只执行一次”，添加下拉
+  与默认值支持。
+- 运行日志 `run-log.js`：do_once 跳过时显示 “本次运行已执行过，跳过”。
+- 文档 `workflow-schema-v3.md` 装饰器章节补充 do_once 语义。
+
+验证结果：Python `123 passed, 2 skipped`、mypy 48 个源码文件、TypeScript 编译通过、
+Node 逻辑冒烟 78 项、编辑器 DOM 冒烟与运行日志 DOM 冒烟 38 项、
+Python/TypeScript 引擎规则对拍全部通过。本次未拉取任何外部文件或仓库内容。
+
+已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.28.vsix`（584 files,
+814.03 KB）并通过 VS Code CLI 强制覆盖安装；安装版本确认为
+`oooonmyoji.onmyoji-workflow-helper@0.2.28`，安装目录已核对包含 do_once 的
+校验、编辑器与运行日志改动。重新加载 VS Code 窗口后生效。
+
+### Do Once reset_on_failure 参数
+
+按用户要求为 `do_once` 装饰器新增可选布尔参数 `reset_on_failure`。默认
+`false` 保持原语义：无论成败，首次执行后锁定；`true` 时改为“成功才锁定”，
+失败不锁定，下次进入可再次执行，适合反复尝试直到命中一次的准备/恢复分支。
+
+实现内容：
+
+- `workflows/model.py`：`BehaviorDecorator` 增加 `reset_on_failure: bool = False`。
+- `workflows/validator.py`：`do_once` 允许 `reset_on_failure` 字段，JSON Schema
+  增加布尔定义，解析时缺省为 `false`。
+- `workflows/engine.py`：锁定条件改为 `outcome 为 succeeded 或未开启
+  reset_on_failure`，失败/取消在开启时不锁定。
+- TypeScript `workflow.ts`：`DecoratorInfo.resetOnFailure`、解析、字段校验
+  （非布尔报 invalid-decorator）与 JSON Schema 同步。
+- 编辑器 `workflow-editor.js`：卡片摘要按开关显示“成功才锁定/整个运行只执行
+  一次”，详情栏新增复选框；未勾选时从 JSON 删除该字段保持工作流简洁。
+- `workflow-editor.css`：`.inline-control` 内 checkbox 不再被拉伸为整行，
+  新增 `.do-once-note` 次要文字样式。
+- 测试与文档：Python 引擎新增“reset_on_failure 重试直到成功”与“默认失败也
+  锁定”两条用例；校验器测试断言缺省与非法值；逻辑冒烟、引擎规则对拍、编辑器
+  DOM 冒烟补充勾选交互；`workflow-schema-v3.md` 补充参数说明。
+
+已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.29.vsix` 并通过
+VS Code CLI 强制覆盖安装。
+
+### 完整画布导出内嵌缩略图
+
+修复完整画布 PNG 导出不包含卡片内部缩略图的问题。此前导出函数直接删除
+`.node-preview-frame` 与 `.node-preview-image`，原因是画布上模板缩略图的
+`href` 是 webview 资源 URI，序列化后的 SVG 以 data URL 解码时无法解析外部
+资源，保留会渲染成空白。
+
+实现内容：
+
+- 导出前通过新的 `requestAssetData` 消息向扩展宿主请求画布上全部模板路径的
+  base64 data URL；扩展端校验路径必须位于项目 `assets/` 内且不允许 `..`，
+  限制最多 64 个、单文件 8 MB，逐文件容错。
+- 运行截图缩略图本身已是 data URL，直接保留；模板命中后把克隆 SVG 的
+  `<image href>` 替换为 data URL，任何一步失败只跳过该缩略图，不阻断导出。
+- webview 响应等待 8 秒超时兜底，扩展无响应时按无缩略图继续导出。
+- `collectExportTemplatePaths` 与 `applyInlineThumbnails` 为纯函数并挂到
+  `window.__btEditor`，编辑器 DOM 冒烟新增“路径收集去重/跳过截图与无路径
+  图”与“data URL 回填且未命中项保持原 href”两条用例。
+
+已打包 `vscode-onmyoji-workflow/onmyoji-workflow-helper-0.2.30.vsix` 并通过
+VS Code CLI 强制覆盖安装。

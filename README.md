@@ -7,7 +7,11 @@
 ## 目录结构
 
 - `src/oooonmyoji/`：设备、视觉识别、Action、工作流引擎和运行时源码。
-- `workflows/`：单人御魂、组队队长/队员及奖励统计工作流。
+- `workflows/`：按入口、业务流程和公共子流程分层的 JSON 工作流。
+  - `entrypoints/`：可直接运行的实例入口（`mumu-0` 队长、`mumu-1` 队员/单人循环）。
+  - `souls/party/`：组队御魂队长/队员的单回合流程。
+  - `souls/shared/`：多个入口复用的进入副本、准备阵容、等待胜利和奖励统计流程。
+  - `examples/`：用于开发验证的示例工作流。
 - `assets/templates/`：按功能和实例分组的游戏模板图。
 - `vscode-onmyoji-workflow/`：侧边栏控制、可视化编辑器和运行日志插件。
 - `config/`：示例配置和本机运行配置。
@@ -70,7 +74,7 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 
 `run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
 `config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
-需要覆盖输入时可传入 JSON 文件：
+参数可以是工作流 ID、JSON 文件名或 `workflows/` 下的相对路径（包含子目录）；需要覆盖输入时可传入 JSON 文件：
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli `
@@ -238,7 +242,7 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 - `root` 恰好连接一个子节点；其他节点恰好有一个父节点，禁止环和孤立节点。
 - `Selector` 遇到成功即停止，`Sequence` 遇到失败即停止；`Simple Parallel` 的
   第一个子节点必须是主 Task，第二个是后台分支。
-- 条件、冷却、超时、重试、重复都作为 `decorators` 挂在节点或子树上。
+- 条件、冷却、超时、重试、重复、只执行一次都作为 `decorators` 挂在节点或子树上。
 - 参数绑定使用 `{"ref": "blackboard.<键>"}` 或
   `{"ref": "nodes.<节点id>.output.<字段>"}`。
 - 顶层可选字段 `description` 用于说明工作流用途，并显示在子工作流选择器中。

@@ -67,7 +67,7 @@
     },
     {
       "id": "material_shikigami",
-      "name": "素材式神",
+      "name": "四星青吉鬼",
       "template": "material-shikigami.png",
       "threshold": 0.88,
       "max_results": 8,

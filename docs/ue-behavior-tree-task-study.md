@@ -222,7 +222,7 @@ FinishMode = AbortBackground   |  WaitForBackground
 | Task | `type: task` + Action manifest 参数 |
 | Selector / Sequence | 运行时直接实现 UE 的成功/失败推进规则 |
 | Simple Parallel | 主 Task + 后台分支，支持 AbortBackground / WaitForBackground |
-| Decorator | condition / cooldown / timeout / retry / repeat |
+| Decorator | condition / cooldown / timeout / retry / repeat / do_once |
 | ExecutionIndex | 编译阶段按深度优先顺序生成并写入运行事件 |
 | RunBehavior | 保留 `workflow.run` Action、递归检测与四层限制 |
 

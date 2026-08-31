@@ -35,7 +35,13 @@ class WorkflowLoader:
             raise WorkflowError(f"unable to read workflow {path}: {exc}", cause=exc) from exc
         if not isinstance(raw, dict):
             raise ConfigError(f"workflow {path} must be a JSON object")
-        spec = validate_workflow(raw, path, self.registry, project_root=self.project_root)
+        spec = validate_workflow(
+            raw,
+            path,
+            self.registry,
+            project_root=self.project_root,
+            workflow_dir=self.workflow_dir,
+        )
         self.validate_paths(spec)
         return replace(spec, file_hash=hashlib.sha256(payload).hexdigest())
 
@@ -49,8 +55,24 @@ class WorkflowLoader:
             location = ".".join(str(item) for item in error.absolute_path)
             raise ConfigError(f"workflow {workflow.workflow_id} blackboard{('.' + location) if location else ''}: {error.message}")
 
-    def normalize_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> dict[str, Any]:
+    def validate_public_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> None:
+        """Reject values passed to variables that the child workflow keeps private."""
+
+        private = sorted(set(inputs) - set(workflow.public_inputs))
+        if private:
+            names = ", ".join(private)
+            raise ConfigError(f"workflow {workflow.workflow_id} inputs are private or unknown: {names}")
+
+    def normalize_inputs(
+        self,
+        workflow: WorkflowSpec,
+        inputs: dict[str, Any],
+        *,
+        public_only: bool = False,
+    ) -> dict[str, Any]:
         """Apply JSON Schema defaults, then validate the normalized input object."""
+        if public_only:
+            self.validate_public_inputs(workflow, inputs)
         normalized = deepcopy(inputs)
 
         def apply(value: Any, schema: Any) -> None:
@@ -114,8 +136,8 @@ class WorkflowLoader:
         if not self.workflow_dir.is_dir():
             raise WorkflowError(f"workflow directory does not exist: {self.workflow_dir}")
         result: dict[str, WorkflowSpec] = {}
-        for path in sorted(self.workflow_dir.glob("*.json")):
-            spec = self.load(path.name)
+        for path in sorted(self.workflow_dir.rglob("*.json")):
+            spec = self.load(path.relative_to(self.workflow_dir).as_posix())
             if spec.workflow_id in result:
                 raise ConfigError(f"duplicate workflow id: {spec.workflow_id}")
             result[spec.workflow_id] = spec

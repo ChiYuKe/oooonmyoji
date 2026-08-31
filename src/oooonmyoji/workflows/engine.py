@@ -88,6 +88,7 @@ class WorkflowEngine:
         self._lock = threading.RLock()
         self._steps = 0
         self._cooldowns: dict[str, float] = {}
+        self._done_once: set[str] = set()
         self._workflow_deadline = 0.0
         self._current_step: str | None = None
 
@@ -98,6 +99,7 @@ class WorkflowEngine:
             self.requires_worker_restart = False
             self._steps = 0
             self._cooldowns = {}
+            self._done_once = set()
             self._current_step = None
         self._workflow_deadline = time.monotonic() + self.workflow.timeout_seconds
         if hasattr(self.context, "set_deadline"):
@@ -165,6 +167,15 @@ class WorkflowEngine:
                 self._record_node(node, outcome, started_perf, started_at, decorator="cooldown")
                 return outcome
 
+        do_once = self._decorator(node, "do_once")
+        if do_once is not None:
+            with self._lock:
+                already_done = node.id in self._done_once
+            if already_done:
+                outcome = _Outcome(ActionStatus.SUCCEEDED)
+                self._record_node(node, outcome, started_perf, started_at, decorator="do_once")
+                return outcome
+
         timeout = self._decorator(node, "timeout")
         node_deadline = min(deadline, time.monotonic() + timeout.seconds) if timeout is not None and timeout.seconds is not None else deadline
         retry = self._decorator(node, "retry")
@@ -202,6 +213,9 @@ class WorkflowEngine:
         if cooldown is not None and cooldown.seconds is not None:
             with self._lock:
                 self._cooldowns[node.id] = time.monotonic() + cooldown.seconds
+        if do_once is not None and (outcome.status == ActionStatus.SUCCEEDED or not do_once.reset_on_failure):
+            with self._lock:
+                self._done_once.add(node.id)
         self._record_node(node, outcome, started_perf, started_at, attempts=attempts_used, repeats=repeats_used)
         return outcome
 
@@ -213,14 +227,20 @@ class WorkflowEngine:
         if node.type == "selector":
             last = _Outcome(ActionStatus.FAILED, error="all selector children failed", category="behavior")
             failed_branches: list[tuple[int, int]] = []
-            for child_id in node.children:
+            for child_index, child_id in enumerate(node.children):
+                # A selector failure is a branch miss as soon as control moves to
+                # the next candidate. The final candidate remains the real failure
+                # when every candidate fails, so the root cause stays visible.
+                if child_index > 0 and failed_branches:
+                    self._ensure_running(deadline, branch_cancel)
+                    self._recover_selector_failures(node.id, failed_branches)
+                    failed_branches = []
                 with self._lock:
                     history_start = len(self.history)
                 last = self._run_node(child_id, deadline, branch_cancel)
                 with self._lock:
                     history_end = len(self.history)
                 if last.status == ActionStatus.SUCCEEDED:
-                    self._recover_selector_failures(node.id, failed_branches)
                     return last
                 if last.status == ActionStatus.CANCELLED or last.fatal:
                     return last

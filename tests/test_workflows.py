@@ -70,6 +70,28 @@ class FailAction(Action):
         return ActionResult.failed("expected failure", category="test")
 
 
+class CountingAction(Action):
+    name = "test.count"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def execute(self, context: Context, arguments: dict[str, Any]) -> ActionResult:
+        self.calls += 1
+        return ActionResult.succeeded({"calls": self.calls})
+
+
+class CountingFailAction(Action):
+    name = "test.count_fail"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def execute(self, context: Context, arguments: dict[str, Any]) -> ActionResult:
+        self.calls += 1
+        return ActionResult.failed("expected failure", category="test")
+
+
 class SlowAction(Action):
     name = "test.slow"
 
@@ -232,6 +254,68 @@ def test_validator_enforces_simple_parallel_shape_and_decorators() -> None:
         validate(bad_decorator, actions)
 
 
+def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindings() -> None:
+    actions = registry(action_spec(EchoAction()))
+    valid = tree([
+        {
+            "id": "run_all",
+            "type": "instance_parallel",
+            "runs": [
+                {"instance": "mumu-0", "workflow": "entrypoints/mumu_0_souls_party_leader.json", "inputs": {"rounds": {"ref": "blackboard.rounds"}}},
+                {"instance": "mumu-1", "workflow": "entrypoints/mumu_1_souls_loop.json", "inputs": {}},
+            ],
+            "wait_for": "all",
+            "cancel_on_failure": True,
+        },
+    ], "run_all", blackboard={"rounds": {"type": "integer", "default": 1}})
+    parsed = validate(valid, actions)
+    assert parsed.node_map["run_all"].runs[0].instance == "mumu-0"
+    assert parsed.node_map["run_all"].wait_for == "all"
+
+    duplicate = tree([
+        {"id": "run_all", "type": "instance_parallel", "runs": [
+            {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json"},
+            {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json"},
+        ]},
+    ], "run_all")
+    with pytest.raises(ConfigError, match="more than once"):
+        validate(duplicate, actions)
+
+    output_binding = tree([
+        {"id": "run_all", "type": "instance_parallel", "runs": [
+            {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json", "inputs": {"value": {"ref": "nodes.some.output.value"}}},
+        ]},
+    ], "run_all")
+    with pytest.raises(ConfigError, match="only reference blackboard"):
+        validate(output_binding, actions)
+
+
+def test_validator_accepts_do_once_and_rejects_duplicate_or_extra_fields() -> None:
+    actions = registry(action_spec(EchoAction()))
+    ok = tree([task("a", "test.echo", decorators=[{"type": "do_once"}])], "a")
+    validate(ok, actions)
+
+    duplicate = tree([task("a", "test.echo", decorators=[{"type": "do_once"}, {"type": "do_once"}])], "a")
+    with pytest.raises(ConfigError, match="duplicate do_once"):
+        validate(duplicate, actions)
+
+    extra = tree([task("a", "test.echo", decorators=[{"type": "do_once", "seconds": 1}])], "a")
+    with pytest.raises(ConfigError, match="unknown fields"):
+        validate(extra, actions)
+
+    bad_reset = tree([task("a", "test.echo", decorators=[{"type": "do_once", "reset_on_failure": "yes"}])], "a")
+    with pytest.raises(ConfigError):
+        validate(bad_reset, actions)
+
+
+def test_validator_accepts_do_once_reset_on_failure_flag() -> None:
+    actions = registry(action_spec(EchoAction()))
+    ok = tree([task("a", "test.echo", decorators=[{"type": "do_once", "reset_on_failure": True}])], "a")
+    spec = validate(ok, actions)
+    decorator = spec.node_map["a"].decorators[0]
+    assert decorator.reset_on_failure is True
+
+
 def test_bindings_are_typed_and_use_blackboard_and_nodes_namespaces() -> None:
     count = ParameterDefinition.parse("count", {"type": "integer", "required": True})
     typed = ActionSpec(definition(
@@ -340,6 +424,71 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     assert not ReferenceResolver({}, {}).condition({"exists": {"ref": "blackboard.missing"}})
 
 
+def test_engine_do_once_runs_action_only_once_across_repeat_iterations() -> None:
+    once_action = CountingAction()
+    echo_action = CountingAction()
+    echo_action.name = "test.echo"
+    actions = registry(action_spec(once_action), action_spec(echo_action))
+    raw = tree([
+        {"id": "loop", "type": "sequence", "decorators": [{"type": "repeat", "count": 3}], "children": ["once", "after"]},
+        task("once", "test.count", decorators=[{"type": "do_once"}]),
+        task("after", "test.echo"),
+    ], "loop")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert once_action.calls == 1
+    assert echo_action.calls == 3
+    once_events = [item for item in result.step_history if item["step_id"] == "once"]
+    assert len(once_events) == 3
+    assert once_events[0].get("decorator") is None
+    assert all(item["status"] == ActionStatus.SUCCEEDED.value for item in once_events[1:])
+    assert all(item["decorator"] == "do_once" for item in once_events[1:])
+
+
+def test_engine_do_once_reset_on_failure_retries_until_success() -> None:
+    fail_then_succeed = RetryAction()
+    echo_action = CountingAction()
+    echo_action.name = "test.echo"
+    actions = registry(action_spec(fail_then_succeed), action_spec(echo_action))
+    raw = tree([
+        {"id": "loop", "type": "selector", "decorators": [{"type": "repeat", "count": 3}], "children": ["once", "fallback"]},
+        task("once", "test.retry", decorators=[{"type": "do_once", "reset_on_failure": True}]),
+        task("fallback", "test.echo"),
+    ], "loop")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    # 第 1 轮失败不锁定 → 第 2 轮重试成功并锁定 → 第 3 轮直接成功跳过（fallback 只在首轮执行）。
+    assert fail_then_succeed.calls == 2
+    assert echo_action.calls == 1
+    once_events = [item for item in result.step_history if item["step_id"] == "once"]
+    assert len(once_events) == 3
+    # 第 1、2 次是真实执行（第 1 次失败、第 2 次成功），第 3 次才是 do_once 成功跳过。
+    assert once_events[2]["decorator"] == "do_once"
+    assert once_events[2]["status"] == ActionStatus.SUCCEEDED.value
+
+
+def test_engine_do_once_default_locks_even_when_first_execution_fails() -> None:
+    fail_action = CountingFailAction()
+    echo_action = CountingAction()
+    echo_action.name = "test.echo"
+    actions = registry(action_spec(fail_action), action_spec(echo_action))
+    raw = tree([
+        {"id": "loop", "type": "selector", "decorators": [{"type": "repeat", "count": 2}], "children": ["once", "fallback"]},
+        task("once", "test.count_fail", decorators=[{"type": "do_once"}]),
+        task("fallback", "test.echo"),
+    ], "loop")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert fail_action.calls == 1
+    assert echo_action.calls == 1
+    once_events = [item for item in result.step_history if item["step_id"] == "once"]
+    assert len(once_events) == 2
+    # 第一次失败被 Selector 恢复归类为 branch_miss；第二次直接按 do_once 成功跳过。
+    assert once_events[0]["status"] == "branch_miss"
+    assert once_events[1]["status"] == ActionStatus.SUCCEEDED.value
+    assert once_events[1]["decorator"] == "do_once"
+
+
 def test_engine_sequence_stops_and_selector_falls_back() -> None:
     actions = registry(action_spec(EchoAction()), action_spec(FailAction()))
     selector = tree([
@@ -369,12 +518,19 @@ def test_engine_sequence_stops_and_selector_falls_back() -> None:
         task("fail_one", "test.fail"),
         task("fail_two", "test.fail"),
     ], "selector")
-    failed_result = WorkflowEngine(validate(all_failed, actions), actions, Context(), {}).run()
+    all_failed_emitted: list[dict[str, Any]] = []
+    failed_result = WorkflowEngine(
+        validate(all_failed, actions), actions, Context(), {}, on_step=all_failed_emitted.append,
+    ).run()
     assert failed_result.status == ActionStatus.FAILED
     assert [
         event["status"] for event in failed_result.step_history
         if event["step_id"] in {"fail_one", "fail_two"}
-    ] == ["failed", "failed"]
+    ] == ["branch_miss", "failed"]
+    assert [
+        event["status"] for event in all_failed_emitted
+        if event["step_id"] in {"fail_one", "fail_two"}
+    ] == ["failed", "branch_miss", "failed"]
 
     sequence = tree([
         {"id": "sequence", "type": "sequence", "children": ["fail", "never"]},
@@ -486,8 +642,88 @@ def test_workflow_loader_applies_required_top_level_default_before_validation(tm
     assert normalized == {"rounds": 30}
 
 
+def test_workflow_loader_only_accepts_public_child_inputs(tmp_path: Path) -> None:
+    workflow_dir = tmp_path / "workflows"
+    workflow_dir.mkdir()
+    raw = tree(
+        [task("echo", "test.echo", {"value": {"ref": "blackboard.public_value"}})],
+        "echo",
+        blackboard={
+            "public_value": {"type": "string", "public": True, "required": True},
+            "private_value": {"type": "string", "public": False, "default": "internal"},
+            "legacy_value": {"type": "integer", "default": 1},
+        },
+    )
+    (workflow_dir / "child.json").write_text(json.dumps(raw), encoding="utf-8")
+    loader = WorkflowLoader(workflow_dir, registry(action_spec(EchoAction())), project_root=tmp_path)
+    child = loader.load("child")
+
+    assert child.public_inputs == ("public_value", "legacy_value")
+    assert loader.normalize_inputs(
+        child,
+        {"public_value": "from-parent", "legacy_value": 2},
+        public_only=True,
+    ) == {
+        "public_value": "from-parent",
+        "private_value": "internal",
+        "legacy_value": 2,
+    }
+    with pytest.raises(ConfigError, match="private or unknown: private_value"):
+        loader.normalize_inputs(
+            child,
+            {"public_value": "from-parent", "private_value": "override"},
+            public_only=True,
+        )
+
+
+def test_instance_parallel_rejects_private_child_inputs(tmp_path: Path) -> None:
+    workflow_dir = tmp_path / "workflows"
+    workflow_dir.mkdir()
+    child = tree(
+        [task("echo", "test.echo")],
+        "echo",
+        blackboard={
+            "rounds": {"type": "integer", "public": True, "default": 1},
+            "secret": {"type": "string", "public": False, "default": "internal"},
+        },
+    )
+    (workflow_dir / "child.json").write_text(json.dumps(child), encoding="utf-8")
+    parent = tree([
+        {
+            "id": "parallel",
+            "type": "instance_parallel",
+            "runs": [{"instance": "mumu-0", "workflow": "child.json", "inputs": {"secret": "override"}}],
+        },
+    ], "parallel")
+
+    with pytest.raises(ConfigError, match="private or unknown child inputs: secret"):
+        validate_workflow(
+            parent,
+            workflow_dir / "parent.json",
+            registry(action_spec(EchoAction())),
+            project_root=tmp_path,
+            workflow_dir=workflow_dir,
+        )
+
+
+def test_workflow_loader_discovers_nested_workflows_and_resolves_ids(tmp_path: Path) -> None:
+    workflow_dir = tmp_path / "workflows"
+    nested = workflow_dir / "entrypoints"
+    nested.mkdir(parents=True)
+    raw = tree([task("echo", "test.echo", {"value": "nested"})], "echo")
+    path = nested / "nested_entry.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    actions = registry(action_spec(EchoAction()))
+    loader = WorkflowLoader(workflow_dir, actions, project_root=tmp_path)
+
+    assert loader.path_for("entrypoints/nested_entry.json") == path.resolve()
+    assert loader.path_for("nested_entry") == path.resolve()
+    assert list(loader.discover()) == [raw["id"]]
+
+
 def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> None:
-    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls_party_member_round.json"
+    project_root = Path(__file__).resolve().parents[1]
+    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls" / "party" / "member_round.json"
     raw = json.loads(workflow_path.read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in raw["nodes"]}
 
@@ -508,7 +744,7 @@ def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> 
     invite_params = nodes["wait_auto_ready_invite"]["params"]
     assert invite_params["threshold"] >= 0.85
     assert invite_params["timeout_seconds"] >= 12
-    assert (workflow_path.parents[1] / invite_params["template"]).is_file()
+    assert (project_root / invite_params["template"]).is_file()
     assert nodes["complete_auto_ready_setup"]["children"] == [
         "wait_lobby_without_confirmation",
         "handle_auto_ready_confirmation",
@@ -517,7 +753,7 @@ def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> 
 
 
 def test_party_member_setup_phase_accepts_return_to_lobby() -> None:
-    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls_party_member_round.json"
+    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls" / "party" / "member_round.json"
     raw = json.loads(workflow_path.read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in raw["nodes"]}
     lobby_phase_condition = {
@@ -532,8 +768,12 @@ def test_party_member_setup_phase_accepts_return_to_lobby() -> None:
 def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
     project_root = Path(__file__).resolve().parents[1]
     workflow_nodes = []
-    for workflow_name in ("souls_party_member_round.json", "mumu_1_souls_loop.json"):
-        raw = json.loads((project_root / "workflows" / workflow_name).read_text(encoding="utf-8"))
+    workflow_paths = (
+        project_root / "workflows" / "souls" / "party" / "member_round.json",
+        project_root / "workflows" / "entrypoints" / "mumu_1_souls_loop.json",
+    )
+    for workflow_path in workflow_paths:
+        raw = json.loads(workflow_path.read_text(encoding="utf-8"))
         workflow_nodes.extend(
             node
             for node in raw["nodes"]

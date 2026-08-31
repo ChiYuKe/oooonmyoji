@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from pathlib import Path
 from typing import Any
 
 from ..actions import ActionRegistry
 from ..actions.manifest import ParameterDefinition, apply_parameter_defaults, compile_parameters
-from ..config.loader import _validate_json_schema
+from ..config.loader import _validate_json_schema, resolve_workflow_path
 from ..exceptions import ConfigError
 from .model import (
     DECORATOR_TYPES,
+    INSTANCE_PARALLEL_WAIT_MODES,
+    InstanceParallelRun,
     NODE_TYPES,
     PARALLEL_FINISH_MODES,
     BehaviorDecorator,
@@ -21,6 +24,7 @@ from .model import (
 from .resolver import is_binding
 
 CONDITION_OPERATORS = {"exists", "eq", "ne", "gt", "gte", "lt", "lte", "contains", "and", "or", "not"}
+OPTIONAL_DECORATOR_FIELDS = {"retry": {"delay_seconds"}, "do_once": {"reset_on_failure"}}
 _BINDING_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": ["ref"],
@@ -86,11 +90,28 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                                 "attempts": {"type": "integer", "minimum": 1},
                                 "delay_seconds": {"type": "number", "minimum": 0},
                                 "count": {"type": "integer", "minimum": 1},
+                                "reset_on_failure": {"type": "boolean"},
                             },
                             "additionalProperties": False,
                         },
                     },
                     "finish_mode": {"enum": list(PARALLEL_FINISH_MODES)},
+                    "runs": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "required": ["instance", "workflow"],
+                            "properties": {
+                                "instance": {"type": "string", "minLength": 1},
+                                "workflow": {"type": "string", "minLength": 1},
+                                "inputs": {"type": "object"},
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "wait_for": {"enum": list(INSTANCE_PARALLEL_WAIT_MODES)},
+                    "cancel_on_failure": {"type": "boolean"},
                 },
                 "additionalProperties": False,
             },
@@ -429,9 +450,10 @@ def _parse_decorators(
             "timeout": {"type", "seconds"},
             "retry": {"type", "attempts", "delay_seconds"},
             "repeat": {"type", "count"},
+            "do_once": {"type", "reset_on_failure"},
         }[kind]
         extra = set(item) - allowed
-        missing = allowed - set(item) - ({"delay_seconds"} if kind == "retry" else set())
+        missing = allowed - set(item) - OPTIONAL_DECORATOR_FIELDS.get(kind, set())
         if extra or missing:
             details = f"unknown fields {sorted(extra)}" if extra else f"missing fields {sorted(missing)}"
             raise ConfigError(f"{path}: {details}")
@@ -446,17 +468,83 @@ def _parse_decorators(
             parsed.append(BehaviorDecorator(type=kind, seconds=float(item["seconds"])))
         elif kind == "retry":
             parsed.append(BehaviorDecorator(type=kind, attempts=int(item["attempts"]), delay_seconds=float(item.get("delay_seconds", 0.0))))
+        elif kind == "do_once":
+            parsed.append(BehaviorDecorator(type=kind, reset_on_failure=bool(item.get("reset_on_failure", False))))
         else:
             parsed.append(BehaviorDecorator(type=kind, count=int(item["count"])))
     return tuple(parsed)
 
 
-def validate_workflow(raw: dict[str, Any], path: Path, registry: ActionRegistry, *, project_root: Path) -> WorkflowSpec:
-    del project_root
+def _validate_instance_parallel_inputs(
+    value: Any,
+    *,
+    blackboard_schema: dict[str, Any],
+    path: str,
+) -> None:
+    """Only orchestration blackboard bindings may cross an instance boundary."""
+
+    if isinstance(value, dict):
+        if "ref" in value:
+            if not is_binding(value) or not str(value["ref"]).startswith("blackboard."):
+                raise ConfigError(f"{path} may only reference blackboard.*")
+            _ref_schema(
+                str(value["ref"]),
+                node_ids=set(),
+                blackboard_schema=blackboard_schema,
+                output_schemas={},
+                available_node_ids=set(),
+                path=path,
+            )
+            return
+        for key, child in value.items():
+            _validate_instance_parallel_inputs(child, blackboard_schema=blackboard_schema, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _validate_instance_parallel_inputs(child, blackboard_schema=blackboard_schema, path=f"{path}[{index}]")
+
+
+def _validate_instance_workflow_reference(workflow_dir: Path, reference: str, path: str) -> None:
+    try:
+        resolve_workflow_path(workflow_dir, reference)
+    except ConfigError as exc:
+        raise ConfigError(f"{path} does not resolve to a workflow: {reference}") from exc
+
+
+def _validate_public_child_inputs(workflow_dir: Path, reference: str, inputs: dict[str, Any], path: str) -> None:
+    child_path = resolve_workflow_path(workflow_dir, reference)
+    try:
+        child_raw = json.loads(child_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"{path} cannot read child workflow: {reference}") from exc
+    blackboard = child_raw.get("blackboard", {}) if isinstance(child_raw, dict) else {}
+    if not isinstance(blackboard, dict):
+        blackboard = {}
+    public = {
+        name
+        for name, definition in blackboard.items()
+        if isinstance(definition, dict)
+        and definition.get("public", True) is not False
+    }
+    hidden = sorted(set(inputs) - public)
+    if hidden:
+        raise ConfigError(f"{path} passes private or unknown child inputs: {', '.join(hidden)}")
+
+
+def validate_workflow(
+    raw: dict[str, Any],
+    path: Path,
+    registry: ActionRegistry,
+    *,
+    project_root: Path,
+    workflow_dir: Path | None = None,
+) -> WorkflowSpec:
     _validate_json_schema(raw, WORKFLOW_SCHEMA, f"workflow {path}")
 
     blackboard_raw = raw.get("blackboard", {})
     assert isinstance(blackboard_raw, dict)
+    for name, definition in blackboard_raw.items():
+        if isinstance(definition, dict) and "public" in definition and not isinstance(definition["public"], bool):
+            raise ConfigError(f"blackboard.{name}.public must be a boolean")
     blackboard_schema = compile_parameters({name: ParameterDefinition.parse(name, value) for name, value in blackboard_raw.items()})
 
     nodes_raw = raw["nodes"]
@@ -499,6 +587,49 @@ def validate_workflow(raw: dict[str, Any], path: Path, registry: ActionRegistry,
             normalized = apply_parameter_defaults(spec.definition.parameters, params)
             _validate_json_schema(normalized, _binding_aware_parameter_schema(spec.input_schema), f"nodes[{index}].params")
             action = str(item["action"])
+        elif node_type == "instance_parallel":
+            forbidden = set(item) & {"action", "params", "children", "finish_mode"}
+            if forbidden:
+                raise ConfigError(f"nodes[{index}] instance_parallel cannot define {sorted(forbidden)}")
+            if decorators_raw:
+                raise ConfigError(f"nodes[{index}] instance_parallel cannot have decorators")
+            runs_raw = item.get("runs")
+            if not isinstance(runs_raw, list) or not runs_raw:
+                raise ConfigError(f"nodes[{index}] instance_parallel must define at least one run")
+            seen_instances: set[str] = set()
+            default_workflow_dir = project_root / "workflows"
+            base_workflow_dir = Path(workflow_dir or (default_workflow_dir if default_workflow_dir.is_dir() else path.parent)).resolve()
+            for run_index, run_value in enumerate(runs_raw):
+                if not isinstance(run_value, dict):
+                    raise ConfigError(f"nodes[{index}].runs[{run_index}] must be an object")
+                instance_value = run_value.get("instance")
+                workflow_value = run_value.get("workflow")
+                if not isinstance(instance_value, str) or not instance_value.strip():
+                    raise ConfigError(f"nodes[{index}].runs[{run_index}].instance must be a non-empty string")
+                if instance_value in seen_instances:
+                    raise ConfigError(f"nodes[{index}] instance_parallel cannot run instance more than once: {instance_value}")
+                seen_instances.add(instance_value)
+                if not isinstance(workflow_value, str) or not workflow_value.strip():
+                    raise ConfigError(f"nodes[{index}].runs[{run_index}].workflow must be a non-empty string")
+                _validate_instance_workflow_reference(base_workflow_dir, workflow_value, f"nodes[{index}].runs[{run_index}].workflow")
+                run_inputs = run_value.get("inputs", {})
+                if not isinstance(run_inputs, dict):
+                    raise ConfigError(f"nodes[{index}].runs[{run_index}].inputs must be an object")
+                _validate_instance_parallel_inputs(run_inputs, blackboard_schema=blackboard_schema, path=f"nodes[{index}].runs[{run_index}].inputs")
+                _validate_public_child_inputs(
+                    base_workflow_dir,
+                    workflow_value,
+                    run_inputs,
+                    f"nodes[{index}].runs[{run_index}].inputs",
+                )
+            wait_for = item.get("wait_for", "all")
+            if wait_for not in INSTANCE_PARALLEL_WAIT_MODES:
+                raise ConfigError(f"nodes[{index}].wait_for must be one of {INSTANCE_PARALLEL_WAIT_MODES}")
+            cancel_on_failure = item.get("cancel_on_failure", True)
+            if not isinstance(cancel_on_failure, bool):
+                raise ConfigError(f"nodes[{index}].cancel_on_failure must be a boolean")
+            params = {}
+            action = None
         else:
             forbidden = set(item) & {"action", "params"}
             if forbidden:
@@ -507,12 +638,22 @@ def validate_workflow(raw: dict[str, Any], path: Path, registry: ActionRegistry,
             action = None
         if node_type != "simple_parallel" and "finish_mode" in item:
             raise ConfigError(f"nodes[{index}].finish_mode is only valid for simple_parallel")
+        if node_type != "instance_parallel" and any(field in item for field in ("runs", "wait_for", "cancel_on_failure")):
+            raise ConfigError(f"nodes[{index}] instance_parallel fields are only valid for instance_parallel")
         decorators = _parse_decorators(decorators_raw, node_index=index, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids)
         if node_type == "root" and decorators:
             raise ConfigError(f"nodes[{index}] root cannot have decorators")
         retry = next((decorator for decorator in decorators if decorator.type == "retry"), None)
         if retry is not None and retry.attempts > 1 and node_type == "task" and not action_specs[item["id"]].definition.retry_safe and not raw.get("retry_safe", False):
             raise ConfigError(f"nodes[{index}] retries an Action that is not declared retry-safe")
+        instance_runs = tuple(
+            InstanceParallelRun(
+                instance=str(run_value["instance"]),
+                workflow=str(run_value["workflow"]),
+                inputs=deepcopy(run_value.get("inputs", {})),
+            )
+            for run_value in item.get("runs", [])
+        ) if node_type == "instance_parallel" else ()
         parsed.append(WorkflowNode(
             id=str(item["id"]),
             type=node_type,
@@ -522,6 +663,9 @@ def validate_workflow(raw: dict[str, Any], path: Path, registry: ActionRegistry,
             children=tuple(str(child) for child in children_raw),
             decorators=decorators,
             finish_mode=str(item.get("finish_mode", "abort_background")),
+            runs=instance_runs,
+            wait_for=str(item.get("wait_for", "all")),
+            cancel_on_failure=bool(item.get("cancel_on_failure", True)),
         ))
 
     node_map = {node.id: node for node in parsed}
@@ -543,10 +687,20 @@ def validate_workflow(raw: dict[str, Any], path: Path, registry: ActionRegistry,
                 raise ConfigError(f"simple_parallel node {node.id} must contain exactly two children")
             elif node_map[node.children[0]].type != "task":
                 raise ConfigError(f"simple_parallel node {node.id} requires a task as its first (main) child")
+        if node.type == "instance_parallel":
+            if node.children:
+                raise ConfigError(f"instance_parallel node {node.id} cannot contain children")
+            if not node.runs:
+                raise ConfigError(f"instance_parallel node {node.id} must contain at least one run")
         if node.type == "task" and node.children:
             raise ConfigError(f"task node {node.id} cannot contain children")
     if parent_counts[root.id] != 0:
         raise ConfigError("root node cannot have a parent")
+    for node in parsed:
+        if node.type != "instance_parallel":
+            continue
+        if root.children != (node.id,) or parent_counts[node.id] != 1:
+            raise ConfigError("instance_parallel must be the Root's only direct child")
     for node in parsed:
         if node.id != root.id and parent_counts[node.id] != 1:
             raise ConfigError(f"node {node.id} must have exactly one parent (found {parent_counts[node.id]})")

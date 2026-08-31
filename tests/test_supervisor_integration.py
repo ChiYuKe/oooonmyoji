@@ -4,11 +4,15 @@ import json
 import os
 from pathlib import Path
 import queue
+import threading
+from types import SimpleNamespace
 
 import pytest
 
 from src.oooonmyoji.config import load_config
+from src.oooonmyoji.runtime.records import AtomicJsonStore
 from src.oooonmyoji.runtime.supervisor import Supervisor
+from src.oooonmyoji.workflows.model import InstanceParallelRun, WorkflowNode, WorkflowSpec
 
 
 def _write_config(path: Path, *, serial: str = "not-connected") -> Path:
@@ -85,6 +89,81 @@ def test_wait_for_all_cancels_peer_after_failure(monkeypatch: pytest.MonkeyPatch
     assert records["leader-run"] == {"status": "failed"}
     assert records["member-run"] == {"status": "cancelled"}
     assert cancelled == ["member-run"]
+
+
+def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    instances = tuple(SimpleNamespace(id=f"mumu-{index}", enabled=True) for index in range(3))
+    config = SimpleNamespace(
+        artifact_dir=tmp_path,
+        instances=instances,
+        instance=lambda instance_id: next(item for item in instances if item.id == instance_id),
+    )
+    supervisor = Supervisor.__new__(Supervisor)
+    supervisor.config = config
+    supervisor.workers = {item.id: object() for item in instances}
+    supervisor._runs = {}
+    supervisor._completed = {}
+    supervisor._groups = {}
+    supervisor._run_groups = {}
+    supervisor._group_lock = threading.RLock()
+    supervisor._stopping = False
+    supervisor.event_queue = None
+    supervisor._workflow_loader = None
+    queued: list[tuple[str, str, dict[str, object] | None, str | None]] = []
+
+    def queue_run(workflow: str, instance: str, inputs: dict[str, object] | None = None, *, events_file: str | None = None, wait: bool = True) -> str:
+        run_id = f"{instance}-run"
+        queued.append((workflow, instance, inputs, events_file))
+        supervisor._runs[run_id] = instance
+        return run_id
+
+    monkeypatch.setattr(supervisor, "start", lambda: None)
+    monkeypatch.setattr(supervisor, "check_workers", lambda: None)
+    monkeypatch.setattr(supervisor, "_queue_workflow_run", queue_run)
+    monkeypatch.setattr(supervisor, "load_workflow", lambda _reference: WorkflowSpec(
+        3,
+        "all-accounts",
+        "1.0.0",
+        "",
+        (1, 1),
+        "root",
+        10,
+        100,
+        {},
+        (),
+        tmp_path / "all-accounts.json",
+        "hash",
+        {},
+    ))
+    node = WorkflowNode(
+        "run_all",
+        "instance_parallel",
+        runs=tuple(InstanceParallelRun(item.id, f"{item.id}.json") for item in instances),
+    )
+    workflow = WorkflowSpec(
+        3,
+        "all-accounts",
+        "1.0.0",
+        "",
+        (1, 1),
+        "root",
+        10,
+        100,
+        {},
+        (WorkflowNode("root", "root", children=("run_all",)), node),
+        tmp_path / "all-accounts.json",
+        "hash",
+        {},
+    )
+    group_id = supervisor._run_instance_parallel(workflow, node, {}, wait=False, events_file=None)
+    assert [item[1] for item in queued] == ["mumu-0", "mumu-1", "mumu-2"]
+    for _, instance, _, _ in queued:
+        AtomicJsonStore(tmp_path / "runs" / f"{instance}-run.json").write({"status": "succeeded"})
+    group = supervisor._groups[group_id]
+    assert group.done.wait(3)
+    record = AtomicJsonStore(tmp_path / "runs" / f"{group_id}.json").read(default={})
+    assert record["status"] == "succeeded"
+    assert [item["instance"] for item in record["runs"]] == ["mumu-0", "mumu-1", "mumu-2"]
 
 
 @pytest.mark.skipif(

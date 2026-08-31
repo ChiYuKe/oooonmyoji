@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "task")
-COMPOSITE_TYPES = ("root", "selector", "sequence", "simple_parallel")
-DECORATOR_TYPES = ("condition", "cooldown", "timeout", "retry", "repeat")
+NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "instance_parallel", "task")
+COMPOSITE_TYPES = ("root", "selector", "sequence", "simple_parallel", "instance_parallel")
+DECORATOR_TYPES = ("condition", "cooldown", "timeout", "retry", "repeat", "do_once")
 PARALLEL_FINISH_MODES = ("abort_background", "wait_for_background")
+INSTANCE_PARALLEL_WAIT_MODES = ("all", "any")
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,16 @@ class BehaviorDecorator:
     attempts: int = 1
     delay_seconds: float = 0.0
     count: int = 1
+    reset_on_failure: bool = False
+
+
+@dataclass(frozen=True)
+class InstanceParallelRun:
+    """One child workflow scheduled on a configured runtime instance."""
+
+    instance: str
+    workflow: str
+    inputs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -32,6 +43,9 @@ class WorkflowNode:
     children: tuple[str, ...] = ()
     decorators: tuple[BehaviorDecorator, ...] = ()
     finish_mode: str = "abort_background"
+    runs: tuple[InstanceParallelRun, ...] = ()
+    wait_for: str = "all"
+    cancel_on_failure: bool = True
 
     @property
     def is_task(self) -> bool:
@@ -40,6 +54,10 @@ class WorkflowNode:
     @property
     def is_composite(self) -> bool:
         return self.type in COMPOSITE_TYPES
+
+    @property
+    def is_orchestration(self) -> bool:
+        return self.type == "instance_parallel"
 
 
 @dataclass(frozen=True)
@@ -63,10 +81,25 @@ class WorkflowSpec:
     def node_map(self) -> dict[str, WorkflowNode]:
         return {node.id: node for node in self.nodes}
 
+    @property
+    def public_inputs(self) -> tuple[str, ...]:
+        """Inputs exposed to parent workflows; omitted ``public`` keeps v3 compatibility."""
+
+        blackboard = self.raw.get("blackboard", {})
+        if not isinstance(blackboard, dict):
+            return ()
+        return tuple(
+            name
+            for name, definition in blackboard.items()
+            if isinstance(definition, dict) and definition.get("public", True) is not False
+        )
+
 
 __all__ = [
     "COMPOSITE_TYPES",
     "DECORATOR_TYPES",
+    "INSTANCE_PARALLEL_WAIT_MODES",
+    "InstanceParallelRun",
     "NODE_TYPES",
     "PARALLEL_FINISH_MODES",
     "BehaviorDecorator",

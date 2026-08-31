@@ -164,6 +164,32 @@ def test_subworkflow_missing_input_fails_call(tmp_path: Path, monkeypatch: pytes
     assert step["output"]["error_category"] == "config"
 
 
+def test_subworkflow_cannot_override_private_child_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    _write_workflow(
+        tmp_path,
+        "private_child",
+        [{"id": "capture", "action": "core.capture"}],
+        inputs={"secret": {"type": "string", "public": False, "default": "internal"}},
+    )
+    _write_workflow(tmp_path, "parent_private_input", [
+        {
+            "id": "exec_sub",
+            "action": "workflow.run",
+            "params": {"workflow": "private_child", "inputs": {"secret": "override"}},
+        },
+    ])
+
+    record = _run(config, "parent_private_input")
+
+    assert record.status.value == "failed"
+    step = _step(record, "exec_sub")
+    assert step is not None and step["status"] == "failed"
+    assert step["error_category"] == "config"
+    assert "private or unknown: secret" in str(step["error"])
+
+
 def test_subworkflow_action_failure_is_reported_to_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))

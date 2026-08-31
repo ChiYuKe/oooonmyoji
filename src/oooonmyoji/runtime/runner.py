@@ -305,7 +305,7 @@ class TaskRunner:
                         raise WorkflowError(f"recursive subworkflow call: {sub_id}")
                     if len(subworkflow_stack) >= subworkflow_limit:
                         raise WorkflowError(f"subworkflow nesting exceeds the limit ({subworkflow_limit})")
-                    normalized = self.workflow_loader.normalize_inputs(sub, inputs)
+                    normalized = self.workflow_loader.normalize_inputs(sub, inputs, public_only=True)
                     subworkflow_stack.append(sub_id)
                     try:
                         sub_engine = WorkflowEngine(

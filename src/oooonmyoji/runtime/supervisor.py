@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from ..config.loader import load_config
@@ -18,7 +19,9 @@ from ..actions import build_action_registry
 from ..vision.ocr import SharedOcrPool
 from ..workflows.loader import WorkflowLoader
 from .logging import EventLogger
-from .records import RunStatus
+from ..workflows.model import WorkflowNode, WorkflowSpec
+from ..workflows.resolver import ReferenceResolver
+from .records import AtomicJsonStore, RunStatus
 from .reward_stats import RewardStatsProcessor
 from .runner import RemoteOcrEngine, TaskRunner
 
@@ -30,6 +33,18 @@ class _Worker:
     command_queue: Any
     response_queue: Any
     control_queue: Any
+
+
+@dataclass
+class _Group:
+    group_id: str
+    workflow: WorkflowSpec
+    node: WorkflowNode
+    run_ids: list[str]
+    entries: list[dict[str, Any]]
+    records: dict[str, dict[str, Any] | None]
+    done: threading.Event
+    cancel_requested: bool = False
 
 
 def _apply_cancel_request(
@@ -135,6 +150,10 @@ class Supervisor:
         self.workers: dict[str, _Worker] = {}
         self._runs: dict[str, str] = {}
         self._completed: dict[str, dict[str, Any]] = {}
+        self._workflow_loader: WorkflowLoader | None = None
+        self._groups: dict[str, _Group] = {}
+        self._run_groups: dict[str, str] = {}
+        self._group_lock = threading.RLock()
         self._ocr_lock = threading.Lock()
         self._reward_stats: RewardStatsProcessor | None = None
         self._stopping = False
@@ -176,10 +195,35 @@ class Supervisor:
             return
         self._start_worker(mp.get_context("spawn"), instance)
 
+    def load_workflow(self, workflow: str) -> WorkflowSpec:
+        """Load a workflow in the supervisor process for orchestration decisions."""
+
+        if self._workflow_loader is None:
+            registry = build_action_registry(self.config.action_dir)
+            self._workflow_loader = WorkflowLoader(
+                self.config.workflow_dir,
+                registry,
+                project_root=self.config.root_dir,
+            )
+        return self._workflow_loader.load(workflow)
+
+    @staticmethod
+    def _instance_parallel_node(workflow: WorkflowSpec) -> WorkflowNode | None:
+        root = workflow.node_map.get(workflow.root)
+        if root is None or len(root.children) != 1:
+            return None
+        child = workflow.node_map.get(root.children[0])
+        return child if child is not None and child.type == "instance_parallel" else None
+
     def run(self, job_id: str, *, wait: bool = True, events_file: str | None = None) -> str:
         self.start()
         self.check_workers()
         job = self.config.job(job_id)
+        workflow_spec = self.load_workflow(job.workflow)
+        orchestration_node = self._instance_parallel_node(workflow_spec)
+        if orchestration_node is not None:
+            normalized = self._workflow_loader.normalize_inputs(workflow_spec, dict(job.inputs)) if self._workflow_loader else dict(job.inputs)
+            return self._run_instance_parallel(workflow_spec, orchestration_node, normalized, wait=wait, events_file=events_file)
         worker = self.workers.get(job.instance)
         if worker is None:
             raise RuntimeError(f"instance is disabled or not started: {job.instance}")
@@ -205,6 +249,22 @@ class Supervisor:
 
         self.start()
         self.check_workers()
+        workflow_spec = self.load_workflow(workflow)
+        orchestration_node = self._instance_parallel_node(workflow_spec)
+        if orchestration_node is not None:
+            normalized = self._workflow_loader.normalize_inputs(workflow_spec, dict(inputs or {})) if self._workflow_loader else dict(inputs or {})
+            return self._run_instance_parallel(workflow_spec, orchestration_node, normalized, wait=wait, events_file=events_file)
+        return self._queue_workflow_run(workflow, instance_id, inputs, events_file=events_file, wait=wait)
+
+    def _queue_workflow_run(
+        self,
+        workflow: str,
+        instance_id: str,
+        inputs: dict[str, Any] | None = None,
+        *,
+        events_file: str | None = None,
+        wait: bool = True,
+    ) -> str:
         try:
             instance = self.config.instance(instance_id)
         except StopIteration as exc:
@@ -233,6 +293,200 @@ class Supervisor:
         if wait:
             self.wait_for(run_id)
         return run_id
+
+    def _group_events_file(self, group_id: str, instance_id: str, requested: str | None) -> str:
+        if requested:
+            target = Path(requested)
+            return str(target.with_name(f"{target.stem}-{instance_id}{target.suffix or '.jsonl'}"))
+        stamp = group_id.split("-", 2)[1] if group_id.startswith("group-") else group_id
+        return str(self.config.artifact_dir / "runs" / f"events-group-{stamp}-{instance_id}.jsonl")
+
+    def _group_store(self, group_id: str) -> AtomicJsonStore:
+        return AtomicJsonStore(self.config.artifact_dir / "runs" / f"{group_id}.json")
+
+    def _group_payload(self, group: _Group, *, status: str | None = None) -> dict[str, Any]:
+        child_rows: list[dict[str, Any]] = []
+        for entry in group.entries:
+            row = dict(entry)
+            record = group.records.get(entry["run_id"])
+            if isinstance(record, dict):
+                row["status"] = record.get("status", row.get("status"))
+                row["record"] = record
+            child_rows.append(row)
+        return {
+            "group_id": group.group_id,
+            "workflow_id": group.workflow.workflow_id,
+            "workflow_file": str(group.workflow.path),
+            "workflow_file_hash": group.workflow.file_hash,
+            "node_id": group.node.id,
+            "status": status or self._group_status(group),
+            "wait_for": group.node.wait_for,
+            "cancel_on_failure": group.node.cancel_on_failure,
+            "run_ids": list(group.run_ids),
+            "runs": child_rows,
+        }
+
+    @staticmethod
+    def _group_status(group: _Group) -> str:
+        if len(group.records) < len(group.run_ids):
+            return RunStatus.QUEUED.value
+        statuses = [record.get("status") if isinstance(record, dict) else RunStatus.FAILED.value for record in group.records.values()]
+        if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
+            return RunStatus.SUCCEEDED.value
+        if all(status == RunStatus.SUCCEEDED.value for status in statuses):
+            return RunStatus.SUCCEEDED.value
+        if all(status == RunStatus.CANCELLED.value for status in statuses):
+            return RunStatus.CANCELLED.value
+        return RunStatus.FAILED.value
+
+    def _persist_group(self, group: _Group, *, status: str | None = None, finished: bool = False) -> None:
+        payload = self._group_payload(group, status=status)
+        if finished:
+            payload["finished_at"] = datetime.now(timezone.utc).isoformat()
+        self._group_store(group.group_id).write(payload)
+
+    def _run_instance_parallel(
+        self,
+        workflow: WorkflowSpec,
+        node: WorkflowNode,
+        inputs: dict[str, Any],
+        *,
+        wait: bool,
+        events_file: str | None,
+    ) -> str:
+        if not node.runs:
+            raise RuntimeError(f"instance_parallel node has no runs: {node.id}")
+        instances = [run.instance for run in node.runs]
+        if len(instances) != len(set(instances)):
+            raise RuntimeError("instance_parallel contains duplicate instances")
+        for instance_id in instances:
+            try:
+                self.config.instance(instance_id)
+            except StopIteration as exc:
+                raise RuntimeError(f"instance does not exist: {instance_id}") from exc
+            if instance_id not in self.workers:
+                raise RuntimeError(f"instance is disabled or not started: {instance_id}")
+            if any(active_instance == instance_id for active_instance in self._runs.values()):
+                raise RuntimeError(f"instance already has a queued or running task: {instance_id}")
+
+        resolver = ReferenceResolver(inputs, {})
+        group_id = f"group-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+        entries: list[dict[str, Any]] = []
+        child_ids: list[str] = []
+        child_inputs: list[dict[str, Any]] = []
+        for run in node.runs:
+            resolved_inputs = resolver.value(run.inputs)
+            if not isinstance(resolved_inputs, dict):
+                raise ValueError(f"inputs for instance_parallel run {run.instance} must resolve to an object")
+            child_workflow = self.load_workflow(run.workflow)
+            child_inputs.append(
+                self._workflow_loader.normalize_inputs(child_workflow, resolved_inputs, public_only=True)
+                if self._workflow_loader is not None
+                else resolved_inputs
+            )
+        for run, resolved_inputs in zip(node.runs, child_inputs):
+            child_id = self._queue_workflow_run(
+                run.workflow,
+                run.instance,
+                resolved_inputs,
+                events_file=self._group_events_file(group_id, run.instance, events_file),
+                wait=False,
+            )
+            child_ids.append(child_id)
+            entries.append({
+                "run_id": child_id,
+                "instance": run.instance,
+                "workflow": run.workflow,
+                "inputs": resolved_inputs,
+                "events_file": self._group_events_file(group_id, run.instance, events_file),
+                "status": RunStatus.QUEUED.value,
+            })
+
+        group = _Group(group_id, workflow, node, child_ids, entries, {}, threading.Event())
+        with self._group_lock:
+            self._groups[group_id] = group
+            for child_id in child_ids:
+                self._run_groups[child_id] = group_id
+        self._persist_group(group)
+        if wait:
+            if node.wait_for == "all":
+                records = self.wait_for_all(child_ids, timeout_seconds=workflow.timeout_seconds, cancel_on_failure=node.cancel_on_failure)
+                group.records.update(records)
+            else:
+                self._wait_group_poll(group, timeout_seconds=workflow.timeout_seconds)
+            self._finish_group(group)
+        else:
+            thread = threading.Thread(
+                target=self._wait_group_poll,
+                args=(group,),
+                kwargs={"timeout_seconds": workflow.timeout_seconds},
+                name=f"wait-{group_id}",
+                daemon=True,
+            )
+            thread.start()
+        return group_id
+
+    def _finish_group(self, group: _Group) -> None:
+        status = self._group_status(group)
+        self._persist_group(group, status=status, finished=True)
+        group.done.set()
+        if self.event_queue is not None:
+            record = self._group_store(group.group_id).read(default={})
+            self.event_queue.put({"type": "result", "run_id": group.group_id, "status": status, "record": record})
+
+    def _wait_group_poll(self, group: _Group, *, timeout_seconds: float | None) -> None:
+        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
+        terminal = {
+            RunStatus.SUCCEEDED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+            RunStatus.INTERRUPTED.value,
+        }
+        failure_requested = False
+        while True:
+            if group.done.is_set() or getattr(self, "_stopping", False):
+                return
+            for run_id in group.run_ids:
+                if run_id in group.records:
+                    continue
+                record = self._group_store(run_id).read(default={})
+                if isinstance(record, dict) and record.get("status") in terminal:
+                    group.records[run_id] = record
+            statuses = [record.get("status") for record in group.records.values() if isinstance(record, dict)]
+            if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
+                if group.node.cancel_on_failure:
+                    for run_id in group.run_ids:
+                        if run_id not in group.records:
+                            try:
+                                self.cancel(run_id)
+                            except KeyError:
+                                pass
+                self._finish_group(group)
+                return
+            if len(group.records) == len(group.run_ids):
+                if group.node.cancel_on_failure and not failure_requested and any(status != RunStatus.SUCCEEDED.value for status in statuses):
+                    failure_requested = True
+                self._finish_group(group)
+                return
+            if group.node.cancel_on_failure and not failure_requested and any(status not in {None, RunStatus.SUCCEEDED.value, RunStatus.QUEUED.value, RunStatus.RUNNING.value, RunStatus.RETRYING.value} for status in statuses):
+                failure_requested = True
+                for run_id in group.run_ids:
+                    if run_id not in group.records:
+                        try:
+                            self.cancel(run_id)
+                        except KeyError:
+                            pass
+            if deadline is not None and time.monotonic() >= deadline:
+                for run_id in group.run_ids:
+                    if run_id not in group.records:
+                        try:
+                            self.cancel(run_id)
+                        except KeyError:
+                            pass
+                self._finish_group(group)
+                return
+            self.check_workers()
+            time.sleep(0.1)
 
     def wait_for(self, run_id: str, *, timeout_seconds: float | None = None) -> dict[str, Any] | None:
         if run_id in self._completed:
@@ -345,7 +599,25 @@ class Supervisor:
         if isinstance(run_id, str):
             self._runs.pop(run_id, None)
         record = event.get("record")
+        if isinstance(run_id, str) and isinstance(record, dict):
+            self._update_group_record(run_id, record)
         return record if isinstance(record, dict) else None
+
+    def _update_group_record(self, run_id: str, record: dict[str, Any]) -> None:
+        group_lock = getattr(self, "_group_lock", None)
+        run_groups = getattr(self, "_run_groups", {})
+        groups = getattr(self, "_groups", {})
+        if group_lock is None:
+            return
+        with group_lock:
+            group_id = run_groups.get(run_id)
+            group = groups.get(group_id) if group_id else None
+            if group is None:
+                return
+            group.records[run_id] = record
+            self._persist_group(group)
+            if len(group.records) == len(group.run_ids):
+                group.done.set()
 
     def check_workers(self) -> None:
         """Isolate a crashed instance and restart its worker process."""
@@ -425,6 +697,17 @@ class Supervisor:
             return self.ocr_pool.recognize(image)
 
     def cancel(self, run_id: str) -> None:
+        with self._group_lock:
+            group = self._groups.get(run_id)
+        if group is not None:
+            group.cancel_requested = True
+            for child_id in group.run_ids:
+                try:
+                    self.cancel(child_id)
+                except KeyError:
+                    pass
+            self.logger.emit("group.cancel_requested", group_id=run_id, run_ids=group.run_ids)
+            return
         instance_id = self._runs.get(run_id)
         if instance_id is None:
             raise KeyError(run_id)
@@ -443,6 +726,9 @@ class Supervisor:
         self.logger.emit("run.cancel_requested", run_id=run_id, instance_id=instance_id)
 
     def stop(self, *, wait_seconds: float = 10.0) -> None:
+        with self._group_lock:
+            for group in self._groups.values():
+                group.done.set()
         for worker in self.workers.values():
             try:
                 worker.control_queue.put_nowait({"type": "stop"})
@@ -464,6 +750,9 @@ class Supervisor:
         self.workers.clear()
         self._runs.clear()
         self._completed.clear()
+        with self._group_lock:
+            self._groups.clear()
+            self._run_groups.clear()
         if self._reward_stats is not None:
             drained = self._reward_stats.close(wait_seconds=15.0)
             if not drained:

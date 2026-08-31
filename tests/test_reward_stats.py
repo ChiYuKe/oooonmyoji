@@ -261,8 +261,8 @@ def test_enqueue_reward_action_is_non_fatal_when_queue_is_unavailable() -> None:
 
 def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
     project_root = Path(__file__).resolve().parents[1]
-    workflow = json.loads((project_root / "workflows" / "mumu_1_souls_loop.json").read_text(encoding="utf-8"))
-    stats_workflow = json.loads((project_root / "workflows" / "reward_statistics.json").read_text(encoding="utf-8"))
+    workflow = json.loads((project_root / "workflows" / "entrypoints" / "mumu_1_souls_loop.json").read_text(encoding="utf-8"))
+    stats_workflow = json.loads((project_root / "workflows" / "souls" / "shared" / "reward_statistics.json").read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in workflow["nodes"]}
     assert nodes["main"]["children"][:2] == ["prepare_entry", "enter_souls"]
     assert nodes["return_to_courtyard"]["children"] == [
@@ -277,10 +277,25 @@ def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
         node for node in workflow["nodes"]
         if node.get("action") in {"input.tap", "input.tap_match"}
     ]
-    assert len(click_nodes) == 13
+    assert len(click_nodes) == 11
     for node in click_nodes:
         assert node["params"]["random_offset"] > 0, node["id"]
         assert node["params"]["random_interval"] == [0.2, 0.6], node["id"]
+    assert nodes["battle_loop"]["children"] == [
+        "wait_challenge",
+        "tap_challenge",
+        "prepare_lineup",
+        "await_victory",
+        "settlement",
+    ]
+    assert nodes["prepare_lineup"]["params"] == {
+        "workflow": "souls/shared/prepare_lineup.json",
+        "inputs": {"timeout_seconds": 30},
+    }
+    assert nodes["await_victory"]["params"] == {
+        "workflow": "souls/shared/await_victory.json",
+        "inputs": {"timeout_seconds": 180},
+    }
     assert nodes["settled_one_tap"]["children"][:2] == ["stats_reward_layer_1", "dismiss_reward_once"]
     assert nodes["settled_more_taps"]["children"] == [
         "stats_reward_layer_2",
@@ -293,7 +308,7 @@ def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
     for layer in (1, 2, 3):
         node = nodes[f"stats_reward_layer_{layer}"]
         assert node["action"] == "workflow.run"
-        assert node["params"]["workflow"] == "reward_statistics.json"
+        assert node["params"]["workflow"] == "souls/shared/reward_statistics.json"
         assert node["params"]["inputs"]["layer"] == layer
     stats_nodes = {node["id"]: node for node in stats_workflow["nodes"]}
     assert stats_nodes["enqueue_reward"]["params"]["roi"] == [320, 200, 1280, 640]
@@ -302,8 +317,8 @@ def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
 def test_courtyard_explore_templates_are_scoped_by_instance() -> None:
     project_root = Path(__file__).resolve().parents[1]
     workflow_paths = {
-        "mumu-0": project_root / "workflows" / "mumu_0_souls_party_leader.json",
-        "mumu-1": project_root / "workflows" / "mumu_1_souls_loop.json",
+        "mumu-0": project_root / "workflows" / "entrypoints" / "mumu_0_souls_party_leader.json",
+        "mumu-1": project_root / "workflows" / "entrypoints" / "mumu_1_souls_loop.json",
     }
 
     for instance_id, workflow_path in workflow_paths.items():
@@ -335,10 +350,45 @@ def test_courtyard_explore_templates_are_scoped_by_instance() -> None:
     ]
 
 
+def test_party_teammate_templates_flow_through_public_workflow_variables() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    workflows = project_root / "workflows"
+    parallel = json.loads((workflows / "entrypoints" / "three_mumu_souls_parallel.json").read_text(encoding="utf-8"))
+    leader = json.loads((workflows / "entrypoints" / "mumu_0_souls_party_leader.json").read_text(encoding="utf-8"))
+    leader_round = json.loads((workflows / "souls" / "party" / "leader_round.json").read_text(encoding="utf-8"))
+
+    template_names = ("member_present_template", "invite_target_template")
+    for name in template_names:
+        assert parallel["blackboard"][name]["public"] is True
+        assert leader["blackboard"][name]["public"] is True
+
+    parallel_node = next(node for node in parallel["nodes"] if node["type"] == "instance_parallel")
+    leader_run = next(run for run in parallel_node["runs"] if run["workflow"] == "entrypoints/mumu_0_souls_party_leader.json")
+    for name in template_names:
+        assert leader_run["inputs"][name] == {"ref": f"blackboard.{name}"}
+
+    leader_nodes = {node["id"]: node for node in leader["nodes"]}
+    assert leader_nodes["detect_member_present"]["params"]["template"] == {"ref": "blackboard.member_present_template"}
+    assert leader_nodes["wait_invite_target"]["params"]["template"] == {"ref": "blackboard.invite_target_template"}
+    round_calls = [
+        node for node in leader["nodes"]
+        if node.get("action") == "workflow.run" and node.get("params", {}).get("workflow") == "souls/party/leader_round.json"
+    ]
+    assert len(round_calls) == 3
+    assert all(
+        node["params"]["inputs"]["member_present_template"] == {"ref": "blackboard.member_present_template"}
+        for node in round_calls
+    )
+
+    assert leader_round["blackboard"]["member_present_template"]["public"] is True
+    round_nodes = {node["id"]: node for node in leader_round["nodes"]}
+    assert round_nodes["wait_member_present"]["params"]["template"] == {"ref": "blackboard.member_present_template"}
+
+
 def test_party_leader_retries_swallowed_create_team_click() -> None:
     project_root = Path(__file__).resolve().parents[1]
     workflow = json.loads(
-        (project_root / "workflows" / "mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
+        (project_root / "workflows" / "entrypoints" / "mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
     )
     nodes = {node["id"]: node for node in workflow["nodes"]}
 
@@ -372,8 +422,8 @@ def test_party_leader_retries_swallowed_create_team_click() -> None:
 def test_party_rounds_prepare_unlocked_lineups() -> None:
     project_root = Path(__file__).resolve().parents[1]
     round_paths = [
-        project_root / "workflows" / "souls_party_leader_round.json",
-        project_root / "workflows" / "souls_party_member_round.json",
+        project_root / "workflows" / "souls" / "party" / "leader_round.json",
+        project_root / "workflows" / "souls" / "party" / "member_round.json",
     ]
 
     for round_path in round_paths:
@@ -383,7 +433,7 @@ def test_party_rounds_prepare_unlocked_lineups() -> None:
         state_index = round_children.index("detect_lineup_state")
         prepare_index = round_children.index("prepare_lineup_if_needed")
         assert state_index < prepare_index
-        assert round_children[prepare_index + 1] == "wait_victory"
+        assert round_children[prepare_index + 1] == "await_victory"
         assert nodes["detect_lineup_state"]["children"] == [
             "detect_locked_lineup",
             "detect_unlocked_lineup",
@@ -404,24 +454,63 @@ def test_party_rounds_prepare_unlocked_lineups() -> None:
             "prepare_unlocked_lineup",
             "lineup_started_without_ready",
         ]
-        assert nodes["prepare_unlocked_lineup"]["children"] == ["wait_ready", "tap_ready"]
-        assert nodes["wait_ready"]["params"]["template"] == "assets/templates/souls/souls-ready.png"
-        assert nodes["wait_ready"]["params"]["timeout_seconds"] == 10
-        assert nodes["tap_ready"]["params"]["match"] == {"ref": "nodes.wait_ready.output.0"}
-        assert nodes["tap_ready"]["params"]["random_offset"] > 0
+        assert nodes["prepare_unlocked_lineup"]["action"] == "workflow.run"
+        assert nodes["prepare_unlocked_lineup"]["params"]["workflow"] == (
+            "souls/shared/prepare_lineup.json"
+        )
+        assert nodes["prepare_unlocked_lineup"]["params"]["inputs"] == {
+            "timeout_seconds": 10
+        }
+        assert nodes["await_victory"]["action"] == "workflow.run"
+        assert nodes["await_victory"]["params"]["workflow"] == (
+            "souls/shared/await_victory.json"
+        )
+        assert nodes["await_victory"]["params"]["inputs"] == {
+            "timeout_seconds": 240
+        }
         assert nodes["lineup_already_locked"]["decorators"] == [{
             "type": "condition",
             "expression": {"exists": {"ref": "nodes.detect_locked_lineup.output.0"}},
         }]
 
 
+def test_shared_battle_workflows_expose_timeout_inputs() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    prepare = json.loads(
+        (project_root / "workflows" / "souls" / "shared" / "prepare_lineup.json").read_text(encoding="utf-8")
+    )
+    victory = json.loads(
+        (project_root / "workflows" / "souls" / "shared" / "await_victory.json").read_text(encoding="utf-8")
+    )
+
+    assert prepare["blackboard"]["timeout_seconds"]["default"] == 10
+    prepare_nodes = {node["id"]: node for node in prepare["nodes"]}
+    assert prepare_nodes["prepare"]["children"] == ["wait_ready", "tap_ready"]
+    assert prepare_nodes["wait_ready"]["params"]["timeout_seconds"] == {
+        "ref": "blackboard.timeout_seconds"
+    }
+    assert prepare_nodes["tap_ready"]["params"]["match"] == {
+        "ref": "nodes.wait_ready.output.0"
+    }
+
+    assert victory["blackboard"]["timeout_seconds"]["default"] == 240
+    victory_nodes = {node["id"]: node for node in victory["nodes"]}
+    assert victory_nodes["await"]["children"] == ["wait_victory", "tap_victory"]
+    assert victory_nodes["wait_victory"]["params"]["timeout_seconds"] == {
+        "ref": "blackboard.timeout_seconds"
+    }
+    assert victory_nodes["tap_victory"]["params"]["match"] == {
+        "ref": "nodes.wait_victory.output.0"
+    }
+
+
 def test_party_long_run_plan_sets_up_automatic_invites_once() -> None:
     project_root = Path(__file__).resolve().parents[1]
     leader = json.loads(
-        (project_root / "workflows" / "mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
+        (project_root / "workflows" / "entrypoints" / "mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
     )
     member = json.loads(
-        (project_root / "workflows" / "mumu_1_souls_party_member.json").read_text(encoding="utf-8")
+        (project_root / "workflows" / "entrypoints" / "mumu_1_souls_party_member.json").read_text(encoding="utf-8")
     )
     leader_nodes = {node["id"]: node for node in leader["nodes"]}
     member_nodes = {node["id"]: node for node in member["nodes"]}
@@ -434,10 +523,12 @@ def test_party_long_run_plan_sets_up_automatic_invites_once() -> None:
         "repeat_auto_invite_rounds",
     ]
     assert leader_nodes["setup_auto_invite_round"]["params"]["inputs"] == {
-        "phase": "setup_auto_invite"
+        "phase": "setup_auto_invite",
+        "member_present_template": {"ref": "blackboard.member_present_template"},
     }
     assert leader_nodes["repeat_auto_invite_rounds"]["params"]["inputs"] == {
-        "phase": "auto_invite"
+        "phase": "auto_invite",
+        "member_present_template": {"ref": "blackboard.member_present_template"},
     }
     assert {"type": "repeat", "count": 9998} in leader_nodes[
         "repeat_auto_invite_rounds"
@@ -470,10 +561,10 @@ def test_party_long_run_plan_sets_up_automatic_invites_once() -> None:
 def test_party_auto_invite_templates_and_timed_click_are_native_and_fast() -> None:
     project_root = Path(__file__).resolve().parents[1]
     leader = json.loads(
-        (project_root / "workflows" / "souls_party_leader_round.json").read_text(encoding="utf-8")
+        (project_root / "workflows" / "souls" / "party" / "leader_round.json").read_text(encoding="utf-8")
     )
     member = json.loads(
-        (project_root / "workflows" / "souls_party_member_round.json").read_text(encoding="utf-8")
+        (project_root / "workflows" / "souls" / "party" / "member_round.json").read_text(encoding="utf-8")
     )
     leader_nodes = {node["id"]: node for node in leader["nodes"]}
     member_nodes = {node["id"]: node for node in member["nodes"]}
@@ -533,7 +624,7 @@ def test_reward_material_catalog_templates_exist_and_are_readable() -> None:
     assert len(catalog["templates"]) == 10
     materials = {material["id"]: material["name"] for material in catalog["templates"]}
     assert materials["orochi_scale_fragment"] == "八岐大蛇鳞片"
-    assert materials["material_shikigami"] == "素材式神"
+    assert materials["material_shikigami"] == "四星青吉鬼"
     assert materials["friendship_points"] == "友情点"
     assert "soul_purple" not in materials
     quantities = {

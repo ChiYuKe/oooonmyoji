@@ -530,10 +530,8 @@
       "children": [
         "wait_challenge",
         "tap_challenge",
-        "wait_ready",
-        "tap_ready",
-        "wait_victory",
-        "tap_victory",
+        "prepare_lineup",
+        "await_victory",
         "settlement"
       ],
       "decorators": [
@@ -583,73 +581,27 @@
       }
     },
     {
-      "id": "wait_ready",
+      "id": "prepare_lineup",
       "type": "task",
-      "name": "等待编队准备",
-      "action": "vision.wait_template",
+      "name": "等待并点击编队准备",
+      "action": "workflow.run",
       "params": {
-        "template": "assets/templates/souls/souls-ready.png",
-        "timeout_seconds": 30,
-        "roi": [
-          1500,
-          700,
-          420,
-          380
-        ],
-        "threshold": 0.88,
-        "scale_search": false
+        "workflow": "souls/shared/prepare_lineup.json",
+        "inputs": {
+          "timeout_seconds": 30
+        }
       }
     },
     {
-      "id": "tap_ready",
+      "id": "await_victory",
       "type": "task",
-      "name": "点击准备开始战斗",
-      "action": "input.tap_match",
+      "name": "等待战斗胜利并继续",
+      "action": "workflow.run",
       "params": {
-        "match": {
-          "ref": "nodes.wait_ready.output.0"
-        },
-        "revalidate": false,
-        "random_offset": 5,
-        "random_interval": [
-          0.2,
-          0.6
-        ]
-      }
-    },
-    {
-      "id": "wait_victory",
-      "type": "task",
-      "name": "等待战斗胜利",
-      "action": "vision.wait_template",
-      "params": {
-        "template": "assets/templates/souls/souls-victory-continue.png",
-        "timeout_seconds": 180,
-        "roi": [
-          650,
-          900,
-          650,
-          180
-        ],
-        "threshold": 0.86,
-        "scale_search": false
-      }
-    },
-    {
-      "id": "tap_victory",
-      "type": "task",
-      "name": "点击胜利页继续",
-      "action": "input.tap_match",
-      "params": {
-        "match": {
-          "ref": "nodes.wait_victory.output.0"
-        },
-        "revalidate": false,
-        "random_offset": 8,
-        "random_interval": [
-          0.2,
-          0.6
-        ]
+        "workflow": "souls/shared/await_victory.json",
+        "inputs": {
+          "timeout_seconds": 180
+        }
       }
     },
     {
@@ -704,7 +656,7 @@
       "name": "后台统计第一层奖励",
       "action": "workflow.run",
       "params": {
-        "workflow": "reward_statistics.json",
+        "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
           "category": "souls",
           "layer": 1
@@ -763,7 +715,7 @@
       "name": "后台统计第二层奖励",
       "action": "workflow.run",
       "params": {
-        "workflow": "reward_statistics.json",
+        "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
           "category": "souls",
           "layer": 2
@@ -800,7 +752,7 @@
       "name": "后台统计第三层奖励",
       "action": "workflow.run",
       "params": {
-        "workflow": "reward_statistics.json",
+        "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
           "category": "souls",
           "layer": 3

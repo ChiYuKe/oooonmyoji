@@ -14,11 +14,13 @@
   "blackboard": {
     "category": {
       "type": "string",
+      "public": true,
       "required": true,
       "default": "souls"
     },
     "layer": {
       "type": "integer",
+      "public": true,
       "required": true,
       "default": 1,
       "min": 1,

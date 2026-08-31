@@ -14,6 +14,7 @@
   "blackboard": {
     "phase": {
       "type": "string",
+      "public": true,
       "required": true,
       "default": "finish",
       "enum": [
@@ -21,6 +22,12 @@
         "setup_auto_invite",
         "auto_invite"
       ]
+    },
+    "member_present_template": {
+      "type": "asset",
+      "public": true,
+      "default": "assets/templates/souls/party/member-present.png",
+      "description": "用于确认目标队友已经进入协战房间"
     }
   },
   "nodes": [
@@ -41,8 +48,7 @@
         "detect_lineup_state",
         "tap_party_challenge",
         "prepare_lineup_if_needed",
-        "wait_victory",
-        "tap_victory",
+        "await_victory",
         "settle_to_round_destination",
         "choose_after_battle_action"
       ]
@@ -50,10 +56,12 @@
     {
       "id": "wait_member_present",
       "type": "task",
-      "name": "等待 mumu1 加入房间",
+      "name": "等待目标队友加入房间",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/souls/party/member-present.png",
+        "template": {
+          "ref": "blackboard.member_present_template"
+        },
         "timeout_seconds": 180,
         "roi": [
           700,
@@ -147,46 +155,14 @@
     },
     {
       "id": "prepare_unlocked_lineup",
-      "type": "sequence",
+      "type": "task",
       "name": "准备未锁定阵容",
-      "children": [
-        "wait_ready",
-        "tap_ready"
-      ]
-    },
-    {
-      "id": "wait_ready",
-      "type": "task",
-      "name": "短暂等待编队准备按钮",
-      "action": "vision.wait_template",
+      "action": "workflow.run",
       "params": {
-        "template": "assets/templates/souls/souls-ready.png",
-        "timeout_seconds": 10,
-        "roi": [
-          1500,
-          700,
-          420,
-          380
-        ],
-        "threshold": 0.88,
-        "scale_search": false
-      }
-    },
-    {
-      "id": "tap_ready",
-      "type": "task",
-      "name": "点击准备开始战斗",
-      "action": "input.tap_match",
-      "params": {
-        "match": {
-          "ref": "nodes.wait_ready.output.0"
-        },
-        "revalidate": false,
-        "random_offset": 5,
-        "random_interval": [
-          0.2,
-          0.6
-        ]
+        "workflow": "souls/shared/prepare_lineup.json",
+        "inputs": {
+          "timeout_seconds": 10
+        }
       }
     },
     {
@@ -218,38 +194,15 @@
       }
     },
     {
-      "id": "wait_victory",
+      "id": "await_victory",
       "type": "task",
-      "name": "等待组队战斗结束",
-      "action": "vision.wait_template",
+      "name": "等待组队战斗结束并继续",
+      "action": "workflow.run",
       "params": {
-        "template": "assets/templates/souls/souls-victory-continue.png",
-        "timeout_seconds": 240,
-        "roi": [
-          650,
-          900,
-          650,
-          180
-        ],
-        "threshold": 0.86,
-        "scale_search": false
-      }
-    },
-    {
-      "id": "tap_victory",
-      "type": "task",
-      "name": "点击胜利页继续",
-      "action": "input.tap_match",
-      "params": {
-        "match": {
-          "ref": "nodes.wait_victory.output.0"
-        },
-        "revalidate": false,
-        "random_offset": 8,
-        "random_interval": [
-          0.2,
-          0.6
-        ]
+        "workflow": "souls/shared/await_victory.json",
+        "inputs": {
+          "timeout_seconds": 240
+        }
       }
     },
     {
@@ -349,7 +302,7 @@
       "name": "后台统计第一层奖励",
       "action": "workflow.run",
       "params": {
-        "workflow": "reward_statistics.json",
+        "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
           "category": "souls",
           "layer": 1
@@ -458,7 +411,7 @@
       "name": "后台统计第二层奖励",
       "action": "workflow.run",
       "params": {
-        "workflow": "reward_statistics.json",
+        "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
           "category": "souls",
           "layer": 2
@@ -733,14 +686,6 @@
       "x": 1664,
       "y": 624
     },
-    "wait_ready": {
-      "x": 1992,
-      "y": 832
-    },
-    "tap_ready": {
-      "x": 2324,
-      "y": 832
-    },
     "prepare_unlocked_lineup": {
       "x": 2158,
       "y": 624
@@ -753,12 +698,8 @@
       "x": 2158,
       "y": 416
     },
-    "wait_victory": {
+    "await_victory": {
       "x": 2988,
-      "y": 416
-    },
-    "tap_victory": {
-      "x": 3320,
       "y": 416
     },
     "wait_prompt_direct": {

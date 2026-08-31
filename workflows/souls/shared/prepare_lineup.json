@@ -1,0 +1,97 @@
+{
+  "schema_version": 3,
+  "id": "prepare_lineup",
+  "version": "1.0.0",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 60,
+    "max_steps": 10
+  },
+  "blackboard": {
+    "timeout_seconds": {
+      "type": "number",
+      "public": true,
+      "default": 10,
+      "min": 0
+    }
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "准备阵容入口",
+      "children": [
+        "prepare"
+      ]
+    },
+    {
+      "id": "prepare",
+      "type": "sequence",
+      "name": "等待并点击编队准备",
+      "children": [
+        "wait_ready",
+        "tap_ready"
+      ]
+    },
+    {
+      "id": "wait_ready",
+      "type": "task",
+      "name": "等待编队准备按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-ready.png",
+        "timeout_seconds": {
+          "ref": "blackboard.timeout_seconds"
+        },
+        "roi": [
+          1500,
+          700,
+          420,
+          380
+        ],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_ready",
+      "type": "task",
+      "name": "点击准备开始战斗",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_ready.output.0"
+        },
+        "revalidate": false,
+        "random_offset": 5,
+        "random_interval": [
+          0.2,
+          0.6
+        ]
+      }
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 0,
+      "y": 0
+    },
+    "prepare": {
+      "x": 0,
+      "y": 208
+    },
+    "wait_ready": {
+      "x": 0,
+      "y": 416
+    },
+    "tap_ready": {
+      "x": 332,
+      "y": 416
+    }
+  },
+  "description": "等待并点击御魂编队准备按钮，供队伍和单人入口复用"
+}

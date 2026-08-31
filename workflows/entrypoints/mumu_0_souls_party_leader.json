@@ -14,12 +14,25 @@
   "blackboard": {
     "rounds": {
       "type": "integer",
+      "public": true,
       "required": true,
       "default": 9999,
       "enum": [
         1,
         9999
       ]
+    },
+    "member_present_template": {
+      "type": "asset",
+      "public": true,
+      "default": "assets/templates/souls/party/member-present.png",
+      "description": "用于确认目标队友已经进入协战房间"
+    },
+    "invite_target_template": {
+      "type": "asset",
+      "public": true,
+      "default": "assets/templates/souls/party/member-invite-target.png",
+      "description": "好友邀请列表中的目标队友名字模板"
     }
   },
   "nodes": [
@@ -528,7 +541,7 @@
     {
       "id": "ensure_member_invited",
       "type": "selector",
-      "name": "确认 mumu1 已加入或发送邀请",
+      "name": "确认目标队友已加入或发送邀请",
       "children": [
         "member_already_present",
         "send_initial_invite"
@@ -537,7 +550,7 @@
     {
       "id": "member_already_present",
       "type": "sequence",
-      "name": "mumu1 已在房间",
+      "name": "目标队友已在房间",
       "children": [
         "detect_member_present"
       ]
@@ -545,10 +558,12 @@
     {
       "id": "detect_member_present",
       "type": "task",
-      "name": "检测 mumu1 账号条",
+      "name": "检测目标队友账号条",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/souls/party/member-present.png",
+        "template": {
+          "ref": "blackboard.member_present_template"
+        },
         "timeout_seconds": 2,
         "roi": [
           700,
@@ -564,7 +579,7 @@
     {
       "id": "send_initial_invite",
       "type": "sequence",
-      "name": "邀请鱼不鲤窝",
+      "name": "邀请目标队友",
       "children": [
         "tap_empty_member_slot",
         "wait_invite_target",
@@ -591,10 +606,12 @@
     {
       "id": "wait_invite_target",
       "type": "task",
-      "name": "等待鱼不鲤窝好友项",
+      "name": "等待目标队友好友项",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/souls/party/member-invite-target.png",
+        "template": {
+          "ref": "blackboard.invite_target_template"
+        },
         "timeout_seconds": 30,
         "roi": [
           500,
@@ -609,7 +626,7 @@
     {
       "id": "tap_invite_target",
       "type": "task",
-      "name": "选择鱼不鲤窝",
+      "name": "选择目标队友",
       "action": "input.tap_match",
       "params": {
         "match": {
@@ -694,9 +711,12 @@
       "name": "完成单轮并停止续邀",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls_party_leader_round.json",
+        "workflow": "souls/party/leader_round.json",
         "inputs": {
-          "phase": "finish"
+          "phase": "finish",
+          "member_present_template": {
+            "ref": "blackboard.member_present_template"
+          }
         }
       }
     },
@@ -728,9 +748,12 @@
       "name": "首轮勾选默认邀请好友",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls_party_leader_round.json",
+        "workflow": "souls/party/leader_round.json",
         "inputs": {
-          "phase": "setup_auto_invite"
+          "phase": "setup_auto_invite",
+          "member_present_template": {
+            "ref": "blackboard.member_present_template"
+          }
         }
       }
     },
@@ -740,9 +763,12 @@
       "name": "默认邀请下完成后 9998 轮",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls_party_leader_round.json",
+        "workflow": "souls/party/leader_round.json",
         "inputs": {
-          "phase": "auto_invite"
+          "phase": "auto_invite",
+          "member_present_template": {
+            "ref": "blackboard.member_present_template"
+          }
         }
       },
       "decorators": [
@@ -761,7 +787,7 @@
       "type": "task",
       "action": "workflow.run",
       "params": {
-        "workflow": "_souls/task_in_souls.json"
+        "workflow": "souls/shared/task_in_souls.json"
       },
       "name": "进入御魂挑战界面"
     }
@@ -892,7 +918,7 @@
       "y": 416
     },
     "detect_member_present": {
-      "x": 7636,
+      "x": 7632,
       "y": 832
     },
     "member_already_present": {
@@ -904,7 +930,7 @@
       "y": 832
     },
     "wait_invite_target": {
-      "x": 8304,
+      "x": 8320,
       "y": 832
     },
     "tap_invite_target": {

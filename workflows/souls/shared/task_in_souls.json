@@ -24,7 +24,7 @@
       "id": "selector_1",
       "type": "selector",
       "children": [
-        "task_1",
+        "task_8",
         "sequence_2"
       ],
       "name": "已经在御魂界面"
@@ -37,28 +37,13 @@
       ]
     },
     {
-      "id": "task_1",
-      "type": "task",
-      "action": "vision.match_template",
-      "params": {
-        "template": "assets/templates/souls/souls-challenge.png",
-        "roi": [
-          1343,
-          766,
-          577,
-          314
-        ],
-        "threshold": 0.95
-      },
-      "name": "看到御魂挑战"
-    },
-    {
       "id": "sequence_2",
       "type": "sequence",
       "children": [
         "selector_2",
         "task_6",
-        "task_4"
+        "task_4",
+        "task_7"
       ],
       "name": "看到八岐大蛇卡片"
     },
@@ -69,7 +54,8 @@
         "task_3",
         "sequence_3"
       ],
-      "name": "找到八岐大蛇卡片"
+      "name": "找到八岐大蛇卡片",
+      "decorators": []
     },
     {
       "id": "task_3",
@@ -153,56 +139,94 @@
         "threshold": 0.9
       },
       "name": "匹配八岐大蛇卡片"
+    },
+    {
+      "id": "task_7",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 5,
+        "roi": [
+          1343,
+          766,
+          577,
+          314
+        ],
+        "threshold": 0.9
+      },
+      "name": "看到御魂挑战"
+    },
+    {
+      "id": "task_8",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 1,
+        "roi": [
+          1343,
+          766,
+          577,
+          314
+        ],
+        "threshold": 0.9
+      },
+      "name": "看到御魂挑战"
     }
   ],
   "_layout": {
     "root": {
-      "x": 664,
+      "x": 643,
       "y": 0
     },
     "selector_1": {
-      "x": 664,
+      "x": 643,
       "y": 416
     },
     "sequence_1": {
-      "x": 664,
+      "x": 643,
       "y": 208
     },
-    "task_1": {
-      "x": 0,
+    "sequence_2": {
+      "x": 1287,
       "y": 624
     },
-    "sequence_2": {
-      "x": 824,
-      "y": 608
-    },
     "selector_2": {
-      "x": 96,
+      "x": 581,
       "y": 832
     },
     "task_3": {
-      "x": 64,
+      "x": 332,
       "y": 1040
     },
     "task_4": {
-      "x": 1160,
-      "y": 816
+      "x": 1660,
+      "y": 832
     },
     "sequence_3": {
-      "x": 424,
+      "x": 830,
       "y": 1040
     },
     "task_2": {
-      "x": 264,
+      "x": 664,
       "y": 1248
     },
     "task_5": {
-      "x": 592,
+      "x": 996,
       "y": 1248
     },
     "task_6": {
-      "x": 824,
-      "y": 816
+      "x": 1328,
+      "y": 832
+    },
+    "task_7": {
+      "x": 1992,
+      "y": 832
+    },
+    "task_8": {
+      "x": 0,
+      "y": 624
     }
   },
   "description": "此task是专门负责进入御魂副本挑战按钮界面"

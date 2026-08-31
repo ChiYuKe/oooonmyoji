@@ -176,7 +176,23 @@ def _workflow_path(workflow_dir: Path, reference: str, *, require_file: bool) ->
     except ValueError as exc:
         raise ConfigError(f"workflow reference escapes workflow_dir: {reference}") from exc
     if require_file and not path.is_file():
-        raise ConfigError(f"workflow does not exist: {path}")
+        # Workflows are organized in nested folders. Keep bare IDs and file
+        # names convenient by resolving a unique recursive match as a fallback.
+        matches = [item for item in workflow_dir.rglob("*.json") if item.name == candidate.name]
+        if len(matches) == 1:
+            path = matches[0].resolve()
+        elif not matches:
+            for item in workflow_dir.rglob("*.json"):
+                try:
+                    value = json.loads(item.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if isinstance(value, dict) and value.get("id") == candidate.stem:
+                    matches.append(item)
+            if len(matches) == 1:
+                path = matches[0].resolve()
+        if not path.is_file():
+            raise ConfigError(f"workflow does not exist: {path}")
     return path
 
 

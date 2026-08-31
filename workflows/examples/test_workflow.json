@@ -25,7 +25,7 @@
       "type": "task",
       "action": "workflow.run",
       "params": {
-        "workflow": "task_in_souls.json"
+        "workflow": "souls/shared/task_in_souls.json"
       },
       "name": "进入御魂挑战界面"
     }

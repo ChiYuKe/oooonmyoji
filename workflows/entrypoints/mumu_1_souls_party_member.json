@@ -11,6 +11,7 @@
   "blackboard": {
     "rounds": {
       "type": "integer",
+      "public": true,
       "required": true,
       "default": 9999,
       "enum": [1, 9999]
@@ -35,7 +36,7 @@
       "name": "接受邀请并完成 1 轮",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls_party_member_round.json",
+        "workflow": "souls/party/member_round.json",
         "inputs": {"phase": "finish"}
       },
       "decorators": [
@@ -63,7 +64,7 @@
       "name": "首轮接受限时邀请并启用不再提示",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls_party_member_round.json",
+        "workflow": "souls/party/member_round.json",
         "inputs": {"phase": "setup_auto_ready"}
       }
     },
@@ -73,7 +74,7 @@
       "name": "自动接受邀请并完成后 9998 轮",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls_party_member_round.json",
+        "workflow": "souls/party/member_round.json",
         "inputs": {"phase": "auto_ready"}
       },
       "decorators": [

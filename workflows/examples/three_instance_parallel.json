@@ -1,0 +1,53 @@
+{
+  "schema_version": 3,
+  "id": "three_instance_parallel",
+  "version": "1.0.0",
+  "description": "同时启动三个 MuMu 实例，各自执行指定入口工作流",
+  "resolution": [1920, 1080],
+  "limits": {
+    "timeout_seconds": 1209600,
+    "max_steps": 1000
+  },
+  "blackboard": {
+    "rounds": {
+      "type": "integer",
+      "public": true,
+      "required": false,
+      "default": 9999,
+      "enum": [1, 9999]
+    }
+  },
+  "root": "root",
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "三实例并行入口",
+      "children": ["run_all_instances"]
+    },
+    {
+      "id": "run_all_instances",
+      "type": "instance_parallel",
+      "name": "同时启动 MuMu-0、1、2",
+      "wait_for": "all",
+      "cancel_on_failure": true,
+      "runs": [
+        {
+          "instance": "mumu-0",
+          "workflow": "entrypoints/mumu_0_souls_party_leader.json",
+          "inputs": {"rounds": {"ref": "blackboard.rounds"}}
+        },
+        {
+          "instance": "mumu-1",
+          "workflow": "entrypoints/mumu_1_souls_party_member.json",
+          "inputs": {"rounds": {"ref": "blackboard.rounds"}}
+        },
+        {
+          "instance": "mumu-2",
+          "workflow": "entrypoints/mumu_1_souls_loop.json",
+          "inputs": {}
+        }
+      ]
+    }
+  ]
+}

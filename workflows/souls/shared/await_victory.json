@@ -1,0 +1,97 @@
+{
+  "schema_version": 3,
+  "id": "await_victory",
+  "version": "1.0.0",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 300,
+    "max_steps": 10
+  },
+  "blackboard": {
+    "timeout_seconds": {
+      "type": "number",
+      "public": true,
+      "default": 240,
+      "min": 0
+    }
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "name": "等待胜利入口",
+      "children": [
+        "await"
+      ]
+    },
+    {
+      "id": "await",
+      "type": "sequence",
+      "name": "等待并点击胜利页继续",
+      "children": [
+        "wait_victory",
+        "tap_victory"
+      ]
+    },
+    {
+      "id": "wait_victory",
+      "type": "task",
+      "name": "等待战斗胜利",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-victory-continue.png",
+        "timeout_seconds": {
+          "ref": "blackboard.timeout_seconds"
+        },
+        "roi": [
+          650,
+          900,
+          650,
+          180
+        ],
+        "threshold": 0.86,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_victory",
+      "type": "task",
+      "name": "点击胜利页继续",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_victory.output.0"
+        },
+        "revalidate": false,
+        "random_offset": 8,
+        "random_interval": [
+          0.2,
+          0.6
+        ]
+      }
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 0,
+      "y": 0
+    },
+    "await": {
+      "x": 0,
+      "y": 208
+    },
+    "wait_victory": {
+      "x": 0,
+      "y": 416
+    },
+    "tap_victory": {
+      "x": 332,
+      "y": 416
+    }
+  },
+  "description": "等待御魂战斗胜利并点击继续，供队伍和单人入口复用"
+}

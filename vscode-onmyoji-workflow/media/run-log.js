@@ -161,6 +161,19 @@
     setStatus(activeRun().status);
   }
 
+  function applyProcessResult(result) {
+    if (!result || typeof result !== 'object') return;
+    const status = result.stopped ? 'cancelled' : result.code === 0 ? 'succeeded' : 'failed';
+    for (const run of state.runs.values()) {
+      if (!run.runFinishedAt && !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(run.status)) {
+        setStatus(status, run, false);
+      }
+    }
+    if (status === 'failed'
+      && [...state.runs.values()].every((run) => run.rows.length === 0)
+      && state.engineOutput.trim()) state.view = 'engine';
+  }
+
   function eventKey(event) {
     const step = event.step || {};
     const workflow = Array.isArray(step.workflow_path)
@@ -308,6 +321,7 @@
 
     if (row.attempts > 1) facts.push(`尝试 ${row.attempts} 次`);
     if (row.repeats > 1) facts.push(`重复 ${row.repeats} 次`);
+    if (row.decorator === 'do_once') facts.push('Do Once · 本次运行已执行过，跳过');
     return { operation, facts };
   }
 
@@ -706,9 +720,7 @@
       resetRun(data.descriptor);
       state.engineOutput = String(data.engineOutput || '');
       for (const event of Array.isArray(data.events) ? data.events : []) acceptEvent(event, true);
-      if (data.processResult && data.processResult.stopped) {
-        for (const run of state.runs.values()) setStatus('cancelled', run, false);
-      }
+      applyProcessResult(data.processResult);
       updateIdentity();
       renderSourceTabs();
       setStatus(activeRun().status);
@@ -720,10 +732,7 @@
       if (state.engineOutput.length > 300000) state.engineOutput = state.engineOutput.slice(-300000);
       if (state.view === 'engine') render();
     } else if (data.type === 'processFinished') {
-      for (const run of state.runs.values()) {
-        if (data.stopped) setStatus('cancelled', run, false);
-        else if (!run.runFinishedAt && data.code !== 0) setStatus('failed', run, false);
-      }
+      applyProcessResult(data);
       setStatus(activeRun().status);
       render();
     } else if (data.type === 'cleared') {

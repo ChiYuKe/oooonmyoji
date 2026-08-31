@@ -37,6 +37,11 @@ class FakeEl {
   select() {}
   getContext() { return { drawImage() {} }; }
   toDataURL(type = 'image/png') { return `data:${type};base64,QUJD`; }
+  querySelectorAll(selector) {
+    const match = /^image\.node-preview-image$/.exec(String(selector));
+    if (!match) return [];
+    return walk(this, (item) => item.tagName === 'IMAGE' && item.classList.contains('node-preview-image'));
+  }
 }
 
 const els = {};
@@ -104,7 +109,7 @@ const matchOutputSchema = {
 };
 const catalog = [
   { name: 'core.capture', version: '1.0.0', description: '截屏', parameters: {}, inputSchema: { type: 'object', properties: {}, additionalProperties: false }, outputSchema: { type: 'object', properties: { width: { type: 'integer' } } }, outputFields: ['width'], retrySafe: true },
-  { name: 'vision.match_template', version: '1.0.0', description: '匹配', parameters: { template: { type: 'asset', required: true }, roi: { type: 'rect' }, threshold: { type: 'number', default: 0.85, min: 0, max: 1 }, max_results: { type: 'integer', default: 20, min: 1 }, scale_search: { type: 'boolean', default: false } }, inputSchema: { type: 'object', properties: { template: { type: 'string' }, roi: { type: 'array' }, threshold: { type: 'number' }, max_results: { type: 'integer' }, scale_search: { type: 'boolean' } }, required: ['template'], additionalProperties: false }, outputSchema: matchOutputSchema, outputFields: [], retrySafe: true },
+  { name: 'vision.match_template', version: '1.0.0', description: '匹配', parameters: { template: { type: 'asset', required: true, description: '模板图路径', minLength: 1, maxLength: 200 }, roi: { type: 'rect' }, threshold: { type: 'number', default: 0.85, min: 0, max: 1 }, max_results: { type: 'integer', default: 20, min: 1 }, scale_search: { type: 'boolean', default: false } }, inputSchema: { type: 'object', properties: { template: { type: 'string' }, roi: { type: 'array' }, threshold: { type: 'number' }, max_results: { type: 'integer' }, scale_search: { type: 'boolean' } }, required: ['template'], additionalProperties: false }, outputSchema: matchOutputSchema, outputFields: [], retrySafe: true },
   { name: 'input.tap_match', version: '1.0.0', description: '点击匹配', parameters: { match: { type: 'object', required: true } }, inputSchema: { type: 'object', properties: { match: { type: 'object' } }, required: ['match'], additionalProperties: false }, outputSchema: { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' } } }, outputFields: ['x', 'y'], retrySafe: false },
   { name: 'core.log', version: '1.0.0', description: '日志', parameters: { message: { type: 'string', required: true } }, inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: true },
   { name: 'workflow.run', version: '1.0.0', description: '同步运行另一个工作流', parameters: { workflow: { type: 'string', required: true }, inputs: { type: 'object' } }, inputSchema: { type: 'object', properties: { workflow: { type: 'string' }, inputs: { type: 'object' } }, required: ['workflow'], additionalProperties: false }, outputSchema: { type: 'object' }, outputFields: [], retrySafe: false },
@@ -274,10 +279,44 @@ fire(within(templateCheckOverlay, (item) => item.tagName === 'BUTTON' && item.at
 check('模板匹配渲染完整参数组', inspectorItems((item) => hasClass(item, 'parameter-block')).length === 5);
 templateInput.value = 'assets/templates/other.png'; fire(templateInput, 'change');
 check('参数栏写回 Action 参数', save().nodes.find((node) => node.id === 'find').params.template === 'assets/templates/other.png');
+const templateParameterBlock = inspectorItems((item) => hasClass(item, 'parameter-block')).find((block) => within(block, (item) => item.tagName === 'SPAN' && item.textContent === 'template *').length === 1);
+const parameterPublicToggle = () => within(templateParameterBlock, (item) => item.tagName === 'LABEL' && hasClass(item, 'parameter-public'))[0];
+check('Action 参数标题显示公开选项', !!parameterPublicToggle()
+  && within(parameterPublicToggle(), (item) => item.tagName === 'SPAN' && item.textContent === '公开').length === 1);
+const exposeTemplate = within(parameterPublicToggle(), (item) => item.tagName === 'INPUT' && item.type === 'checkbox')[0];
+exposeTemplate.checked = true; fire(exposeTemplate, 'change');
+let promoted = save();
+check('勾选公开会把参数提升为公开工作流变量并保留当前值为默认值', promoted.blackboard.find_template.public === true
+  && promoted.blackboard.find_template.default === 'assets/templates/other.png'
+  && promoted.nodes.find((node) => node.id === 'find').params.template.ref === 'blackboard.find_template');
+check('参数提升会保留类型说明并把长度约束转换为工作流字段', promoted.blackboard.find_template.type === 'asset'
+  && promoted.blackboard.find_template.description === '模板图路径'
+  && promoted.blackboard.find_template.min_length === 1
+  && promoted.blackboard.find_template.max_length === 200);
+check('参数名冲突时使用节点 ID 生成唯一变量名', !promoted.blackboard.template.public
+  && !!promoted.blackboard.find_template);
+const privateTemplate = inspectorItems((item) => item.tagName === 'LABEL' && hasClass(item, 'parameter-public'))
+  .find((label) => label.title.includes('find_template'));
+const hideTemplate = within(privateTemplate, (item) => item.tagName === 'INPUT' && item.type === 'checkbox')[0];
+hideTemplate.checked = false; fire(hideTemplate, 'change');
+promoted = save();
+check('取消公开只隐藏变量并保持节点引用', promoted.blackboard.find_template.public === false
+  && promoted.nodes.find((node) => node.id === 'find').params.template.ref === 'blackboard.find_template');
+const showTemplateAgain = inspectorItems((item) => item.tagName === 'LABEL' && hasClass(item, 'parameter-public'))
+  .map((label) => ({ label, checkbox: within(label, (item) => item.tagName === 'INPUT' && item.type === 'checkbox')[0] }))
+  .find((item) => item.checkbox && item.checkbox.checked === false && within(item.label.parentNode.parentNode, (child) => child.tagName === 'SPAN' && child.textContent === 'template *').length === 1);
+showTemplateAgain.checkbox.checked = true; fire(showTemplateAgain.checkbox, 'change');
+check('已绑定私有变量可直接重新公开', save().blackboard.find_template.public === true);
 
 const decoratorAdd = inspectorItems((item) => item.tagName === 'SELECT' && hasClass(item, 'decorator-add'))[0];
 decoratorAdd.value = 'retry'; fire(decoratorAdd, 'change');
 check('详情栏添加 Retry 装饰器', save().nodes.find((node) => node.id === 'find').decorators.some((item) => item.type === 'retry' && item.attempts === 2));
+const doOnceAdd = inspectorItems((item) => item.tagName === 'SELECT' && hasClass(item, 'decorator-add'))[0];
+doOnceAdd.value = 'do_once'; fire(doOnceAdd, 'change');
+check('详情栏添加 Do Once 装饰器', save().nodes.find((node) => node.id === 'find').decorators.some((item) => item.type === 'do_once'));
+const doOnceBox = inspectorItems((item) => item.tagName === 'INPUT' && item.type === 'checkbox').pop();
+if (doOnceBox) { doOnceBox.checked = true; fire(doOnceBox, 'change'); }
+check('Do Once 勾选失败重置并写回工作流', doOnceBox !== undefined && save().nodes.find((node) => node.id === 'find').decorators.some((item) => item.type === 'do_once' && item.reset_on_failure === true));
 fire(graph, 'mousedown', { target: graph, clientX: 850, clientY: 600 });
 fire(graph, 'mouseup', { target: graph, clientX: 850, clientY: 600 });
 check('点击画布空白处会收起详情栏', els.inspector.classList.contains('hidden') && !els['editor-main'].classList.contains('inspector-open'));
@@ -330,10 +369,47 @@ check('滚轮以光标为中心缩放视口', windowStub.__btEditor.state.zoom >
 sendEditorCommand('autoLayout');
 check('自动布局保持 Root 在子节点上方', save()._layout.root.y < save()._layout.main.y);
 
-sendEditorCommand('blackboard');
-const addKey = inspectorItems((item) => item.tagName === 'BUTTON' && String(item.textContent).includes('添加键'))[0];
-fire(addKey, 'click');
-check('黑板栏新增类型化键', !!save().blackboard.key_1 && save().blackboard.key_1.type === 'string');
+windowStub.__btEditor.state.raw.blackboard.rounds = { type: 'integer', public: true, default: 9999, enum: [1, 9999] };
+sendEditorCommand('variables');
+const variableItem = (name) => inspectorItems((item) => hasClass(item, 'variable-list-item') && item.dataset.variable === name)[0];
+check('变量入口使用 UE 式变量列表且不显示旧参数面板文案', !!variableItem('template') && !!variableItem('rounds')
+  && els['inspector-title'].textContent === '变量'
+  && inspectorItems((item) => String(item.textContent).includes('黑板')).length === 0);
+fire(variableItem('rounds'), 'click');
+const variableDetails = () => inspectorItems((item) => hasClass(item, 'variable-details'))[0];
+const roundsDefault = within(variableDetails(), (item) => item.tagName === 'SELECT'
+    && within(item, (option) => option.tagName === 'OPTION' && option.textContent === '1').length === 1
+    && within(item, (option) => option.tagName === 'OPTION' && option.textContent === '9999').length === 1)[0];
+check('选中变量后只显示当前变量详情', !!roundsDefault && roundsDefault.value === '9999'
+  && within(variableDetails(), (item) => hasClass(item, 'definition-enum-row')).length === 2
+  && inspectorItems((item) => hasClass(item, 'variable-details')).length === 1);
+roundsDefault.value = '1'; fire(roundsDefault, 'change');
+check('枚举下拉框直接写回变量默认值', save().blackboard.rounds.default === 1);
+fire(variableItem('template'), 'click');
+const browseVariableAsset = within(variableDetails(), (item) => item.tagName === 'BUTTON' && item.textContent === '浏览')[0];
+check('asset 变量详情提供模板浏览选项', !!browseVariableAsset);
+fire(browseVariableAsset, 'click');
+const variableAssetRequest = [...posted].reverse().find((message) => message.type === 'listAssetImages');
+for (const fn of windowStub._listeners.message || []) fn({ data: {
+  type: 'assetImages', requestId: variableAssetRequest.requestId,
+  images: [{ path: 'assets/templates/variable-target.png', uri: 'webview://assets/templates/variable-target.png' }],
+} });
+const variableAssetOverlay = findById(body, 'asset-browser');
+const variableAssetTile = within(variableAssetOverlay, (item) => hasClass(item, 'asset-tile'))[0];
+fire(variableAssetTile, 'click');
+fire(within(variableAssetOverlay, (item) => item.tagName === 'BUTTON' && item.textContent === '选择')[0], 'click');
+check('模板浏览结果直接写回变量默认值', save().blackboard.template.default === 'assets/templates/variable-target.png');
+const addVariable = inspectorItems((item) => item.tagName === 'BUTTON' && item.title === '添加变量')[0];
+fire(addVariable, 'click');
+check('新增变量自动选中并创建为私有 string', !!save().blackboard.new_variable_1
+  && save().blackboard.new_variable_1.type === 'string'
+  && save().blackboard.new_variable_1.public === false
+  && windowStub.__btEditor.state.selectedVariable === 'new_variable_1');
+fire(variableItem('find_template'), 'click');
+const deleteReferencedVariable = inspectorItems((item) => item.tagName === 'BUTTON' && item.title === '删除变量')[0];
+fire(deleteReferencedVariable, 'click');
+check('被节点引用的变量不能直接删除', !!save().blackboard.find_template
+  && els.toast.textContent.includes('正在被 1 处引用'));
 
 const editor = windowStub.__btEditor;
 const current = editor.state.raw;
@@ -366,6 +442,9 @@ check('子工作流同名节点不会覆盖主流程卡片和线条', hasClass(n
 for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'runEvent', event: { type: 'step', step_id: 'find', step: { status: 'failed', action: 'vision.match_template', workflow_id: 'demo', error_category: 'not_matched', error: 'template not matched' } } } });
 check('模板零命中显示未匹配状态', hasClass(nodeGroup('find'), 'run-not_matched') && within(nodeGroup('find'), (item) => item.textContent === '未匹配').length === 1);
 check('模板零命中让入线显示未匹配状态', hasClass(edgeGroup('selector', 'find'), 'run-not_matched'));
+for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'runEvent', event: { type: 'step', step_id: 'find', step: { status: 'branch_miss', original_status: 'failed', recovered_by: 'selector', workflow_id: 'demo', error_category: 'not_matched' } } } });
+check('后续分支启动后节点显示分支跳过', hasClass(nodeGroup('find'), 'run-branch_miss') && within(nodeGroup('find'), (item) => hasClass(item, 'run-label') && item.textContent === '分支跳过').length === 1);
+check('后续分支启动后入线显示分支跳过', hasClass(edgeGroup('selector', 'find'), 'run-branch_miss'));
 for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'runEvent', event: { type: 'step', step_id: 'fallback', step: { status: 'failed', action: 'core.log', workflow_id: 'demo' } } } });
 check('失败节点让入线显示失败状态', hasClass(edgeGroup('selector', 'fallback'), 'run-failed'));
 for (const fn of windowStub._listeners.message || []) fn({ data: { type: 'runEvent', event: { type: 'step', step_id: 'fallback', step: { status: 'branch_miss', action: 'core.log', workflow_id: 'demo' } } } });
@@ -529,6 +608,121 @@ check('脏状态返回先弹确认菜单', posted.slice(postedBeforeDirtyBack).e
   ], canGoBack: true, catalog, refs: { blackboard: ['blackboard.template'], nodes: ['nodes.capture.output.width'] }, issues: [], instances: [{ id: 'mumu-0', backend: 'mumu', displayName: 'primary' }, { id: 'mumu-1', backend: 'mumu', displayName: 'second' }], selectedInstance: 'mumu-0' } });
   await new Promise((resolve) => setTimeout(resolve, 5));
   check('切换文档后重新适配视口', editor.state.zoom !== 1.7);
+
+  const childDescriptor = {
+    uri: 'file:///child.json', name: 'child.json', rel: 'workflows/entrypoints/child.json', id: 'child',
+    variables: [
+      { name: 'rounds', public: true, definition: { type: 'integer', public: true, default: 9999 } },
+      { name: 'secret', public: false, definition: { type: 'string', public: false, default: 'internal' } },
+    ],
+  };
+
+  // 普通 workflow.run 与 Instance Parallel 使用同一套公开变量卡片。
+  const subworkflowParent = {
+    schema_version: 3,
+    id: 'subworkflow_parent', version: '3.0.0', resolution: [1920, 1080], root: 'root',
+    blackboard: { parent_rounds: { type: 'integer', default: 1 } },
+    nodes: [
+      { id: 'root', type: 'root', children: ['run_child'] },
+      { id: 'run_child', type: 'task', action: 'workflow.run', params: { workflow: 'entrypoints/child.json', inputs: { rounds: 3, secret: 'stale' } } },
+    ],
+  };
+  for (const fn of windowStub._listeners.message || []) fn({ data: {
+    type: 'init',
+    document: { name: 'subworkflow_parent.json', uri: 'file:///subworkflow_parent.json', text: JSON.stringify(subworkflowParent) },
+    workflows: [
+      { uri: 'file:///subworkflow_parent.json', name: 'subworkflow_parent.json', rel: 'workflows/entrypoints/subworkflow_parent.json', id: 'subworkflow_parent', variables: [] },
+      childDescriptor,
+      { uri: 'file:///other.json', name: 'other.json', rel: 'workflows/entrypoints/other.json', id: 'other', variables: [] },
+    ],
+    catalog, refs: { blackboard: ['blackboard.parent_rounds'], nodes: [] }, issues: [],
+    instances: [{ id: 'mumu-0', backend: 'mumu', displayName: 'primary' }], selectedInstance: 'mumu-0',
+  } });
+  check('workflow.run 卡片直接显示公开变量及当前传值', within(nodeGroup('run_child'), (item) => item.textContent === 'rounds').length === 1
+    && within(nodeGroup('run_child'), (item) => item.textContent === '3').length === 1
+    && within(nodeGroup('run_child'), (item) => item.textContent === 'secret').length === 0);
+  selectNode('run_child');
+  check('workflow.run 详情只为公开变量渲染变量卡片', inspectorItems((item) => hasClass(item, 'run-variable-block')).length === 1
+    && inspectorItems((item) => hasClass(item, 'private-input-warning') && String(item.textContent).includes('secret')).length === 1);
+  check('workflow.run 不再显示 inputs 通用 JSON 文本框', inspectorItems((item) => item.tagName === 'TEXTAREA' && hasClass(item, 'json-value')).length === 0);
+  const literalRounds = inspectorItems((item) => item.tagName === 'INPUT' && item.type === 'number' && item.value === '3')[0];
+  literalRounds.value = '7'; fire(literalRounds, 'change');
+  check('workflow.run 公开变量可以直接传常量', save().nodes.find((node) => node.id === 'run_child').params.inputs.rounds === 7);
+  const childBindingMode = inspectorItems((item) => item.tagName === 'SELECT'
+    && within(item, (child) => child.tagName === 'OPTION' && child.textContent === '绑定父变量').length === 1)[0];
+  childBindingMode.value = 'binding'; fire(childBindingMode, 'change');
+  check('workflow.run 公开变量可以绑定父工作流变量', save().nodes.find((node) => node.id === 'run_child').params.inputs.rounds.ref === 'blackboard.parent_rounds');
+  const childWorkflowInput = inspectorItems((item) => item.tagName === 'INPUT' && item.placeholder === '_folder/workflow.json')[0];
+  childWorkflowInput.value = 'entrypoints/other.json'; fire(childWorkflowInput, 'change');
+  check('workflow.run 切换子流程会清空旧公开变量传值', Object.keys(save().nodes.find((node) => node.id === 'run_child').params.inputs).length === 0);
+
+  // Instance Parallel 展开为子工作流卡片，并只暴露子工作流声明为 public 的变量。
+  const orchestrationWorkflow = {
+    schema_version: 3,
+    id: 'orchestration', version: '3.0.0', resolution: [1920, 1080], root: 'root',
+    blackboard: { parent_rounds: { type: 'integer', default: 1 } },
+    nodes: [
+      { id: 'root', type: 'root', children: ['parallel'] },
+      {
+        id: 'parallel', type: 'instance_parallel', wait_for: 'all', cancel_on_failure: true,
+        runs: [{ instance: 'mumu-0', workflow: 'entrypoints/child.json', inputs: {} }],
+      },
+    ],
+  };
+  for (const fn of windowStub._listeners.message || []) fn({ data: {
+    type: 'init',
+    document: { name: 'orchestration.json', uri: 'file:///orchestration.json', text: JSON.stringify(orchestrationWorkflow) },
+    workflows: [
+      { uri: 'file:///orchestration.json', name: 'orchestration.json', rel: 'workflows/entrypoints/orchestration.json', id: 'orchestration', variables: [] },
+      childDescriptor,
+    ],
+    catalog, refs: { blackboard: ['blackboard.parent_rounds'], nodes: [] }, issues: [],
+    instances: [{ id: 'mumu-0', backend: 'mumu', displayName: 'primary' }], selectedInstance: 'mumu-0',
+  } });
+  const runCards = () => allGraph((item) => item.tagName === 'G' && hasClass(item, 'instance-run-card'));
+  check('每个实例运行项渲染一张子工作流卡片', runCards().length === orchestrationWorkflow.nodes[1].runs.length);
+  check('每张子工作流卡片都有连接线', allGraph((item) => item.tagName === 'G' && hasClass(item, 'instance-run-edge')).length === orchestrationWorkflow.nodes[1].runs.length);
+  check('子工作流卡片只显示公开变量', within(runCards()[0], (item) => item.textContent === 'rounds').length === 1
+    && within(runCards()[0], (item) => item.textContent === 'secret').length === 0);
+
+  const firstRunBody = () => within(runCards()[0], (item) => hasClass(item, 'instance-run-card-box'))[0];
+  fire(firstRunBody(), 'mousedown', { clientX: 160, clientY: 180 });
+  check('点击子工作流卡片打开该运行项详情', !!editor.state.selectedRun
+    && editor.state.selectedRun.nodeId === 'parallel'
+    && inspectorItems((item) => item.textContent === '公开变量').length === 1);
+  fire(firstRunBody(), 'mousedown', { clientX: 160, clientY: 180 });
+  check('双击子工作流卡片按引用打开工作流', posted.some((message) => message.type === 'openSubWorkflow'
+    && message.reference === 'entrypoints/child.json'));
+
+  const bindingMode = inspectorItems((item) => item.tagName === 'SELECT'
+    && within(item, (child) => child.tagName === 'OPTION' && child.textContent === '绑定父变量').length === 1)[0];
+  bindingMode.value = 'binding'; fire(bindingMode, 'change');
+  check('公开变量可以绑定父工作流同类型变量', save().nodes.find((node) => node.id === 'parallel').runs[0].inputs.rounds.ref === 'blackboard.parent_rounds');
+  fireWindow('keydown', { key: 'Delete' });
+  check('Delete 只删除当前子工作流运行项', save().nodes.find((node) => node.id === 'parallel').runs.length === 0
+    && editor.snapshot().nodes.length === 2);
+
+  // 完整画布导出：模板缩略图收集 + data URL 内嵌（配合扩展端 requestAssetData）。
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const fakeGraph = documentStub.createElementNS(svgNS, 'svg');
+  const makeThumb = (href, templatePath) => {
+    const image = documentStub.createElementNS(svgNS, 'image');
+    image.setAttribute('class', 'node-preview-image');
+    image.setAttribute('href', href);
+    if (templatePath) image.setAttribute('data-template-path', templatePath);
+    return image;
+  };
+  fakeGraph.appendChild(makeThumb('file:///webview/assets/templates/a.png', 'assets/templates/a.png'));
+  fakeGraph.appendChild(makeThumb('data:image/png;base64,QUJD', ''));
+  fakeGraph.appendChild(makeThumb('file:///webview/assets/templates/b.png', ''));
+  check('导出收集模板路径并跳过截图与无路径图', JSON.stringify(editor.collectExportTemplatePaths(fakeGraph)) === JSON.stringify(['assets/templates/a.png']));
+  const beforePost = posted.length;
+  editor.applyInlineThumbnails(fakeGraph, new Map([['assets/templates/a.png', 'data:image/png;base64,AAEK']]));
+  const thumbs = fakeGraph.querySelectorAll('image.node-preview-image');
+  check('导出内嵌 data URL 且未命中项保持原 href', thumbs[0].getAttribute('href') === 'data:image/png;base64,AAEK'
+    && thumbs[1].getAttribute('href') === 'data:image/png;base64,QUJD'
+    && thumbs[2].getAttribute('href') === 'file:///webview/assets/templates/b.png'
+    && posted.length === beforePost);
   console.log(ok ? 'DOM SMOKE OK' : 'DOM SMOKE FAILED');
   process.exit(ok ? 0 : 1);
 })();

@@ -149,7 +149,14 @@ export class RunLogManager implements vscode.Disposable {
 
   finishProcess(code: number | null, signal: string | null, stopped: boolean): void {
     this.processResult = { code, signal, stopped };
-    if (this.descriptor && stopped) this.descriptor.status = 'cancelled';
+    const status = stopped ? 'cancelled' : code === 0 ? 'succeeded' : 'failed';
+    if (this.descriptor) {
+      this.descriptor.status = status;
+      const terminal = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
+      for (const source of this.descriptor.sources ?? []) {
+        if (!terminal.has(source.status)) source.status = status;
+      }
+    }
     if (this.panel) {
       void this.panel.webview.postMessage({ type: 'processFinished', code, signal, stopped });
     }
@@ -279,7 +286,7 @@ export class RunLogManager implements vscode.Disposable {
   <button id="btn-stop" class="icon-button danger" title="停止当前工作流" aria-label="停止当前工作流">■</button>
   <button id="btn-clear" class="icon-button" title="清空日志" aria-label="清空日志">⌫</button>
 </header>
-<nav id="source-tabs" class="source-tabs hidden" role="tablist" aria-label="组队实例"></nav>
+<nav id="source-tabs" class="source-tabs hidden" role="tablist" aria-label="并行实例"></nav>
 <section id="summary">
   <div class="status-block"><span id="status-dot"></span><span id="status-label">待命</span><strong id="elapsed">00:00.0</strong></div>
   <div class="metric"><span>已完成</span><strong id="completed-count">0</strong></div>

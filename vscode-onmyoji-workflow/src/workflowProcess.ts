@@ -20,6 +20,14 @@ export function buildWorkflowRunArguments(
   ];
 }
 
+export function missingWorkflowInstances(
+  runs: Array<{ instance: string }>,
+  available: Array<{ id: string }>,
+): string[] {
+  const availableIds = new Set(available.map((item) => item.id));
+  return [...new Set(runs.map((run) => run.instance).filter((instance) => !availableIds.has(instance)))];
+}
+
 export function buildPartySoulsRunArguments(
   configPath: string,
   leaderInstance = 'mumu-0',

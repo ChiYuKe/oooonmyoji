@@ -109,6 +109,7 @@ main { height: calc(100% - 52px); min-height: 0; position: relative; }
 .tree-node.type-selector .tree-icon { color: #7ed28a; }
 .tree-node.type-sequence .tree-icon { color: #e4b84c; }
 .tree-node.type-simple_parallel .tree-icon { color: #7cc6d8; }
+.tree-node.type-instance_parallel .tree-icon { color: #b49be8; }
 .tree-name {
   flex: 1;
   min-width: 0;

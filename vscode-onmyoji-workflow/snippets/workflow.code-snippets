@@ -58,6 +58,22 @@
     ],
     "description": "第一个子节点是主 Task，第二个是后台分支"
   },
+  "BT 节点：Instance Parallel": {
+    "prefix": "owf-instance-parallel",
+    "body": [
+      "{",
+      "  \"id\": \"${1:run_all_instances}\",",
+      "  \"type\": \"instance_parallel\",",
+      "  \"wait_for\": \"all\",",
+      "  \"cancel_on_failure\": true,",
+      "  \"runs\": [",
+      "    { \"instance\": \"${2:mumu-0}\", \"workflow\": \"${3:entrypoints/account_0.json}\", \"inputs\": {} },",
+      "    { \"instance\": \"${4:mumu-1}\", \"workflow\": \"${5:entrypoints/account_1.json}\", \"inputs\": {} }",
+      "  ]",
+      "}"
+    ],
+    "description": "Supervisor 同时启动多个实例工作流（只能作为 Root 的唯一子节点）"
+  },
   "BT 装饰器：Condition": {
     "prefix": "owf-decorator-condition",
     "body": [

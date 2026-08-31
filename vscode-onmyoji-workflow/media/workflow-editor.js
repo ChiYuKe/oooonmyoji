@@ -7,10 +7,15 @@
   const BASE_H = 96;
   const DECO_H = 22;
   const PORT_R = 7;
+  const RUN_CARD_W = 250;
+  const RUN_CARD_BASE_H = 84;
+  const RUN_VARIABLE_H = 24;
+  const RUN_CARD_GAP_X = 48;
+  const RUN_CARD_GAP_Y = 92;
   const PREVIEW = { x: 154, y: 38, width: 92, height: 44 };
-  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'task'];
-  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', task: 'TASK' };
-  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', task: '▣' };
+  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'instance_parallel', 'task'];
+  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
+  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', instance_parallel: '⇉', task: '▣' };
   const RUN_LABEL = {
     running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
     failed: '失败', cancelled: '已取消', branch_miss: '分支跳过',
@@ -27,6 +32,8 @@
     instanceId: '',
     selected: new Set(),
     selectedEdge: null,
+    selectedRun: null,
+    selectedVariable: '',
     zoom: 1,
     panX: 80,
     panY: 48,
@@ -63,7 +70,10 @@
   const nodes = () => Array.isArray(state.raw && state.raw.nodes) ? state.raw.nodes : [];
   const nodeById = (id) => nodes().find((node) => node && node.id === id) || null;
   const catalogByName = (name) => state.catalog.find((item) => item.name === name) || null;
-  const nodeHeight = (node) => BASE_H + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
+  const workflowNodeVariables = (node) => subWorkflowRef(node) ? publicWorkflowVariables(subWorkflowRef(node)) : [];
+  const nodeHeight = (node) => BASE_H
+    + workflowNodeVariables(node).length * RUN_VARIABLE_H
+    + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
   const layout = () => {
     if (!state.raw._layout || typeof state.raw._layout !== 'object' || Array.isArray(state.raw._layout)) state.raw._layout = {};
     return state.raw._layout;
@@ -72,6 +82,51 @@
     const value = layout()[node.id];
     return value && Number.isFinite(value.x) && Number.isFinite(value.y) ? value : { x: 0, y: 0 };
   };
+
+  function workflowDescriptor(reference) {
+    const normalized = String(reference || '').trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
+    if (!normalized) return null;
+    const withExt = normalized.toLowerCase().endsWith('.json') ? normalized : `${normalized}.json`;
+    return (state.workflows || []).find((file) => {
+      const candidate = workflowReference(file);
+      return candidate === normalized
+        || candidate === withExt
+        || candidate.endsWith(`/${normalized}`)
+        || candidate.endsWith(`/${withExt}`)
+        || file.id === normalized;
+    }) || null;
+  }
+
+  function publicWorkflowVariables(reference) {
+    const descriptor = workflowDescriptor(reference);
+    return descriptor && Array.isArray(descriptor.variables)
+      ? descriptor.variables.filter((variable) => variable && variable.public !== false && variable.definition)
+      : [];
+  }
+
+  function instanceRunCards() {
+    const cards = [];
+    for (const node of nodes()) {
+      if (node.type !== 'instance_parallel' || !Array.isArray(node.runs) || !node.runs.length) continue;
+      const parent = position(node);
+      const totalWidth = node.runs.length * RUN_CARD_W + Math.max(0, node.runs.length - 1) * RUN_CARD_GAP_X;
+      const startX = parent.x + NODE_W / 2 - totalWidth / 2;
+      node.runs.forEach((run, index) => {
+        const variables = publicWorkflowVariables(run.workflow);
+        cards.push({
+          key: `${node.id}:${index}`,
+          node,
+          run,
+          index,
+          variables,
+          x: startX + index * (RUN_CARD_W + RUN_CARD_GAP_X),
+          y: parent.y + nodeHeight(node) + RUN_CARD_GAP_Y,
+          height: RUN_CARD_BASE_H + variables.length * RUN_VARIABLE_H,
+        });
+      });
+    }
+    return cards;
+  }
 
   function svgEl(tag, attrs, parent) {
     const element = document.createElementNS(NS, tag);
@@ -114,6 +169,7 @@
     state.raw = JSON.parse(text);
     state.selected.clear();
     state.selectedEdge = null;
+    state.selectedRun = null;
     render();
   }
 
@@ -164,6 +220,7 @@
     const child = nodeById(childId);
     if (!parent || !child) return '节点不存在';
     if (parent.type === 'task') return 'Task 没有子节点输出';
+    if (parent.type === 'instance_parallel') return 'Instance Parallel 由 runs 配置实例，不能连接子节点';
     if (child.type === 'root') return 'Root 不允许父节点';
     if (parentId === childId || descendants(childId).has(parentId)) return '连接会形成环';
     if (parent.type === 'root' && parent.children && parent.children.length >= 1 && parent.children[0] !== childId) return null;
@@ -197,18 +254,24 @@
   }
 
   function addNode(type, at) {
-    const prefix = type === 'simple_parallel' ? 'parallel' : type;
+    const prefix = type === 'simple_parallel' ? 'parallel' : type === 'instance_parallel' ? 'instances' : type;
     const node = { id: nextId(prefix), type, children: [] };
     if (type === 'task') {
       delete node.children;
       node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture';
       node.params = {};
+    } else if (type === 'instance_parallel') {
+      delete node.children;
+      node.runs = [{ instance: state.instances[0]?.id || 'mumu-0', workflow: '', inputs: {} }];
+      node.wait_for = 'all';
+      node.cancel_on_failure = true;
     }
     mutate(() => {
       nodes().push(node);
       const point = at || worldPoint({ clientX: wrap.clientWidth / 2, clientY: wrap.clientHeight / 2 });
       layout()[node.id] = { x: Math.round(point.x - NODE_W / 2), y: Math.round(point.y - BASE_H / 2) };
       state.selected = new Set([node.id]);
+      state.selectedRun = null;
       state.inspector = 'node';
     });
   }
@@ -227,6 +290,7 @@
       for (const node of nodes()) if (Array.isArray(node.children)) node.children = node.children.filter((id) => !ids.includes(id));
       for (const id of ids) delete layout()[id];
       state.selected.clear();
+      state.selectedRun = null;
     });
   }
 
@@ -318,6 +382,7 @@
         created.push(copy.id);
       }
       state.selected = new Set(created);
+      state.selectedRun = null;
       state.inspector = 'node';
     });
     toast(`已粘贴 ${idMap.size} 个节点`);
@@ -366,11 +431,12 @@
   function bounds() {
     if (!nodes().length) return { minX: 0, minY: 0, maxX: NODE_W, maxY: BASE_H };
     const points = nodes().map((node) => ({ node, pos: position(node) }));
+    const runCards = instanceRunCards();
     return {
-      minX: Math.min(...points.map((item) => item.pos.x)),
+      minX: Math.min(...points.map((item) => item.pos.x), ...runCards.map((item) => item.x)),
       minY: Math.min(...points.map((item) => item.pos.y)),
-      maxX: Math.max(...points.map((item) => item.pos.x + NODE_W)),
-      maxY: Math.max(...points.map((item) => item.pos.y + nodeHeight(item.node))),
+      maxX: Math.max(...points.map((item) => item.pos.x + NODE_W), ...runCards.map((item) => item.x + RUN_CARD_W)),
+      maxY: Math.max(...points.map((item) => item.pos.y + nodeHeight(item.node)), ...runCards.map((item) => item.y + item.height)),
     };
   }
 
@@ -424,9 +490,12 @@
       const children = Array.isArray(parent.children) ? parent.children : [];
       children.forEach((childId, order) => renderEdge(wires, parent, childId, order));
     }
+    const runCards = instanceRunCards();
+    runCards.forEach((card) => renderInstanceRunEdge(wires, card));
     if (state.connect) renderConnection(wires);
     const cards = svgEl('g', { class: 'cards' }, root);
     nodes().forEach((node) => renderNode(cards, node));
+    runCards.forEach((card) => renderInstanceRunCard(cards, card));
     if (state.marquee) {
       const box = state.marquee;
       svgEl('rect', { class: 'marquee', x: Math.min(box.x1, box.x2), y: Math.min(box.y1, box.y2), width: Math.abs(box.x2 - box.x1), height: Math.abs(box.y2 - box.y1) }, root);
@@ -476,6 +545,7 @@
       event.stopPropagation();
       state.selected.clear();
       state.selectedEdge = { parent: parent.id, child: childId };
+      state.selectedRun = null;
       state.inspector = 'node';
       render();
     });
@@ -489,6 +559,20 @@
       state.connect = { direction: 'from-output', parent: parent.id, x: point.x, y: point.y, oldChild: childId, oldIndex: order, hover: null, pointerId: captureConnectionPointer(event) };
       render();
     });
+  }
+
+  function renderInstanceRunEdge(layer, card) {
+    const parent = position(card.node);
+    const x1 = parent.x + NODE_W / 2;
+    const y1 = parent.y + nodeHeight(card.node);
+    const x2 = card.x + RUN_CARD_W / 2;
+    const y2 = card.y;
+    const path = bezier(x1, y1, x2, y2);
+    const group = svgEl('g', { class: 'instance-run-edge', 'data-run-key': card.key }, layer);
+    svgEl('path', { class: 'instance-run-edge-line', d: path }, group);
+    const midY = (y1 + y2) / 2;
+    svgEl('circle', { class: 'edge-order-bg', cx: (x1 + x2) / 2, cy: midY, r: 10 }, group);
+    svgEl('text', { class: 'edge-order', x: (x1 + x2) / 2, y: midY + 4, 'text-anchor': 'middle' }, group).textContent = String(card.index + 1);
   }
 
   function renderConnection(layer) {
@@ -580,9 +664,18 @@
       renderNodePreview(group, { uri, path: '' }, 'step-thumb', 'xMidYMid slice', run.screenshot || uri);
     } else if (template) renderNodePreview(group, template, 'template-thumb', 'xMidYMid meet');
     else if (run && Number.isFinite(run.duration)) svgEl('text', { class: 'node-duration', x: NODE_W - 12, y: 72, 'text-anchor': 'end' }, group).textContent = `${run.duration} ms`;
+    const workflowVariables = workflowNodeVariables(node);
+    const workflowInputs = node.params && typeof node.params === 'object' ? node.params : {};
+    workflowVariables.forEach((variable, variableIndex) => {
+      const y = BASE_H + variableIndex * RUN_VARIABLE_H;
+      svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
+      svgEl('circle', { class: `instance-variable-pin type-${variable.definition.type || 'any'}`, cx: 10, cy: y + RUN_VARIABLE_H / 2, r: 5 }, group);
+      svgEl('text', { class: 'instance-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(variable.name, 15);
+      svgEl('text', { class: 'instance-variable-value', x: NODE_W - 10, y: y + 16, 'text-anchor': 'end' }, group).textContent = workflowInputVariableValue(workflowInputs, variable);
+    });
     const decorators = Array.isArray(node.decorators) ? node.decorators : [];
     decorators.forEach((decorator, index) => {
-      const y = BASE_H + index * DECO_H;
+      const y = BASE_H + workflowVariables.length * RUN_VARIABLE_H + index * DECO_H;
       svgEl('line', { class: 'decorator-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
       svgEl('text', { class: 'decorator-icon', x: 14, y: y + 15 }, group).textContent = '◇';
       svgEl('text', { class: 'decorator-label', x: 32, y: y + 15 }, group).textContent = decoratorLabel(decorator);
@@ -605,7 +698,7 @@
       if (isDouble) {
         event.preventDefault(); event.stopPropagation();
         if (subRef) { requestOpenSubWorkflow(node.id); return; }
-        state.selected = new Set([node.id]); state.inspector = 'node'; render();
+        state.selected = new Set([node.id]); state.selectedRun = null; state.inspector = 'node'; render();
         return;
       }
       startNodeDrag(event, node.id);
@@ -615,7 +708,7 @@
       body.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        state.selected = new Set([node.id]); render();
+        state.selected = new Set([node.id]); state.selectedRun = null; render();
         showMenu(event.clientX, event.clientY, [
           { label: '进入子工作流视图', run: () => requestOpenSubWorkflow(node.id) },
           'separator',
@@ -627,6 +720,75 @@
     }
   }
 
+  function compactValue(value, max = 24) {
+    let text;
+    if (value === undefined) text = '未传值';
+    else if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') text = `← ${value.ref.replace(/^blackboard\./, '')}`;
+    else if (typeof value === 'string') text = value;
+    else {
+      try { text = JSON.stringify(value); } catch { text = String(value); }
+    }
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  }
+
+  function workflowInputVariableValue(holder, variable) {
+    const inputs = holder && holder.inputs && typeof holder.inputs === 'object' && !Array.isArray(holder.inputs) ? holder.inputs : {};
+    if (Object.prototype.hasOwnProperty.call(inputs, variable.name)) return compactValue(inputs[variable.name]);
+    if (Object.prototype.hasOwnProperty.call(variable.definition, 'default')) return `默认 ${compactValue(variable.definition.default, 18)}`;
+    return variable.definition.required ? '需要传值' : '未传值';
+  }
+
+  function renderInstanceRunCard(layer, card) {
+    const selected = state.selectedRun && state.selectedRun.nodeId === card.node.id && state.selectedRun.index === card.index;
+    const group = svgEl('g', {
+      class: `instance-run-card${selected ? ' selected' : ''}`,
+      transform: `translate(${card.x},${card.y})`,
+      'data-run-key': card.key,
+    }, layer);
+    group.dataset.runKey = card.key;
+    const body = svgEl('rect', { class: 'instance-run-card-box', width: RUN_CARD_W, height: card.height, rx: 5 }, group);
+    svgEl('rect', { class: 'instance-run-card-head', width: RUN_CARD_W, height: 30, rx: 5 }, group);
+    svgEl('rect', { class: 'instance-run-card-head-square', y: 24, width: RUN_CARD_W, height: 8 }, group);
+    svgEl('text', { class: 'instance-run-card-icon', x: 13, y: 20 }, group).textContent = '▣';
+    svgEl('text', { class: 'instance-run-card-type', x: 34, y: 20 }, group).textContent = 'CHILD WORKFLOW';
+    svgEl('text', { class: 'instance-run-card-instance', x: 14, y: 51 }, group).textContent = card.run.instance || '未选择实例';
+    const workflowName = String(card.run.workflow || '未选择工作流').split(/[\\/]/).pop();
+    svgEl('text', { class: 'instance-run-card-workflow', x: 14, y: 69 }, group).textContent = compactValue(workflowName, 31);
+    card.variables.forEach((variable, variableIndex) => {
+      const y = RUN_CARD_BASE_H + variableIndex * RUN_VARIABLE_H;
+      svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: RUN_CARD_W, y2: y }, group);
+      svgEl('circle', { class: `instance-variable-pin type-${variable.definition.type || 'any'}`, cx: 10, cy: y + RUN_VARIABLE_H / 2, r: 5 }, group);
+      svgEl('text', { class: 'instance-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(variable.name, 15);
+      svgEl('text', { class: 'instance-variable-value', x: RUN_CARD_W - 10, y: y + 16, 'text-anchor': 'end' }, group).textContent = workflowInputVariableValue(card.run, variable);
+    });
+    const input = svgEl('circle', { class: 'port port-in instance-run-port', cx: RUN_CARD_W / 2, cy: 0, r: PORT_R }, group);
+    input.style.pointerEvents = 'none';
+    body.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const clickKey = `run:${card.key}`;
+      const now = Date.now();
+      const nearby = Math.abs(event.clientX - lastClickX) < 8 && Math.abs(event.clientY - lastClickY) < 8;
+      const isDouble = now - lastClickTime < 300 && lastClickNode === clickKey && nearby;
+      lastClickTime = now; lastClickNode = clickKey; lastClickX = event.clientX; lastClickY = event.clientY;
+      state.selected.clear(); state.selectedEdge = null;
+      state.selectedRun = { nodeId: card.node.id, index: card.index };
+      state.inspector = 'node';
+      if (isDouble && card.run.workflow) requestOpenWorkflowReference(card.run.workflow);
+      else render();
+    });
+    body.addEventListener('contextmenu', (event) => {
+      event.preventDefault(); event.stopPropagation();
+      state.selected.clear(); state.selectedEdge = null;
+      state.selectedRun = { nodeId: card.node.id, index: card.index };
+      render();
+      const items = [];
+      if (card.run.workflow) items.push({ label: '进入子工作流视图', run: () => requestOpenWorkflowReference(card.run.workflow) }, 'separator');
+      items.push({ label: '删除实例运行项', danger: true, run: () => removeInstanceRun(card.node, card.index) });
+      showMenu(event.clientX, event.clientY, items);
+    });
+  }
+
   /** 若节点是子流程 task（workflow.run），返回子工作流引用，否则返回空字符串。 */
   function subWorkflowRef(node) {
     if (!node || node.type !== 'task' || node.action !== 'workflow.run') return '';
@@ -636,7 +798,13 @@
 
   /** 请求打开子工作流视图；当前有未保存修改时先询问保存/放弃。 */
   function requestOpenSubWorkflow(nodeId) {
-    const doOpen = (saveText) => vscode.postMessage({ type: 'openSubWorkflow', nodeId, saveText });
+    const node = nodeById(nodeId);
+    requestOpenWorkflowReference(subWorkflowRef(node), nodeId);
+  }
+
+  function requestOpenWorkflowReference(reference, nodeId = '') {
+    if (!reference) return;
+    const doOpen = (saveText) => vscode.postMessage({ type: 'openSubWorkflow', nodeId, reference, saveText });
     if (state.dirty) {
       const rect = $('workflow-select').getBoundingClientRect();
       showMenu(rect.left, rect.bottom + 4, [
@@ -654,6 +822,10 @@
     const count = Array.isArray(node.children) ? node.children.length : 0;
     if (node.type === 'root') return count ? 'Tree Root' : '等待连接';
     if (node.type === 'simple_parallel') return `${count}/2 · ${node.finish_mode === 'wait_for_background' ? '等待后台' : '中止后台'}`;
+    if (node.type === 'instance_parallel') {
+      const runs = Array.isArray(node.runs) ? node.runs : [];
+      return `${runs.length} 个实例 · ${node.wait_for === 'any' ? '任一完成' : '全部完成'}`;
+    }
     return `${count} 个有序子节点`;
   }
 
@@ -664,6 +836,7 @@
     if (decorator.type === 'timeout') return `Time Limit · ${decorator.seconds}s`;
     if (decorator.type === 'retry') return `Retry · ${decorator.attempts} 次`;
     if (decorator.type === 'repeat') return `Repeat · ${decorator.count} 次`;
+    if (decorator.type === 'do_once') return `Do Once · ${decorator.reset_on_failure ? '成功才锁定' : '整个运行只执行一次'}`;
     return String(decorator.type || 'Decorator');
   }
 
@@ -756,6 +929,7 @@
       if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
     }
     state.selectedEdge = null;
+    state.selectedRun = null;
     state.inspector = 'node';
     const point = worldPoint(event);
     const origins = {};
@@ -775,6 +949,7 @@
       const point = worldPoint(event);
       if (!event.shiftKey) state.selected.clear();
       state.selectedEdge = null;
+      state.selectedRun = null;
       state.inspector = 'node';
       state.marquee = { x1: point.x, y1: point.y, x2: point.x, y2: point.y, additive: event.shiftKey };
       state.drag = { kind: 'marquee' };
@@ -861,6 +1036,9 @@
       const pos = position(node);
       svgEl('rect', { class: `mini-node type-${node.type}`, x: pos.x, y: pos.y, width: NODE_W, height: nodeHeight(node) }, mini);
     }
+    for (const card of instanceRunCards()) {
+      svgEl('rect', { class: 'mini-node type-instance-run', x: card.x, y: card.y, width: RUN_CARD_W, height: card.height }, mini);
+    }
     const rect = wrap.getBoundingClientRect();
     svgEl('rect', { class: 'mini-viewport', x: -state.panX / state.zoom, y: -state.panY / state.zoom, width: rect.width / state.zoom, height: rect.height / state.zoom }, mini);
   }
@@ -898,10 +1076,9 @@
     for (const menu of Array.from(document.querySelectorAll ? document.querySelectorAll('.context-menu') : [])) menu.remove();
   }
 
-  function showMenu(x, y, items) {
+  function showMenu(x, y, items, options = {}) {
     hideMenus();
     const menu = el('div', 'context-menu');
-    menu.style.left = `${x}px`; menu.style.top = `${y}px`;
     for (const item of items) {
       if (item === 'separator') { menu.appendChild(el('div', 'menu-separator')); continue; }
       const button = el('button', item.danger ? 'danger' : '', item.label);
@@ -909,6 +1086,13 @@
       menu.appendChild(button);
     }
     document.body.appendChild(menu);
+    const margin = 8;
+    const rect = menu.getBoundingClientRect();
+    const preferredLeft = options.align === 'end' ? x - rect.width : x;
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    menu.style.left = `${Math.min(Math.max(margin, preferredLeft), maxLeft)}px`;
+    menu.style.top = `${Math.min(Math.max(margin, y), maxTop)}px`;
   }
 
   function openLightbox(src) {
@@ -1023,14 +1207,16 @@
     const selected = [...state.selected];
     const selectedNode = selected.length === 1 ? nodeById(selected[0]) : null;
     const open = state.inspector === 'workflow'
-      || state.inspector === 'blackboard'
+      || state.inspector === 'variables'
+      || Boolean(state.selectedRun)
       || Boolean(state.selectedEdge)
       || Boolean(selectedNode);
     $('inspector').classList.toggle('hidden', !open);
     $('editor-main').classList.toggle('inspector-open', open);
     if (!open) return;
     if (state.inspector === 'workflow') { renderWorkflowInspector(); return; }
-    if (state.inspector === 'blackboard') { renderBlackboardInspector(); return; }
+    if (state.inspector === 'variables') { renderVariablesInspector(); return; }
+    if (state.selectedRun) { renderInstanceRunInspector(); return; }
     if (state.selectedEdge) { renderEdgeInspector(); return; }
     if (selected.length !== 1) {
       $('inspector-title').textContent = selected.length ? `${selected.length} 个节点` : '详细信息';
@@ -1082,10 +1268,17 @@
       node.type = type;
       if (type === 'task') {
         delete node.children; delete node.finish_mode;
+        delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
         node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture'; node.params = {};
+      } else if (type === 'instance_parallel') {
+        delete node.action; delete node.params; delete node.children; delete node.finish_mode;
+        node.runs = Array.isArray(node.runs) && node.runs.length ? node.runs : [{ instance: state.instances[0]?.id || 'mumu-0', workflow: '', inputs: {} }];
+        node.wait_for = node.wait_for === 'any' ? 'any' : 'all';
+        node.cancel_on_failure = node.cancel_on_failure !== false;
       } else {
         delete node.action; delete node.params;
         node.children = [];
+        delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
         if (type === 'simple_parallel') node.finish_mode = 'abort_background'; else delete node.finish_mode;
       }
     });
@@ -1103,7 +1296,115 @@
       body.appendChild(el('div', 'empty-section', '无参数'));
       return;
     }
-    for (const [name, definition] of Object.entries(spec.parameters)) renderParameter(body, node, name, definition);
+    for (const [name, definition] of Object.entries(spec.parameters)) {
+      if (node.action === 'workflow.run' && name === 'inputs') continue;
+      renderParameter(body, node, name, definition);
+    }
+    if (node.action === 'workflow.run') renderPublicWorkflowInputs(body, node.params, node.params.workflow);
+  }
+
+  function removeInstanceRun(node, index) {
+    mutate(() => {
+      if (Array.isArray(node.runs)) node.runs.splice(index, 1);
+      state.selectedRun = null;
+    });
+  }
+
+  function parentVariableRefs(definition) {
+    const expected = definitionSchema(definition);
+    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
+      ? state.raw.blackboard
+      : {};
+    return Object.entries(blackboard)
+      .filter(([, parentDefinition]) => compatibleRefType(expected, definitionSchema(parentDefinition)))
+      .map(([name]) => `blackboard.${name}`);
+  }
+
+  function runInputLiteralControl(holder, name, definition) {
+    const value = holder.inputs[name];
+    const set = (next) => mutate(() => { holder.inputs[name] = next; });
+    if (Array.isArray(definition.enum) && definition.enum.length) {
+      return selectInput(JSON.stringify(value), definition.enum.map((item) => ({ value: JSON.stringify(item), label: String(item) })), (next) => set(JSON.parse(next)), 'full');
+    }
+    if (definition.type === 'boolean') return checkbox(!!value, set);
+    if (definition.type === 'number' || definition.type === 'integer') {
+      return textInput(value, (next) => set(definition.type === 'integer' ? parseInt(next || '0', 10) : parseFloat(next || '0')), { type: 'number', min: definition.min, max: definition.max, step: definition.type === 'integer' ? 1 : 'any' });
+    }
+    if (['array', 'object', 'any', 'rect'].includes(definition.type)) {
+      const area = el('textarea', 'json-value'); area.value = JSON.stringify(value, null, 2);
+      area.addEventListener('change', () => { try { set(JSON.parse(area.value)); } catch { toast(`${name} 不是有效 JSON`, true); } });
+      return area;
+    }
+    return textInput(value ?? '', set);
+  }
+
+  function renderPublicWorkflowInputs(body, holder, reference) {
+    if (!holder.inputs || typeof holder.inputs !== 'object' || Array.isArray(holder.inputs)) holder.inputs = {};
+    const variables = publicWorkflowVariables(reference);
+    section(body, '公开变量');
+    if (!variables.length) body.appendChild(el('div', 'empty-section', reference ? '该子工作流没有公开变量' : '请先选择子工作流'));
+    variables.forEach((variable) => {
+      const definition = variable.definition || {};
+      const block = el('div', 'run-variable-block');
+      const heading = el('div', 'run-variable-heading');
+      heading.appendChild(el('span', '', variable.name));
+      heading.appendChild(el('span', 'variable-type-label', `${definition.type || 'any'}${definition.required ? ' · 必填' : ''}`));
+      block.appendChild(heading);
+      const current = holder.inputs[variable.name];
+      const binding = current && typeof current === 'object' && !Array.isArray(current) && typeof current.ref === 'string';
+      const exists = Object.prototype.hasOwnProperty.call(holder.inputs, variable.name);
+      const mode = !exists ? 'default' : binding ? 'binding' : 'literal';
+      const modeRow = field(block, '传值方式');
+      modeRow.appendChild(selectInput(mode, [
+        { value: 'default', label: Object.prototype.hasOwnProperty.call(definition, 'default') ? '使用默认值' : '不传值' },
+        { value: 'literal', label: '常量' },
+        { value: 'binding', label: '绑定父变量' },
+      ], (next) => mutate(() => {
+        if (next === 'default') delete holder.inputs[variable.name];
+        else if (next === 'literal') holder.inputs[variable.name] = Object.prototype.hasOwnProperty.call(definition, 'default') ? clone(definition.default) : defaultValue(definition);
+        else {
+          const refs = parentVariableRefs(definition);
+          holder.inputs[variable.name] = { ref: refs[0] || '' };
+        }
+      })));
+      if (mode === 'binding') {
+        const refs = parentVariableRefs(definition);
+        const bindingRow = field(block, '父变量');
+        bindingRow.appendChild(selectInput(current.ref || '', refs.length ? refs.map((ref) => ({ value: ref, label: ref.replace(/^blackboard\./, '') })) : [{ value: '', label: '没有兼容变量' }], (ref) => mutate(() => { holder.inputs[variable.name] = { ref }; })));
+      } else if (mode === 'literal') {
+        field(block, '值').appendChild(runInputLiteralControl(holder, variable.name, definition));
+      }
+      if (definition.description) block.appendChild(el('div', 'description', definition.description));
+      body.appendChild(block);
+    });
+    const privateKeys = Object.keys(holder.inputs).filter((name) => !variables.some((variable) => variable.name === name));
+    if (privateKeys.length) body.appendChild(el('div', 'private-input-warning', `不可传变量：${privateKeys.join(', ')}`));
+  }
+
+  function renderInstanceRunInspector() {
+    const selection = state.selectedRun;
+    const node = selection && nodeById(selection.nodeId);
+    const run = node && Array.isArray(node.runs) ? node.runs[selection.index] : null;
+    if (!node || !run) { state.selectedRun = null; renderInspector(); return; }
+    if (!run.inputs || typeof run.inputs !== 'object' || Array.isArray(run.inputs)) run.inputs = {};
+    const body = clearInspector(run.instance || `运行 ${selection.index + 1}`);
+    section(body, '子工作流');
+    const instanceOptions = (state.instances || []).map((item) => ({ value: item.id, label: item.display_name ? `${item.display_name} · ${item.id}` : item.id }));
+    field(body, '实例').appendChild(selectInput(run.instance || '', instanceOptions.length ? instanceOptions : [{ value: run.instance || '', label: run.instance || '未配置实例' }], (value) => mutate(() => { run.instance = value; })));
+    const workflowOptions = (state.workflows || []).filter((item) => item && item.rel).map((item) => {
+      const relative = workflowReference(item);
+      return { value: relative, label: item.name || relative };
+    });
+    field(body, '工作流').appendChild(selectInput(run.workflow || '', [{ value: '', label: '选择工作流' }, ...workflowOptions], (value) => mutate(() => { run.workflow = value; run.inputs = {}; })));
+    if (run.workflow) {
+      const open = el('button', 'full-command', '打开子工作流');
+      open.addEventListener('click', () => requestOpenWorkflowReference(run.workflow));
+      body.appendChild(open);
+    }
+    renderPublicWorkflowInputs(body, run, run.workflow);
+    const remove = el('button', 'danger full-command', '删除实例运行项');
+    remove.addEventListener('click', () => removeInstanceRun(node, selection.index));
+    body.appendChild(remove);
   }
 
   function defaultValue(definition) {
@@ -1284,16 +1585,98 @@
     return candidates.filter((candidate) => compatibleRefType(expected, candidate.schema)).map((candidate) => candidate.ref);
   }
 
+  function referenceLabel(ref) {
+    if (!ref) return '无可用引用';
+    if (ref.startsWith('blackboard.')) return `变量 · ${ref.slice('blackboard.'.length)}`;
+    return ref;
+  }
+
+  function parameterBlackboardBinding(node, name) {
+    const value = node.params && node.params[name];
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ref !== 'string') return null;
+    const prefix = 'blackboard.';
+    if (!value.ref.startsWith(prefix)) return null;
+    const variableName = value.ref.slice(prefix.length);
+    const blackboard = state.raw && state.raw.blackboard;
+    if (!variableName || !blackboard || typeof blackboard !== 'object' || Array.isArray(blackboard)) return null;
+    const variable = blackboard[variableName];
+    return variable && typeof variable === 'object' && !Array.isArray(variable)
+      ? { name: variableName, definition: variable }
+      : null;
+  }
+
+  function publicParameterName(node, name) {
+    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
+    const normalize = (value, fallback) => String(value || '').trim().replace(/[^A-Za-z0-9_]/g, '_').replace(/^_+|_+$/g, '') || fallback;
+    const parameterName = normalize(name, 'parameter');
+    if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, parameterName)) return parameterName;
+    const nodeName = `${normalize(node.id, 'node')}_${parameterName}`;
+    if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, nodeName)) return nodeName;
+    let index = 2;
+    while (Object.prototype.hasOwnProperty.call(state.raw.blackboard, `${nodeName}_${index}`)) index += 1;
+    return `${nodeName}_${index}`;
+  }
+
+  function workflowDefinitionFromParameter(definition, value, root = true) {
+    const result = { type: definition.type || 'any' };
+    if (root) result.public = true;
+    if (typeof definition.description === 'string' && definition.description) result.description = definition.description;
+    if (typeof definition.editor === 'string' && definition.editor) result.editor = definition.editor;
+    if (typeof definition.min === 'number') result.min = definition.min;
+    if (typeof definition.max === 'number') result.max = definition.max;
+    if (typeof definition.minLength === 'number') result.min_length = definition.minLength;
+    if (typeof definition.maxLength === 'number') result.max_length = definition.maxLength;
+    if (Array.isArray(definition.enum) && definition.enum.length) result.enum = clone(definition.enum);
+    if (typeof definition.minItems === 'number') result.min_items = definition.minItems;
+    if (typeof definition.maxItems === 'number') result.max_items = definition.maxItems;
+    if (definition.items && typeof definition.items === 'object') result.items = workflowDefinitionFromParameter(definition.items, definition.items.default, false);
+    if (definition.properties && typeof definition.properties === 'object') {
+      result.properties = Object.fromEntries(Object.entries(definition.properties).map(([key, child]) => [
+        key,
+        workflowDefinitionFromParameter(child, child.default, false),
+      ]));
+    }
+    if (definition.required === true && !root) result.required = true;
+    if (value !== undefined) result.default = clone(value);
+    else if (definition.default !== undefined) result.default = clone(definition.default);
+    return result;
+  }
+
+  function setParameterPublic(node, name, definition, checked) {
+    const binding = parameterBlackboardBinding(node, name);
+    if (binding) {
+      binding.definition.public = checked;
+      return;
+    }
+    if (!checked) return;
+    const current = Object.prototype.hasOwnProperty.call(node.params, name) ? node.params[name] : undefined;
+    const bound = current && typeof current === 'object' && !Array.isArray(current) && typeof current.ref === 'string';
+    const defaultInput = bound || current === undefined
+      ? definition.default !== undefined ? definition.default : defaultValue(definition)
+      : current;
+    const variableName = publicParameterName(node, name);
+    state.raw.blackboard[variableName] = workflowDefinitionFromParameter(definition, defaultInput);
+    node.params[name] = { ref: `blackboard.${variableName}` };
+  }
+
   function renderParameter(body, node, name, definition) {
     const block = el('div', 'parameter-block');
     const heading = el('div', 'parameter-heading');
     heading.appendChild(el('span', '', `${name}${definition.required ? ' *' : ''}`));
+    const headingActions = el('div', 'parameter-heading-actions');
     const exists = Object.prototype.hasOwnProperty.call(node.params, name);
     if (!definition.required && definition.default === undefined) {
       const enabled = checkbox(exists, (checked) => mutate(() => { if (checked) node.params[name] = defaultValue(definition); else delete node.params[name]; }));
       const toggleLabel = el('label', 'parameter-enable'); toggleLabel.appendChild(enabled); toggleLabel.appendChild(el('span', '', '启用'));
-      heading.appendChild(toggleLabel);
+      headingActions.appendChild(toggleLabel);
     }
+    const blackboardBinding = parameterBlackboardBinding(node, name);
+    const exposed = !!blackboardBinding && blackboardBinding.definition.public !== false;
+    const publicToggle = el('label', 'parameter-public');
+    publicToggle.title = exposed && blackboardBinding ? `父工作流可传入 ${blackboardBinding.name}；不传时使用默认值` : '公开给父工作流；不传时使用当前值作为默认值';
+    publicToggle.appendChild(checkbox(exposed, (checked) => mutate(() => setParameterPublic(node, name, definition, checked))));
+    publicToggle.appendChild(el('span', '', '公开'));
+    headingActions.appendChild(publicToggle);
     if (name === 'threshold' && ['vision.match_template', 'vision.wait_template'].includes(node.action)) {
       const check = el('button', 'parameter-check', '检查'); check.title = '获取当前画面并执行模板匹配';
       let pointerPending = false;
@@ -1303,8 +1686,9 @@
         setTimeout(() => { if (pointerPending) { pointerPending = false; requestTemplateCheck(node.id); } }, 0);
       });
       check.addEventListener('click', () => { if (!pointerPending) requestTemplateCheck(node.id); });
-      heading.appendChild(check);
+      headingActions.appendChild(check);
     }
+    heading.appendChild(headingActions);
     block.appendChild(heading);
     if (definition.description) block.appendChild(el('div', 'field-hint', definition.description));
     if (!exists && !definition.required && definition.default === undefined) { body.appendChild(block); return; }
@@ -1324,7 +1708,7 @@
       const options = refs.includes(ref) ? refs : [ref, ...refs];
       block.appendChild(selectInput(ref, options.map((item) => ({
         value: item,
-        label: item || '无可用引用',
+        label: referenceLabel(item),
       })), (next) => mutate(() => { node.params[name] = { ref: next }; }), 'full'));
     } else {
       block.appendChild(literalControl(node, name, definition, value));
@@ -1333,7 +1717,12 @@
   }
 
   function literalControl(node, name, definition, value) {
-    const set = (next) => mutate(() => { node.params[name] = next; });
+    const workflowParameter = node.action === 'workflow.run' && name === 'workflow';
+    const set = (next) => mutate(() => {
+      const changed = node.params[name] !== next;
+      node.params[name] = next;
+      if (workflowParameter && changed) node.params.inputs = {};
+    });
     if (Array.isArray(definition.enum) && definition.enum.length) {
       return selectInput(JSON.stringify(value), definition.enum.map((item) => ({ value: JSON.stringify(item), label: String(item) })), (next) => set(JSON.parse(next)), 'full');
     }
@@ -1354,7 +1743,6 @@
       return area;
     }
     const shell = el('div', 'inline-control');
-    const workflowParameter = node.action === 'workflow.run' && name === 'workflow';
     shell.appendChild(textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : workflowParameter ? '_folder/workflow.json' : '' }));
     if (definition.type === 'asset') {
       const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片'; browse.addEventListener('click', () => openAssetBrowser(node.id, name, value)); shell.appendChild(browse);
@@ -1377,6 +1765,48 @@
         { value: 'wait_for_background', label: '主任务结束后等待后台' },
       ], (value) => mutate(() => { node.finish_mode = value; })));
     }
+    if (node.type === 'instance_parallel') {
+      body.appendChild(el('div', 'description', 'Supervisor 会同时把每个运行项投递到对应实例。该节点不能连接普通子节点。'));
+      const wait = field(body, '完成条件');
+      wait.appendChild(selectInput(node.wait_for || 'all', [
+        { value: 'all', label: '全部实例完成' },
+        { value: 'any', label: '任一实例完成' },
+      ], (value) => mutate(() => { node.wait_for = value; })));
+      const cancel = field(body, '失败时取消其他实例');
+      cancel.appendChild(checkbox(node.cancel_on_failure !== false, (value) => mutate(() => { node.cancel_on_failure = value; })));
+      section(body, '实例运行项');
+      if (!Array.isArray(node.runs)) node.runs = [];
+      const instanceOptions = (state.instances || []).map((item) => ({ value: item.id, label: item.display_name ? `${item.display_name} · ${item.id}` : item.id }));
+      const workflowOptions = (state.workflows || []).filter((item) => item && item.rel).map((item) => {
+        const relative = String(item.rel).replace(/^.*workflows[\\/]/i, '');
+        return { value: relative, label: item.name || relative };
+      });
+      node.runs.forEach((run, index) => {
+        const block = el('div', 'instance-run-block');
+        const heading = el('div', 'parameter-heading');
+        heading.appendChild(el('span', '', `运行 ${index + 1} · ${run.instance || '未选择实例'}`));
+        const remove = el('button', 'icon-button danger', '×'); remove.title = '删除运行项';
+        remove.addEventListener('click', () => removeInstanceRun(node, index));
+        heading.appendChild(remove); block.appendChild(heading);
+        const instanceRow = field(block, '实例');
+        instanceRow.appendChild(selectInput(run.instance || '', instanceOptions.length ? instanceOptions : [{ value: run.instance || '', label: run.instance || '未配置实例' }], (value) => mutate(() => { run.instance = value; })));
+        const workflowRow = field(block, '工作流');
+        workflowRow.appendChild(selectInput(run.workflow || '', workflowOptions.length ? [{ value: '', label: '选择工作流' }, ...workflowOptions] : [{ value: run.workflow || '', label: run.workflow || '输入路径' }], (value) => mutate(() => { run.workflow = value; run.inputs = {}; })));
+        const edit = el('button', 'full-command', `编辑公开变量（${publicWorkflowVariables(run.workflow).length}）`);
+        edit.addEventListener('click', () => { state.selected.clear(); state.selectedEdge = null; state.selectedRun = { nodeId: node.id, index }; render(); });
+        block.appendChild(edit); body.appendChild(block);
+      });
+      const addRun = el('button', 'full-command', '＋ 添加实例运行项');
+      addRun.addEventListener('click', () => {
+        const index = node.runs.length;
+        mutate(() => {
+          node.runs.push({ instance: state.instances[0]?.id || 'mumu-0', workflow: '', inputs: {} });
+          state.selected.clear(); state.selectedEdge = null; state.selectedRun = { nodeId: node.id, index };
+        });
+      });
+      body.appendChild(addRun);
+      return;
+    }
     section(body, '有序子节点');
     const children = Array.isArray(node.children) ? node.children : [];
     if (!children.length) body.appendChild(el('div', 'empty-section', '尚未连接'));
@@ -1398,11 +1828,12 @@
     const add = selectInput('', [
       { value: '', label: '＋ 添加' }, { value: 'condition', label: 'Condition' }, { value: 'cooldown', label: 'Cooldown' },
       { value: 'timeout', label: 'Time Limit' }, { value: 'retry', label: 'Retry' }, { value: 'repeat', label: 'Repeat' },
+      { value: 'do_once', label: 'Do Once' },
     ], (type) => {
       if (!type) return;
       mutate(() => {
         if (!Array.isArray(node.decorators)) node.decorators = [];
-        const defaults = { condition: { type, expression: true }, cooldown: { type, seconds: 1 }, timeout: { type, seconds: 10 }, retry: { type, attempts: 2, delay_seconds: 0 }, repeat: { type, count: 2 } };
+        const defaults = { condition: { type, expression: true }, cooldown: { type, seconds: 1 }, timeout: { type, seconds: 10 }, retry: { type, attempts: 2, delay_seconds: 0 }, repeat: { type, count: 2 }, do_once: { type, reset_on_failure: false } };
         node.decorators.push(defaults[type]);
       });
     }, 'decorator-add');
@@ -1424,6 +1855,12 @@
       row.appendChild(textInput(decorator.delay_seconds || 0, (value) => mutate(() => { decorator.delay_seconds = Math.max(0, parseFloat(value || '0')); }), { type: 'number', min: 0, step: 0.1 }));
       block.appendChild(row);
     } else if (decorator.type === 'repeat') block.appendChild(textInput(decorator.count, (value) => mutate(() => { decorator.count = Math.max(1, parseInt(value || '1', 10)); }), { type: 'number', min: 1, step: 1 }));
+    else if (decorator.type === 'do_once') {
+      const row = el('div', 'inline-control');
+      row.appendChild(checkbox(decorator.reset_on_failure === true, (value) => mutate(() => { decorator.reset_on_failure = value; if (!value) delete decorator.reset_on_failure; })));
+      row.appendChild(el('span', 'do-once-note', '失败后自动重置（成功才锁定）'));
+      block.appendChild(row);
+    }
     body.appendChild(block);
   }
 
@@ -1444,13 +1881,13 @@
       const ref = expression.exists && expression.exists.ref;
       const refs = allRefs(node, undefined, true);
       const options = ref && !refs.includes(ref) ? [ref, ...refs] : refs;
-      shell.appendChild(selectInput(ref || '', (options.length ? options : ['']).map((value) => ({ value, label: value || '无可用引用' })), (value) => mutate(() => { decorator.expression = { exists: { ref: value } }; }), 'full'));
+      shell.appendChild(selectInput(ref || '', (options.length ? options : ['']).map((value) => ({ value, label: referenceLabel(value) })), (value) => mutate(() => { decorator.expression = { exists: { ref: value } }; }), 'full'));
     } else if (['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'].includes(op)) {
       const refs = allRefs(node);
       const operands = Array.isArray(expression[op]) ? expression[op] : [{ ref: refs[0] || '' }, null];
       const left = operands[0] && operands[0].ref ? operands[0].ref : refs[0] || '';
       const options = left && !refs.includes(left) ? [left, ...refs] : refs;
-      shell.appendChild(selectInput(left, (options.length ? options : ['']).map((value) => ({ value, label: value || '无可用引用' })), (value) => mutate(() => { decorator.expression[op][0] = { ref: value }; }), 'full'));
+      shell.appendChild(selectInput(left, (options.length ? options : ['']).map((value) => ({ value, label: referenceLabel(value) })), (value) => mutate(() => { decorator.expression[op][0] = { ref: value }; }), 'full'));
       const right = textInput(JSON.stringify(operands[1]), (value) => { try { mutate(() => { decorator.expression[op][1] = JSON.parse(value); }); } catch { toast('比较值不是有效 JSON', true); } });
       shell.appendChild(right);
     } else {
@@ -1492,29 +1929,279 @@
     inline.appendChild(textInput(resolution[1], (value) => mutate(() => { state.raw.resolution[1] = Math.max(1, parseInt(value || '1', 10)); }), { type: 'number', min: 1 })); resolutionRow.appendChild(inline);
   }
 
-  function renderBlackboardInspector() {
-    const body = clearInspector('黑板');
-    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
-    const add = el('button', '', '＋ 添加键'); add.addEventListener('click', () => mutate(() => { let index = 1; while (state.raw.blackboard[`key_${index}`]) index += 1; state.raw.blackboard[`key_${index}`] = { type: 'string' }; }));
-    section(body, '键定义', add);
-    const entries = Object.entries(state.raw.blackboard);
-    if (!entries.length) body.appendChild(el('div', 'empty-section', '无黑板键'));
-    entries.forEach(([name, definition]) => {
-      const block = el('div', 'blackboard-row');
-      const top = el('div', 'inline-control');
-      top.appendChild(textInput(name, (value) => renameBlackboard(name, value.trim())));
-      top.appendChild(selectInput(definition.type || 'string', ['string', 'number', 'integer', 'boolean', 'rect', 'asset', 'path', 'array', 'object', 'any'].map((value) => ({ value, label: value })), (value) => mutate(() => { definition.type = value; delete definition.items; delete definition.properties; })));
-      const remove = el('button', 'icon-button danger', '×'); remove.addEventListener('click', () => mutate(() => { delete state.raw.blackboard[name]; })); top.appendChild(remove); block.appendChild(top);
-      const required = el('label', 'check-label'); required.appendChild(checkbox(definition.required === true, (value) => mutate(() => { if (value) definition.required = true; else delete definition.required; }))); required.appendChild(el('span', '', '必填')); block.appendChild(required);
-      const area = el('textarea', 'blackboard-advanced'); area.value = JSON.stringify(definition, null, 2); area.title = '参数定义高级字段';
-      area.addEventListener('change', () => { try { const value = JSON.parse(area.value); mutate(() => { state.raw.blackboard[name] = value; }); } catch { toast('参数定义不是有效 JSON', true); } }); block.appendChild(area);
-      body.appendChild(block);
+  const DEFINITION_TYPES = ['string', 'number', 'integer', 'boolean', 'rect', 'asset', 'path', 'array', 'object', 'any'];
+
+  function sameDefinitionValue(left, right) {
+    try { return JSON.stringify(left) === JSON.stringify(right); } catch { return left === right; }
+  }
+
+  function definitionAcceptsValue(type, value) {
+    if (type === 'any') return true;
+    if (type === 'string' || type === 'asset' || type === 'path') return typeof value === 'string';
+    if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+    if (type === 'integer') return Number.isInteger(value);
+    if (type === 'boolean') return typeof value === 'boolean';
+    if (type === 'rect') return Array.isArray(value) && value.length === 4 && value.every(Number.isInteger);
+    if (type === 'array') return Array.isArray(value);
+    if (type === 'object') return value !== null && typeof value === 'object' && !Array.isArray(value);
+    return false;
+  }
+
+  function changeDefinitionType(definition, type) {
+    definition.type = type;
+    if (!['number', 'integer'].includes(type)) { delete definition.min; delete definition.max; }
+    if (!['string', 'asset', 'path'].includes(type)) { delete definition.min_length; delete definition.max_length; }
+    if (type !== 'array') { delete definition.min_items; delete definition.max_items; delete definition.items; }
+    if (type !== 'object') delete definition.properties;
+    if (Object.prototype.hasOwnProperty.call(definition, 'default') && !definitionAcceptsValue(type, definition.default)) delete definition.default;
+    if (Array.isArray(definition.enum)) {
+      definition.enum = definition.enum.filter((value) => definitionAcceptsValue(type, value));
+      if (!definition.enum.length) delete definition.enum;
+    }
+  }
+
+  function initialDefinitionValue(definition) {
+    if (Array.isArray(definition.enum) && definition.enum.length) return clone(definition.enum[0]);
+    return defaultValue({ type: definition.type });
+  }
+
+  function definitionValueControl(definition, value, assign, options = {}) {
+    const set = (next) => mutate(() => assign(next));
+    if (options.useEnum !== false && Array.isArray(definition.enum) && definition.enum.length) {
+      const values = definition.enum.slice();
+      if (!values.some((item) => sameDefinitionValue(item, value))) values.unshift(value);
+      return selectInput(JSON.stringify(value), values.map((item) => ({ value: JSON.stringify(item), label: String(item) })), (next) => set(JSON.parse(next)), 'full');
+    }
+    if (definition.type === 'boolean') return checkbox(!!value, set);
+    if (definition.type === 'number' || definition.type === 'integer') {
+      return textInput(value, (next) => set(definition.type === 'integer' ? parseInt(next || '0', 10) : parseFloat(next || '0')), {
+        type: 'number', min: definition.min, max: definition.max, step: definition.type === 'integer' ? 1 : 'any',
+      });
+    }
+    if (definition.type === 'rect') {
+      const shell = el('div', 'definition-rect-control');
+      const values = Array.isArray(value) && value.length === 4 ? value : [0, 0, 100, 100];
+      values.forEach((item, index) => shell.appendChild(textInput(item, (next) => {
+        const updated = values.slice(); updated[index] = parseInt(next || '0', 10); set(updated);
+      }, { type: 'number' })));
+      return shell;
+    }
+    if (['array', 'object', 'any'].includes(definition.type)) {
+      const area = el('textarea', 'json-value definition-json-value'); area.value = JSON.stringify(value, null, 2);
+      area.addEventListener('change', () => { try { set(JSON.parse(area.value)); } catch { toast('默认值不是有效 JSON', true); } });
+      return area;
+    }
+    if (definition.type === 'asset') {
+      const shell = el('div', 'inline-control');
+      shell.appendChild(textInput(value ?? '', set, { placeholder: 'assets/templates/...' }));
+      const browse = el('button', '', '浏览'); browse.title = '从 assets 中选择模板';
+      browse.addEventListener('click', () => openAssetBrowser(options.nodeId || '', options.key || '', value, assign));
+      shell.appendChild(browse);
+      return shell;
+    }
+    return textInput(value ?? '', set);
+  }
+
+  function optionalDefinitionNumber(body, label, definition, key, options = {}) {
+    const row = field(body, label);
+    row.appendChild(textInput(definition[key] ?? '', (value) => mutate(() => {
+      if (String(value).trim() === '') delete definition[key];
+      else definition[key] = options.integer ? parseInt(value, 10) : parseFloat(value);
+    }), { type: 'number', min: options.min, step: options.integer ? 1 : 'any', placeholder: '不限' }));
+  }
+
+  function nextEnumValue(definition) {
+    const values = Array.isArray(definition.enum) ? definition.enum : [];
+    if (definition.type === 'boolean') return values.includes(false) ? true : false;
+    if (definition.type === 'number' || definition.type === 'integer') {
+      let value = 0; while (values.includes(value)) value += 1; return value;
+    }
+    let index = values.length + 1;
+    let value = `选项 ${index}`;
+    while (values.includes(value)) { index += 1; value = `选项 ${index}`; }
+    return value;
+  }
+
+  function renderDefinitionEnum(body, definition) {
+    if (!['string', 'number', 'integer', 'boolean', 'path'].includes(definition.type)) return;
+    const heading = el('div', 'definition-option-heading');
+    heading.appendChild(el('span', '', '可选值'));
+    const add = el('button', 'small-command', '＋ 添加选项');
+    add.disabled = definition.type === 'boolean' && Array.isArray(definition.enum) && definition.enum.length >= 2;
+    add.addEventListener('click', () => mutate(() => {
+      if (!Array.isArray(definition.enum)) definition.enum = [];
+      definition.enum.push(nextEnumValue(definition));
+    }));
+    heading.appendChild(add); body.appendChild(heading);
+    const values = Array.isArray(definition.enum) ? definition.enum : [];
+    if (!values.length) body.appendChild(el('div', 'definition-option-empty', '未限制可选值'));
+    values.forEach((value, index) => {
+      const row = el('div', 'definition-enum-row');
+      const editable = { ...definition }; delete editable.enum;
+      row.appendChild(definitionValueControl(editable, value, (next) => { definition.enum[index] = next; }, { useEnum: false }));
+      const remove = el('button', 'icon-button danger', '×'); remove.title = '删除选项';
+      remove.addEventListener('click', () => mutate(() => {
+        const removed = definition.enum.splice(index, 1)[0];
+        if (!definition.enum.length) delete definition.enum;
+        if (Object.prototype.hasOwnProperty.call(definition, 'default') && sameDefinitionValue(definition.default, removed)) {
+          if (Array.isArray(definition.enum) && definition.enum.length) definition.default = clone(definition.enum[0]);
+          else delete definition.default;
+        }
+      }));
+      row.appendChild(remove); body.appendChild(row);
     });
+  }
+
+  function renameDefinitionProperty(definition, oldName, name) {
+    if (!name || name === oldName) return;
+    if (definition.properties[name]) { toast('字段名称已存在', true); return; }
+    const next = {};
+    for (const [key, value] of Object.entries(definition.properties)) next[key === oldName ? name : key] = value;
+    definition.properties = next;
+  }
+
+  function renderDefinitionShape(body, definition) {
+    if (definition.type === 'number' || definition.type === 'integer') {
+      optionalDefinitionNumber(body, '最小值', definition, 'min');
+      optionalDefinitionNumber(body, '最大值', definition, 'max');
+    } else if (['string', 'asset', 'path'].includes(definition.type)) {
+      optionalDefinitionNumber(body, '最短长度', definition, 'min_length', { integer: true, min: 0 });
+      optionalDefinitionNumber(body, '最长长度', definition, 'max_length', { integer: true, min: 0 });
+    } else if (definition.type === 'array') {
+      optionalDefinitionNumber(body, '最少元素', definition, 'min_items', { integer: true, min: 0 });
+      optionalDefinitionNumber(body, '最多元素', definition, 'max_items', { integer: true, min: 0 });
+      const itemType = field(body, '元素类型');
+      itemType.appendChild(selectInput(definition.items?.type || '', [
+        { value: '', label: '任意类型' },
+        ...DEFINITION_TYPES.map((type) => ({ value: type, label: type })),
+      ], (type) => mutate(() => { if (type) definition.items = { type }; else delete definition.items; })));
+    } else if (definition.type === 'object') {
+      if (!definition.properties || typeof definition.properties !== 'object' || Array.isArray(definition.properties)) definition.properties = {};
+      const heading = el('div', 'definition-option-heading'); heading.appendChild(el('span', '', '对象字段'));
+      const add = el('button', 'small-command', '＋ 添加字段');
+      add.addEventListener('click', () => mutate(() => {
+        let index = 1; while (definition.properties[`field_${index}`]) index += 1;
+        definition.properties[`field_${index}`] = { type: 'string' };
+      }));
+      heading.appendChild(add); body.appendChild(heading);
+      const properties = Object.entries(definition.properties);
+      if (!properties.length) body.appendChild(el('div', 'definition-option-empty', '自由对象，不限制字段'));
+      properties.forEach(([name, child]) => {
+        const row = el('div', 'definition-property-row');
+        row.appendChild(textInput(name, (value) => mutate(() => renameDefinitionProperty(definition, name, value.trim()))));
+        row.appendChild(selectInput(child.type || 'string', DEFINITION_TYPES.map((type) => ({ value: type, label: type })), (type) => mutate(() => changeDefinitionType(child, type))));
+        const required = checkbox(child.required === true, (value) => mutate(() => { if (value) child.required = true; else delete child.required; })); required.title = '必填字段'; row.appendChild(required);
+        const remove = el('button', 'icon-button danger', '×'); remove.title = '删除字段'; remove.addEventListener('click', () => mutate(() => { delete definition.properties[name]; })); row.appendChild(remove);
+        body.appendChild(row);
+      });
+    }
+  }
+
+  function renderDefinitionOptions(body, name, definition) {
+    field(body, '描述').appendChild(textInput(definition.description || '', (value) => mutate(() => {
+      if (value.trim()) definition.description = value.trim(); else delete definition.description;
+    }), { placeholder: '说明这个变量的用途' }));
+    const hasDefault = Object.prototype.hasOwnProperty.call(definition, 'default');
+    const defaultRow = field(body, '默认值');
+    const defaultShell = el('div', 'definition-default');
+    const enabled = el('label', 'check-label'); enabled.appendChild(checkbox(hasDefault, (value) => mutate(() => {
+      if (value) definition.default = initialDefinitionValue(definition); else delete definition.default;
+    }))); enabled.appendChild(el('span', '', '启用')); defaultShell.appendChild(enabled);
+    if (hasDefault) defaultShell.appendChild(definitionValueControl(definition, definition.default, (value) => { definition.default = value; }, { key: name }));
+    defaultRow.appendChild(defaultShell);
+    renderDefinitionEnum(body, definition);
+    renderDefinitionShape(body, definition);
+  }
+
+  function nextVariableName() {
+    let index = 1;
+    while (state.raw.blackboard[`new_variable_${index}`]) index += 1;
+    return `new_variable_${index}`;
+  }
+
+  function variableReferenceCount(name) {
+    const prefix = `blackboard.${name}`;
+    let count = 0;
+    const visit = (value) => {
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      if (!value || typeof value !== 'object') return;
+      if (typeof value.ref === 'string' && (value.ref === prefix || value.ref.startsWith(`${prefix}.`))) count += 1;
+      Object.values(value).forEach(visit);
+    };
+    visit(state.raw.nodes);
+    return count;
+  }
+
+  function removeVariable(name) {
+    const references = variableReferenceCount(name);
+    if (references) {
+      toast(`变量 ${name} 正在被 ${references} 处引用，不能删除`, true);
+      return;
+    }
+    mutate(() => {
+      const names = Object.keys(state.raw.blackboard);
+      const index = names.indexOf(name);
+      delete state.raw.blackboard[name];
+      const remaining = Object.keys(state.raw.blackboard);
+      state.selectedVariable = remaining[Math.min(Math.max(0, index), remaining.length - 1)] || '';
+    });
+  }
+
+  function renderVariablesInspector() {
+    const body = clearInspector('变量');
+    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
+    const add = el('button', 'icon-button variable-add', '+'); add.title = '添加变量';
+    add.addEventListener('click', () => mutate(() => {
+      const name = nextVariableName();
+      state.raw.blackboard[name] = { type: 'string', public: false };
+      state.selectedVariable = name;
+    }));
+    section(body, '变量', add);
+    const entries = Object.entries(state.raw.blackboard);
+    if (!entries.some(([name]) => name === state.selectedVariable)) state.selectedVariable = entries[0]?.[0] || '';
+
+    const list = el('div', 'variable-list');
+    if (!entries.length) list.appendChild(el('div', 'variable-list-empty', '没有变量'));
+    entries.forEach(([name, rawDefinition]) => {
+      const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition)
+        ? rawDefinition
+        : { type: 'any', public: false };
+      if (definition !== rawDefinition) state.raw.blackboard[name] = definition;
+      const item = el('button', `variable-list-item${name === state.selectedVariable ? ' selected' : ''}`);
+      item.type = 'button'; item.dataset.variable = name;
+      item.appendChild(el('span', `variable-type-dot type-${definition.type || 'any'}`));
+      item.appendChild(el('span', 'variable-list-name', name));
+      item.appendChild(el('span', 'variable-list-type', definition.type || 'any'));
+      const scope = el('span', `variable-list-scope${definition.public !== false ? ' public' : ''}`, definition.public !== false ? '公开' : '私有');
+      scope.title = definition.public !== false ? '父工作流可以传值' : '仅当前工作流可用';
+      item.appendChild(scope);
+      item.addEventListener('click', () => { state.selectedVariable = name; renderInspector(); });
+      list.appendChild(item);
+    });
+    body.appendChild(list);
+
+    const name = state.selectedVariable;
+    const definition = name ? state.raw.blackboard[name] : null;
+    if (!definition) return;
+    const remove = el('button', 'icon-button danger', '×'); remove.title = '删除变量'; remove.addEventListener('click', () => removeVariable(name));
+    section(body, '变量详情', remove);
+    const details = el('div', 'variable-details');
+    field(details, '名称').appendChild(textInput(name, (value) => renameBlackboard(name, value.trim())));
+    field(details, '类型').appendChild(selectInput(definition.type || 'string', DEFINITION_TYPES.map((value) => ({ value, label: value })), (value) => mutate(() => changeDefinitionType(definition, value))));
+    const flags = el('div', 'variable-flags');
+    const exposed = el('label', 'check-label'); exposed.appendChild(checkbox(definition.public !== false, (value) => mutate(() => { definition.public = value; }))); exposed.appendChild(el('span', '', '公开给父工作流')); flags.appendChild(exposed);
+    const required = el('label', 'check-label'); required.appendChild(checkbox(definition.required === true, (value) => mutate(() => { if (value) definition.required = true; else delete definition.required; }))); required.appendChild(el('span', '', '必填')); flags.appendChild(required);
+    details.appendChild(flags);
+    const references = variableReferenceCount(name);
+    const usage = el('div', 'variable-usage', references ? `${references} 处节点引用` : '尚未被节点引用');
+    details.appendChild(usage);
+    const options = el('div', 'variable-options'); renderDefinitionOptions(options, name, definition); details.appendChild(options);
+    body.appendChild(details);
   }
 
   function renameBlackboard(oldName, name) {
     if (!name || name === oldName) return;
-    if (state.raw.blackboard[name]) { toast('黑板键已存在', true); return; }
+    if (state.raw.blackboard[name]) { toast('变量名称已存在', true); return; }
     mutate(() => {
       const next = {};
       for (const [key, value] of Object.entries(state.raw.blackboard)) next[key === oldName ? name : key] = value;
@@ -1522,10 +2209,14 @@
       const remap = (item) => {
         if (Array.isArray(item)) return item.forEach(remap);
         if (!item || typeof item !== 'object') return;
-        if (typeof item.ref === 'string') item.ref = item.ref.replace(`blackboard.${oldName}`, `blackboard.${name}`);
+        const prefix = `blackboard.${oldName}`;
+        if (typeof item.ref === 'string' && (item.ref === prefix || item.ref.startsWith(`${prefix}.`))) {
+          item.ref = `blackboard.${name}${item.ref.slice(prefix.length)}`;
+        }
         Object.values(item).forEach(remap);
       };
       remap(state.raw.nodes);
+      state.selectedVariable = name;
     });
   }
 
@@ -1555,6 +2246,64 @@
       image.onerror = () => reject(new Error('无法渲染工作流画布'));
       image.src = dataUrl;
     });
+  }
+
+  function requestAssetDataUrls(paths) {
+    if (!paths.length) return Promise.resolve(new Map());
+    return new Promise((resolve) => {
+      const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      let settled = false;
+      const finish = (map) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', listener);
+        clearTimeout(timer);
+        resolve(map);
+      };
+      const listener = (event) => {
+        const message = event.data || {};
+        if (message.type !== 'assetData' || message.requestId !== requestId) return;
+        const map = new Map();
+        for (const entry of Array.isArray(message.items) ? message.items : []) {
+          if (entry && typeof entry.path === 'string' && typeof entry.dataUrl === 'string') map.set(entry.path, entry.dataUrl);
+        }
+        finish(map);
+      };
+      const timer = setTimeout(() => finish(new Map()), 8000);
+      window.addEventListener('message', listener);
+      vscode.postMessage({ type: 'requestAssetData', requestId, paths });
+    });
+  }
+
+  /** 收集画布上需要内嵌的模板路径（运行截图已是 data URL，无需请求）。 */
+  function collectExportTemplatePaths(root) {
+    const paths = new Set();
+    for (const image of root.querySelectorAll('image.node-preview-image')) {
+      const href = image.getAttribute('href') || '';
+      if (href && !href.startsWith('data:')) {
+        const templatePath = image.getAttribute('data-template-path') || '';
+        if (templatePath) paths.add(templatePath);
+      }
+    }
+    return [...paths];
+  }
+
+  /** 把导出克隆里的缩略图 <image> 换成内嵌 data URL，返回保留数量。 */
+  function applyInlineThumbnails(root, dataUrls) {
+    let count = 0;
+    for (const image of root.querySelectorAll('image.node-preview-image')) {
+      const href = image.getAttribute('href') || '';
+      if (href.startsWith('data:')) { count += 1; continue; }
+      const dataUrl = dataUrls.get(image.getAttribute('data-template-path') || '');
+      if (dataUrl) { image.setAttribute('href', dataUrl); count += 1; }
+    }
+    return count;
+  }
+
+  async function inlineExportThumbnails(exported) {
+    const paths = collectExportTemplatePaths(exported);
+    const dataUrls = paths.length ? await requestAssetDataUrls(paths) : new Map();
+    return applyInlineThumbnails(exported, dataUrls);
   }
 
   function encodeSvgDataUrl(value) {
@@ -1589,7 +2338,10 @@
       const world = exported.querySelector('.graph-world');
       if (!world) throw new Error('工作流画布尚未准备好');
       world.setAttribute('transform', `translate(${padding - box.minX},${padding - box.minY})`);
-      exported.querySelectorAll('.connection-preview, .marquee, .node-preview-frame, .node-preview-image, .edge-hit, .edge-rewire').forEach((element) => element.remove());
+      exported.querySelectorAll('.connection-preview, .marquee, .edge-hit, .edge-rewire').forEach((element) => element.remove());
+      // 缩略图保留进导出：把模板 <image> 的外部资源 URI 替换为内嵌 data URL，
+      // 运行截图本身已是 data URL。请求失败或文件缺失时只跳过该图，不阻断导出。
+      await inlineExportThumbnails(exported);
 
       const serialized = new XMLSerializer().serializeToString(exported);
       const image = await loadSvgImage(encodeSvgDataUrl(serialized));
@@ -1768,7 +2520,7 @@
     overlay.appendChild(dialog);
   }
 
-  function openAssetBrowser(nodeId, key, currentPath) {
+  function openAssetBrowser(nodeId, key, currentPath, applyValue = null) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const normalized = typeof currentPath === 'string' ? currentPath.replace(/\\/g, '/') : '';
     const slash = normalized.lastIndexOf('/');
@@ -1776,6 +2528,7 @@
       requestId,
       nodeId,
       key,
+      applyValue,
       images: null,
       folder: slash > 0 ? normalized.slice(0, slash) : 'assets',
       query: '',
@@ -1807,9 +2560,12 @@
   function applyAssetSelection(assetPath) {
     const browser = state.assetBrowser;
     if (!browser || !assetPath) return;
-    const node = nodeById(browser.nodeId);
-    if (!node) { closeAssetBrowser(); toast('目标节点已不存在', true); return; }
-    mutate(() => { node.params[browser.key] = assetPath; });
+    if (typeof browser.applyValue === 'function') mutate(() => browser.applyValue(assetPath));
+    else {
+      const node = nodeById(browser.nodeId);
+      if (!node) { closeAssetBrowser(); toast('目标节点已不存在', true); return; }
+      mutate(() => { node.params[browser.key] = assetPath; });
+    }
     closeAssetBrowser();
     toast('已选择模板');
   }
@@ -1977,7 +2733,11 @@
     if (!browser || !reference) return;
     const node = nodeById(browser.nodeId);
     if (!node) { closeWorkflowBrowser(); toast('目标节点已不存在', true); return; }
-    mutate(() => { node.params[browser.key] = reference; });
+    mutate(() => {
+      const changed = node.params[browser.key] !== reference;
+      node.params[browser.key] = reference;
+      if (node.action === 'workflow.run' && browser.key === 'workflow' && changed) node.params.inputs = {};
+    });
     closeWorkflowBrowser();
     toast('已选择子工作流');
   }
@@ -2187,17 +2947,20 @@
     $('btn-run').addEventListener('click', () => vscode.postMessage({ type: 'runWorkflow', instanceId: state.instanceId }));
     $('btn-stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
     $('btn-save').addEventListener('click', () => { vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' }); setDirty(false); });
-    $('btn-more').addEventListener('click', (event) => showMenu(event.clientX || window.innerWidth - 180, event.clientY || 40, [
-      { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
-      { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },
-      { label: '打开 JSON', run: () => vscode.postMessage({ type: 'openFile' }) },
-      'separator',
-      { label: '在结构树窗口查看', run: () => vscode.postMessage({ type: 'openWorkflowTree' }) },
-      'separator',
-      { label: '查看引用', run: () => vscode.postMessage({ type: 'openReferences' }) },
-      'separator',
-      { label: '重新加载', run: () => vscode.postMessage({ type: 'reloadRequest' }) },
-    ]));
+    $('btn-more').addEventListener('click', () => {
+      const rect = $('btn-more').getBoundingClientRect();
+      showMenu(rect.right, rect.bottom + 4, [
+        { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
+        { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },
+        { label: '打开 JSON', run: () => vscode.postMessage({ type: 'openFile' }) },
+        'separator',
+        { label: '在结构树窗口查看', run: () => vscode.postMessage({ type: 'openWorkflowTree' }) },
+        'separator',
+        { label: '查看引用', run: () => vscode.postMessage({ type: 'openReferences' }) },
+        'separator',
+        { label: '重新加载', run: () => vscode.postMessage({ type: 'reloadRequest' }) },
+      ], { align: 'end' });
+    });
   }
 
   function searchNodeByName(value) {
@@ -2219,6 +2982,7 @@
     state.nodeSearch = { query: normalized, ids, index };
     state.selected = new Set([target.id]);
     state.selectedEdge = null;
+    state.selectedRun = null;
     state.inspector = 'node';
     focusNode(target.id);
     toast(`卡片 ${index + 1}/${matches.length}：${String(target.name).trim()}`);
@@ -2229,11 +2993,12 @@
     else if (command === 'addSelector') addNode('selector');
     else if (command === 'addSequence') addNode('sequence');
     else if (command === 'addParallel') addNode('simple_parallel');
+    else if (command === 'addInstanceParallel') addNode('instance_parallel');
     else if (command === 'autoLayout') { autoLayout(); fitView(); }
     else if (command === 'fitView') fitView();
     else if (command === 'exportImage') exportFullCanvasImage();
-    else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; renderInspector(); }
-    else if (command === 'blackboard') { state.inspector = 'blackboard'; state.selected.clear(); state.selectedEdge = null; renderInspector(); }
+    else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }
+    else if (command === 'variables') { state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {
       const id = String(value ?? '');
@@ -2241,6 +3006,7 @@
       if (!node) return;
       state.selected = new Set([id]);
       state.selectedEdge = null;
+      state.selectedRun = null;
       state.inspector = 'node';
       focusNode(id);
     }
@@ -2261,6 +3027,7 @@
     const items = [
       { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
       { label: '＋ Sequence', run: () => addNode('sequence', point) }, { label: '＋ Simple Parallel', run: () => addNode('simple_parallel', point) },
+      { label: '＋ Instance Parallel', run: () => addNode('instance_parallel', point) },
       'separator',
     ];
     if (state.selected.size > 0) {
@@ -2281,7 +3048,15 @@
     const tag = event.target && event.target.tagName;
     const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     if (event.key === 'Escape') { if (state.connect) cancelConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
-    if (!editing && event.key === 'Delete') { event.preventDefault(); deleteSelection(); }
+    if (!editing && event.key === 'Delete') {
+      event.preventDefault();
+      if (state.selectedRun) {
+        const selection = state.selectedRun;
+        const node = nodeById(selection.nodeId);
+        if (node && Array.isArray(node.runs) && node.runs[selection.index]) removeInstanceRun(node, selection.index);
+        else { state.selectedRun = null; render(); }
+      } else deleteSelection();
+    }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); }
@@ -2315,7 +3090,7 @@
       state.documentName = message.document.name || '';
       state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
       state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
-      state.selected.clear(); state.selectedEdge = null; state.undo = []; state.redo = []; state.run.clear(); state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
+      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; state.undo = []; state.redo = []; state.run.clear(); state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
       $('btn-back').classList.toggle('hidden', !message.canGoBack);
       renderWorkflowPicker(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
       setTimeout(() => { if (!sameDocument) fitView(); }, 0);
@@ -2336,7 +3111,11 @@
     }
     else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) {
       const request = state.roi;
-      const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; });
+      const browser = request.returnToAssetBrowser ? state.assetBrowser : null;
+      if (browser && typeof browser.applyValue === 'function') mutate(() => browser.applyValue(message.path));
+      else {
+        const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; });
+      }
       state.roi = null;
       if (request.returnToAssetBrowser && state.assetBrowser) {
         state.assetBrowser.selectedPath = message.path;
@@ -2372,6 +3151,6 @@
     if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
-  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw) };
+  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw), collectExportTemplatePaths, applyInlineThumbnails };
   vscode.postMessage({ type: 'ready' });
 })();

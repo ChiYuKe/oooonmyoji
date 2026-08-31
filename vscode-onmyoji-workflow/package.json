@@ -2,7 +2,7 @@
   "name": "onmyoji-workflow-helper",
   "displayName": "Onmyoji Workflow Helper",
   "description": "为 oooonmyoji 自动化项目编写 Behavior Tree schema v3 工作流：智能补全、校验、悬停提示与可视化编辑器（支持内置与自定义 Action）",
-  "version": "0.2.27",
+  "version": "0.2.31",
   "publisher": "oooonmyoji",
   "license": "MIT",
   "engines": {

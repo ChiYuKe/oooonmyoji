@@ -70,11 +70,12 @@ const editorCommands = new Set([
   'addSelector',
   'addSequence',
   'addParallel',
+  'addInstanceParallel',
   'autoLayout',
   'fitView',
   'exportImage',
   'workflowSettings',
-  'blackboard',
+  'variables',
   'searchNodeByName',
   'focusNode',
 ]);
@@ -222,11 +223,20 @@ export class WebviewManager implements vscode.Disposable {
     const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
     const descriptors = await Promise.all(files.map(async (file): Promise<WorkflowFileDescriptor> => {
       let description = '';
+      let workflowId = '';
+      let variables: NonNullable<WorkflowFileDescriptor['variables']> = [];
       try {
         const contents = await vscode.workspace.fs.readFile(file);
         const raw: unknown = JSON.parse(Buffer.from(contents).toString('utf8'));
-        if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { description?: unknown }).description === 'string') {
-          description = (raw as { description: string }).description.trim();
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          const parsed = parseWorkflow(raw);
+          workflowId = parsed.id ?? '';
+          description = parsed.description?.trim() ?? '';
+          variables = Object.entries(parsed.blackboard).map(([name, definition]) => ({
+            name,
+            public: definition.public !== false,
+            definition,
+          }));
         }
       } catch {
         // 无法解析的脚本仍列出，只是不显示描述。
@@ -235,7 +245,9 @@ export class WebviewManager implements vscode.Disposable {
         uri: file.toString(),
         name: path.basename(file.fsPath),
         rel: vscode.workspace.asRelativePath(file),
+        ...(workflowId ? { id: workflowId } : {}),
         ...(description ? { description } : {}),
+        ...(variables.length ? { variables } : {}),
       };
     }));
     return descriptors.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.rel.localeCompare(b.rel, 'zh-CN'));
@@ -450,13 +462,14 @@ export class WebviewManager implements vscode.Disposable {
         break;
       }
       case 'openSubWorkflow': {
-        // 从当前工作流 JSON 中解析节点引用的子工作流，并切换过去。
+        // 普通 workflow.run 按节点解析；实例运行卡片可直接携带 runs[].workflow 引用。
         if (!this.docUri) break;
         const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
         if (saveText !== undefined) await this.saveCurrentText(saveText);
-        const reference = this.subWorkflowReferenceOf(String(message.nodeId ?? ''));
+        const directReference = typeof message.reference === 'string' ? message.reference.trim() : '';
+        const reference = directReference || this.subWorkflowReferenceOf(String(message.nodeId ?? ''));
         if (!reference) {
-          vscode.window.showWarningMessage('该节点不是子工作流节点（workflow.run）。');
+          vscode.window.showWarningMessage('该卡片没有配置子工作流。');
           break;
         }
         const target = await this.resolveSubWorkflowUri(reference);
@@ -622,6 +635,21 @@ export class WebviewManager implements vscode.Disposable {
         }
         break;
       }
+      case 'requestAssetData': {
+        const requestId = String(message.requestId ?? '');
+        const paths = Array.isArray(message.paths) ? message.paths.map((item) => String(item)) : [];
+        try {
+          const items = await this.readAssetDataUrls(paths);
+          void this.panel.webview.postMessage({ type: 'assetData', requestId, items });
+        } catch (error) {
+          void this.panel.webview.postMessage({
+            type: 'assetDataError',
+            requestId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        break;
+      }
       case 'saveTemplate': {
         const requestId = String(message.requestId ?? '');
         const nodeId = String(message.nodeId ?? message.stepId ?? '');
@@ -743,6 +771,35 @@ export class WebviewManager implements vscode.Disposable {
 
     await visit(assetsRoot);
     return images;
+  }
+
+  /** 读取项目内 assets 图片并返回 base64 data URL，供完整画布导出内嵌缩略图。 */
+  private async readAssetDataUrls(paths: string[]): Promise<Array<{ path: string; dataUrl: string }>> {
+    const projectRoot = path.resolve(this.getProjectRoot());
+    const assetsRoot = path.join(projectRoot, 'assets');
+    const supported = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+    const mimeByExtension = new Map([
+      ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
+      ['.webp', 'image/webp'], ['.gif', 'image/gif'], ['.bmp', 'image/bmp'],
+    ]);
+    const items: Array<{ path: string; dataUrl: string }> = [];
+    for (const raw of paths.slice(0, 64)) {
+      const relative = raw.replace(/\\/g, '/').trim();
+      if (!relative.startsWith('assets/') || relative.includes('..')) continue;
+      const absolutePath = path.resolve(projectRoot, relative);
+      if (!absolutePath.startsWith(assetsRoot + path.sep)) continue;
+      const extension = path.extname(absolutePath).toLowerCase();
+      if (!supported.has(extension)) continue;
+      try {
+        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(absolutePath));
+        if (bytes.byteLength > 8 * 1024 * 1024) continue;
+        const dataUrl = `data:${mimeByExtension.get(extension)};base64,${Buffer.from(bytes).toString('base64')}`;
+        items.push({ path: relative, dataUrl });
+      } catch {
+        // 单个文件读取失败只跳过该缩略图，不阻断整次导出。
+      }
+    }
+    return items;
   }
 
   /** 开始监听运行事件文件（引擎写入 JSONL，本方法尾随并转发给 webview）。 */

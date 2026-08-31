@@ -16,7 +16,7 @@ const {
 const { parseWorkflow, validateWorkflow, buildWorkflowSchema, collectRefSuggestions, matchWorkflowReference, collectWorkflowRunReferences, resolveWorkflowReference, buildTreeNode } = require('../out/workflow');
 const { computeLayout } = require('../out/layout');
 const { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment } = require('../out/runtimeInstances');
-const { buildPartySoulsRunArguments, buildWorkflowRunArguments } = require('../out/workflowProcess');
+const { buildPartySoulsRunArguments, buildWorkflowRunArguments, missingWorkflowInstances } = require('../out/workflowProcess');
 const extensionManifest = require('../package.json');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -88,6 +88,10 @@ async function main() {
     '-m', 'src.oooonmyoji.cli', '--config', '配置/运行.json', 'run-workflow', 'mumu_1_souls_loop.json',
     '--instance', 'mumu-1', '--events-file', '产物/events latest.jsonl',
   ]));
+  check('多实例运行前准确找出未启动实例', JSON.stringify(missingWorkflowInstances(
+    [{ instance: 'mumu-0' }, { instance: 'mumu-1' }, { instance: 'mumu-2' }],
+    [{ id: 'mumu-0' }, { id: 'mumu-1' }],
+  )) === JSON.stringify(['mumu-2']));
   const partyArgs = buildPartySoulsRunArguments('配置/运行.json', 'mumu-0', 'mumu-1', 9999, '日志/队长.jsonl', '日志/队员.jsonl');
   check('组队御魂参数直接启动双实例协调入口', JSON.stringify(partyArgs) === JSON.stringify([
     '-m', 'src.oooonmyoji.cli', '--config', '配置/运行.json', 'run-party-souls',
@@ -141,9 +145,14 @@ async function main() {
   check('解析 Root', info.root === 'root' && info.nodes[0].type === 'root');
   check('解析工作流描述', info.description === '用于扩展冒烟测试的工作流');
   check('解析有序 children', JSON.stringify(info.nodes.find((node) => node.id === 'main').children) === JSON.stringify(['capture', 'wait', 'choice']));
-  check('解析黑板键', info.blackboardProps.includes('verify_timeout'));
+  check('解析工作流变量', info.blackboardProps.includes('verify_timeout'));
   check('解析装饰器', info.nodes.find((node) => node.id === 'wait').decorators[0].type === 'timeout');
   check('合法 Behavior Tree 无错误', errorsOf(FIXTURE, catalog).length === 0);
+  const threeInstance = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'workflows', 'examples', 'three_instance_parallel.json'), 'utf8'));
+  const threeInfo = parseWorkflow(threeInstance);
+  const threeNode = threeInfo.nodes.find((node) => node.type === 'instance_parallel');
+  check('解析 Instance Parallel 节点', !!threeNode && threeNode.runs.length === 3 && threeNode.runs[0].instance === 'mumu-0');
+  check('Instance Parallel 示例通过编辑器校验', errorsOf(threeInstance, catalog).length === 0);
 
   const duplicate = clone(FIXTURE); duplicate.nodes.push(clone(duplicate.nodes[2]));
   check('拒绝重复节点', errorsOf(duplicate, catalog).some((item) => item.code === 'duplicate-node'));
@@ -170,6 +179,16 @@ async function main() {
   check('拒绝 Selector 分支间普通参数引用', errorsOf(branchRef, catalog).some((item) => item.code === 'unavailable-ref'));
   const unsafeRetry = clone(FIXTURE); unsafeRetry.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'retry', attempts: 3 });
   check('拒绝副作用 Action 重试', errorsOf(unsafeRetry, catalog).some((item) => item.code === 'unsafe-retry'));
+  const doOnce = clone(FIXTURE); doOnce.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'do_once' });
+  check('接受 do_once 装饰器', errorsOf(doOnce, catalog).length === 0);
+  const duplicateDoOnce = clone(FIXTURE); duplicateDoOnce.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'do_once' }, { type: 'do_once' });
+  check('拒绝重复 do_once 装饰器', errorsOf(duplicateDoOnce, catalog).some((item) => item.code === 'duplicate-decorator'));
+  const doOnceExtra = clone(FIXTURE); doOnceExtra.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'do_once', seconds: 1 });
+  check('拒绝 do_once 未知字段', errorsOf(doOnceExtra, catalog).some((item) => item.code === 'invalid-decorator'));
+  const doOnceReset = clone(FIXTURE); doOnceReset.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'do_once', reset_on_failure: true });
+  check('接受 do_once reset_on_failure', errorsOf(doOnceReset, catalog).length === 0);
+  const doOnceResetBad = clone(FIXTURE); doOnceResetBad.nodes.find((node) => node.id === 'tap').decorators.push({ type: 'do_once', reset_on_failure: 'yes' });
+  check('拒绝 do_once 非布尔 reset_on_failure', errorsOf(doOnceResetBad, catalog).some((item) => item.code === 'invalid-decorator'));
   const parallel = clone(FIXTURE); parallel.nodes.find((node) => node.id === 'choice').type = 'simple_parallel'; parallel.nodes.find((node) => node.id === 'choice').children[0] = 'main';
   check('拒绝 Parallel 非 Task 主分支', errorsOf(parallel, catalog).some((item) => item.code === 'parallel-main-task'));
   check('拒绝 schema v2', errorsOf({ ...FIXTURE, schema_version: 2 }, catalog).some((item) => item.code === 'schema-version'));
@@ -179,7 +198,7 @@ async function main() {
   check('Schema 支持工作流描述', schema.properties.description.type === 'string');
   check('Schema children 使用节点枚举', schema.properties.nodes.items.properties.children.items.enum.includes('tap'));
   const refs = collectRefSuggestions(info, catalog);
-  check('黑板引用补全', refs.blackboard.includes('blackboard.verify_timeout'));
+  check('工作流变量引用补全', refs.blackboard.includes('blackboard.verify_timeout'));
   check('节点输出引用补全', refs.nodes.includes('nodes.capture.output.width'));
   check('数组输出补全首个匹配对象与字段', refs.nodes.includes('nodes.wait.output.0') && refs.nodes.includes('nodes.wait.output.0.confidence'));
   const matchRefs = collectRefSuggestions(info, catalog, 'tap', { type: 'object' });
@@ -213,17 +232,17 @@ async function main() {
     .sort()
     .map((rel) => ({ uri: `file:///${rel}`, name: rel.split('/').pop(), rel }));
   const projectRead = async (uri) => fs.readFileSync(path.join(PROJECT_ROOT, uri.replace('file:///', '')), 'utf8');
-  const leaderRaw = JSON.parse(await projectRead('file:///workflows/mumu_0_souls_party_leader.json'));
+  const leaderRaw = JSON.parse(await projectRead('file:///workflows/entrypoints/mumu_0_souls_party_leader.json'));
   const leaderRefs = collectWorkflowRunReferences(leaderRaw);
   check('队长工作流收集 4 处子流程引用且节点 ID 齐全', leaderRefs.length === 4 && leaderRefs.every((entry) => entry.nodeId && entry.reference));
   const leaderResolved = [];
   for (const entry of leaderRefs) leaderResolved.push(await resolveWorkflowReference(entry.reference, projectFiles, projectRead));
   check('队长引用全部解析到文件', leaderResolved.length === 4 && leaderResolved.every(Boolean));
-  check('文件名引用解析到回合脚本', leaderResolved.filter((uri) => uri === 'file:///workflows/souls_party_leader_round.json').length === 3);
-  check('_souls 路径引用解析到子目录脚本', leaderResolved.includes('file:///workflows/_souls/task_in_souls.json'));
+  check('文件名引用解析到回合脚本', leaderResolved.filter((uri) => uri === 'file:///workflows/souls/party/leader_round.json').length === 3);
+  check('shared 路径引用解析到公共子流程', leaderResolved.includes('file:///workflows/souls/shared/task_in_souls.json'));
 
   const backRefs = [];
-  const rewardUri = 'file:///workflows/reward_statistics.json';
+  const rewardUri = 'file:///workflows/souls/shared/reward_statistics.json';
   for (const file of projectFiles) {
     if (file.uri === rewardUri) continue;
     for (const entry of collectWorkflowRunReferences(JSON.parse(await projectRead(file.uri)))) {
@@ -233,9 +252,9 @@ async function main() {
     }
   }
   check('奖励统计脚本被多个工作流引用（含回合脚本）', backRefs.length >= 3
-    && backRefs.some((item) => item.file === 'workflows/souls_party_leader_round.json')
-    && backRefs.some((item) => item.file === 'workflows/mumu_1_souls_loop.json'));
-  const testRaw = JSON.parse(await projectRead('file:///workflows/test_workflow.json'));
+    && backRefs.some((item) => item.file === 'workflows/souls/party/leader_round.json')
+    && backRefs.some((item) => item.file === 'workflows/entrypoints/mumu_1_souls_loop.json'));
+  const testRaw = JSON.parse(await projectRead('file:///workflows/examples/test_workflow.json'));
   check('悬空引用在收集层仍是条目、解析层返回 undefined', collectWorkflowRunReferences(testRaw).length > 0
     && (await resolveWorkflowReference('no_such_flow.json', projectFiles, projectRead)) === undefined);
 
@@ -250,12 +269,12 @@ async function main() {
 
   // 结构树：真实项目文件构建层级（与独立结构树窗口同一函数）。
   const flattenTree = (nodes, out = []) => { for (const node of nodes) { out.push(node); flattenTree(node.children, out); } return out; };
-  const leaderTree = buildTreeNode(JSON.parse(await projectRead('file:///workflows/mumu_0_souls_party_leader.json')));
+  const leaderTree = buildTreeNode(JSON.parse(await projectRead('file:///workflows/entrypoints/mumu_0_souls_party_leader.json')));
   const leaderLeaves = flattenTree(leaderTree);
   check('结构树从 root 构建完整层级', leaderTree.length === 1 && leaderTree[0].type === 'root' && leaderTree[0].id === 'root' && leaderLeaves.length > 10);
   check('结构树标记子流程引用节点', leaderLeaves.some((node) => node.meta.startsWith('⇢ ')));
   check('结构树节点 ID 与类型齐全', leaderLeaves.every((node) => node.id && node.type));
-  const roundTree = buildTreeNode(JSON.parse(await projectRead('file:///workflows/souls_party_leader_round.json')));
+  const roundTree = buildTreeNode(JSON.parse(await projectRead('file:///workflows/souls/party/leader_round.json')));
   check('结构树子流程引用显示目标文件名', flattenTree(roundTree).some((node) => node.meta === '⇢ reward_statistics.json'));
   check('空输入构建空树', buildTreeNode(null).length === 0 && buildTreeNode({ nodes: 'x' }).length === 0);
 

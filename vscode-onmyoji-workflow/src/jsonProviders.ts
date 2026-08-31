@@ -285,7 +285,7 @@ export class WorkflowIntelligence implements vscode.Disposable {
         item.range = replaceRange;
         item.insertText = refPath;
         item.filterText = refPath;
-        item.detail = refPath.startsWith('blackboard.') ? '黑板键引用' : '节点输出引用';
+        item.detail = refPath.startsWith('blackboard.') ? '工作流变量引用' : '节点输出引用';
         item.documentation = new vscode.MarkdownString('结构化绑定，引擎仅支持 `blackboard.<键>` 与 `nodes.<节点id>.output.<字段>`');
         items.push(item);
       }
@@ -445,10 +445,10 @@ function customHover(node: Node, catalog: ActionCatalog, info: WorkflowInfo): vs
       const prop = info.blackboard[propName];
       if (prop) {
         const def = prop.default !== undefined ? JSON.stringify(prop.default) : undefined;
-        md.appendMarkdown(`黑板键 \`${propName}\`（${prop.type}${def !== undefined ? `，默认 ${def}` : ''}）`);
+        md.appendMarkdown(`工作流变量 \`${propName}\`（${prop.type}${def !== undefined ? `，默认 ${def}` : ''}）`);
         if (prop.description) md.appendMarkdown(`\n\n${prop.description}`);
       } else {
-        md.appendMarkdown('引用 `blackboard` 中未声明的键');
+        md.appendMarkdown('引用了未声明的工作流变量');
       }
     } else if (parts[0] === 'nodes' && parts[2] === 'output') {
       const nodeId = parts[1] ?? '';

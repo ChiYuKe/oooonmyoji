@@ -24,11 +24,10 @@ class ElementStub {
   }
 }
 
-const ids = ['run-party', 'stop', 'open-editor', 'open-log', 'open-tree', 'open-refs', 'validate', 'rounds', 'run-status', 'status-text', 'node-search', 'find-node'];
+const ids = ['stop', 'open-editor', 'open-log', 'open-tree', 'open-refs', 'validate', 'run-status', 'status-text', 'node-search', 'find-node'];
 const elements = Object.fromEntries(ids.map((id) => [id, new ElementStub(id)]));
-const editorCommands = ['workflowSettings', 'blackboard', 'addTask', 'addSelector', 'addSequence', 'addParallel', 'autoLayout', 'fitView', 'exportImage'];
+const editorCommands = ['workflowSettings', 'variables', 'addTask', 'addSelector', 'addSequence', 'addParallel', 'autoLayout', 'fitView', 'exportImage'];
 const editorButtons = editorCommands.map((command) => new ElementStub(`editor-${command}`, command));
-elements.rounds.value = '9999';
 const posted = [];
 const windowListeners = {};
 const context = {
@@ -54,9 +53,6 @@ const check = (name, condition) => {
 };
 
 check('侧边栏初始化发送 ready', posted.some((message) => message.type === 'ready'));
-elements.rounds.value = '1';
-elements['run-party'].fire('click');
-check('组队按钮发送所选场数', posted.some((message) => message.type === 'runPartySouls' && message.rounds === 1));
 elements.stop.fire('click');
 elements['open-editor'].fire('click');
 elements['open-log'].fire('click');
@@ -75,10 +71,10 @@ elements['node-search'].fire('keydown', { key: 'Enter' });
 check('卡片查找支持回车提交', posted.some((message) => message.type === 'editorCommand' && message.command === 'searchNodeByName' && message.value === '奖励'));
 
 for (const listener of windowListeners.message || []) {
-  listener({ data: { type: 'state', state: 'running', detail: '组队御魂 · 9999 场', rounds: 9999 } });
+  listener({ data: { type: 'state', state: 'running', detail: 'three_mumu_souls_parallel · 3 个实例' } });
 }
-check('运行状态禁用重复启动', elements['run-party'].disabled && elements.rounds.disabled && !elements.stop.disabled);
-check('运行状态文字更新', elements['run-status'].className === 'status running' && elements['status-text'].textContent === '组队御魂 · 9999 场');
+check('运行状态启用停止按钮', !elements.stop.disabled);
+check('运行状态文字更新', elements['run-status'].className === 'status running' && elements['status-text'].textContent === 'three_mumu_souls_parallel · 3 个实例');
 
 if (!ok) process.exit(1);
 console.log('SIDEBAR DOM SMOKE OK');

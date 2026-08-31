@@ -72,6 +72,12 @@ def main() -> int:
     checks.append(("old ref namespace rejected", verdict(old_ref) == "reject"))
     unsafe_retry = copy.deepcopy(FIXTURE); unsafe_retry["nodes"][4]["decorators"].append({"type": "retry", "attempts": 2})
     checks.append(("unsafe retry rejected", verdict(unsafe_retry) == "reject"))
+    do_once = copy.deepcopy(FIXTURE); do_once["nodes"][4]["decorators"].append({"type": "do_once"})
+    checks.append(("do_once decorator accepted", verdict(do_once) == "accept"))
+    do_once_reset = copy.deepcopy(FIXTURE); do_once_reset["nodes"][4]["decorators"].append({"type": "do_once", "reset_on_failure": True})
+    checks.append(("do_once reset_on_failure accepted", verdict(do_once_reset) == "accept"))
+    duplicate_do_once = copy.deepcopy(FIXTURE); duplicate_do_once["nodes"][4]["decorators"].extend([{"type": "do_once"}, {"type": "do_once"}])
+    checks.append(("duplicate do_once rejected", verdict(duplicate_do_once) == "reject"))
     old_schema = copy.deepcopy(FIXTURE); old_schema["schema_version"] = 2
     checks.append(("schema v2 rejected", verdict(old_schema) == "reject"))
 

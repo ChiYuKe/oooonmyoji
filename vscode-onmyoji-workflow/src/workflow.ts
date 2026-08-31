@@ -8,10 +8,11 @@ import {
   parseParameterDefinition,
 } from './catalog';
 
-export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'task'] as const;
-export const DECORATOR_TYPES = ['condition', 'cooldown', 'timeout', 'retry', 'repeat'] as const;
+export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'instance_parallel', 'task'] as const;
+export const DECORATOR_TYPES = ['condition', 'cooldown', 'timeout', 'retry', 'repeat', 'do_once'] as const;
 export const PARALLEL_FINISH_MODES = ['abort_background', 'wait_for_background'] as const;
 export const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'] as const;
+export const INSTANCE_PARALLEL_WAIT_MODES = ['all', 'any'] as const;
 
 export type NodeType = typeof NODE_TYPES[number];
 export type Severity = 'error' | 'warning' | 'info';
@@ -30,6 +31,7 @@ export interface DecoratorInfo {
   attempts?: number;
   delaySeconds?: number;
   count?: number;
+  resetOnFailure?: boolean;
   raw: Record<string, unknown>;
 }
 
@@ -43,6 +45,15 @@ export interface NodeInfo {
   children: string[];
   decorators: DecoratorInfo[];
   finishMode: 'abort_background' | 'wait_for_background';
+  runs: InstanceParallelRunInfo[];
+  waitFor: 'all' | 'any';
+  cancelOnFailure: boolean;
+}
+
+export interface InstanceParallelRunInfo {
+  instance: string;
+  workflow: string;
+  inputs: Record<string, unknown>;
 }
 
 export interface WorkflowInfo {
@@ -80,6 +91,7 @@ function parsedDecorator(raw: unknown): DecoratorInfo | undefined {
   if (typeof raw.attempts === 'number') out.attempts = raw.attempts;
   if (typeof raw.delay_seconds === 'number') out.delaySeconds = raw.delay_seconds;
   if (typeof raw.count === 'number') out.count = raw.count;
+  if (typeof raw.reset_on_failure === 'boolean') out.resetOnFailure = raw.reset_on_failure;
   return out;
 }
 
@@ -125,6 +137,16 @@ export function parseWorkflow(raw: unknown): WorkflowInfo {
         children: Array.isArray(object.children) ? object.children.filter((child): child is string => typeof child === 'string') : [],
         decorators: Array.isArray(object.decorators) ? object.decorators.flatMap((decorator) => parsedDecorator(decorator) ?? []) : [],
         finishMode: object.finish_mode === 'wait_for_background' ? 'wait_for_background' : 'abort_background',
+        runs: Array.isArray(object.runs) ? object.runs.flatMap((run): InstanceParallelRunInfo[] => {
+          if (!isObject(run)) return [];
+          return [{
+            instance: typeof run.instance === 'string' ? run.instance : '',
+            workflow: typeof run.workflow === 'string' ? run.workflow : '',
+            inputs: isObject(run.inputs) ? run.inputs : {},
+          }];
+        }) : [],
+        waitFor: object.wait_for === 'any' ? 'any' : 'all',
+        cancelOnFailure: object.cancel_on_failure !== false,
       };
     });
   }
@@ -309,7 +331,7 @@ function resolveRefSchema(
     const parameter = context.info.blackboard[parts[1]];
     const resolved = parameter ? schemaAtPath(parameterToSchema(parameter), parts.slice(2)) : undefined;
     if (resolved) return resolved;
-    issues.push({ path, message: `绑定引用了未声明的黑板键：${ref}`, severity: 'error', code: 'unknown-ref' });
+    issues.push({ path, message: `绑定引用了未声明的工作流变量：${ref}`, severity: 'error', code: 'unknown-ref' });
     return undefined;
   }
   if (parts.length >= 4 && parts[0] === 'nodes' && parts[2] === 'output' && context.nodeIds.has(parts[1]) && parts.slice(3).every(Boolean)) {
@@ -431,10 +453,10 @@ function validateDecorator(
   }
   const allowed: Record<string, string[]> = {
     condition: ['type', 'expression'], cooldown: ['type', 'seconds'], timeout: ['type', 'seconds'],
-    retry: ['type', 'attempts', 'delay_seconds'], repeat: ['type', 'count'],
+    retry: ['type', 'attempts', 'delay_seconds'], repeat: ['type', 'count'], do_once: ['type', 'reset_on_failure'],
   };
   const required: Record<string, string[]> = {
-    condition: ['expression'], cooldown: ['seconds'], timeout: ['seconds'], retry: ['attempts'], repeat: ['count'],
+    condition: ['expression'], cooldown: ['seconds'], timeout: ['seconds'], retry: ['attempts'], repeat: ['count'], do_once: [],
   };
   const extras = Object.keys(item).filter((key) => !allowed[type].includes(key));
   if (extras.length) issues.push(issue(path, `装饰器包含未知字段：${extras.join(', ')}`, 'invalid-decorator'));
@@ -444,6 +466,22 @@ function validateDecorator(
   if (type === 'retry' && (!Number.isInteger(item.attempts) || Number(item.attempts) < 1)) issues.push(issue([...path, 'attempts'], 'attempts 必须是正整数', 'invalid-decorator'));
   if (type === 'retry' && item.delay_seconds !== undefined && (typeof item.delay_seconds !== 'number' || item.delay_seconds < 0)) issues.push(issue([...path, 'delay_seconds'], 'delay_seconds 不能小于 0', 'invalid-decorator'));
   if (type === 'repeat' && (!Number.isInteger(item.count) || Number(item.count) < 1)) issues.push(issue([...path, 'count'], 'count 必须是正整数', 'invalid-decorator'));
+  if (type === 'do_once' && item.reset_on_failure !== undefined && typeof item.reset_on_failure !== 'boolean') issues.push(issue([...path, 'reset_on_failure'], 'reset_on_failure 必须是布尔值', 'invalid-decorator'));
+}
+
+function validateInstanceParallelInputs(value: unknown, path: (string | number)[], issues: ValidationIssue[]): void {
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => validateInstanceParallelInputs(child, [...path, index], issues));
+    return;
+  }
+  if (!isObject(value)) return;
+  if ('ref' in value) {
+    if (Object.keys(value).length !== 1 || typeof value.ref !== 'string' || !value.ref.startsWith('blackboard.')) {
+      issues.push(issue(path, '实例并行 inputs 只能绑定父工作流变量', 'invalid-instance-binding'));
+    }
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) validateInstanceParallelInputs(child, [...path, key], issues);
 }
 
 export function validateWorkflow(raw: unknown, catalog: ActionCatalog): ValidationIssue[] {
@@ -459,9 +497,12 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
   if (!Array.isArray(root.resolution) || root.resolution.length !== 2 || !root.resolution.every((value) => Number.isInteger(value) && Number(value) > 0)) issues.push(issue(['resolution'], 'resolution 必须包含两个正整数', 'invalid-resolution'));
   if (!Array.isArray(root.nodes) || root.nodes.length < 2) issues.push(issue(['nodes'], 'Behavior Tree 至少需要 Root 和一个子节点', 'invalid-nodes'));
   if (root.blackboard !== undefined && !isObject(root.blackboard)) {
-    issues.push(issue(['blackboard'], 'blackboard 必须是参数定义对象', 'invalid-blackboard'));
+    issues.push(issue(['blackboard'], '工作流变量必须是定义对象', 'invalid-blackboard'));
   } else if (isObject(root.blackboard)) {
     for (const [name, definition] of Object.entries(root.blackboard)) {
+      if (isObject(definition) && definition.public !== undefined && typeof definition.public !== 'boolean') {
+        issues.push(issue(['blackboard', name, 'public'], 'public 必须是布尔值', 'invalid-variable-visibility'));
+      }
       try { parseParameterDefinition(definition, `blackboard.${name}`); }
       catch (error) { issues.push(issue(['blackboard', name], (error as Error).message, 'invalid-blackboard-definition')); }
     }
@@ -514,8 +555,37 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
           }
         }
       }
+    } else if (node.type === 'instance_parallel') {
+      if (['action', 'params', 'children', 'finish_mode'].some((key) => key in rawNode)) {
+        issues.push(issue(path, 'Instance Parallel 不能定义 action、params、children 或 finish_mode', 'invalid-instance-parallel'));
+      }
+      if (node.decorators.length) issues.push(issue([...path, 'decorators'], 'Instance Parallel 不能挂装饰器', 'invalid-instance-parallel'));
+      if (!Array.isArray(rawNode.runs) || rawNode.runs.length === 0) {
+        issues.push(issue([...path, 'runs'], 'Instance Parallel 至少需要一个运行项', 'instance-run-count'));
+      } else {
+        const seen = new Set<string>();
+        rawNode.runs.forEach((run, runIndex) => {
+          const runPath = [...path, 'runs', runIndex];
+          if (!isObject(run)) { issues.push(issue(runPath, '运行项必须是对象', 'invalid-instance-run')); return; }
+          if (typeof run.instance !== 'string' || !run.instance.trim()) issues.push(issue([...runPath, 'instance'], 'instance 必须是非空字符串', 'invalid-instance-run'));
+          else if (seen.has(run.instance)) issues.push(issue([...runPath, 'instance'], `实例重复：${run.instance}`, 'duplicate-instance-run'));
+          else seen.add(run.instance);
+          if (typeof run.workflow !== 'string' || !run.workflow.trim()) issues.push(issue([...runPath, 'workflow'], 'workflow 必须是非空字符串', 'invalid-instance-run'));
+          if (run.inputs !== undefined && !isObject(run.inputs)) issues.push(issue([...runPath, 'inputs'], 'inputs 必须是对象', 'invalid-instance-inputs'));
+          if (run.inputs !== undefined) validateInstanceParallelInputs(run.inputs, [...runPath, 'inputs'], issues);
+          const allowed = new Set(['instance', 'workflow', 'inputs']);
+          for (const key of Object.keys(run)) if (!allowed.has(key)) issues.push(issue([...runPath, key], `运行项包含未知字段：${key}`, 'invalid-instance-run'));
+        });
+      }
+      if (rawNode.wait_for !== undefined && !INSTANCE_PARALLEL_WAIT_MODES.includes(rawNode.wait_for as typeof INSTANCE_PARALLEL_WAIT_MODES[number])) {
+        issues.push(issue([...path, 'wait_for'], 'wait_for 必须是 all 或 any', 'invalid-instance-parallel'));
+      }
+      if (rawNode.cancel_on_failure !== undefined && typeof rawNode.cancel_on_failure !== 'boolean') {
+        issues.push(issue([...path, 'cancel_on_failure'], 'cancel_on_failure 必须是布尔值', 'invalid-instance-parallel'));
+      }
     } else {
       if ('action' in rawNode || 'params' in rawNode) issues.push(issue(path, `${node.type} 不能定义 action 或 params`, 'invalid-composite'));
+      if (['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
       if (node.type === 'root' && node.decorators.length) issues.push(issue([...path, 'decorators'], 'Root 不能挂装饰器', 'invalid-root'));
       if (!Array.isArray(rawNode.children)) issues.push(issue([...path, 'children'], `${node.type} 必须定义 children`, 'invalid-children'));
       if (node.type === 'root' && node.children.length !== 1) issues.push(issue([...path, 'children'], 'Root 必须恰好连接一个子节点', 'root-child-count'));
@@ -535,6 +605,12 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
   if (typeof root.root === 'string' && !rootNode) issues.push(issue(['root'], `root 指向不存在的节点：${root.root}`, 'unknown-root'));
   else if (rootNode?.type !== 'root') issues.push(issue(['root'], 'root 必须指向 Root 类型节点', 'invalid-root'));
   if (rootNode && (parents.get(rootNode.id) ?? 0) !== 0) issues.push(issue(['root'], 'Root 不能有父节点', 'root-parent'));
+  for (const node of info.nodes) {
+    if (node.type !== 'instance_parallel') continue;
+    if (!rootNode || rootNode.children.length !== 1 || rootNode.children[0] !== node.id || (parents.get(node.id) ?? 0) !== 1) {
+      issues.push(issue(['nodes', node.index], 'Instance Parallel 必须是 Root 的唯一直接子节点', 'instance-parallel-root-only'));
+    }
+  }
   for (const node of info.nodes) {
     if (rootNode && node.id !== rootNode.id && (parents.get(node.id) ?? 0) !== 1) issues.push(issue(['nodes', node.index], `节点 ${node.id} 必须恰好有一个父节点`, 'parent-count'));
   }
@@ -578,8 +654,18 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog):
             id: { type: 'string', minLength: 1 }, type: { enum: [...NODE_TYPES] }, name: { type: 'string', minLength: 1 },
             action: { type: 'string', enum: catalog.names() }, params: { type: 'object' },
             children: { type: 'array', items: { type: 'string', enum: info.nodeIds }, uniqueItems: true },
-            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, expression: {}, seconds: { type: 'number', exclusiveMinimum: 0 }, attempts: { type: 'integer', minimum: 1 }, delay_seconds: { type: 'number', minimum: 0 }, count: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, expression: {}, seconds: { type: 'number', exclusiveMinimum: 0 }, attempts: { type: 'integer', minimum: 1 }, delay_seconds: { type: 'number', minimum: 0 }, count: { type: 'integer', minimum: 1 }, reset_on_failure: { type: 'boolean' } }, additionalProperties: false } },
             finish_mode: { enum: [...PARALLEL_FINISH_MODES] },
+            runs: {
+              type: 'array', minItems: 1,
+              items: {
+                type: 'object', required: ['instance', 'workflow'],
+                properties: { instance: { type: 'string', minLength: 1 }, workflow: { type: 'string', minLength: 1 }, inputs: { type: 'object' } },
+                additionalProperties: false,
+              },
+            },
+            wait_for: { enum: [...INSTANCE_PARALLEL_WAIT_MODES] },
+            cancel_on_failure: { type: 'boolean' },
           },
           additionalProperties: false,
         },
@@ -652,7 +738,13 @@ export interface WorkflowFileDescriptor {
   uri: string;
   name: string;
   rel: string;
+  id?: string;
   description?: string;
+  variables?: Array<{
+    name: string;
+    public: boolean;
+    definition: ParameterInfo;
+  }>;
 }
 
 /**
@@ -709,7 +801,9 @@ export function buildTreeNode(raw: unknown): TreeNodePayload[] {
       : '';
     const meta = type === 'task'
       ? (subRef ? `⇢ ${subRef}` : typeof node.action === 'string' ? node.action : 'task')
-      : type;
+      : type === 'instance_parallel' && Array.isArray(node.runs)
+        ? `${node.runs.length} 个实例`
+        : type;
     const entry: TreeNodePayload = {
       id,
       name: typeof node.name === 'string' && node.name.trim() ? node.name.trim() : id,

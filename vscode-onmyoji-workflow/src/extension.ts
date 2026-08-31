@@ -15,7 +15,7 @@ import { WorkflowTreeManager } from './workflowTreeManager';
 import { chooseRuntimeInstance, parseRuntimeInstances, pythonUtf8Environment, RuntimeInstanceInfo } from './runtimeInstances';
 import { SidebarProvider } from './sidebarProvider';
 import { TemplateCheckOptions, TemplateCheckResult, WebviewManager } from './webviewManager';
-import { buildPartySoulsRunArguments, buildWorkflowRunArguments } from './workflowProcess';
+import { buildPartySoulsRunArguments, buildWorkflowRunArguments, missingWorkflowInstances } from './workflowProcess';
 
 let intelligence: WorkflowIntelligence;
 let webviewManager: WebviewManager;
@@ -488,7 +488,7 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
   const active = vscode.window.activeTextEditor;
   const uri = preferred ?? (active && intelligence.isWorkflowFile(active.document.uri) ? active.document.uri : undefined);
   if (!uri || !intelligence.isWorkflowFile(uri)) {
-    void vscode.window.showInformationMessage('请先打开一个 workflows/*.json 文件，或从工作流编辑器中执行。');
+    void vscode.window.showInformationMessage('请先打开一个 workflows/**/*.json 文件，或从工作流编辑器中执行。');
     return;
   }
 
@@ -513,17 +513,64 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
 
   const configPath = resolveRuntimeConfigPath();
   const pythonPath = resolvePythonExecutable();
-  const instance = await rememberRuntimeInstance(requestedInstance ?? '');
-
   const workflowReference = relative.split(path.sep).join('/');
+  let orchestrationRuns: Array<{ instance: string; workflow: string }> = [];
+  try {
+    const raw = JSON.parse(doc.getText()) as { root?: string; nodes?: Array<{ id?: string; type?: string; children?: string[]; runs?: unknown }> };
+    const rootNode = raw.nodes?.find((node) => node.id === raw.root && node.type === 'root');
+    const child = rootNode && Array.isArray(raw.nodes) ? raw.nodes.find((node) => node.id === rootNode.children?.[0]) : undefined;
+    if (child?.type === 'instance_parallel' && Array.isArray(child.runs)) {
+      orchestrationRuns = child.runs.flatMap((run) => {
+        if (!run || typeof run !== 'object' || Array.isArray(run)) return [];
+        const value = run as { instance?: unknown; workflow?: unknown };
+        return typeof value.instance === 'string' && typeof value.workflow === 'string'
+          ? [{ instance: value.instance, workflow: value.workflow }]
+          : [];
+      });
+    }
+  } catch {
+    // JSON diagnostics are shown by the editor/engine; execution will report the parse error.
+  }
+  const isMultiRun = orchestrationRuns.length > 0;
+  const instance = isMultiRun ? orchestrationRuns[0].instance : await rememberRuntimeInstance(requestedInstance ?? '');
+  const runSources = orchestrationRuns.map((run, index) => ({
+    id: `${run.instance}-${index}`,
+    label: run.instance,
+    workflow: run.workflow,
+    instance: run.instance,
+  }));
+  if (isMultiRun) {
+    const missingInstances = missingWorkflowInstances(orchestrationRuns, await getRuntimeInstances());
+    if (missingInstances.length > 0) {
+      const message = `无法启动：未发现运行实例 ${missingInstances.join('、')}。请先启动对应 MuMu 实例，或从 Instance Parallel 中删除该运行项。`;
+      await runLogManager.beginMultiRun(path.basename(uri.fsPath), runSources);
+      runLogManager.appendOutput(`${message}\n`, 'stderr');
+      runLogManager.finishProcess(2, null, false);
+      await runLogManager.open();
+      sidebarProvider.setRunState('error', `缺少实例 · ${missingInstances.join('、')}`);
+      void vscode.window.showErrorMessage(message);
+      return;
+    }
+  }
   // 无论从哪个入口执行（面板▶ / 命令面板 / 编辑器标题栏），都写运行事件文件并让编辑器监听
-  const eventsFile = eventsFilePath ?? resolveEventsFilePath(projectRoot);
-  await runLogManager.beginRun(path.basename(uri.fsPath), instance);
-  webviewManager.startRunWatcher(eventsFile);
+  const eventStamp = Date.now();
+  const eventsFile = isMultiRun
+    ? eventsFilePath ?? path.join(resolveArtifactDir(projectRoot), 'runs', `events-group-${eventStamp}.jsonl`)
+    : eventsFilePath ?? resolveEventsFilePath(projectRoot);
+  if (isMultiRun) {
+    await runLogManager.beginMultiRun(path.basename(uri.fsPath), runSources);
+    runLogManager.startEventSources(orchestrationRuns.map((run, index) => ({
+      id: `${run.instance}-${index}`,
+      filePath: path.join(path.dirname(eventsFile), `${path.basename(eventsFile, path.extname(eventsFile))}-${run.instance}${path.extname(eventsFile) || '.jsonl'}`),
+    })));
+  } else {
+    await runLogManager.beginRun(path.basename(uri.fsPath), instance);
+    webviewManager.startRunWatcher(eventsFile);
+  }
   const args = buildWorkflowRunArguments(configPath, workflowReference, instance, eventsFile);
   workflowOutput.clear();
   workflowOutput.appendLine(`启动工作流：${path.basename(uri.fsPath)}`);
-  workflowOutput.appendLine(`运行实例：${instance}`);
+  workflowOutput.appendLine(`运行实例：${isMultiRun ? orchestrationRuns.map((run) => run.instance).join(', ') : instance}`);
   workflowOutput.appendLine('');
 
   const child = spawn(pythonPath, args, {
@@ -534,7 +581,7 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
   });
   activeWorkflowProcess = child;
   workflowStopRequested = false;
-  sidebarProvider.setRunState('running', `${path.basename(uri.fsPath)} · ${instance}`);
+  sidebarProvider.setRunState('running', `${path.basename(uri.fsPath)} · ${isMultiRun ? `${orchestrationRuns.length} 个实例` : instance}`);
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string | Buffer) => {
@@ -550,7 +597,7 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
     launchFailed = true;
     workflowOutput.appendLine(`\n启动失败：${error.message}`);
     runLogManager.appendOutput(`\n启动失败：${error.message}\n`, 'stderr');
-    webviewManager.finishRunWatcher();
+    if (isMultiRun) runLogManager.finishEventSources(); else webviewManager.finishRunWatcher();
     runLogManager.finishProcess(-1, null, false);
     if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
     sidebarProvider.setRunState('error', '启动失败');
@@ -562,7 +609,7 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
     workflowOutput.appendLine(`\n进程结束：${stopped ? '已停止' : `退出代码 ${code ?? '未知'}`}${signal ? `，信号 ${signal}` : ''}`);
     if (activeWorkflowProcess === child) activeWorkflowProcess = undefined;
     workflowStopRequested = false;
-    webviewManager.finishRunWatcher();
+    if (isMultiRun) runLogManager.finishEventSources(); else webviewManager.finishRunWatcher();
     runLogManager.finishProcess(code, signal, stopped);
     if (stopped) {
       sidebarProvider.setRunState('idle', '已停止');
@@ -576,7 +623,7 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
       void vscode.window.showErrorMessage(`工作流执行失败（退出代码 ${code ?? '未知'}），请查看“Onmyoji 工作流运行”输出。`);
     }
   });
-  void vscode.window.setStatusBarMessage(`已启动工作流：${path.basename(uri.fsPath)}（实例：${instance}）`, 3000);
+  void vscode.window.setStatusBarMessage(`已启动工作流：${path.basename(uri.fsPath)}（实例：${isMultiRun ? orchestrationRuns.map((run) => run.instance).join('、') : instance}）`, 3000);
 }
 
 async function runPartySouls(requestedRounds?: number): Promise<void> {
@@ -605,8 +652,8 @@ async function runPartySouls(requestedRounds?: number): Promise<void> {
 
   await vscode.workspace.getConfiguration('onmyoji').update('partySoulsRounds', rounds, vscode.ConfigurationTarget.Workspace);
   await runLogManager.beginMultiRun('组队御魂', [
-    { id: 'leader', label: '队长', workflow: 'mumu_0_souls_party_leader.json', instance: 'mumu-0' },
-    { id: 'member', label: '队员', workflow: 'mumu_1_souls_party_member.json', instance: 'mumu-1' },
+    { id: 'leader', label: '队长', workflow: 'entrypoints/mumu_0_souls_party_leader.json', instance: 'mumu-0' },
+    { id: 'member', label: '队员', workflow: 'entrypoints/mumu_1_souls_party_member.json', instance: 'mumu-1' },
   ]);
   runLogManager.startEventSources([
     { id: 'leader', filePath: leaderEventsFile },
@@ -700,7 +747,7 @@ async function stopWorkflow(): Promise<void> {
 function validateCurrentWorkflow(): void {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !intelligence.isWorkflowFile(editor.document.uri)) {
-    void vscode.window.showInformationMessage('请先打开一个 workflows/*.json 文件');
+    void vscode.window.showInformationMessage('请先打开一个 workflows/**/*.json 文件');
     return;
   }
   void (async () => {

@@ -32,6 +32,10 @@
       ['rect', { x: 4.2, y: 2.4, width: 2.6, height: 11.2, rx: 1.3 }],
       ['rect', { x: 9.2, y: 2.4, width: 2.6, height: 11.2, rx: 1.3 }],
     ],
+    instance_parallel: [
+      ['path', { d: 'M2 4.5 H10 M6 1.5 L10 4.5 L6 7.5' }],
+      ['path', { d: 'M6 11.5 H14 M10 8.5 L14 11.5 L10 14.5' }],
+    ],
     task: [['rect', { x: 2.6, y: 2.6, width: 10.8, height: 10.8, rx: 2.2 }]],
   };
   const CARET_ICON = [[

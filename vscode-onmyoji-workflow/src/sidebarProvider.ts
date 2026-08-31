@@ -5,7 +5,6 @@ type RunState = 'idle' | 'running' | 'stopping' | 'success' | 'error';
 
 interface SidebarMessage {
   type: string;
-  rounds?: unknown;
   command?: unknown;
   value?: unknown;
 }
@@ -41,8 +40,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private postState(): void {
     if (!this.view) return;
-    const rounds = vscode.workspace.getConfiguration('onmyoji').get<number>('partySoulsRounds', 9999);
-    void this.view.webview.postMessage({ type: 'state', state: this.state, detail: this.detail, rounds });
+    void this.view.webview.postMessage({ type: 'state', state: this.state, detail: this.detail });
   }
 
   private async onMessage(message: SidebarMessage): Promise<void> {
@@ -50,11 +48,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'ready':
         this.postState();
         break;
-      case 'runPartySouls': {
-        const rounds = Number(message.rounds);
-        await vscode.commands.executeCommand('onmyoji.runPartySouls', rounds === 1 ? 1 : 9999);
-        break;
-      }
       case 'stopWorkflow':
         await vscode.commands.executeCommand('onmyoji.stopWorkflow');
         break;
@@ -100,26 +93,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       <div><h1>Onmyoji</h1><div class="subtitle">自动化控制</div></div>
     </header>
 
-    <section aria-labelledby="party-heading">
-      <h2 id="party-heading">组队御魂</h2>
-      <div class="instance-row"><span>队长</span><strong>mumu-0</strong></div>
-      <div class="instance-row"><span>队员</span><strong>mumu-1</strong></div>
-      <label class="field" for="rounds"><span>运行场数</span>
-        <select id="rounds"><option value="9999">9999 场</option><option value="1">1 场测试</option></select>
-      </label>
-      <div class="run-actions">
-        <button id="run-party" class="primary"><span aria-hidden="true">▶</span><span>运行组队御魂</span></button>
-        <button id="stop" class="icon-button" title="停止当前自动化" aria-label="停止当前自动化">■</button>
-      </div>
-      <div id="run-status" class="status idle" role="status"><span class="status-dot"></span><span id="status-text">就绪</span></div>
-    </section>
-
     <section aria-labelledby="workflow-heading">
       <h2 id="workflow-heading">工作流</h2>
       <button id="open-editor" class="command"><span class="command-icon" aria-hidden="true">◇</span><span>打开工作流编辑器</span></button>
       <div class="tool-grid compact-grid">
         <button data-editor-command="workflowSettings"><span class="tool-icon" aria-hidden="true">⚙</span><span>工作流设置</span></button>
-        <button data-editor-command="blackboard"><span class="tool-icon" aria-hidden="true">▦</span><span>黑板参数</span></button>
+        <button data-editor-command="variables"><span class="tool-icon" aria-hidden="true">●</span><span>变量</span></button>
       </div>
     </section>
 
@@ -138,6 +117,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         <button data-editor-command="addSelector"><span class="node-swatch selector" aria-hidden="true"></span><span>Selector</span></button>
         <button data-editor-command="addSequence"><span class="node-swatch sequence" aria-hidden="true"></span><span>Sequence</span></button>
         <button data-editor-command="addParallel"><span class="node-swatch parallel" aria-hidden="true"></span><span>Parallel</span></button>
+        <button data-editor-command="addInstanceParallel"><span class="node-swatch instance-parallel" aria-hidden="true"></span><span>Instances</span></button>
       </div>
     </section>
 
@@ -152,6 +132,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     <section aria-labelledby="tools-heading">
       <h2 id="tools-heading">工具</h2>
+      <div class="run-actions">
+        <div id="run-status" class="status idle" role="status"><span class="status-dot"></span><span id="status-text">就绪</span></div>
+        <button id="stop" class="icon-button" title="停止当前工作流" aria-label="停止当前工作流">■</button>
+      </div>
       <button id="open-log" class="command"><span class="command-icon" aria-hidden="true">☷</span><span>运行日志</span></button>
       <button id="open-tree" class="command"><span class="command-icon" aria-hidden="true">≣</span><span>结构树</span></button>
       <button id="open-refs" class="command"><span class="command-icon" aria-hidden="true">⇄</span><span>引用查看</span></button>

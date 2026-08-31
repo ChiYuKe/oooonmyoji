@@ -116,7 +116,7 @@ export class ReferenceViewerManager implements vscode.Disposable {
 
   /** 枚举项目内所有工作流文件，供工具栏下拉框使用。 */
   private async listWorkflowFiles(): Promise<WorkflowFileDescriptor[]> {
-    const pattern = vscode.workspace.getConfiguration('onmyoji').get<string>('workflowFiles', '**/workflows/*.json');
+    const pattern = vscode.workspace.getConfiguration('onmyoji').get<string>('workflowFiles', '**/workflows/**/*.json');
     const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
     return files
       .map((f) => ({ uri: f.toString(), name: path.basename(f.fsPath), rel: vscode.workspace.asRelativePath(f) }))

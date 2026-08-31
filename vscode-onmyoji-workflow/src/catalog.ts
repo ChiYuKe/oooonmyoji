@@ -10,6 +10,8 @@ import Ajv2020 from 'ajv/dist/2020';
 
 export interface ParameterInfo {
   type: string;
+  /** Workflow blackboard visibility. Action manifests do not use this field. */
+  public?: boolean;
   required?: boolean;
   default?: unknown;
   description?: string;
@@ -251,6 +253,7 @@ function validateParameter(param: ParameterInfo, key: string): void {
 export function parseParameterDefinition(raw: unknown, key: string): ParameterInfo {
   const obj = asRecord(raw);
   const info: ParameterInfo = { type: String(obj.type ?? '') };
+  if (typeof obj.public === 'boolean') info.public = obj.public;
   if (obj.required === true) info.required = true;
   if (obj.default !== undefined) info.default = obj.default;
   if (typeof obj.description === 'string') info.description = obj.description;

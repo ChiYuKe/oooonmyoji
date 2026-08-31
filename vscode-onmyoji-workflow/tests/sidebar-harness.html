@@ -39,25 +39,12 @@
       <span class="product-mark" aria-hidden="true">O</span>
       <div><h1>Onmyoji</h1><div class="subtitle">自动化控制</div></div>
     </header>
-    <section aria-labelledby="party-heading">
-      <h2 id="party-heading">组队御魂</h2>
-      <div class="instance-row"><span>队长</span><strong>mumu-0</strong></div>
-      <div class="instance-row"><span>队员</span><strong>mumu-1</strong></div>
-      <label class="field" for="rounds"><span>运行场数</span>
-        <select id="rounds"><option value="9999">9999 场</option><option value="1">1 场测试</option></select>
-      </label>
-      <div class="run-actions">
-        <button id="run-party" class="primary"><span aria-hidden="true">▶</span><span>运行组队御魂</span></button>
-        <button id="stop" class="icon-button" title="停止当前自动化" aria-label="停止当前自动化">■</button>
-      </div>
-      <div id="run-status" class="status idle" role="status"><span class="status-dot"></span><span id="status-text">就绪</span></div>
-    </section>
     <section aria-labelledby="workflow-heading">
       <h2 id="workflow-heading">工作流</h2>
       <button id="open-editor" class="command"><span class="command-icon" aria-hidden="true">◇</span><span>打开工作流编辑器</span></button>
       <div class="tool-grid compact-grid">
         <button data-editor-command="workflowSettings"><span class="tool-icon" aria-hidden="true">⚙</span><span>工作流设置</span></button>
-        <button data-editor-command="blackboard"><span class="tool-icon" aria-hidden="true">▦</span><span>黑板参数</span></button>
+        <button data-editor-command="variables"><span class="tool-icon" aria-hidden="true">●</span><span>变量</span></button>
       </div>
     </section>
     <section aria-labelledby="search-heading">
@@ -86,6 +73,10 @@
     </section>
     <section aria-labelledby="tools-heading">
       <h2 id="tools-heading">工具</h2>
+      <div class="run-actions">
+        <div id="run-status" class="status idle" role="status"><span class="status-dot"></span><span id="status-text">就绪</span></div>
+        <button id="stop" class="icon-button" title="停止当前工作流" aria-label="停止当前工作流">■</button>
+      </div>
       <button id="open-log" class="command"><span class="command-icon" aria-hidden="true">☷</span><span>运行日志</span></button>
       <button id="validate" class="command"><span class="command-icon" aria-hidden="true">✓</span><span>引擎校验</span></button>
     </section>

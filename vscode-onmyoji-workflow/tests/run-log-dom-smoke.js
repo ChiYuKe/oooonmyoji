@@ -199,9 +199,58 @@ fire(elements['source-tabs'].children[1], 'click');
 check('切换队员后显示独立任务统计', elements['completed-count'].textContent === '2' && elements['workflow-name'].textContent.includes('队员'));
 check('队员材料累计与队长分离', elements['reward-totals'].children[0].children[1].textContent === '×20');
 
+send({
+  type: 'init',
+  descriptor: {
+    workflow: 'three.json', instance: '3 个实例', startedAt: Date.now(), status: 'failed',
+    sources: [
+      { id: 'zero', label: 'mumu-0', workflow: 'zero.json', instance: 'mumu-0', startedAt: Date.now(), status: 'failed' },
+      { id: 'one', label: 'mumu-1', workflow: 'one.json', instance: 'mumu-1', startedAt: Date.now(), status: 'failed' },
+      { id: 'two', label: 'mumu-2', workflow: 'two.json', instance: 'mumu-2', startedAt: Date.now(), status: 'failed' },
+    ],
+  },
+  events: [],
+  engineOutput: '无法启动：未发现运行实例 mumu-2\n',
+  processResult: { code: 2, signal: null, stopped: false },
+});
+check('打开已失败运行时不会永久显示正在启动', elements['status-label'].textContent === '失败'
+  && elements['source-tabs'].children.every((item) => item.children[0].classList.contains('failed')));
+check('启动期失败且没有步骤时自动显示引擎错误', windowStub.__runLog.state.view === 'engine'
+  && elements['engine-output'].textContent.includes('未发现运行实例 mumu-2'));
+
+send({
+  type: 'init',
+  descriptor: {
+    workflow: 'two.json', instance: '2 个实例', startedAt: Date.now(), status: 'starting',
+    sources: [
+      { id: 'zero', label: 'mumu-0', workflow: 'zero.json', instance: 'mumu-0', startedAt: Date.now(), status: 'starting' },
+      { id: 'one', label: 'mumu-1', workflow: 'one.json', instance: 'mumu-1', startedAt: Date.now(), status: 'starting' },
+    ],
+  },
+  events: [], engineOutput: '',
+});
+check('下一次运行按当前 runs 数量清掉旧页签', elements['source-tabs'].children.length === 2);
+
 fire(elements['btn-stop'], 'click');
 fire(elements['btn-clear'], 'click');
 check('停止与清空命令可用', posted.some((message) => message.type === 'stopWorkflow') && posted.some((message) => message.type === 'clear'));
+
+send({
+  type: 'init',
+  descriptor: { workflow: 'once.json', instance: 'mumu-0', startedAt: Date.now(), status: 'running' },
+  events: [
+    { type: 'run_started', run_id: 'once-run', instance_id: 'mumu-0', status: 'running', ts: 250 },
+    { type: 'step', step_id: 'once_task', ts: 251, step: { status: 'succeeded', execution_index: 1, node_kind: 'task', action: 'core.log', duration_ms: 12 } },
+    { type: 'step', step_id: 'once_task', ts: 252, step: { status: 'succeeded', started_at: 251.8, execution_index: 1, node_kind: 'task', action: 'core.log', decorator: 'do_once', duration_ms: 1 } },
+  ],
+});
+const onceRows = elements['step-list'].children.filter((item) => item.dataset.stepId === 'once_task');
+const onceSkipRow = onceRows.find((item) => {
+  const facts = childWithClass(item.children[1], 'step-facts');
+  return facts !== undefined && facts.children.map((child) => child.textContent).join('|').includes('Do Once');
+});
+check('Do Once 跳过行显示事实而不计入重复', onceRows.length === 2 && onceSkipRow !== undefined
+  && elements['completed-count'].textContent === '2');
 
 send({
   type: 'init',

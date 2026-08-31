@@ -1,6 +1,6 @@
 # Onmyoji Workflow Helper
 
-为 oooonmyoji（阴阳师自动化底座）项目编写 `workflows/*.json` 的 VS Code 扩展。
+为 oooonmyoji（阴阳师自动化底座）项目编写 `workflows/**/*.json` 的 VS Code 扩展。
 工作流采用 **Behavior Tree schema v3**（有序 `children`），Action 参数元数据
 来自与 Python 运行时共享的唯一 manifest。
 
@@ -8,10 +8,10 @@
   - Action 名称（内置 `core.*`/`vision.*`/`input.*`/`workflow.*` + `plugins/actions` 下的自定义 Action）
   - 每个节点的 `params` 参数键（按该 Action 的 manifest 参数定义）、`ref` 绑定路径
     （`blackboard.<键>`、`nodes.<节点id>.output.<字段>`）
-  - Root / Selector / Sequence / Simple Parallel / Task 节点及装饰器
+  - Root / Selector / Sequence / Simple Parallel / Instance Parallel / Task 节点及装饰器
   - 校验：父级唯一性、未知子节点、环、孤立节点、无效绑定、非法装饰器和非安全重试
 - **可视化 Behavior Tree 编辑器**：蓝图式卡片、有序父子连线、重新连接/断开、
-  参数表单（含 ROI 与模板截取）、装饰器、黑板、缩放平移、自动布局与小地图。
+  参数表单（含 ROI 与模板截取）、装饰器、UE 风格变量、缩放平移、自动布局与小地图。
 - **独立运行日志**：节点时间线、状态/耗时统计、逐局与本次累计材料、失败筛选、运行截图预览和原始引擎输出。
 - **引擎校验**：一键在终端里运行 `python -m src.oooonmyoji.cli ... validate`。
 - **自定义 Action 零编辑**：插件只写一份 v2 manifest + Action 类，编辑器无需改代码。
@@ -37,7 +37,7 @@ code --install-extension onmyoji-workflow-helper-0.2.10.vsix
 
 - 点击 VS Code 左侧活动栏的 Onmyoji 工作流图标，可打开独立自动化控制页，直接选择
   运行场数并启动/停止组队御魂，也可进入工作流编辑器、运行日志和引擎校验。
-- 打开任意 `workflows/*.json`，即可获得补全/悬停/波浪线诊断（错误=红）。
+- 打开任意 `workflows/**/*.json`，即可获得补全/悬停/波浪线诊断（错误=红）。
 - 打开工作流 JSON 后，可点击编辑器右上角的流程图按钮直接打开可视化编辑器。
 - 命令面板（`Ctrl+Shift+P`）：
   - `Onmyoji: 新建工作流`（自动创建 v3 Behavior Tree 骨架并打开可视化编辑器）
@@ -68,15 +68,17 @@ code --install-extension onmyoji-workflow-helper-0.2.10.vsix
     步骤事件，子流程各节点的运行状态（成功/失败/未匹配等）会直接显示在卡片上；
     工具栏出现的「← 返回」按钮可逐级返回上级工作流（支持多级嵌套），有未保存修改时
     会先询问「保存并返回 / 放弃修改并返回」。
+  - `Instance Parallel` 是 Supervisor 层的跨实例编排节点，在右侧详情栏编辑每个实例对应的
+    工作流、输入和完成策略；它不能连接普通子节点。
   - 工作流设置可编辑顶层 `description`；`workflow.run` 的浏览弹窗会在文件名下显示描述，
     并支持按描述、文件名或相对路径搜索。
   - 拖动连线靠近目标端的手柄可重新连接；双击连线或选中后按 Delete 可断开。
-  - 右侧详情栏编辑 Action 参数、Condition/Cooldown/Time Limit/Retry/Repeat 装饰器、
+  - 右侧详情栏编辑 Action 参数、Condition/Cooldown/Time Limit/Retry/Repeat/Do Once 装饰器、
     Simple Parallel 结束模式和子节点优先级。
   - `roi` 参数旁「选择识别区域」按钮会从 MuMu 获取当前截图，在面板内框选后自动换算为
     参考分辨率坐标写入参数；`template` 参数旁「截取模板」按钮把框选区域保存为
     `assets/templates/` 下的模板图。
-  - 参数可在固定值与结构化引用间切换；黑板面板编辑 `blackboard` 类型化键。
+  - 参数可在固定值与结构化引用间切换；变量面板以 UE 风格编辑工作流变量。
   - 「设置」编辑 ID、版本、参考分辨率与运行限制。
   - 「▶ 运行」会通过后台 Python 进程运行当前已保存的工作流；有未保存修改时需先保存。
     运行开始不再自动弹出日志窗口（避免打断编辑），需要时可点「☷」或运行日志命令随时打开；
@@ -86,10 +88,10 @@ code --install-extension onmyoji-workflow-helper-0.2.10.vsix
   - 运行日志按时间线展示节点状态、Action、耗时、错误和截图，可在「任务 / 全部 / 失败」
     间筛选；奖励识别完成后增加逐局材料行，顶部汇总当前这一次运行的累计数量；「引擎输出」
     保留清理 ANSI 控制码后的原始输出，关闭窗口后仍可回放本次运行。Selector 中已由后续
-    分支恢复的失败会显示为“分支未命中”，不计入失败数和失败筛选。
+    Selector 已转入后续候选的失败会显示为“分支跳过”，不计入失败数和失败筛选；最后一个失败候选仍保留真实失败原因。
   - 组队御魂使用队长、队员两条独立事件流；运行日志提供实例页签，分别统计双方的步骤、
     成功/失败、当前节点、局数和材料累计，不会把两个账号的数据合并。
-  - 御魂工作流在奖励弹层关闭前调用 `reward_statistics.json` 子工作流。子工作流用 MuMu
+  - 御魂工作流在奖励弹层关闭前调用 `souls/shared/reward_statistics.json` 子工作流。子工作流用 MuMu
     原生接口保存截图并立即返回；Supervisor 后台先匹配材料模板，再把邻近 OCR 数字绑定为
     对应数量，不会再连接或点击模拟器。材料目录位于 `assets/templates/rewards/catalog.json`，
     原始截图保存在当前 run 的 `rewards/` 目录，逐局 `items` 与累计 `material_totals` 位于

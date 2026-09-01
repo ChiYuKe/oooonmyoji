@@ -21,6 +21,7 @@ const api: OnmyojiDesktopApi = {
   createWorkflow: () => ipcRenderer.invoke('project:create-workflow'),
   openWorkflowFile: (uri) => ipcRenderer.invoke('project:open-workflow-file', uri),
   openContentItem: (path) => ipcRenderer.invoke('project:open-content-item', path),
+  getReferenceGraph: (target) => ipcRenderer.invoke('project:reference-graph', target),
   runWorkflow: (request: RunWorkflowRequest) => ipcRenderer.invoke('runtime:run-workflow', request),
   stopWorkflow: () => ipcRenderer.invoke('runtime:stop-workflow'),
   listInstances: () => ipcRenderer.invoke('runtime:list-instances'),

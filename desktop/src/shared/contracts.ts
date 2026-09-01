@@ -165,6 +165,48 @@ export interface SaveCanvasRequest {
   dataUrl: string;
 }
 
+/** 引用查看器：引用图中一个节点（工作流 / 模板图片 / 奖励目录 / 其他）。 */
+export type ReferenceTargetKind = 'workflow' | 'asset' | 'catalog' | 'other';
+
+export interface ReferenceNode {
+  kind: ReferenceTargetKind;
+  /** 项目相对路径（正斜杠）。 */
+  path: string;
+  /** 显示名（文件基名）。 */
+  name: string;
+  workflowId?: string;
+  description?: string;
+  /** 目标文件当前是否存在于磁盘。 */
+  exists: boolean;
+}
+
+/** 一次具体引用发生的位置 / 方式。 */
+export type ReferenceContextKind = 'workflow.run' | 'instance_parallel' | 'template' | 'template-binding' | 'asset-default' | 'catalog-entry';
+
+export interface ReferenceContext {
+  kind: ReferenceContextKind;
+  /** 人类可读说明（节点名 / 变量名 / 目录条目名）。 */
+  label: string;
+  nodeId?: string;
+  nodeName?: string;
+  variable?: string;
+  /** 引用原文。 */
+  reference: string;
+}
+
+/** 引用图中一个条目：某个被引用 / 引用方节点 + 它身上的若干处引用。 */
+export interface ReferenceItem {
+  target: ReferenceNode;
+  contexts: ReferenceContext[];
+}
+
+/** 引用图：目标节点 + 谁引用了我（incoming）+ 我引用了谁（outgoing）。 */
+export interface ReferenceGraph {
+  target: ReferenceNode;
+  referencedBy: ReferenceItem[];
+  references: ReferenceItem[];
+}
+
 export interface OnmyojiDesktopApi {
   minimizeWindow(): Promise<void>;
   toggleMaximizeWindow(): Promise<boolean>;
@@ -176,6 +218,7 @@ export interface OnmyojiDesktopApi {
   createWorkflow(): Promise<string | undefined>;
   openWorkflowFile(uri: string): Promise<void>;
   openContentItem(path: string): Promise<void>;
+  getReferenceGraph(target: string): Promise<ReferenceGraph>;
   runWorkflow(request: RunWorkflowRequest): Promise<void>;
   stopWorkflow(): Promise<void>;
   listInstances(): Promise<RuntimeInstance[]>;

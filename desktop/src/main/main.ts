@@ -120,6 +120,7 @@ function registerIpc(): void {
   ipcMain.handle('project:create-workflow', (event) => project.createWorkflow(ownerWindow(event)));
   ipcMain.handle('project:open-workflow-file', (_event, uri: string) => project.openWorkflowFile(uri));
   ipcMain.handle('project:open-content-item', (_event, relativePath: string) => project.openContentItem(relativePath));
+  ipcMain.handle('project:reference-graph', (_event, target: string) => project.getReferenceGraph(target));
   ipcMain.handle('project:list-assets', () => project.listAssets());
   ipcMain.handle('project:read-asset-data', (_event, paths: string[]) => project.readAssetData(paths));
   ipcMain.handle('project:save-template', (_event, request: SaveTemplateRequest) => project.saveTemplate(request));

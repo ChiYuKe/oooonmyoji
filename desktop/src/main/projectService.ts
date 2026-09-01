@@ -5,6 +5,7 @@ import { BrowserWindow, dialog, shell } from 'electron';
 import type {
   AssetImage,
   BootstrapData,
+  ReferenceGraph,
   RuntimeInstance,
   SaveCanvasRequest,
   SaveTemplateRequest,
@@ -12,6 +13,7 @@ import type {
   WorkflowEditorInit,
 } from '../shared/contracts';
 import { loadActionCatalog } from './core/catalog';
+import { buildReferenceGraph } from './core/references';
 import { collectRefSuggestions, parseWorkflow, validateWorkflow } from './core/workflow';
 
 const IMAGE_MIME = new Map([
@@ -260,6 +262,11 @@ export class ProjectService {
     };
     await visit(this.assetsRoot);
     return images;
+  }
+
+  /** 构建引用图：给定项目相对路径（工作流或模板图片），返回谁引用了它、它引用了谁。 */
+  async getReferenceGraph(target: string): Promise<ReferenceGraph> {
+    return buildReferenceGraph(this.projectRoot, target);
   }
 
   async readAssetData(paths: string[]): Promise<Array<{ path: string; dataUrl: string }>> {

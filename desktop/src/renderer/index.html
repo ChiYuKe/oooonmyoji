@@ -9,10 +9,7 @@
 <body>
   <div id="app" class="app-shell">
     <div class="custom-titlebar">
-      <div class="product-mark" aria-label="Onmyoji Studio">
-        <span class="product-glyph">陰</span>
-        <span class="product-name">Onmyoji Studio</span>
-      </div>
+      <img class="titlebar-icon" src="./assets/onmyoji-icon.png" alt="阴阳师" draggable="false" />
       <nav class="titlebar-menu" aria-label="主菜单">
         <div class="menu-root">
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">编辑</button>
@@ -26,6 +23,8 @@
             <button type="button" role="menuitem" data-editor-command="deleteSelection"><span>删除所选</span><kbd>Delete</kbd></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-desktop-command="save"><span>保存工作流</span><kbd>Ctrl+S</kbd></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-app-command="settings"><span>设置</span></button>
           </div>
         </div>
         <div class="menu-root">
@@ -33,6 +32,7 @@
           <div class="titlebar-dropdown" role="menu">
             <button type="button" role="menuitemcheckbox" data-workbench-panel="workflow" aria-checked="true" disabled title="固定根模块"><span>工作流编辑器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitemcheckbox" data-dock-panel="structure" aria-checked="true"><span>结构</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-dock-panel="palette" aria-checked="true"><span>节点</span><span class="menu-check">✓</span></button>
@@ -78,13 +78,6 @@
       <div id="workbench-frame" class="workbench-frame" aria-label="顶层模块工作区"></div>
       <div id="workbench-module-store" class="workbench-module-store">
         <section id="module-workbench" class="workbench-module">
-          <header class="app-header">
-            <button id="back-button" class="icon-button" title="返回上一级工作流" disabled><i data-lucide="arrow-left"></i></button>
-            <select id="workflow-select" class="workflow-select" aria-label="当前工作流"></select>
-            <span id="dirty-indicator" class="dirty-indicator" aria-label="保存状态"></span>
-            <div class="header-spacer"></div>
-          </header>
-
           <div class="tool-strip" aria-label="画布工具">
             <div class="tool-group">
               <button class="icon-button" data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i></button>
@@ -147,6 +140,43 @@
             </div>
           </div>
         </section>
+
+        <section id="module-settings" class="dock-module settings-module">
+          <div class="settings-body">
+            <section class="settings-section">
+              <h3 class="settings-section-title">界面</h3>
+              <label class="settings-row">
+                <span>内容浏览器默认视图</span>
+                <select id="settings-content-view" aria-label="内容浏览器默认视图">
+                  <option value="grid">缩略图</option>
+                  <option value="list">列表</option>
+                </select>
+              </label>
+              <label class="settings-row">
+                <span>实例列表自动刷新</span>
+                <input id="settings-auto-refresh" type="checkbox" aria-label="实例列表自动刷新">
+              </label>
+            </section>
+            <section class="settings-section">
+              <h3 class="settings-section-title">运行</h3>
+              <label class="settings-row">
+                <span>启动时加载默认工作流</span>
+                <input id="settings-default-workflow" type="checkbox" aria-label="启动时加载默认工作流">
+              </label>
+            </section>
+            <section class="settings-section">
+              <h3 class="settings-section-title">关于</h3>
+              <div class="settings-row">
+                <span>项目根目录</span>
+                <span id="settings-project-root" class="settings-value"></span>
+              </div>
+              <div class="settings-row">
+                <span>桌面端版本</span>
+                <span class="settings-value">0.1.0</span>
+              </div>
+            </section>
+          </div>
+        </section>
       </div>
     </main>
 
@@ -154,6 +184,10 @@
         <section id="module-structure" class="dock-module structure-module">
           <div class="module-command-strip">
             <span class="module-context">工作流层级</span>
+            <div class="structure-toolbar" role="group" aria-label="结构树显示控制">
+              <button id="structure-expand-all" class="panel-action compact-action" title="全部展开" aria-label="全部展开"><i data-lucide="unfold-vertical"></i></button>
+              <button id="structure-collapse-all" class="panel-action compact-action" title="全部收起" aria-label="全部收起"><i data-lucide="fold-vertical"></i></button>
+            </div>
             <button id="new-workflow-button" class="panel-action" title="新建工作流"><i data-lucide="file-plus-2"></i></button>
           </div>
           <div id="structure-view" class="panel-content tree-content"></div>

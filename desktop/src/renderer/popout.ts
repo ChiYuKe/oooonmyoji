@@ -3,6 +3,8 @@
  * popped out. The legacy bridge then posts to this window instead of the main
  * renderer, so forward those messages with the iframe id preserved.
  */
+import 'dockview/dist/styles/dockview.css';
+import './styles.css';
 import { createIcons, Minus, Square, X } from 'lucide';
 
 document.body.classList.add('dockview-popout-host');

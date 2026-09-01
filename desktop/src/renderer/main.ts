@@ -2,23 +2,30 @@ import {
   ArrowLeft,
   Box,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
+  CircleDot,
   Columns3,
   Copy,
   Ellipsis,
+  ExternalLink,
   FilePlus2,
   FileJson2,
+  Flag,
   Folder,
   FolderOpen,
+  FoldVertical,
   GitBranch,
   Image,
   ImageDown,
   LayoutGrid,
+  Link2,
   List,
   ListTree,
   Maximize,
   Minus,
   MonitorUp,
+  Network,
   Play,
   Plus,
   RefreshCw,
@@ -26,14 +33,22 @@ import {
   Search,
   Settings2,
   Square,
+  UnfoldVertical,
   WandSparkles,
+  Waypoints,
+  Workflow,
   X,
   createIcons,
+  createElement,
 } from 'lucide';
 import 'dockview/dist/styles/dockview.css';
 import type {
   BootstrapData,
   AssetImage,
+  ReferenceContext,
+  ReferenceGraph,
+  ReferenceItem,
+  ReferenceNode,
   RuntimeInstance,
   RuntimeOutputEvent,
   RuntimeStateEvent,
@@ -112,23 +127,30 @@ const desktopIcons = {
   ArrowLeft,
   Box,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
+  CircleDot,
   Columns3,
   Copy,
   Ellipsis,
+  ExternalLink,
   FilePlus2,
   FileJson2,
+  Flag,
   Folder,
   FolderOpen,
+  FoldVertical,
   GitBranch,
   Image,
   ImageDown,
   LayoutGrid,
+  Link2,
   List,
   ListTree,
   Maximize,
   Minus,
   MonitorUp,
+  Network,
   Play,
   Plus,
   RefreshCw,
@@ -136,22 +158,26 @@ const desktopIcons = {
   Search,
   Settings2,
   Square,
+  UnfoldVertical,
   WandSparkles,
+  Waypoints,
+  Workflow,
   X,
 };
 const editorFrame = document.querySelector<HTMLIFrameElement>('#editor-frame')!;
 const detailsFrame = document.querySelector<HTMLIFrameElement>('#details-frame')!;
-const workflowSelect = document.querySelector<HTMLSelectElement>('#workflow-select')!;
 const instanceSelect = document.querySelector<HTMLSelectElement>('#instance-select')!;
 const structureView = document.querySelector<HTMLElement>('#structure-view')!;
 const variablesView = document.querySelector<HTMLElement>('#variables-view')!;
 const loadingMask = document.querySelector<HTMLElement>('#loading-mask')!;
-const dirtyIndicator = document.querySelector<HTMLElement>('#dirty-indicator')!;
 const runtimeLogFrame = document.querySelector<HTMLIFrameElement>('#runtime-log-frame')!;
 const contentBrowserTree = document.querySelector<HTMLElement>('#content-browser-tree')!;
 const contentBrowserItems = document.querySelector<HTMLElement>('#content-browser-items')!;
 const contentBrowserBreadcrumbs = document.querySelector<HTMLElement>('#content-browser-breadcrumbs')!;
 const contentBrowserSearch = document.querySelector<HTMLInputElement>('#content-browser-search')!;
+const settingsContentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
+const settingsAutoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
+const settingsDefaultWorkflow = document.querySelector<HTMLInputElement>('#settings-default-workflow')!;
 
 let bootstrap: BootstrapData | undefined;
 let currentUri = '';
@@ -165,6 +191,8 @@ let sidebarNodes: SidebarNode[] = [];
 let sidebarVariables: SidebarVariable[] = [];
 let selectedNode = '';
 let selectedVariable = '';
+/** 结构树手动收起的分支节点 ID：重渲染（如切换选中节点）时保持折叠状态。 */
+let collapsedTreeNodes = new Set<string>();
 let toastTimer: number | undefined;
 let instanceRefreshTimer: number | undefined;
 let docking: DockingController | undefined;
@@ -180,6 +208,8 @@ let runtimeLogDescriptor: RuntimeLogDescriptor | undefined;
 let runtimeLogEvents: Record<string, unknown>[] = [];
 let runtimeEngineOutput = '';
 let runtimeProcessResult: { code: number | null; signal: string | null; stopped: boolean } | undefined;
+let autoRefreshInstances = true;
+let loadDefaultWorkflowOnStart = true;
 
 function postToEditor(payload: Record<string, unknown>): void {
   postToFrame(editorFrame, payload);
@@ -251,8 +281,6 @@ function errorMessage(error: unknown): string {
 
 function setDirty(value: boolean): void {
   dirty = value;
-  dirtyIndicator.classList.toggle('dirty', value);
-  dirtyIndicator.title = value ? '有未保存修改' : '已保存';
 }
 
 function workflowReference(file: WorkflowDescriptor): string {
@@ -280,14 +308,6 @@ function resolveWorkflow(reference: string): WorkflowDescriptor | undefined {
 }
 
 function renderWorkflowSelect(workflows: WorkflowDescriptor[]): void {
-  workflowSelect.replaceChildren(...workflows.map((file) => {
-    const option = document.createElement('option');
-    option.value = file.uri;
-    option.textContent = `${file.name}  ·  ${file.rel.replace(/^workflows\//, '')}`;
-    option.title = file.description || file.rel;
-    return option;
-  }));
-  workflowSelect.value = currentUri;
   document.querySelector<HTMLElement>('#workflow-count')!.textContent = `${workflows.length} 个工作流`;
 }
 
@@ -295,7 +315,11 @@ function renderInstances(instances: RuntimeInstance[], requested = selectedInsta
   instanceSelect.replaceChildren(...instances.map((instance) => {
     const option = document.createElement('option');
     option.value = instance.id;
-    option.textContent = instance.displayName ? `${instance.displayName} · ${instance.id}` : instance.id;
+    // 选中态高亮和行间距由内部行元素承担：Chromium 会把 option 自身的 margin/border 强制清零
+    const row = document.createElement('span');
+    row.className = 'select-row';
+    row.textContent = instance.displayName ? `${instance.displayName} · ${instance.id}` : instance.id;
+    option.appendChild(row);
     option.title = [instance.backend, instance.adbSerial].filter(Boolean).join(' · ');
     return option;
   }));
@@ -408,6 +432,13 @@ function createContentItem(item: ContentBrowserItem): HTMLButtonElement {
     else if (item.workflow) desktopControl('switchWorkflow', item.workflow.uri);
     else if (item.asset) void api.openContentItem(item.asset.path).catch((error) => showToast(errorMessage(error), true));
   });
+  if (item.kind !== 'folder') {
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      selectContentItem(button, item);
+      showContentContextMenu(event, item, button);
+    });
+  }
   return button;
 }
 
@@ -487,6 +518,401 @@ async function refreshContentBrowser(): Promise<void> {
   }
 }
 
+/* ---------- 内容浏览器右键菜单 + 引用查看器 ---------- */
+
+let contentContextMenu: { owner: Document; menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
+let referenceViewerDocument: Document | undefined;
+let referenceViewerOverlay: HTMLElement | undefined;
+let referenceViewerBody: HTMLElement | undefined;
+let referenceViewerTrailEl: HTMLElement | undefined;
+let referenceViewerKeyDoc: Document | undefined;
+let referenceViewerKeyHandler: ((event: KeyboardEvent) => void) | undefined;
+let referenceTrail: string[] = [];
+let referenceViewerToken = 0;
+
+const referenceContextKindLabels: Record<ReferenceContext['kind'], string> = {
+  'workflow.run': '子工作流调用',
+  instance_parallel: '实例并行',
+  template: '模板匹配',
+  'template-binding': '模板绑定',
+  'asset-default': '变量默认值',
+  'catalog-entry': '奖励目录',
+};
+
+/** 把绝对路径转成项目相对路径（正斜杠）；不在项目内时原样返回。 */
+function relativeToProject(absolutePath: string): string {
+  const root = bootstrap?.projectRoot ?? '';
+  const absolute = absolutePath.replace(/\\/g, '/');
+  const normalizedRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalizedRoot) return absolute;
+  if (absolute.toLowerCase().startsWith(`${normalizedRoot.toLowerCase()}/`)) {
+    return absolute.slice(normalizedRoot.length + 1);
+  }
+  if (absolute.toLowerCase() === normalizedRoot.toLowerCase()) return '';
+  return absolute;
+}
+
+function closeContentContextMenu(): void {
+  if (!contentContextMenu) return;
+  const { owner, menu, dismiss, keyHandler } = contentContextMenu;
+  owner.removeEventListener('pointerdown', dismiss, true);
+  owner.removeEventListener('keydown', keyHandler, true);
+  menu.remove();
+  contentContextMenu = undefined;
+}
+
+function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, button: HTMLButtonElement): void {
+  closeContentContextMenu();
+  const doc = button.ownerDocument;
+  const menu = doc.createElement('div');
+  menu.className = 'content-context-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '内容操作');
+
+  const addEntry = (label: string, icon: IconComponent, action: () => void): void => {
+    const entry = doc.createElement('button');
+    entry.type = 'button';
+    entry.setAttribute('role', 'menuitem');
+    entry.appendChild(createElement(icon, { width: '13', height: '13', 'aria-hidden': 'true' }));
+    entry.appendChild(doc.createTextNode(label));
+    entry.addEventListener('click', () => {
+      closeContentContextMenu();
+      action();
+    });
+    menu.appendChild(entry);
+  };
+
+  addEntry('引用查看器', Network, () => openReferenceViewer(item.path, doc));
+  const separator = doc.createElement('div');
+  separator.className = 'content-context-separator';
+  menu.appendChild(separator);
+  if (item.workflow) {
+    addEntry('在编辑器中打开', FileJson2, () => desktopControl('switchWorkflow', item.workflow!.uri));
+  } else if (item.asset) {
+    addEntry('打开图片', Image, () => void api.openContentItem(item.asset!.path).catch((error) => showToast(errorMessage(error), true)));
+  }
+
+  doc.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  const viewportWidth = doc.documentElement.clientWidth;
+  const viewportHeight = doc.documentElement.clientHeight;
+  menu.style.left = `${Math.max(4, Math.min(event.clientX, viewportWidth - rect.width - 6))}px`;
+  menu.style.top = `${Math.max(4, Math.min(event.clientY, viewportHeight - rect.height - 6))}px`;
+
+  const dismiss = (pointerEvent: Event): void => {
+    if (menu.contains(pointerEvent.target as Node)) return;
+    closeContentContextMenu();
+  };
+  const keyHandler = (keyEvent: KeyboardEvent): void => {
+    if (keyEvent.key === 'Escape') closeContentContextMenu();
+  };
+  doc.addEventListener('pointerdown', dismiss, true);
+  doc.addEventListener('keydown', keyHandler, true);
+  contentContextMenu = { owner: doc, menu, dismiss, keyHandler };
+}
+
+function closeReferenceViewer(): void {
+  referenceViewerToken += 1;
+  if (referenceViewerKeyDoc && referenceViewerKeyHandler) {
+    referenceViewerKeyDoc.removeEventListener('keydown', referenceViewerKeyHandler, true);
+  }
+  referenceViewerOverlay?.remove();
+  referenceViewerOverlay = undefined;
+  referenceViewerBody = undefined;
+  referenceViewerTrailEl = undefined;
+  referenceViewerKeyDoc = undefined;
+  referenceViewerKeyHandler = undefined;
+  referenceViewerDocument = undefined;
+  referenceTrail = [];
+}
+
+function referenceKindIcon(kind: ReferenceNode['kind']): SVGSVGElement {
+  const icon = kind === 'workflow' ? FileJson2 : kind === 'asset' ? Image : kind === 'catalog' ? Box : Waypoints;
+  return createElement(icon, { width: '15', height: '15', 'aria-hidden': 'true' }) as SVGSVGElement;
+}
+
+function referenceKindLabel(kind: ReferenceNode['kind']): string {
+  if (kind === 'workflow') return '工作流';
+  if (kind === 'asset') return '模板图片';
+  if (kind === 'catalog') return '奖励目录';
+  return '其他';
+}
+
+function referenceContextChips(contexts: ReferenceContext[], doc: Document): HTMLElement {
+  const chips = doc.createElement('span');
+  chips.className = 'reference-card-contexts';
+  const visible = contexts.slice(0, 6);
+  for (const context of visible) {
+    const chip = doc.createElement('span');
+    chip.className = 'reference-context-chip';
+    chip.textContent = `${referenceContextKindLabels[context.kind]} · ${context.label}`;
+    chip.title = context.reference;
+    chips.appendChild(chip);
+  }
+  if (contexts.length > visible.length) {
+    const more = doc.createElement('span');
+    more.className = 'reference-context-chip more';
+    more.textContent = `+${contexts.length - visible.length} 处`;
+    chips.appendChild(more);
+  }
+  return chips;
+}
+
+function referenceItemCard(item: ReferenceItem, doc: Document, navigable: boolean): HTMLButtonElement {
+  const card = doc.createElement('button');
+  card.type = 'button';
+  card.className = `reference-item-card${navigable ? ' navigable' : ''}`;
+  if (navigable) card.title = '点击查看该内容的引用';
+  const icon = doc.createElement('span');
+  icon.className = 'reference-item-icon';
+  icon.appendChild(referenceKindIcon(item.target.kind));
+  const main = doc.createElement('span');
+  main.className = 'reference-item-main';
+  const name = doc.createElement('span');
+  name.className = 'reference-item-name';
+  name.textContent = item.target.name;
+  main.appendChild(name);
+  if (item.target.workflowId) {
+    const idBadge = doc.createElement('span');
+    idBadge.className = 'reference-item-badge';
+    idBadge.textContent = item.target.workflowId;
+    main.appendChild(idBadge);
+  }
+  if (!item.target.exists) {
+    const missing = doc.createElement('span');
+    missing.className = 'reference-item-badge missing';
+    missing.textContent = '文件缺失';
+    main.appendChild(missing);
+  }
+  const pathEl = doc.createElement('span');
+  pathEl.className = 'reference-item-path';
+  pathEl.textContent = item.target.path;
+  main.appendChild(pathEl);
+  main.appendChild(referenceContextChips(item.contexts, doc));
+  card.append(icon, main);
+  if (navigable) {
+    const chevron = doc.createElement('span');
+    chevron.className = 'reference-item-chevron';
+    chevron.appendChild(createElement(ChevronRight, { width: '14', height: '14', 'aria-hidden': 'true' }));
+    card.appendChild(chevron);
+    card.addEventListener('click', () => navigateReferenceViewer(item.target.path));
+  }
+  return card;
+}
+
+function renderReferenceTrail(doc: Document): void {
+  if (!referenceViewerTrailEl) return;
+  referenceViewerTrailEl.replaceChildren();
+  referenceTrail.forEach((path, index) => {
+    const crumb = doc.createElement('button');
+    crumb.type = 'button';
+    crumb.className = `reference-trail-crumb${index === referenceTrail.length - 1 ? ' current' : ''}`;
+    crumb.textContent = contentName(path);
+    crumb.title = path;
+    crumb.addEventListener('click', () => {
+      referenceTrail = referenceTrail.slice(0, index + 1);
+      void renderReferenceViewer();
+    });
+    referenceViewerTrailEl!.appendChild(crumb);
+    if (index < referenceTrail.length - 1) {
+      const sep = doc.createElement('span');
+      sep.className = 'reference-trail-sep';
+      sep.textContent = '/';
+      referenceViewerTrailEl!.appendChild(sep);
+    }
+  });
+}
+
+function renderReferenceSection(doc: Document, title: string, items: ReferenceItem[], emptyText: string, container: HTMLElement): void {
+  const heading = doc.createElement('div');
+  heading.className = 'reference-section-title';
+  const label = doc.createElement('span');
+  label.textContent = `${title}（${items.length}）`;
+  heading.appendChild(label);
+  container.appendChild(heading);
+  if (items.length === 0) {
+    const empty = doc.createElement('div');
+    empty.className = 'reference-section-empty';
+    empty.textContent = emptyText;
+    container.appendChild(empty);
+    return;
+  }
+  const list = doc.createElement('div');
+  list.className = 'reference-item-list';
+  for (const item of items) {
+    list.appendChild(referenceItemCard(item, doc, true));
+  }
+  container.appendChild(list);
+}
+
+async function renderReferenceViewer(): Promise<void> {
+  const doc = referenceViewerDocument;
+  const body = referenceViewerBody;
+  if (!doc || !body || referenceTrail.length === 0) return;
+  const current = referenceTrail[referenceTrail.length - 1];
+  const token = ++referenceViewerToken;
+
+  renderReferenceTrail(doc);
+  body.replaceChildren();
+  const loading = doc.createElement('div');
+  loading.className = 'reference-loading';
+  const spinner = doc.createElement('span');
+  spinner.className = 'loading-spinner';
+  loading.append(spinner, doc.createTextNode('正在分析引用…'));
+  body.appendChild(loading);
+
+  let graph: ReferenceGraph;
+  try {
+    graph = await api.getReferenceGraph(current);
+  } catch (error) {
+    if (referenceViewerDocument !== doc || referenceViewerToken !== token || referenceTrail[referenceTrail.length - 1] !== current) return;
+    body.replaceChildren();
+    const failure = doc.createElement('div');
+    failure.className = 'reference-section-empty';
+    failure.textContent = `引用分析失败：${errorMessage(error)}`;
+    body.appendChild(failure);
+    showToast(errorMessage(error), true);
+    return;
+  }
+  if (referenceViewerDocument !== doc || referenceViewerToken !== token || referenceTrail[referenceTrail.length - 1] !== current) return;
+
+  body.replaceChildren();
+
+  // 目标卡片（静态）
+  const targetCard = doc.createElement('div');
+  targetCard.className = 'reference-target-card';
+  const targetIcon = doc.createElement('span');
+  targetIcon.className = 'reference-item-icon target';
+  targetIcon.appendChild(referenceKindIcon(graph.target.kind));
+  const targetMain = doc.createElement('span');
+  targetMain.className = 'reference-item-main';
+  const targetName = doc.createElement('span');
+  targetName.className = 'reference-item-name';
+  targetName.textContent = graph.target.name;
+  targetMain.appendChild(targetName);
+  const kindBadge = doc.createElement('span');
+  kindBadge.className = 'reference-item-badge kind';
+  kindBadge.textContent = referenceKindLabel(graph.target.kind);
+  targetMain.appendChild(kindBadge);
+  if (graph.target.workflowId) {
+    const idBadge = doc.createElement('span');
+    idBadge.className = 'reference-item-badge';
+    idBadge.textContent = graph.target.workflowId;
+    targetMain.appendChild(idBadge);
+  }
+  if (!graph.target.exists) {
+    const missing = doc.createElement('span');
+    missing.className = 'reference-item-badge missing';
+    missing.textContent = '文件缺失';
+    targetMain.appendChild(missing);
+  }
+  const targetPath = doc.createElement('span');
+  targetPath.className = 'reference-item-path';
+  targetPath.textContent = graph.target.path;
+  targetMain.appendChild(targetPath);
+  if (graph.target.description) {
+    const description = doc.createElement('span');
+    description.className = 'reference-item-description';
+    description.textContent = graph.target.description;
+    targetMain.appendChild(description);
+  }
+  targetCard.append(targetIcon, targetMain);
+  body.appendChild(targetCard);
+
+  // 谁引用了我
+  renderReferenceSection(doc, '被引用', graph.referencedBy, graph.target.exists ? '没有被其他内容引用' : '目标文件不存在，无法统计引用', body);
+  // 我引用了谁（工作流 / 奖励目录才展示）
+  if (graph.target.kind === 'workflow' || graph.target.kind === 'catalog') {
+    renderReferenceSection(doc, '引用了', graph.references, '没有引用其他内容', body);
+  }
+}
+
+function openReferenceViewer(path: string, doc: Document): void {
+  closeReferenceViewer();
+  referenceViewerDocument = doc;
+  referenceTrail = [path];
+
+  const overlay = doc.createElement('div');
+  overlay.className = 'reference-viewer-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', '引用查看器');
+
+  const panel = doc.createElement('div');
+  panel.className = 'reference-viewer';
+
+  const header = doc.createElement('div');
+  header.className = 'reference-viewer-header';
+  const title = doc.createElement('div');
+  title.className = 'reference-viewer-title';
+  title.appendChild(createElement(Network, { width: '15', height: '15', 'aria-hidden': 'true' }));
+  title.appendChild(doc.createTextNode('引用查看器'));
+  const trailEl = doc.createElement('div');
+  trailEl.className = 'reference-viewer-trail';
+  const closeButton = doc.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'panel-action';
+  closeButton.title = '关闭 (Esc)';
+  closeButton.setAttribute('aria-label', '关闭');
+  closeButton.appendChild(createElement(X, { width: '14', height: '14', 'aria-hidden': 'true' }));
+  closeButton.addEventListener('click', closeReferenceViewer);
+  header.append(title, trailEl, closeButton);
+
+  const body = doc.createElement('div');
+  body.className = 'reference-viewer-body';
+
+  const footer = doc.createElement('div');
+  footer.className = 'reference-viewer-footer';
+  footer.textContent = '点击卡片可逐层跳转 · Esc 关闭';
+
+  panel.append(header, body, footer);
+  overlay.appendChild(panel);
+  doc.body.appendChild(overlay);
+
+  const keyHandler = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeReferenceViewer();
+  };
+  doc.addEventListener('keydown', keyHandler, true);
+  overlay.addEventListener('pointerdown', (event) => {
+    if (event.target === overlay) closeReferenceViewer();
+  });
+
+  referenceViewerOverlay = overlay;
+  referenceViewerBody = body;
+  referenceViewerTrailEl = trailEl;
+  referenceViewerKeyDoc = doc;
+  referenceViewerKeyHandler = keyHandler;
+
+  void renderReferenceViewer();
+}
+
+/** 跳转到引用图中的另一个节点（层层跳转）。 */
+function navigateReferenceViewer(path: string): void {
+  referenceTrail.push(path);
+  void renderReferenceViewer();
+}
+
+type IconComponent = typeof Box;
+
+/** 结构树节点类型 → Lucide 图标与语义色（保持低饱和，遵循设计规则）。 */
+const treeNodeGlyphs: Record<string, { icon: IconComponent; className: string }> = {
+  root: { icon: Flag, className: 'type-root' },
+  sequence: { icon: ListTree, className: 'type-sequence' },
+  selector: { icon: GitBranch, className: 'type-selector' },
+  simple_parallel: { icon: Columns3, className: 'type-parallel' },
+  instance_parallel: { icon: MonitorUp, className: 'type-instance-parallel' },
+  task: { icon: Workflow, className: 'type-task' },
+};
+const treeNodeFallbackGlyph = { icon: CircleDot, className: 'type-default' };
+
+/** 内联创建 Lucide SVG，供动态树行使用（data-lucide + createIcons 无法覆盖局部更新）。 */
+function createTreeIcon(icon: IconComponent, className: string): SVGSVGElement {
+  return createElement(icon, { width: '14', height: '14', 'aria-hidden': 'true', class: className }) as SVGSVGElement;
+}
+
 function createTreeRows(): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const byId = new Map(sidebarNodes.map((node) => [node.id, node]));
@@ -494,33 +920,179 @@ function createTreeRows(): DocumentFragment {
   const roots = sidebarNodes.filter((node) => !childIds.has(node.id));
   const visited = new Set<string>();
 
-  const appendNode = (node: SidebarNode, depth: number): void => {
+  const appendNode = (node: SidebarNode, depth: number, container: ParentNode & { append: (parent: Node) => void }): void => {
     if (visited.has(node.id)) return;
     visited.add(node.id);
+    const glyph = treeNodeGlyphs[node.type] ?? treeNodeFallbackGlyph;
+    const hasChildren = node.children.some((childId) => byId.has(childId));
+    const branchOpen = hasChildren && !collapsedTreeNodes.has(node.id);
+
     const row = document.createElement('button');
+    row.type = 'button';
     row.className = `tree-row${node.id === selectedNode ? ' selected' : ''}`;
-    row.style.setProperty('--depth', String(depth));
     row.title = `${node.name}\n${node.meta}`;
-    row.innerHTML = `<span class="tree-chevron"></span><span class="node-type-glyph ${node.type}"></span><span class="tree-label"></span>`;
-    const label = row.querySelector<HTMLElement>('.tree-label')!;
-    label.textContent = node.name;
-    if (node.children.length > 0) row.querySelector<HTMLElement>('.tree-chevron')!.innerHTML = '<i data-lucide="chevron-down"></i>';
-    row.addEventListener('click', () => {
+    row.dataset.nodeId = node.id;
+    if (hasChildren) row.setAttribute('aria-expanded', String(branchOpen));
+
+    const chevron = document.createElement('span');
+    chevron.className = 'tree-chevron';
+    if (hasChildren) chevron.appendChild(createTreeIcon(ChevronRight, 'chevron-closed'));
+
+    const icon = document.createElement('span');
+    icon.className = `node-type-glyph ${glyph.className}`;
+    icon.appendChild(createTreeIcon(glyph.icon, 'glyph-svg'));
+
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+
+    const name = document.createElement('span');
+    name.className = 'tree-name';
+    name.textContent = node.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'tree-meta';
+    meta.textContent = node.meta;
+
+    const children = document.createElement('div');
+    children.className = 'tree-children';
+
+    label.append(name, meta);
+    row.append(chevron, icon, label);
+    row.addEventListener('click', (event) => {
+      if (hasChildren && event.target instanceof Node && chevron.contains(event.target)) {
+        toggleTreeNode(node.id, row, children);
+        return;
+      }
       docking?.showPanel('details');
       editorCommand('focusNode', node.id);
     });
-    fragment.appendChild(row);
-    for (const childId of node.children) {
-      const child = byId.get(childId);
-      if (child) appendNode(child, depth + 1);
+    container.append(row, children);
+    if (hasChildren) {
+      if (branchOpen) row.classList.add('open');
+      else children.classList.add('closed');
+      for (const childId of node.children) {
+        const child = byId.get(childId);
+        if (child) appendNode(child, depth + 1, children);
+      }
     }
   };
-  for (const root of roots) appendNode(root, 0);
-  for (const node of sidebarNodes) appendNode(node, 0);
+  for (const root of roots) appendNode(root, 0, fragment);
+  for (const node of sidebarNodes) appendNode(node, 0, fragment);
   return fragment;
 }
 
+/** 展开/收起单个结构树分支（状态记录在 collapsedTreeNodes，重渲染后保持）。 */
+function toggleTreeNode(nodeId: string, row: HTMLButtonElement, children: HTMLElement): void {
+  const open = row.classList.toggle('open');
+  children.classList.toggle('closed', !open);
+  if (open) collapsedTreeNodes.delete(nodeId);
+  else collapsedTreeNodes.add(nodeId);
+  row.setAttribute('aria-expanded', String(open));
+}
+
+function setAllTreeBranches(open: boolean): void {
+  collapsedTreeNodes = open ? new Set() : new Set(collectAllBranchNodeIds());
+  structureView.querySelectorAll<HTMLButtonElement>('.tree-row').forEach((row) => {
+    if (!hasTreeChildren(row)) return;
+    row.classList.toggle('open', open);
+    row.setAttribute('aria-expanded', String(open));
+  });
+  structureView.querySelectorAll<HTMLElement>('.tree-children').forEach((children) => {
+    children.classList.toggle('closed', !open);
+  });
+}
+
+function collectAllBranchNodeIds(): Set<string> {
+  return new Set(sidebarNodes.filter((node) => node.children.length > 0).map((node) => node.id));
+}
+
+function hasTreeChildren(row: HTMLButtonElement): boolean {
+  return Boolean(row.nextElementSibling?.classList.contains('tree-children')
+    && row.nextElementSibling.childElementCount > 0);
+}
+
+/** 结构树内容指纹：id、子级、名称、类型、meta 都没变时无需重建 DOM。 */
+function treeSignature(): string {
+  return sidebarNodes.map((node) => `${node.id}\u0001${node.type}\u0001${node.name}\u0001${node.meta}\u0002${node.children.join('\u0003')}`).join('\u0004');
+}
+
+/** 仅更新结构树选中行（含祖先），不重建 DOM，保持滚动位置与展开状态。 */
+function syncTreeSelection(previousNode: string): void {
+  if (previousNode === selectedNode) return;
+  const view = structureView;
+  if (previousNode) {
+    const previousRow = view.querySelector<HTMLButtonElement>(`.tree-row[data-node-id="${CSS.escape(previousNode)}"]`);
+    if (previousRow) previousRow.classList.remove('selected');
+  }
+  if (!selectedNode) return;
+  const nextRow = view.querySelector<HTMLButtonElement>(`.tree-row[data-node-id="${CSS.escape(selectedNode)}"]`);
+  if (!nextRow) return;
+  nextRow.classList.add('selected');
+  // 保证选中的行自身可见：仅展开其祖先链，不动其他手动折叠的分支。
+  for (let parent = nextRow.parentElement; parent && parent !== view; parent = parent.parentElement) {
+    if (parent.classList.contains('tree-children') && parent.classList.contains('closed')) {
+      parent.classList.remove('closed');
+      const branchRow = parent.previousElementSibling as HTMLElement | null;
+      branchRow?.classList.add('open');
+      if (branchRow?.dataset.nodeId) collapsedTreeNodes.delete(branchRow.dataset.nodeId);
+    }
+  }
+  const rowRect = nextRow.getBoundingClientRect();
+  const viewRect = view.getBoundingClientRect();
+  if (rowRect.bottom < viewRect.top || rowRect.top > viewRect.bottom) {
+    nextRow.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+/** 仅更新变量列表选中行，避免整体重建导致滚动跳动。 */
+function syncVariableSelection(previousVariable: string): void {
+  if (previousVariable === selectedVariable) return;
+  const previousRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-name="${CSS.escape(previousVariable)}"]`);
+  if (previousRow) previousRow.classList.remove('selected');
+  const nextRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-name="${CSS.escape(selectedVariable)}"]`);
+  nextRow?.classList.add('selected');
+}
+
+/** 变量列表内容指纹：名称、类型、public 标记有变化时需要重建列表。 */
+function variableSignature(): string {
+  return sidebarVariables.map((variable) => `${variable.name}\u0001${variable.type}\u0001${variable.public ? 1 : 0}`).join('\u0004');
+}
+
+function renderVariables(): void {
+  variablesView.replaceChildren();
+  if (sidebarVariables.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-panel';
+    empty.textContent = '此工作流还没有变量';
+    variablesView.appendChild(empty);
+    return;
+  }
+  for (const variable of sidebarVariables) {
+    const row = document.createElement('button');
+    row.className = `variable-row${variable.name === selectedVariable ? ' selected' : ''}`;
+    row.title = `${variable.public ? '公开变量，可由父工作流传值' : '内部变量'}\n拖到画布可创建变量卡片`;
+    row.dataset.variableName = variable.name;
+    row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
+    row.querySelector<HTMLElement>('.variable-name')!.textContent = variable.name;
+    const flags = row.querySelector<HTMLElement>('.variable-flags')!;
+    flags.innerHTML = `<span>${variable.type}</span>${variable.public ? '<span class="variable-public">PUBLIC</span>' : ''}`;
+    row.draggable = true;
+    row.addEventListener('dragstart', (event) => {
+      const transfer = event.dataTransfer;
+      if (!transfer) return;
+      transfer.setData('application/x-onmyoji-variable', variable.name);
+      transfer.effectAllowed = 'copy';
+    });
+    row.addEventListener('click', () => {
+      docking?.showPanel('details');
+      editorCommand('selectVariable', variable.name);
+    });
+    variablesView.appendChild(row);
+  }
+}
+
 function renderSidebar(): void {
+  const keepScroll = structureView.scrollTop;
   structureView.replaceChildren();
   if (sidebarNodes.length === 0) {
     const empty = document.createElement('div');
@@ -530,29 +1102,8 @@ function renderSidebar(): void {
   } else {
     structureView.appendChild(createTreeRows());
   }
-
-  variablesView.replaceChildren();
-  if (sidebarVariables.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-panel';
-    empty.textContent = '此工作流还没有变量';
-    variablesView.appendChild(empty);
-  } else {
-    for (const variable of sidebarVariables) {
-      const row = document.createElement('button');
-      row.className = `variable-row${variable.name === selectedVariable ? ' selected' : ''}`;
-      row.title = variable.public ? '公开变量，可由父工作流传值' : '内部变量';
-      row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
-      row.querySelector<HTMLElement>('.variable-name')!.textContent = variable.name;
-      const flags = row.querySelector<HTMLElement>('.variable-flags')!;
-      flags.innerHTML = `<span>${variable.type}</span>${variable.public ? '<span class="variable-public">PUBLIC</span>' : ''}`;
-      row.addEventListener('click', () => {
-        docking?.showPanel('details');
-        editorCommand('selectVariable', variable.name);
-      });
-      variablesView.appendChild(row);
-    }
-  }
+  structureView.scrollTop = keepScroll;
+  renderVariables();
   createIcons({ icons: desktopIcons });
 }
 
@@ -563,6 +1114,7 @@ async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> 
     if (addToBackStack && currentUri && currentUri !== uri) backStack.push(currentUri);
     const init = await api.getWorkflowInit(uri, selectedInstance, backStack.length > 0);
     currentEditorInit = init;
+    if (init.document.uri !== currentUri) collapsedTreeNodes = new Set();
     currentUri = init.document.uri;
     currentText = init.document.text;
     selectedInstance = init.selectedInstance;
@@ -574,7 +1126,6 @@ async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> 
     renderInstances(init.instances, init.selectedInstance);
     renderContentBrowser();
     document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(init.document.uri);
-    document.querySelector<HTMLButtonElement>('#back-button')!.disabled = backStack.length === 0;
     setDirty(false);
     postToEditors(init as unknown as Record<string, unknown>);
     setStatus(init.issues.length > 0 ? `${init.issues.length} 个校验问题` : '工作流已载入');
@@ -624,11 +1175,28 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     }
     if (type === 'sidebarStateChanged') {
       if (sourceFrame !== editorFrame) return;
+      const previousTreeSignature = treeSignature();
+      const previousVariableSignature = variableSignature();
+      const previousSelectedNode = selectedNode;
+      const previousSelectedVariable = selectedVariable;
       sidebarVariables = Array.isArray(message.variables) ? message.variables as SidebarVariable[] : [];
       sidebarNodes = Array.isArray(message.nodes) ? message.nodes as SidebarNode[] : [];
       selectedVariable = typeof message.selectedVariable === 'string' ? message.selectedVariable : '';
       selectedNode = typeof message.selectedNode === 'string' ? message.selectedNode : '';
-      renderSidebar();
+      const treeUnchanged = sidebarNodes.length > 0 && treeSignature() === previousTreeSignature;
+      const variablesUnchanged = variableSignature() === previousVariableSignature;
+      if (treeUnchanged && variablesUnchanged) {
+        // 结构与变量都没变（如仅在画布上切换选中节点）：只更新选中行，不重建树，
+        // 展开状态、折叠状态与滚动位置都原样保留。
+        syncTreeSelection(previousSelectedNode);
+        syncVariableSelection(previousSelectedVariable);
+      } else if (treeUnchanged) {
+        // 结构没变但变量列表变了：仅重建变量列表。
+        renderVariables();
+        createIcons({ icons: desktopIcons });
+      } else {
+        renderSidebar();
+      }
       const selection = message.inspectorSelection as unknown as InspectorSelection | undefined;
       if (selection && selection.kind !== 'none') {
         docking?.showPanel('details');
@@ -759,16 +1327,18 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       await api.openWorkflowFile(currentUri);
       return;
     }
-    if (type === 'openWorkflowPicker') {
-      workflowSelect.focus();
-      return;
-    }
     if (type === 'openWorkflowTree') {
       showToast('结构树已显示在左侧');
       return;
     }
     if (type === 'openReferences') {
-      showToast('子工作流引用可在结构树和节点详情中查看');
+      if (!currentUri) {
+        showToast('请先打开一个工作流再查看引用', true);
+        return;
+      }
+      const relative = relativeToProject(displayFileUri(currentUri));
+      if (relative) openReferenceViewer(relative, document);
+      else showToast('无法定位当前工作流的项目路径', true);
       return;
     }
     if (type === 'error') throw new Error(String(message.message ?? '编辑器错误'));
@@ -839,9 +1409,9 @@ function closeTitlebarMenus(): void {
 function updateDockMenuState(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-workbench-panel]').forEach((button) => {
     const panelId = button.dataset.workbenchPanel as WorkbenchPanelId;
-    const open = panelId !== 'workflow'
-      ? Boolean(workbenchFrame?.isOpen(panelId) || docking?.isOpen(panelId))
-      : workbenchFrame?.isOpen(panelId) ?? false;
+    const open = panelId === 'workflow' || panelId === 'settings'
+      ? workbenchFrame?.isOpen(panelId) ?? false
+      : Boolean(workbenchFrame?.isOpen(panelId) || docking?.isOpen(panelId));
     button.setAttribute('aria-checked', String(open));
     button.classList.toggle('checked', open);
   });
@@ -863,6 +1433,28 @@ function popoutActivePanel(): void {
   else docking?.popoutActivePanel();
 }
 
+function openSettingsPanel(): void {
+  settingsContentView.value = contentBrowserView;
+  settingsAutoRefresh.checked = autoRefreshInstances;
+  settingsDefaultWorkflow.checked = loadDefaultWorkflowOnStart;
+  workbenchFrame?.show('settings');
+}
+
+function readSettings(): void {
+  autoRefreshInstances = window.localStorage.getItem('onmyoji-studio.settings.auto-refresh') !== 'false';
+  loadDefaultWorkflowOnStart = window.localStorage.getItem('onmyoji-studio.settings.default-workflow') !== 'false';
+}
+
+function restartInstanceRefresh(): void {
+  if (instanceRefreshTimer !== undefined) {
+    window.clearInterval(instanceRefreshTimer);
+    instanceRefreshTimer = undefined;
+  }
+  if (autoRefreshInstances) {
+    instanceRefreshTimer = window.setInterval(() => void refreshInstances(), 5000);
+  }
+}
+
 function bindUi(): void {
   document.querySelectorAll<HTMLElement>('[data-editor-command]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -874,13 +1466,33 @@ function bindUi(): void {
   document.querySelectorAll<HTMLElement>('[data-desktop-command]').forEach((button) => {
     button.addEventListener('click', () => desktopControl(button.dataset.desktopCommand ?? ''));
   });
+  document.querySelectorAll<HTMLElement>('[data-app-command]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.dataset.appCommand === 'settings') openSettingsPanel();
+    });
+  });
+  settingsContentView.addEventListener('change', () => {
+    contentBrowserView = settingsContentView.value === 'list' ? 'list' : 'grid';
+    window.localStorage.setItem('onmyoji-studio.content-browser-view', contentBrowserView);
+    renderContentBrowser();
+  });
+  settingsAutoRefresh.addEventListener('change', () => {
+    autoRefreshInstances = settingsAutoRefresh.checked;
+    window.localStorage.setItem('onmyoji-studio.settings.auto-refresh', String(autoRefreshInstances));
+    restartInstanceRefresh();
+  });
+  settingsDefaultWorkflow.addEventListener('change', () => {
+    loadDefaultWorkflowOnStart = settingsDefaultWorkflow.checked;
+    window.localStorage.setItem('onmyoji-studio.settings.default-workflow', String(loadDefaultWorkflowOnStart));
+  });
   document.querySelectorAll<HTMLButtonElement>('[data-dock-panel]').forEach((button) => {
     button.addEventListener('click', () => docking?.togglePanel(button.dataset.dockPanel as DockPanelId));
   });
   document.querySelectorAll<HTMLButtonElement>('[data-workbench-panel]').forEach((button) => {
     button.addEventListener('click', () => {
       const panelId = button.dataset.workbenchPanel as WorkbenchPanelId;
-      if (panelId !== 'workflow') toggleSharedPanel(panelId);
+      if (panelId === 'settings') workbenchFrame?.toggle('settings');
+      else if (panelId !== 'workflow') toggleSharedPanel(panelId);
     });
   });
   document.querySelectorAll<HTMLButtonElement>('[data-dock-command]').forEach((button) => {
@@ -928,17 +1540,17 @@ function bindUi(): void {
       document.querySelector<HTMLElement>('#palette-view')!.classList.toggle('hidden', tab.dataset.leftTab !== 'palette');
     });
   });
+  document.querySelector('#structure-expand-all')!.addEventListener('click', () => setAllTreeBranches(true));
+  document.querySelector('#structure-collapse-all')!.addEventListener('click', () => setAllTreeBranches(false));
   document.querySelector('#add-variable-button')!.addEventListener('click', () => editorCommand('addVariable'));
   document.querySelector('#new-workflow-button')!.addEventListener('click', () => void handleEditorMessage({ type: 'newWorkflow' }, editorFrame));
   document.querySelector('#run-button')!.addEventListener('click', () => desktopControl('run'));
   document.querySelector('#stop-button')!.addEventListener('click', () => desktopControl('stop'));
   document.querySelector('#save-button')!.addEventListener('click', () => desktopControl('save'));
-  document.querySelector('#back-button')!.addEventListener('click', () => desktopControl('back'));
   document.querySelector('#more-button')!.addEventListener('click', () => desktopControl('more'));
   document.querySelector('#window-minimize')!.addEventListener('click', () => void api.minimizeWindow());
   document.querySelector('#window-maximize')!.addEventListener('click', async () => updateMaximizedState(await api.toggleMaximizeWindow()));
   document.querySelector('#window-close')!.addEventListener('click', () => void api.closeWindow());
-  workflowSelect.addEventListener('change', () => desktopControl('switchWorkflow', workflowSelect.value));
   instanceSelect.addEventListener('change', () => desktopControl('selectInstance', instanceSelect.value));
   document.querySelector('#content-browser-up')!.addEventListener('click', () => navigateContentBrowser(contentParent(contentBrowserFolder)));
   document.querySelector('#content-browser-refresh')!.addEventListener('click', () => void refreshContentBrowser());
@@ -956,7 +1568,9 @@ function bindUi(): void {
   });
   document.addEventListener('click', closeTitlebarMenus);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeTitlebarMenus();
+    if (event.key === 'Escape') {
+      closeTitlebarMenus();
+    }
     if (event.shiftKey && event.key === 'F6') {
       event.preventDefault();
       popoutActivePanel();
@@ -1023,15 +1637,17 @@ async function start(): Promise<void> {
     const [bootstrapData, assets] = await Promise.all([api.bootstrap(), api.listAssets()]);
     bootstrap = bootstrapData;
     contentAssets = assets;
+    readSettings();
     contentBrowserView = window.localStorage.getItem('onmyoji-studio.content-browser-view') === 'list' ? 'list' : 'grid';
     renderWorkflowSelect(bootstrap.workflows);
     renderInstances(bootstrap.instances);
     renderSidebar();
     renderContentBrowser();
+    document.querySelector<HTMLElement>('#settings-project-root')!.textContent = bootstrap.projectRoot;
     setStatus('桌面端已连接');
-    if (editorReady && bootstrap.defaultWorkflow) await loadWorkflow(bootstrap.defaultWorkflow);
+    if (loadDefaultWorkflowOnStart && editorReady && bootstrap.defaultWorkflow) await loadWorkflow(bootstrap.defaultWorkflow);
     else postToEditors({ type: 'desktopPing' });
-    instanceRefreshTimer = window.setInterval(() => void refreshInstances(), 5000);
+    restartInstanceRefresh();
   } catch (error) {
     loadingMask.classList.add('hidden');
     showToast(errorMessage(error), true);

@@ -20,7 +20,7 @@ import { createElement, ExternalLink } from 'lucide';
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'editor' | 'details' | 'runtime' | 'contentBrowser';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime';
-export type WorkbenchPanelId = 'workflow' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'settings' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -67,15 +67,15 @@ export interface SharedPanelDockBridge {
   dispose(): void;
 }
 
-const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v6';
-const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v4';
+const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v7';
+const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v6';
 const SHARED_PANEL_SURFACE_KEYS: Record<SharedDockPanelId, string> = {
   contentBrowser: 'onmyoji-studio.content-browser-dock-surface',
   runtime: 'onmyoji-studio.runtime-dock-surface',
 };
 
 const DEFAULT_SHARED_PANEL_SURFACES: Record<SharedDockPanelId, SharedDockSurface> = {
-  contentBrowser: 'outer',
+  contentBrowser: 'inner',
   runtime: 'inner',
 };
 
@@ -106,7 +106,7 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
     moduleElementId: 'module-details',
     reference: 'editor',
     direction: 'right',
-    initialWidth: 340,
+    initialWidth: 300,
     minimumWidth: 280,
     minimumHeight: 260,
   },
@@ -145,13 +145,12 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
   },
   contentBrowser: {
     ...SHARED_PANEL_DEFINITIONS.contentBrowser,
-    reference: 'editor',
-    direction: 'below',
-    initialHeight: 230,
+    reference: 'runtime',
+    direction: 'within',
   },
 };
 
-const DEFAULT_PANEL_ORDER: DockPanelId[] = ['editor', 'structure', 'palette', 'variables', 'details', 'runtime'];
+const DEFAULT_PANEL_ORDER: DockPanelId[] = ['editor', 'structure', 'palette', 'variables', 'details', 'runtime', 'contentBrowser'];
 
 const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition> = {
   workflow: {
@@ -159,6 +158,15 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     moduleElementId: 'module-workbench',
     minimumWidth: 480,
     minimumHeight: 360,
+  },
+  settings: {
+    title: '设置',
+    moduleElementId: 'module-settings',
+    reference: 'workflow',
+    direction: 'right',
+    initialWidth: 340,
+    minimumWidth: 300,
+    minimumHeight: 220,
   },
   contentBrowser: {
     ...SHARED_PANEL_DEFINITIONS.contentBrowser,
@@ -174,7 +182,7 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
   },
 };
 
-const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow', 'contentBrowser'];
+const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow'];
 
 class ExistingModuleRenderer implements IContentRenderer {
   readonly element = document.createElement('div');
@@ -272,6 +280,7 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
       const isPopout = params.api.location.type === 'popout';
       const isFixed = !this.canPopout(params.group);
       this.button.disabled = isPopout || isFixed;
+      this.element.style.display = isPopout || isFixed ? 'none' : '';
       this.button.title = isPopout ? '已在独立窗口' : isFixed ? '固定模块不可移出' : '移到独立窗口';
       this.button.setAttribute('aria-label', this.button.title);
     };
@@ -467,9 +476,9 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     saveLayout();
     window.requestAnimationFrame(() => {
       api.getPanel('structure')?.api.group.api.setSize({ width: 260 });
-      api.getPanel('variables')?.api.group.api.setSize({ width: 260, height: 250 });
-      api.getPanel('details')?.api.group.api.setSize({ width: 340 });
-      api.getPanel('runtime')?.api.group.api.setSize({ height: 240 });
+      api.getPanel('variables')?.api.group.api.setSize({ width: 260, height: 400 });
+      api.getPanel('details')?.api.group.api.setSize({ width: 300 });
+      api.getPanel('runtime')?.api.group.api.setSize({ height: 260 });
     });
   };
 
@@ -537,7 +546,32 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
   };
 }
 
+let tabStripWindowDragInstalled = false;
+
+/**
+ * 外层工作区标签条空白处平时作为窗口拖动区（-webkit-app-region: drag），
+ * 但 Electron 会在该区域吞掉原生拖放事件，导致面板无法拖回这里停靠。
+ * 因此在原生拖拽进行期间给 body 加 dockview-dragging 类临时关闭拖动区。
+ */
+function installTabStripWindowDragToggle(): void {
+  if (tabStripWindowDragInstalled) return;
+  tabStripWindowDragInstalled = true;
+  const setActive = (active: boolean): void => {
+    document.body.classList.toggle('dockview-dragging', active);
+  };
+  document.addEventListener('dragstart', () => setActive(true), true);
+  document.addEventListener('dragenter', () => setActive(true), true);
+  document.addEventListener('dragover', () => setActive(true), true);
+  document.addEventListener('drop', () => setActive(false), true);
+  document.addEventListener('dragend', () => setActive(false), true);
+  document.addEventListener('dragleave', (event) => {
+    if (!event.relatedTarget) setActive(false);
+  }, true);
+  window.addEventListener('blur', () => setActive(false));
+}
+
 export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailure?: () => void): WorkbenchFrameController {
+  installTabStripWindowDragToggle();
   const container = document.querySelector<HTMLElement>('#workbench-frame')!;
   const moduleStore = document.querySelector<HTMLElement>('#workbench-module-store')!;
   const modules = new Map<string, HTMLElement>();
@@ -592,9 +626,6 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     DEFAULT_WORKBENCH_PANEL_ORDER.forEach(addPanel);
     suspendPersistence = false;
     saveLayout();
-    window.requestAnimationFrame(() => {
-      api.getPanel('contentBrowser')?.api.group.api.setSize({ height: 230 });
-    });
   };
 
   let restored = false;
@@ -611,10 +642,23 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   else if (!api.getPanel('workflow')) addPanel('workflow');
   suspendPersistence = false;
 
+  // 若持久化布局把设置面板恢复为浮动/弹出状态，先关闭它，
+  // 让设置默认停靠在工作流编辑器右侧（见 WORKBENCH_PANEL_DEFINITIONS.settings）。
+  const restoredSettings = api.getPanel('settings');
+  if (restoredSettings && (restoredSettings.api.location.type === 'floating' || restoredSettings.api.location.type === 'popout')) {
+    restoredSettings.api.close();
+  }
+
   const layoutDisposable = api.onDidLayoutChange(saveLayout);
   const panelDisposable = api.onDidActivePanelChange(() => onLayoutChange?.());
 
   const show = (panelId: WorkbenchPanelId): void => {
+    if (panelId === 'settings') {
+      const existing = api.getPanel('settings');
+      if (existing && (existing.api.location.type === 'floating' || existing.api.location.type === 'popout')) {
+        existing.api.close();
+      }
+    }
     addPanel(panelId);
     const panel = api.getPanel(panelId);
     panel?.api.setActive();

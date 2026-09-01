@@ -85,6 +85,7 @@ export function activate(context: vscode.ExtensionContext): void {
     pickRoi,
     checkTemplate,
     (event) => runLogManager.acceptEvent(event),
+    (state) => sidebarProvider.setEditorState(state),
   );
   workflowTreeManager = new WorkflowTreeManager(context, () => projectRoot, webviewManager);
 

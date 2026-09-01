@@ -150,6 +150,44 @@
     vscode.setState({ dirty: value });
   }
 
+  let lastSidebarState = '';
+
+  function postSidebarState() {
+    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
+      ? state.raw.blackboard
+      : {};
+    const variables = Object.entries(blackboard).map(([name, rawDefinition]) => {
+      const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
+      return { name, type: definition.type || 'any', public: definition.public !== false };
+    });
+    const selectedVariable = state.inspector === 'variables' && Object.prototype.hasOwnProperty.call(blackboard, state.selectedVariable)
+      ? state.selectedVariable
+      : '';
+    const sidebarNodes = nodes().map((node) => {
+      const subRef = node.type === 'task' && node.action === 'workflow.run' && typeof node.params?.workflow === 'string'
+        ? String(node.params.workflow).split(/[\\/]/).pop()
+        : '';
+      const meta = node.type === 'task'
+        ? (subRef ? `⇢ ${subRef}` : node.action || 'task')
+        : node.type === 'instance_parallel' && Array.isArray(node.runs)
+          ? `${node.runs.length} 个实例`
+          : node.type;
+      return {
+        id: node.id,
+        name: String(node.name || node.id),
+        type: node.type || 'task',
+        meta,
+        children: Array.isArray(node.children) ? node.children.slice() : [],
+      };
+    });
+    const selectedNode = state.inspector === 'node' && state.selected.size === 1 ? [...state.selected][0] : '';
+    const payload = { variables, selectedVariable, nodes: sidebarNodes, root: String(state.raw.root || ''), selectedNode };
+    const signature = JSON.stringify(payload);
+    if (signature === lastSidebarState) return;
+    lastSidebarState = signature;
+    vscode.postMessage({ type: 'sidebarStateChanged', ...payload });
+  }
+
   function snapshot() {
     return JSON.stringify(state.raw);
   }
@@ -504,6 +542,7 @@
     updateIssueBadge();
     renderMinimap();
     renderInspector();
+    postSidebarState();
   }
 
   /** 把画布视野中心移到指定节点（搜索定位与结构树窗口共用）。 */
@@ -2147,44 +2186,34 @@
     });
   }
 
-  function renderVariablesInspector() {
-    const body = clearInspector('变量');
-    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
-    const add = el('button', 'icon-button variable-add', '+'); add.title = '添加变量';
-    add.addEventListener('click', () => mutate(() => {
+  function addVariable() {
+    mutate(() => {
+      if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
       const name = nextVariableName();
       state.raw.blackboard[name] = { type: 'string', public: false };
       state.selectedVariable = name;
-    }));
-    section(body, '变量', add);
-    const entries = Object.entries(state.raw.blackboard);
-    if (!entries.some(([name]) => name === state.selectedVariable)) state.selectedVariable = entries[0]?.[0] || '';
-
-    const list = el('div', 'variable-list');
-    if (!entries.length) list.appendChild(el('div', 'variable-list-empty', '没有变量'));
-    entries.forEach(([name, rawDefinition]) => {
-      const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition)
-        ? rawDefinition
-        : { type: 'any', public: false };
-      if (definition !== rawDefinition) state.raw.blackboard[name] = definition;
-      const item = el('button', `variable-list-item${name === state.selectedVariable ? ' selected' : ''}`);
-      item.type = 'button'; item.dataset.variable = name;
-      item.appendChild(el('span', `variable-type-dot type-${definition.type || 'any'}`));
-      item.appendChild(el('span', 'variable-list-name', name));
-      item.appendChild(el('span', 'variable-list-type', definition.type || 'any'));
-      const scope = el('span', `variable-list-scope${definition.public !== false ? ' public' : ''}`, definition.public !== false ? '公开' : '私有');
-      scope.title = definition.public !== false ? '父工作流可以传值' : '仅当前工作流可用';
-      item.appendChild(scope);
-      item.addEventListener('click', () => { state.selectedVariable = name; renderInspector(); });
-      list.appendChild(item);
+      state.inspector = 'variables';
+      state.selected.clear();
+      state.selectedEdge = null;
+      state.selectedRun = null;
     });
-    body.appendChild(list);
+  }
 
+  function renderVariablesInspector() {
     const name = state.selectedVariable;
-    const definition = name ? state.raw.blackboard[name] : null;
-    if (!definition) return;
+    const body = clearInspector(name ? `变量 · ${name}` : '变量');
+    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
+    const rawDefinition = name ? state.raw.blackboard[name] : null;
+    if (!rawDefinition) {
+      body.appendChild(el('div', 'variable-inspector-empty', '从左侧变量列表选择一个变量'));
+      return;
+    }
+    const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition)
+      ? rawDefinition
+      : { type: 'any', public: false };
+    if (definition !== rawDefinition) state.raw.blackboard[name] = definition;
     const remove = el('button', 'icon-button danger', '×'); remove.title = '删除变量'; remove.addEventListener('click', () => removeVariable(name));
-    section(body, '变量详情', remove);
+    section(body, '变量', remove);
     const details = el('div', 'variable-details');
     field(details, '名称').appendChild(textInput(name, (value) => renameBlackboard(name, value.trim())));
     field(details, '类型').appendChild(selectInput(definition.type || 'string', DEFINITION_TYPES.map((value) => ({ value, label: value })), (value) => mutate(() => changeDefinitionType(definition, value))));
@@ -2998,7 +3027,18 @@
     else if (command === 'fitView') fitView();
     else if (command === 'exportImage') exportFullCanvasImage();
     else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }
-    else if (command === 'variables') { state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }
+    else if (command === 'variables') {
+      if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
+      if (!state.raw.blackboard[state.selectedVariable]) state.selectedVariable = Object.keys(state.raw.blackboard)[0] || '';
+      state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
+    }
+    else if (command === 'selectVariable') {
+      const name = String(value ?? '');
+      if (!state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, name)) return;
+      state.selectedVariable = name;
+      state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
+    }
+    else if (command === 'addVariable') addVariable();
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {
       const id = String(value ?? '');

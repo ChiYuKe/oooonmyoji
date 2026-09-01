@@ -370,12 +370,10 @@ sendEditorCommand('autoLayout');
 check('自动布局保持 Root 在子节点上方', save()._layout.root.y < save()._layout.main.y);
 
 windowStub.__btEditor.state.raw.blackboard.rounds = { type: 'integer', public: true, default: 9999, enum: [1, 9999] };
-sendEditorCommand('variables');
-const variableItem = (name) => inspectorItems((item) => hasClass(item, 'variable-list-item') && item.dataset.variable === name)[0];
-check('变量入口使用 UE 式变量列表且不显示旧参数面板文案', !!variableItem('template') && !!variableItem('rounds')
-  && els['inspector-title'].textContent === '变量'
+sendEditorCommand('selectVariable', 'rounds');
+check('左侧变量命令打开右侧单变量详情', els['inspector-title'].textContent === '变量 · rounds'
+  && inspectorItems((item) => hasClass(item, 'variable-list')).length === 0
   && inspectorItems((item) => String(item.textContent).includes('黑板')).length === 0);
-fire(variableItem('rounds'), 'click');
 const variableDetails = () => inspectorItems((item) => hasClass(item, 'variable-details'))[0];
 const roundsDefault = within(variableDetails(), (item) => item.tagName === 'SELECT'
     && within(item, (option) => option.tagName === 'OPTION' && option.textContent === '1').length === 1
@@ -385,7 +383,7 @@ check('选中变量后只显示当前变量详情', !!roundsDefault && roundsDef
   && inspectorItems((item) => hasClass(item, 'variable-details')).length === 1);
 roundsDefault.value = '1'; fire(roundsDefault, 'change');
 check('枚举下拉框直接写回变量默认值', save().blackboard.rounds.default === 1);
-fire(variableItem('template'), 'click');
+sendEditorCommand('selectVariable', 'template');
 const browseVariableAsset = within(variableDetails(), (item) => item.tagName === 'BUTTON' && item.textContent === '浏览')[0];
 check('asset 变量详情提供模板浏览选项', !!browseVariableAsset);
 fire(browseVariableAsset, 'click');
@@ -399,13 +397,17 @@ const variableAssetTile = within(variableAssetOverlay, (item) => hasClass(item, 
 fire(variableAssetTile, 'click');
 fire(within(variableAssetOverlay, (item) => item.tagName === 'BUTTON' && item.textContent === '选择')[0], 'click');
 check('模板浏览结果直接写回变量默认值', save().blackboard.template.default === 'assets/templates/variable-target.png');
-const addVariable = inspectorItems((item) => item.tagName === 'BUTTON' && item.title === '添加变量')[0];
-fire(addVariable, 'click');
+sendEditorCommand('addVariable');
 check('新增变量自动选中并创建为私有 string', !!save().blackboard.new_variable_1
   && save().blackboard.new_variable_1.type === 'string'
   && save().blackboard.new_variable_1.public === false
   && windowStub.__btEditor.state.selectedVariable === 'new_variable_1');
-fire(variableItem('find_template'), 'click');
+check('画布结构和变量变化同步给左侧停靠栏', posted.some((message) => message.type === 'sidebarStateChanged'
+  && message.selectedVariable === 'new_variable_1'
+  && message.root === 'root'
+  && message.nodes.some((node) => node.id === 'root' && Array.isArray(node.children))
+  && message.variables.some((variable) => variable.name === 'new_variable_1' && variable.type === 'string' && variable.public === false)));
+sendEditorCommand('selectVariable', 'find_template');
 const deleteReferencedVariable = inspectorItems((item) => item.tagName === 'BUTTON' && item.title === '删除变量')[0];
 fire(deleteReferencedVariable, 'click');
 check('被节点引用的变量不能直接删除', !!save().blackboard.find_template

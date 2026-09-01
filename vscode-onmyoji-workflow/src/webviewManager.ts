@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { ActionCatalog } from './catalog';
 import { WorkflowIntelligence } from './jsonProviders';
 import { RuntimeInstanceInfo } from './runtimeInstances';
+import type { SidebarEditorState } from './sidebarProvider';
 import { WorkflowFileDescriptor, collectRefSuggestions, parseWorkflow, resolveWorkflowReference, validateWorkflow } from './workflow';
 
 interface WebviewPayload {
@@ -59,6 +60,7 @@ type TemplateChecker = (options: TemplateCheckOptions) => Promise<TemplateCheckR
 type InstanceSelector = (instanceId: string) => Promise<string>;
 type RuntimeInstanceProvider = () => Promise<RuntimeInstanceState>;
 type RunEventListener = (event: Record<string, unknown>) => void;
+type SidebarStateListener = (state: SidebarEditorState) => void;
 
 interface EditorCommandPayload {
   command: string;
@@ -76,6 +78,8 @@ const editorCommands = new Set([
   'exportImage',
   'workflowSettings',
   'variables',
+  'selectVariable',
+  'addVariable',
   'searchNodeByName',
   'focusNode',
 ]);
@@ -112,6 +116,7 @@ export class WebviewManager implements vscode.Disposable {
     private pickRoi: RoiPicker,
     private checkTemplate: TemplateChecker,
     private onRunEvent: RunEventListener,
+    private onSidebarState: SidebarStateListener,
   ) {}
 
   async open(preferred?: vscode.Uri): Promise<void> {
@@ -148,6 +153,7 @@ export class WebviewManager implements vscode.Disposable {
           this.docUri = undefined;
           this.editorReady = false;
           this.pendingEditorCommands = [];
+          this.onSidebarState({ variables: [], selectedVariable: '', nodes: [], root: '', selectedNode: '' });
           this.disposePanelSubscriptions();
         }),
       );
@@ -428,6 +434,45 @@ export class WebviewManager implements vscode.Disposable {
         this.replayRunEvents();
         this.flushEditorCommands();
         break;
+      case 'sidebarStateChanged': {
+        const variables = Array.isArray(message.variables)
+          ? message.variables.flatMap((item) => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+            const value = item as Record<string, unknown>;
+            const name = typeof value.name === 'string' ? value.name.trim() : '';
+            if (!name) return [];
+            return [{
+              name,
+              type: typeof value.type === 'string' && value.type ? value.type : 'any',
+              public: value.public !== false,
+            }];
+          })
+          : [];
+        const selectedVariable = typeof message.selectedVariable === 'string' ? message.selectedVariable : '';
+        const nodes = Array.isArray(message.nodes)
+          ? message.nodes.flatMap((item) => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+            const value = item as Record<string, unknown>;
+            const id = typeof value.id === 'string' ? value.id.trim() : '';
+            if (!id) return [];
+            return [{
+              id,
+              name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : id,
+              type: typeof value.type === 'string' && value.type ? value.type : 'task',
+              meta: typeof value.meta === 'string' ? value.meta : '',
+              children: Array.isArray(value.children) ? value.children.map((child) => String(child)).filter(Boolean) : [],
+            }];
+          })
+          : [];
+        this.onSidebarState({
+          variables,
+          selectedVariable,
+          nodes,
+          root: typeof message.root === 'string' ? message.root : '',
+          selectedNode: typeof message.selectedNode === 'string' ? message.selectedNode : '',
+        });
+        break;
+      }
       case 'reloadRequest':
         this.dirty = false;
         await this.sendInit();

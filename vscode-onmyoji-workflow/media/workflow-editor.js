@@ -13,6 +13,11 @@
   const RUN_CARD_GAP_X = 48;
   const RUN_CARD_GAP_Y = 92;
   const PREVIEW = { x: 154, y: 38, width: 92, height: 44 };
+  const VARIABLE_CARD_W = 150;
+  const VARIABLE_CARD_H = 54;
+  const VARIABLE_CARD_PORT_Y = 13;
+  const VARIABLE_PIN_X = 10;
+  const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'instance_parallel', 'task'];
   const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
   const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', instance_parallel: '⇉', task: '▣' };
@@ -39,6 +44,7 @@
     panY: 48,
     drag: null,
     connect: null,
+    variableConnect: null,
     marquee: null,
     undo: [],
     redo: [],
@@ -62,6 +68,8 @@
   let lastClickNode = '';
   let lastClickX = -1;
   let lastClickY = -1;
+  // 右键拖拽平移后，Windows 在松开右键时才触发 contextmenu，需要抑制这次误触
+  let suppressPanContextMenu = false;
 
   const $ = (id) => document.getElementById(id);
   const graph = $('graph');
@@ -72,6 +80,7 @@
   const catalogByName = (name) => state.catalog.find((item) => item.name === name) || null;
   const workflowNodeVariables = (node) => subWorkflowRef(node) ? publicWorkflowVariables(subWorkflowRef(node)) : [];
   const nodeHeight = (node) => BASE_H
+    + nodeVariablePins(node).length * RUN_VARIABLE_H
     + workflowNodeVariables(node).length * RUN_VARIABLE_H
     + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
   const layout = () => {
@@ -82,6 +91,58 @@
     const value = layout()[node.id];
     return value && Number.isFinite(value.x) && Number.isFinite(value.y) ? value : { x: 0, y: 0 };
   };
+
+  /** 变量卡片位置表，随文档保存（schema 允许 `_` 前缀的编辑器私有键）。 */
+  function variableCards() {
+    if (!state.raw || typeof state.raw !== 'object') return {};
+    if (!state.raw._variableCards || typeof state.raw._variableCards !== 'object' || Array.isArray(state.raw._variableCards)) state.raw._variableCards = {};
+    return state.raw._variableCards;
+  }
+
+  function variableCardList() {
+    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
+      ? state.raw.blackboard
+      : {};
+    return Object.entries(variableCards())
+      .filter(([name]) => Object.prototype.hasOwnProperty.call(blackboard, name))
+      .map(([name, value]) => ({
+        name,
+        x: value && Number.isFinite(value.x) ? value.x : 0,
+        y: value && Number.isFinite(value.y) ? value.y : 0,
+      }));
+  }
+
+  function variableTypeOf(name) {
+    const definition = state.raw.blackboard && state.raw.blackboard[name];
+    return definition && typeof definition === 'object' && definition.type ? definition.type : 'any';
+  }
+
+  /** 节点卡片左侧的变量端点：所有绑定到 blackboard 变量的参数（勾选“公开”即建立绑定）。 */
+  function nodeVariablePins(node) {
+    if (!node || node.type !== 'task' || !node.params || typeof node.params !== 'object' || Array.isArray(node.params)) return [];
+    const pins = [];
+    for (const [param, value] of Object.entries(node.params)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ref !== 'string') continue;
+      if (!value.ref.startsWith('blackboard.')) continue;
+      const variable = value.ref.slice('blackboard.'.length);
+      if (variable) pins.push({ param, variable, type: variableTypeOf(variable) });
+    }
+    return pins;
+  }
+
+  function variablePinPosition(node, index) {
+    const pos = position(node);
+    return { x: pos.x + VARIABLE_PIN_X, y: pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2 };
+  }
+
+  function variableCompatibleWithPin(variableName, node, param) {
+    if (!node) return false;
+    const spec = node.action ? catalogByName(node.action) : null;
+    const definition = spec && spec.parameters ? spec.parameters[param] : undefined;
+    if (!definition) return true;
+    const variableDefinition = state.raw.blackboard && state.raw.blackboard[variableName];
+    return compatibleRefType(definitionSchema(definition), definitionSchema(variableDefinition));
+  }
 
   function workflowDescriptor(reference) {
     const normalized = String(reference || '').trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
@@ -470,11 +531,12 @@
     if (!nodes().length) return { minX: 0, minY: 0, maxX: NODE_W, maxY: BASE_H };
     const points = nodes().map((node) => ({ node, pos: position(node) }));
     const runCards = instanceRunCards();
+    const cards = variableCardList();
     return {
-      minX: Math.min(...points.map((item) => item.pos.x), ...runCards.map((item) => item.x)),
-      minY: Math.min(...points.map((item) => item.pos.y)),
-      maxX: Math.max(...points.map((item) => item.pos.x + NODE_W), ...runCards.map((item) => item.x + RUN_CARD_W)),
-      maxY: Math.max(...points.map((item) => item.pos.y + nodeHeight(item.node)), ...runCards.map((item) => item.y + item.height)),
+      minX: Math.min(...points.map((item) => item.pos.x), ...runCards.map((item) => item.x), ...cards.map((item) => item.x)),
+      minY: Math.min(...points.map((item) => item.pos.y), ...cards.map((item) => item.y)),
+      maxX: Math.max(...points.map((item) => item.pos.x + NODE_W), ...runCards.map((item) => item.x + RUN_CARD_W), ...cards.map((item) => item.x + VARIABLE_CARD_W)),
+      maxY: Math.max(...points.map((item) => item.pos.y + nodeHeight(item.node)), ...runCards.map((item) => item.y + item.height), ...cards.map((item) => item.y + VARIABLE_CARD_H)),
     };
   }
 
@@ -534,6 +596,9 @@
     const cards = svgEl('g', { class: 'cards' }, root);
     nodes().forEach((node) => renderNode(cards, node));
     runCards.forEach((card) => renderInstanceRunCard(cards, card));
+    const variableLayer = svgEl('g', { class: 'variable-cards' }, root);
+    variableCardList().forEach((card) => renderVariableCard(variableLayer, card));
+    if (state.variableConnect) renderVariableConnection(variableLayer);
     if (state.marquee) {
       const box = state.marquee;
       svgEl('rect', { class: 'marquee', x: Math.min(box.x1, box.x2), y: Math.min(box.y1, box.y2), width: Math.abs(box.x2 - box.x1), height: Math.abs(box.y2 - box.y1) }, root);
@@ -678,6 +743,7 @@
     if (subRef) classes.push('node-subworkflow');
     if (state.selected.has(node.id)) classes.push('selected');
     if (state.connect && state.connect.hover === node.id) classes.push('connect-hover');
+    if (state.variableConnect && state.variableConnect.hover && state.variableConnect.hover.nodeId === node.id) classes.push('connect-hover');
     if (run && run.status) classes.push(`run-${run.status}`);
     const group = svgEl('g', { class: classes.join(' '), transform: `translate(${pos.x},${pos.y})`, 'data-id': node.id }, layer);
     group.dataset.id = node.id;
@@ -703,10 +769,21 @@
       renderNodePreview(group, { uri, path: '' }, 'step-thumb', 'xMidYMid slice', run.screenshot || uri);
     } else if (template) renderNodePreview(group, template, 'template-thumb', 'xMidYMid meet');
     else if (run && Number.isFinite(run.duration)) svgEl('text', { class: 'node-duration', x: NODE_W - 12, y: 72, 'text-anchor': 'end' }, group).textContent = `${run.duration} ms`;
+    const pins = nodeVariablePins(node);
+    const pinOffset = pins.length * RUN_VARIABLE_H;
+    pins.forEach((pin, index) => {
+      const y = BASE_H + index * RUN_VARIABLE_H;
+      svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
+      svgEl('circle', { class: `port port-variable type-${pin.type}`, cx: VARIABLE_PIN_X, cy: y + RUN_VARIABLE_H / 2, r: 5.5 }, group);
+      svgEl('text', { class: 'pin-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(pin.variable, 14);
+      svgEl('text', { class: 'pin-variable-param', x: NODE_W - 10, y: y + 16, 'text-anchor': 'end' }, group).textContent = compactValue(pin.param, 14);
+      const hit = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_PIN_X, cy: y + RUN_VARIABLE_H / 2, r: 10, 'data-node': node.id, 'data-param': pin.param }, group);
+      hit.addEventListener('pointerdown', (event) => startVariableConnectionFromPin(event, node.id, pin.param));
+    });
     const workflowVariables = workflowNodeVariables(node);
     const workflowInputs = node.params && typeof node.params === 'object' ? node.params : {};
     workflowVariables.forEach((variable, variableIndex) => {
-      const y = BASE_H + variableIndex * RUN_VARIABLE_H;
+      const y = BASE_H + pinOffset + variableIndex * RUN_VARIABLE_H;
       svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
       svgEl('circle', { class: `instance-variable-pin type-${variable.definition.type || 'any'}`, cx: 10, cy: y + RUN_VARIABLE_H / 2, r: 5 }, group);
       svgEl('text', { class: 'instance-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(variable.name, 15);
@@ -714,7 +791,7 @@
     });
     const decorators = Array.isArray(node.decorators) ? node.decorators : [];
     decorators.forEach((decorator, index) => {
-      const y = BASE_H + workflowVariables.length * RUN_VARIABLE_H + index * DECO_H;
+      const y = BASE_H + pinOffset + workflowVariables.length * RUN_VARIABLE_H + index * DECO_H;
       svgEl('line', { class: 'decorator-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
       svgEl('text', { class: 'decorator-icon', x: 14, y: y + 15 }, group).textContent = '◇';
       svgEl('text', { class: 'decorator-label', x: 32, y: y + 15 }, group).textContent = decoratorLabel(decorator);
@@ -747,6 +824,7 @@
       body.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (contextMenuSuppressedByPan()) return;
         state.selected = new Set([node.id]); state.selectedRun = null; render();
         showMenu(event.clientX, event.clientY, [
           { label: '进入子工作流视图', run: () => requestOpenSubWorkflow(node.id) },
@@ -818,6 +896,7 @@
     });
     body.addEventListener('contextmenu', (event) => {
       event.preventDefault(); event.stopPropagation();
+      if (contextMenuSuppressedByPan()) return;
       state.selected.clear(); state.selectedEdge = null;
       state.selectedRun = { nodeId: card.node.id, index: card.index };
       render();
@@ -826,6 +905,95 @@
       items.push({ label: '删除实例运行项', danger: true, run: () => removeInstanceRun(card.node, card.index) });
       showMenu(event.clientX, event.clientY, items);
     });
+  }
+
+  function renderVariableCard(layer, card) {
+    const definition = (state.raw.blackboard && state.raw.blackboard[card.name]) || {};
+    const type = definition.type || 'any';
+    const selected = state.inspector === 'variables' && state.selectedVariable === card.name;
+    const targeted = state.variableConnect && state.variableConnect.direction === 'from-pin'
+      && state.variableConnect.hover && state.variableConnect.hover.card === card.name;
+    const group = svgEl('g', {
+      class: `variable-card type-${type}${selected ? ' selected' : ''}${targeted ? ' connect-target' : ''}`,
+      transform: `translate(${card.x},${card.y})`,
+      'data-variable': card.name,
+    }, layer);
+    group.dataset.variable = card.name;
+    const body = svgEl('rect', { class: 'variable-card-box', width: VARIABLE_CARD_W, height: VARIABLE_CARD_H, rx: 5 }, group);
+    svgEl('rect', { class: 'variable-card-head', width: VARIABLE_CARD_W, height: 26, rx: 5 }, group);
+    svgEl('rect', { class: 'variable-card-head-square', y: 20, width: VARIABLE_CARD_W, height: 7 }, group);
+    svgEl('circle', { class: `variable-card-dot type-${type}`, cx: 12, cy: VARIABLE_CARD_PORT_Y, r: 4.5 }, group);
+    svgEl('text', { class: 'variable-card-name', x: 22, y: 17 }, group).textContent = compactValue(card.name, 12);
+    svgEl('text', { class: 'variable-card-type', x: 12, y: 44 }, group).textContent = `${type}${definition.public !== false ? ' · 公开' : ' · 私有'}`;
+    svgEl('text', { class: 'variable-card-value', x: VARIABLE_CARD_W - 10, y: 44, 'text-anchor': 'end' }, group).textContent = variableValueSummary(definition);
+    svgEl('circle', { class: `port port-variable-out type-${type}`, cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: PORT_R }, group);
+    const port = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: 10, 'data-variable': card.name }, group);
+    port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.name));
+    body.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation();
+      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null;
+      state.selectedVariable = card.name;
+      state.inspector = 'variables';
+      const point = worldPoint(event);
+      state.drag = { kind: 'variable-card', name: card.name, start: point, origin: { x: card.x, y: card.y }, before: snapshot(), moved: false };
+      render();
+    });
+    body.addEventListener('contextmenu', (event) => {
+      event.preventDefault(); event.stopPropagation();
+      if (contextMenuSuppressedByPan()) return;
+      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null;
+      state.selectedVariable = card.name;
+      state.inspector = 'variables';
+      render();
+      showMenu(event.clientX, event.clientY, [
+        { label: '删除变量卡片', run: () => removeVariableCard(card.name) },
+      ]);
+    });
+  }
+
+  function variableValueSummary(definition) {
+    if (definition && Object.prototype.hasOwnProperty.call(definition, 'default')) return compactValue(definition.default, 13);
+    if (definition && definition.required === true) return '必填';
+    return '未设默认';
+  }
+
+  function removeVariableCard(name) {
+    if (!Object.prototype.hasOwnProperty.call(variableCards(), name)) return;
+    mutate(() => { delete variableCards()[name]; });
+  }
+
+  /** 把变量卡片放到指定世界坐标；若附近有兼容端点则吸附到端点旁并建立绑定。 */
+  function placeVariableCard(name, point, options = {}) {
+    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) return;
+    if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, name)) { toast(`变量 ${name} 不存在`, true); return; }
+    const target = options.connect === false ? null : variablePinTargetAt(point, name);
+    const existed = Object.prototype.hasOwnProperty.call(variableCards(), name);
+    mutate(() => {
+      const cards = variableCards();
+      if (target) {
+        const node = nodeById(target.nodeId);
+        const pos = position(node);
+        cards[name] = { x: Math.round((pos.x - VARIABLE_CARD_W - 56) / 8) * 8, y: Math.round((target.y - VARIABLE_CARD_H / 2) / 8) * 8 };
+        node.params[target.param] = { ref: `blackboard.${name}` };
+      } else {
+        cards[name] = { x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
+      }
+    });
+    if (target) toast(`已连接 参数 ${target.param} ← 变量 ${name}`);
+    else if (!existed) toast(`已添加变量卡片 ${name}`);
+  }
+
+  /** 编辑器命令入口：在鼠标处（或视野中心）创建变量卡片。 */
+  function addVariableCardCommand(name) {
+    const variableName = String(name ?? '').trim();
+    if (!variableName) return;
+    if (!state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, variableName)) { toast(`变量 ${variableName} 不存在`, true); return; }
+    if (Object.prototype.hasOwnProperty.call(variableCards(), variableName)) { toast('该变量的卡片已在画布中'); return; }
+    if (!wrap.clientWidth || !wrap.clientHeight) return;
+    const rect = wrap.getBoundingClientRect();
+    const point = state.mouse || { x: (rect.width / 2 - state.panX) / state.zoom, y: (rect.height / 2 - state.panY) / state.zoom };
+    placeVariableCard(variableName, point, { connect: false });
   }
 
   /** 若节点是子流程 task（workflow.run），返回子工作流引用，否则返回空字符串。 */
@@ -960,6 +1128,136 @@
     return best;
   }
 
+  /** 变量连线拖拽中，光标附近类型兼容的节点端点（变量卡片 → 节点）。 */
+  function variablePinTargetAt(point, variableName) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const maxDistance = Math.max(PORT_R + 8, 32 / state.zoom);
+    let best = null;
+    let bestDistance = maxDistance;
+    for (const node of nodes()) {
+      const pins = nodeVariablePins(node);
+      if (!pins.length) continue;
+      const pos = position(node);
+      pins.forEach((pin, index) => {
+        if (!variableCompatibleWithPin(variableName, node, pin.param)) return;
+        const x = pos.x + VARIABLE_PIN_X;
+        const y = pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2;
+        const distance = Math.hypot(point.x - x, point.y - y);
+        if (distance <= bestDistance) { best = { nodeId: node.id, param: pin.param, x, y }; bestDistance = distance; }
+      });
+    }
+    if (best) return best;
+    // 落在节点卡片本体上时，自动接到第一个类型兼容的参数端点（不必精确捏住引脚）。
+    for (const node of nodes()) {
+      const pos = position(node);
+      if (point.x < pos.x || point.x > pos.x + NODE_W || point.y < pos.y || point.y > pos.y + nodeHeight(node)) continue;
+      const pins = nodeVariablePins(node);
+      const index = pins.findIndex((pin) => variableCompatibleWithPin(variableName, node, pin.param));
+      if (index < 0) continue;
+      return { nodeId: node.id, param: pins[index].param, x: pos.x + VARIABLE_PIN_X, y: pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2 };
+    }
+    return null;
+  }
+
+  /** 变量连线拖拽中，光标附近的变量卡片（节点端点 → 变量卡片）。 */
+  function variableCardTargetAt(point, nodeId, param) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const node = nodeById(nodeId);
+    const maxDistance = Math.max(PORT_R + 8, 32 / state.zoom);
+    let best = null;
+    let bestDistance = maxDistance;
+    for (const card of variableCardList()) {
+      if (!variableCompatibleWithPin(card.name, node, param)) continue;
+      const x = card.x + VARIABLE_CARD_W;
+      const y = card.y + VARIABLE_CARD_PORT_Y;
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance <= bestDistance) { best = { card: card.name, x, y }; bestDistance = distance; }
+    }
+    if (best) return best;
+    // 落在卡片本体上时也视为连到该变量（允许重复连接当前变量，作为成功反馈）。
+    for (const card of variableCardList()) {
+      if (!variableCompatibleWithPin(card.name, node, param)) continue;
+      if (point.x >= card.x && point.x <= card.x + VARIABLE_CARD_W && point.y >= card.y && point.y <= card.y + VARIABLE_CARD_H) {
+        return { card: card.name, x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
+      }
+    }
+    return null;
+  }
+
+  function variableConnectionTargetAt(event) {
+    if (!state.variableConnect || !event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
+    const point = worldPoint(event);
+    return state.variableConnect.direction === 'from-card'
+      ? variablePinTargetAt(point, state.variableConnect.variable)
+      : variableCardTargetAt(point, state.variableConnect.nodeId, state.variableConnect.param);
+  }
+
+  function startVariableConnectionFromCard(event, name) {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const point = worldPoint(event);
+    state.variableConnect = { direction: 'from-card', variable: name, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+    state.selectedEdge = null;
+    render();
+  }
+
+  function startVariableConnectionFromPin(event, nodeId, param) {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const point = worldPoint(event);
+    state.variableConnect = { direction: 'from-pin', nodeId, param, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+    state.selectedEdge = null;
+    render();
+  }
+
+  function cancelVariableConnection() {
+    if (!state.variableConnect) return;
+    const pointerId = state.variableConnect.pointerId;
+    state.variableConnect = null;
+    releaseConnectionPointer(pointerId);
+    render();
+  }
+
+  function finishVariableConnection(event) {
+    if (!state.variableConnect) return;
+    event.preventDefault(); event.stopPropagation();
+    const connection = state.variableConnect;
+    const target = variableConnectionTargetAt(event) || connection.hover;
+    state.variableConnect = null;
+    releaseConnectionPointer(connection.pointerId);
+    if (!target) { render(); return; }
+    if (connection.direction === 'from-card') connectVariableToPin(connection.variable, target.nodeId, target.param);
+    else connectVariableToPin(target.card, connection.nodeId, connection.param);
+  }
+
+  /** 用变量绑定节点参数端点（等价于把该参数接到对应变量）。 */
+  function connectVariableToPin(variable, nodeId, param) {
+    const node = nodeById(nodeId);
+    if (!node || !state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, variable)) return;
+    mutate(() => { node.params[param] = { ref: `blackboard.${variable}` }; });
+    toast(`参数 ${param} ← 变量 ${variable}`);
+  }
+
+  function renderVariableConnection(layer) {
+    const connection = state.variableConnect;
+    if (!connection) return;
+    let origin = null;
+    if (connection.direction === 'from-card') {
+      const card = variableCardList().find((item) => item.name === connection.variable);
+      if (card) origin = { x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
+    } else {
+      const node = nodeById(connection.nodeId);
+      const index = node ? nodeVariablePins(node).findIndex((pin) => pin.param === connection.param) : -1;
+      if (node && index >= 0) origin = variablePinPosition(node, index);
+    }
+    if (!origin) return;
+    const hover = connection.hover;
+    svgEl('path', {
+      class: `variable-connection-preview${hover ? ' snapped' : ''}`,
+      d: bezier(origin.x, origin.y, hover ? hover.x : connection.x, hover ? hover.y : connection.y),
+    }, layer);
+  }
+
   function startNodeDrag(event, id) {
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
@@ -979,9 +1277,10 @@
 
   function onPointerDown(event) {
     hideMenus();
+    suppressPanContextMenu = false;
     if (event.button === 1 || event.button === 2 || (event.button === 0 && event.altKey)) {
       event.preventDefault();
-      state.drag = { kind: 'pan', x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY };
+      state.drag = { kind: 'pan', x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY, moved: false };
       return;
     }
     if (event.button === 0 && event.target === graph) {
@@ -1020,8 +1319,19 @@
       render();
       return;
     }
+    if (state.variableConnect) {
+      if (Number.isInteger(event.pointerId) && Number.isInteger(state.variableConnect.pointerId) && event.pointerId !== state.variableConnect.pointerId) return;
+      autoPan(event);
+      const point = worldPoint(event);
+      state.variableConnect.x = point.x;
+      state.variableConnect.y = point.y;
+      state.variableConnect.hover = variableConnectionTargetAt(event);
+      render();
+      return;
+    }
     if (!state.drag) return;
     if (state.drag.kind === 'pan') {
+      state.drag.moved = state.drag.moved || Math.abs(event.clientX - state.drag.x) + Math.abs(event.clientY - state.drag.y) > 3;
       state.panX = state.drag.panX + event.clientX - state.drag.x;
       state.panY = state.drag.panY + event.clientY - state.drag.y;
     } else if (state.drag.kind === 'nodes') {
@@ -1033,6 +1343,16 @@
       for (const [id, origin] of Object.entries(state.drag.origins)) {
         layout()[id] = { x: Math.round((origin.x + dx) / 8) * 8, y: Math.round((origin.y + dy) / 8) * 8 };
       }
+    } else if (state.drag.kind === 'variable-card') {
+      autoPan(event);
+      const point = worldPoint(event);
+      const dx = point.x - state.drag.start.x;
+      const dy = point.y - state.drag.start.y;
+      state.drag.moved = state.drag.moved || Math.abs(dx) + Math.abs(dy) > 2;
+      variableCards()[state.drag.name] = {
+        x: Math.round((state.drag.origin.x + dx) / 8) * 8,
+        y: Math.round((state.drag.origin.y + dy) / 8) * 8,
+      };
     } else if (state.drag.kind === 'marquee' && state.marquee) {
       const point = worldPoint(event);
       state.marquee.x2 = point.x; state.marquee.y2 = point.y;
@@ -1056,10 +1376,19 @@
       else cancelConnection();
       return;
     }
+    if (state.variableConnect) {
+      if (Number.isInteger(event.pointerId) && Number.isInteger(state.variableConnect.pointerId) && event.pointerId !== state.variableConnect.pointerId) return;
+      finishVariableConnection(event);
+      return;
+    }
     if (!state.drag) return;
     if (state.drag.kind === 'nodes' && state.drag.moved && snapshot() !== state.drag.before) {
       state.undo.push(state.drag.before); state.redo = []; setDirty();
     }
+    if (state.drag.kind === 'variable-card' && state.drag.moved && snapshot() !== state.drag.before) {
+      state.undo.push(state.drag.before); state.redo = []; setDirty();
+    }
+    if (state.drag.kind === 'pan' && state.drag.moved) suppressPanContextMenu = true;
     state.drag = null;
     state.marquee = null;
     render();
@@ -1077,6 +1406,9 @@
     }
     for (const card of instanceRunCards()) {
       svgEl('rect', { class: 'mini-node type-instance-run', x: card.x, y: card.y, width: RUN_CARD_W, height: card.height }, mini);
+    }
+    for (const card of variableCardList()) {
+      svgEl('rect', { class: 'mini-node type-variable-card', x: card.x, y: card.y, width: VARIABLE_CARD_W, height: VARIABLE_CARD_H }, mini);
     }
     const rect = wrap.getBoundingClientRect();
     svgEl('rect', { class: 'mini-viewport', x: -state.panX / state.zoom, y: -state.panY / state.zoom, width: rect.width / state.zoom, height: rect.height / state.zoom }, mini);
@@ -1113,6 +1445,12 @@
 
   function hideMenus() {
     for (const menu of Array.from(document.querySelectorAll ? document.querySelectorAll('.context-menu') : [])) menu.remove();
+  }
+
+  /** 右键平移拖拽结束后应吞掉紧随的 contextmenu，避免误弹出菜单。 */
+  function contextMenuSuppressedByPan() {
+    if (suppressPanContextMenu) { suppressPanContextMenu = false; return true; }
+    return Boolean(state.drag && state.drag.kind === 'pan' && state.drag.moved);
   }
 
   function showMenu(x, y, items, options = {}) {
@@ -1684,7 +2022,19 @@
   function setParameterPublic(node, name, definition, checked) {
     const binding = parameterBlackboardBinding(node, name);
     if (binding) {
-      binding.definition.public = checked;
+      if (!checked) {
+        // 取消公开：解除变量绑定并恢复为变量默认值，卡片端点随之消失；变量失去全部引用时一并清理。
+        const variableDefinition = state.raw.blackboard[binding.name];
+        node.params[name] = variableDefinition && Object.prototype.hasOwnProperty.call(variableDefinition, 'default')
+          ? clone(variableDefinition.default)
+          : defaultValue(definition);
+        if (variableReferenceCount(binding.name) === 0) {
+          delete state.raw.blackboard[binding.name];
+          if (state.raw._variableCards && typeof state.raw._variableCards === 'object' && !Array.isArray(state.raw._variableCards)) delete state.raw._variableCards[binding.name];
+        }
+        return;
+      }
+      binding.definition.public = true;
       return;
     }
     if (!checked) return;
@@ -2181,6 +2531,7 @@
       const names = Object.keys(state.raw.blackboard);
       const index = names.indexOf(name);
       delete state.raw.blackboard[name];
+      if (state.raw._variableCards && typeof state.raw._variableCards === 'object' && !Array.isArray(state.raw._variableCards)) delete state.raw._variableCards[name];
       const remaining = Object.keys(state.raw.blackboard);
       state.selectedVariable = remaining[Math.min(Math.max(0, index), remaining.length - 1)] || '';
     });
@@ -2235,6 +2586,11 @@
       const next = {};
       for (const [key, value] of Object.entries(state.raw.blackboard)) next[key === oldName ? name : key] = value;
       state.raw.blackboard = next;
+      if (state.raw._variableCards && typeof state.raw._variableCards === 'object' && !Array.isArray(state.raw._variableCards)
+        && Object.prototype.hasOwnProperty.call(state.raw._variableCards, oldName)) {
+        state.raw._variableCards[name] = state.raw._variableCards[oldName];
+        delete state.raw._variableCards[oldName];
+      }
       const remap = (item) => {
         if (Array.isArray(item)) return item.forEach(remap);
         if (!item || typeof item !== 'object') return;
@@ -3039,6 +3395,7 @@
       state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
     }
     else if (command === 'addVariable') addVariable();
+    else if (command === 'addVariableCard') addVariableCardCommand(value);
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {
       const id = String(value ?? '');
@@ -3056,13 +3413,14 @@
   graph.addEventListener('mousemove', onPointerMove);
   graph.addEventListener('mouseup', onPointerUp);
   graph.addEventListener('mousemove', (event) => { state.mouse = worldPoint(event); });
-  graph.addEventListener('pointermove', (event) => { if (state.connect) onPointerMove(event); });
-  graph.addEventListener('pointerup', (event) => { if (state.connect) onPointerUp(event); });
-  graph.addEventListener('pointercancel', () => cancelConnection());
-  graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect) onPointerMove(event); });
+  graph.addEventListener('pointermove', (event) => { if (state.connect || state.variableConnect) onPointerMove(event); });
+  graph.addEventListener('pointerup', (event) => { if (state.connect || state.variableConnect) onPointerUp(event); });
+  graph.addEventListener('pointercancel', () => { cancelConnection(); cancelVariableConnection(); });
+  graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect || state.variableConnect) onPointerMove(event); });
   graph.addEventListener('wheel', (event) => { event.preventDefault(); zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY); }, { passive: false });
   graph.addEventListener('contextmenu', (event) => {
     event.preventDefault();
+    if (contextMenuSuppressedByPan()) return;
     const point = worldPoint(event);
     const items = [
       { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
@@ -3082,12 +3440,40 @@
     items.push('separator', { label: '自动排列', run: () => { autoLayout(); fitView(); } });
     showMenu(event.clientX, event.clientY, items);
   });
-  window.addEventListener('mousemove', (event) => { if (state.drag || state.connect) onPointerMove(event); });
+  window.addEventListener('mousemove', (event) => { if (state.drag || state.connect || state.variableConnect) onPointerMove(event); });
   window.addEventListener('mouseup', onPointerUp);
+
+  // 从桌面端变量面板拖入变量：允许放置时显示跟随光标的提示，落点吸附兼容端点。
+  let dropGhost = null;
+  const variableDragAccepted = (event) => Boolean(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes(VARIABLE_DRAG_MIME));
+  const hideVariableDropGhost = () => { if (dropGhost) dropGhost.classList.add('hidden'); };
+  wrap.addEventListener('dragover', (event) => {
+    if (!variableDragAccepted(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    if (!dropGhost) dropGhost = el('div', 'variable-drop-ghost');
+    const rect = wrap.getBoundingClientRect();
+    dropGhost.textContent = '＋ 变量卡片';
+    dropGhost.style.left = `${event.clientX - rect.left + 14}px`;
+    dropGhost.style.top = `${event.clientY - rect.top + 12}px`;
+    dropGhost.classList.remove('hidden');
+  });
+  wrap.addEventListener('dragleave', (event) => {
+    if (!event.relatedTarget || !wrap.contains(event.relatedTarget)) hideVariableDropGhost();
+  });
+  wrap.addEventListener('drop', (event) => {
+    hideVariableDropGhost();
+    if (!variableDragAccepted(event)) return;
+    event.preventDefault();
+    const name = event.dataTransfer.getData(VARIABLE_DRAG_MIME);
+    if (!name) return;
+    placeVariableCard(name, worldPoint(event));
+  });
+  wrap.addEventListener('pointerdown', hideVariableDropGhost);
   window.addEventListener('keydown', (event) => {
     const tag = event.target && event.target.tagName;
     const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-    if (event.key === 'Escape') { if (state.connect) cancelConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
+    if (event.key === 'Escape') { if (state.connect) cancelConnection(); if (state.variableConnect) cancelVariableConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
     if (!editing && event.key === 'Delete') {
       event.preventDefault();
       if (state.selectedRun) {
@@ -3191,6 +3577,6 @@
     if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
-  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw), collectExportTemplatePaths, applyInlineThumbnails };
+  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw), collectExportTemplatePaths, applyInlineThumbnails, placeVariableCard, variableCardList, nodeVariablePins, connectVariableToPin };
   vscode.postMessage({ type: 'ready' });
 })();

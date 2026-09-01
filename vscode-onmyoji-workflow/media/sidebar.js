@@ -69,7 +69,19 @@
       item.appendChild(name);
       item.appendChild(type);
       item.appendChild(scope);
+      const addCard = document.createElement('span');
+      addCard.className = 'sidebar-variable-add';
+      addCard.title = '添加变量卡片到画布';
+      addCard.setAttribute('role', 'button');
+      addCard.setAttribute('aria-label', `添加变量卡片 ${variable.name}`);
+      addCard.textContent = '＋';
+      addCard.addEventListener('click', (event) => {
+        event.stopPropagation();
+        vscode.postMessage({ type: 'editorCommand', command: 'addVariableCard', value: variable.name });
+      });
+      item.appendChild(addCard);
       item.addEventListener('click', () => vscode.postMessage({ type: 'editorCommand', command: 'selectVariable', value: variable.name }));
+      item.addEventListener('dblclick', () => vscode.postMessage({ type: 'editorCommand', command: 'addVariableCard', value: variable.name }));
       list.appendChild(item);
     }
   }

@@ -10,8 +10,21 @@ config/config.json
 
 # Local VS Code settings and packaged extension artifacts
 .vscode/
+# Abandoned VS Code source checkout; retained locally for reference only.
+vscode/
+# Local toolchain downloads (portable Node.js etc.)
+tools/
 *.vsix
 
 # VS Code extension
 vscode-onmyoji-workflow/node_modules/
 vscode-onmyoji-workflow/out/
+
+# Desktop application build output
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+desktop/release/
+
+# Stray artifacts from scripts with unexpanded %SystemDrive% env var
+desktop/%SystemDrive%/

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: onmyoji-resource:; style-src 'self'; script-src 'self'">
+  <title>运行日志</title>
+  <link rel="stylesheet" href="./run-log.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="identity"><span class="mark">RUN</span><div><div id="workflow-name">尚未运行</div><div id="run-meta">等待工作流</div></div></div>
+    <div class="spacer"></div>
+    <div class="segmented" role="tablist"><button id="tab-steps" class="active" role="tab">步骤</button><button id="tab-engine" role="tab">引擎输出</button></div>
+    <label class="auto-scroll"><input id="auto-scroll" type="checkbox" checked> 自动滚动</label>
+    <button id="btn-stop" class="icon-button danger" title="停止当前工作流" aria-label="停止当前工作流">■</button>
+    <button id="btn-clear" class="icon-button" title="清空日志" aria-label="清空日志">⌫</button>
+  </header>
+  <nav id="source-tabs" class="source-tabs hidden" role="tablist" aria-label="并行实例"></nav>
+  <section id="summary">
+    <div class="status-block"><span id="status-dot"></span><span id="status-label">待命</span><strong id="elapsed">00:00.0</strong></div>
+    <div class="metric"><span>已完成</span><strong id="completed-count">0</strong></div>
+    <div class="metric"><span>失败</span><strong id="failed-count">0</strong></div>
+    <div class="metric current"><span>当前节点</span><strong id="current-step">-</strong></div>
+    <div id="progress"><span></span></div>
+  </section>
+  <section id="reward-summary" class="hidden" aria-label="本次材料统计">
+    <span class="reward-label">本次材料</span>
+    <div id="reward-totals"></div>
+    <span id="reward-battles">0 局</span>
+  </section>
+  <main>
+    <section id="steps-view">
+      <div id="filters" class="filterbar"><button data-filter="tasks" class="active">任务</button><button data-filter="all">全部</button><button data-filter="failed">失败</button></div>
+      <div id="empty-state">暂无运行记录</div>
+      <div id="cap-note" class="hidden"></div>
+      <div id="step-list"></div>
+    </section>
+    <section id="engine-view" class="hidden"><pre id="engine-output"></pre></section>
+  </main>
+  <div id="lightbox" class="hidden"><button id="lightbox-close" class="icon-button" title="关闭">×</button><img id="lightbox-image" alt="运行截图"></div>
+  <script src="./run-log.js"></script>
+</body>
+</html>

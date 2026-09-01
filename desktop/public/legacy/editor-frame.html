@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; font-src 'self'; connect-src 'none';">
+  <title>工作流画布</title>
+  <link rel="stylesheet" href="./workflow-editor.css">
+  <style>
+    #topbar { display: none !important; }
+    main { height: 100%; }
+    #external-banner { top: 8px; }
+    #inspector { background: #242424; }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <button id="btn-back" class="icon-button hidden" title="返回上一级">←</button>
+    <select id="workflow-select" aria-label="切换工作流"></select>
+    <span id="dirty-badge" class="badge hidden">未保存</span>
+    <span id="issue-badge" class="badge"></span>
+    <span class="spacer"></span>
+    <select id="instance-select" aria-label="运行实例"></select>
+    <button id="btn-run" class="primary">运行</button>
+    <button id="btn-stop" class="icon-button">停止</button>
+    <button id="btn-save" class="primary">保存</button>
+    <button id="btn-more" class="icon-button">更多</button>
+  </header>
+  <div id="external-banner" class="hidden"></div>
+  <main id="editor-main">
+    <section id="canvas-wrap">
+      <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="viewport-tools">
+        <button id="btn-zoom-out" class="icon-button" title="缩小">−</button>
+        <span id="zoom-label">100%</span>
+        <button id="btn-zoom-in" class="icon-button" title="放大">＋</button>
+      </div>
+      <svg id="minimap" xmlns="http://www.w3.org/2000/svg"></svg>
+    </section>
+    <aside id="inspector">
+      <div id="inspector-title">详细信息</div>
+      <div id="inspector-empty">选择一个节点</div>
+      <div id="inspector-body" class="hidden"></div>
+    </aside>
+  </main>
+  <div id="toast" class="hidden"></div>
+  <script src="./bridge.js"></script>
+  <script src="./workflow-editor.js"></script>
+</body>
+</html>

@@ -232,6 +232,33 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .instance-variable-pin.type-boolean { fill: #d76c6c; }
 .instance-variable-pin.type-array, .instance-variable-pin.type-rect { fill: #d6b45c; }
 .instance-variable-pin.type-object, .instance-variable-pin.type-any { fill: #8f82cf; }
+.port-variable, .port-variable-out { fill: #8f82cf; stroke: #edf2ef; stroke-width: 1.5; cursor: crosshair; }
+.variable-card-dot { fill: #8f82cf; stroke: #edf2ef; stroke-width: 1; }
+.port-variable.type-string, .port-variable-out.type-string, .variable-card-dot.type-string,
+.port-variable.type-asset, .port-variable-out.type-asset, .variable-card-dot.type-asset,
+.port-variable.type-path, .port-variable-out.type-path, .variable-card-dot.type-path { fill: #d77c9b; }
+.port-variable.type-number, .port-variable-out.type-number, .variable-card-dot.type-number,
+.port-variable.type-integer, .port-variable-out.type-integer, .variable-card-dot.type-integer { fill: #78bf83; }
+.port-variable.type-boolean, .port-variable-out.type-boolean, .variable-card-dot.type-boolean { fill: #d76c6c; }
+.port-variable.type-array, .port-variable-out.type-array, .variable-card-dot.type-array,
+.port-variable.type-rect, .port-variable-out.type-rect, .variable-card-dot.type-rect { fill: #d6b45c; }
+.port-variable.type-object, .port-variable-out.type-object, .variable-card-dot.type-object,
+.port-variable.type-any, .port-variable-out.type-any, .variable-card-dot.type-any { fill: #8f82cf; }
+.pin-variable-name { fill: #ccd2d8; font-size: 10px; font-weight: 650; pointer-events: none; }
+.pin-variable-param { fill: #82878f; font-size: 9px; pointer-events: none; }
+.variable-connection-preview { fill: none; stroke: #52b79c; stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; vector-effect: non-scaling-stroke; }
+.variable-connection-preview.snapped { stroke: #7ed28a; stroke-dasharray: none; }
+.variable-card-box { fill: #26332e; stroke: #3e5a50; stroke-width: 1; cursor: move; }
+.variable-card-head, .variable-card-head-square { fill: #2d463e; }
+.variable-card.selected .variable-card-box { fill: #2a3833; stroke: #7ed28a; stroke-width: 1.5; }
+.variable-card.connect-target .variable-card-box { stroke: #7ed28a; stroke-width: 2.5; }
+.variable-card-name { fill: #e7efec; font-size: 12px; font-weight: 650; pointer-events: none; }
+.variable-card-type { fill: #93b5aa; font-size: 9px; pointer-events: none; }
+.variable-card-value { fill: #c7d5d0; font-size: 9px; pointer-events: none; }
+.mini-node.type-variable-card { fill: #2e5d52; stroke: #6fc7ae; }
+.variable-port-hit { fill: none; pointer-events: all; cursor: crosshair; }
+.port-variable, .port-variable-out { pointer-events: none; }
+.variable-drop-ghost { position: absolute; z-index: 40; padding: 4px 10px; border: 1px solid #52b79c; border-radius: 4px; background: rgba(24, 40, 35, 0.92); color: #c4e9dd; font-size: 11px; pointer-events: none; white-space: nowrap; }
 
 #inspector {
   min-width: 0;

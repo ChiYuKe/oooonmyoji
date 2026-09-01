@@ -1,0 +1,28 @@
+{
+  "name": "onmyoji-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone desktop workflow editor and runtime for oooonmyoji",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k -s first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env ONMYOJI_DESKTOP_DEV_URL=http://127.0.0.1:5173 electron .\"",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "build": "npm run typecheck && npm run build:electron && vite build",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "dockview": "^8.2.0",
+    "lucide": "^1.38.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^44.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "wait-on": "^9.0.1"
+  }
+}

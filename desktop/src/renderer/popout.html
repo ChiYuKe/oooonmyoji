@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
+  <title>Onmyoji Studio</title>
+</head>
+<body>
+  <div class="popout-titlebar">
+    <span class="popout-title">Onmyoji Studio</span>
+    <div class="popout-window-controls" aria-label="窗口控制">
+      <button id="popout-minimize" type="button" title="最小化" aria-label="最小化"><i data-lucide="minus"></i></button>
+      <button id="popout-maximize" type="button" title="最大化" aria-label="最大化"><i data-lucide="square"></i></button>
+      <button id="popout-close" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+    </div>
+  </div>
+  <script type="module" src="./popout.ts"></script>
+</body>
+</html>

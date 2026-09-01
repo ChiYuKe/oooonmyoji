@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
+  <title>Onmyoji Studio</title>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <div class="custom-titlebar">
+      <div class="product-mark" aria-label="Onmyoji Studio">
+        <span class="product-glyph">陰</span>
+        <span class="product-name">Onmyoji Studio</span>
+      </div>
+      <nav class="titlebar-menu" aria-label="主菜单">
+        <div class="menu-root">
+          <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">编辑</button>
+          <div class="titlebar-dropdown" role="menu">
+            <button type="button" role="menuitem" data-editor-command="undo"><span>撤销</span><kbd>Ctrl+Z</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="redo"><span>重做</span><kbd>Ctrl+Y</kbd></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-editor-command="cut"><span>剪切</span><kbd>Ctrl+X</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="copy"><span>复制</span><kbd>Ctrl+C</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="paste"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="deleteSelection"><span>删除所选</span><kbd>Delete</kbd></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-desktop-command="save"><span>保存工作流</span><kbd>Ctrl+S</kbd></button>
+          </div>
+        </div>
+        <div class="menu-root">
+          <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">窗口</button>
+          <div class="titlebar-dropdown" role="menu">
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="workflow" aria-checked="true" disabled title="固定根模块"><span>工作流编辑器</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitemcheckbox" data-dock-panel="structure" aria-checked="true"><span>结构</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-dock-panel="palette" aria-checked="true"><span>节点</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-dock-panel="variables" aria-checked="true"><span>变量</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-dock-panel="editor" aria-checked="true"><span>工作流画布</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-dock-panel="details" aria-checked="true"><span>详细信息</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="runtime" aria-checked="true"><span>运行日志</span><span class="menu-check">✓</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-dock-command="popoutActive"><span>当前模块移到独立窗口</span><kbd>Shift+F6</kbd></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-editor-command="fitView"><span>适应画布</span><kbd>Home</kbd></button>
+            <button type="button" role="menuitem" data-layout-command="reset"><span>恢复默认布局</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-window-command="minimize"><span>最小化</span></button>
+            <button id="menu-window-maximize" type="button" role="menuitem" data-window-command="toggleMaximize"><span>最大化</span></button>
+          </div>
+        </div>
+        <div class="menu-root">
+          <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">工具</button>
+          <div class="titlebar-dropdown" role="menu">
+            <button type="button" role="menuitem" data-editor-command="autoLayout"><span>自动排列</span></button>
+            <button type="button" role="menuitem" data-editor-command="exportImage"><span>导出画布图片</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-editor-command="workflowSettings"><span>工作流设置</span></button>
+          </div>
+        </div>
+        <div class="menu-root">
+          <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">选择</button>
+          <div class="titlebar-dropdown" role="menu">
+            <button type="button" role="menuitem" data-editor-command="selectAll"><span>全选节点</span><kbd>Ctrl+A</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="clearSelection"><span>取消选择</span></button>
+          </div>
+        </div>
+      </nav>
+      <div class="titlebar-spacer"></div>
+      <div class="window-controls" aria-label="窗口控制">
+        <button id="window-minimize" class="window-control" title="最小化" aria-label="最小化"><i data-lucide="minus"></i></button>
+        <button id="window-maximize" class="window-control" title="最大化" aria-label="最大化"><i data-lucide="square"></i></button>
+        <button id="window-close" class="window-control close" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+    </div>
+    <main class="workbench-frame-shell">
+      <div id="workbench-frame" class="workbench-frame" aria-label="顶层模块工作区"></div>
+      <div id="workbench-module-store" class="workbench-module-store">
+        <section id="module-workbench" class="workbench-module">
+          <header class="app-header">
+            <button id="back-button" class="icon-button" title="返回上一级工作流" disabled><i data-lucide="arrow-left"></i></button>
+            <select id="workflow-select" class="workflow-select" aria-label="当前工作流"></select>
+            <span id="dirty-indicator" class="dirty-indicator" aria-label="保存状态"></span>
+            <div class="header-spacer"></div>
+          </header>
+
+          <div class="tool-strip" aria-label="画布工具">
+            <div class="tool-group">
+              <button class="icon-button" data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i></button>
+              <button class="icon-button" data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i></button>
+              <button class="icon-button" data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i></button>
+              <button class="icon-button" data-editor-command="addParallel" title="添加并行节点"><i data-lucide="columns-3"></i></button>
+              <button class="icon-button" data-editor-command="addInstanceParallel" title="添加多实例节点"><i data-lucide="monitor-up"></i></button>
+            </div>
+            <span class="tool-divider"></span>
+            <div class="tool-group">
+              <button class="icon-button" data-editor-command="autoLayout" title="自动排列"><i data-lucide="wand-sparkles"></i></button>
+              <button class="icon-button" data-editor-command="fitView" title="适应画布"><i data-lucide="maximize"></i></button>
+              <button class="icon-button" data-editor-command="exportImage" title="导出画布图片"><i data-lucide="image-down"></i></button>
+              <button class="icon-button" data-editor-command="workflowSettings" title="工作流设置"><i data-lucide="settings-2"></i></button>
+            </div>
+            <span class="tool-divider"></span>
+            <select id="instance-select" class="instance-select" aria-label="运行实例"></select>
+            <button id="run-button" class="command-button run-command" title="运行当前工作流"><i data-lucide="play"></i><span>运行</span></button>
+            <button id="stop-button" class="icon-button" title="停止工作流" disabled><i data-lucide="square"></i></button>
+            <button id="save-button" class="command-button" title="保存工作流"><i data-lucide="save"></i><span>保存</span></button>
+            <button id="more-button" class="icon-button" title="更多操作"><i data-lucide="ellipsis"></i></button>
+            <div id="document-path" class="document-path"></div>
+          </div>
+
+          <div class="dock-workspace-shell">
+            <div id="dock-workspace" class="dock-workspace" aria-label="工作流内部可停靠模块"></div>
+          </div>
+
+          <footer class="status-bar">
+            <span id="status-message">准备就绪</span>
+            <span class="status-spacer"></span>
+            <span id="workflow-count">0 个工作流</span>
+            <span id="instance-count">0 个实例</span>
+          </footer>
+        </section>
+
+        <section id="module-content-browser" class="dock-module content-browser-module">
+          <div class="content-browser-toolbar">
+            <button id="content-browser-up" class="panel-action compact-action" title="上一级" disabled><i data-lucide="arrow-left"></i></button>
+            <div id="content-browser-breadcrumbs" class="content-browser-breadcrumbs" aria-label="内容路径"></div>
+            <label class="content-browser-search">
+              <i data-lucide="search"></i>
+              <input id="content-browser-search" type="search" placeholder="搜索内容" aria-label="搜索内容">
+            </label>
+            <div class="content-browser-view-controls" aria-label="显示方式">
+              <button class="panel-action compact-action active" data-content-view="grid" title="缩略图"><i data-lucide="layout-grid"></i></button>
+              <button class="panel-action compact-action" data-content-view="list" title="列表"><i data-lucide="list"></i></button>
+              <button id="content-browser-refresh" class="panel-action compact-action" title="刷新内容"><i data-lucide="refresh-cw"></i></button>
+            </div>
+          </div>
+          <div class="content-browser-body">
+            <aside id="content-browser-tree" class="content-browser-tree" aria-label="内容目录"></aside>
+            <div class="content-browser-results">
+              <div id="content-browser-items" class="content-browser-items grid" role="list"></div>
+              <div id="content-browser-empty" class="empty-panel hidden">没有匹配的内容</div>
+              <div class="content-browser-footer">
+                <span id="content-browser-summary">0 项</span>
+                <span id="content-browser-selection" class="content-browser-selection"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div id="dock-module-store" class="dock-module-store">
+        <section id="module-structure" class="dock-module structure-module">
+          <div class="module-command-strip">
+            <span class="module-context">工作流层级</span>
+            <button id="new-workflow-button" class="panel-action" title="新建工作流"><i data-lucide="file-plus-2"></i></button>
+          </div>
+          <div id="structure-view" class="panel-content tree-content"></div>
+        </section>
+
+        <section id="module-palette" class="dock-module palette-module">
+          <div id="palette-view" class="panel-content palette-content">
+            <button data-editor-command="addTask"><i data-lucide="box"></i><span>任务 Task</span></button>
+            <button data-editor-command="addSequence"><i data-lucide="list-tree"></i><span>顺序 Sequence</span></button>
+            <button data-editor-command="addSelector"><i data-lucide="git-branch"></i><span>选择 Selector</span></button>
+            <button data-editor-command="addParallel"><i data-lucide="columns-3"></i><span>简单并行</span></button>
+            <button data-editor-command="addInstanceParallel"><i data-lucide="monitor-up"></i><span>多实例并行</span></button>
+          </div>
+        </section>
+
+        <section id="module-variables" class="dock-module variables-module">
+          <div class="module-command-strip">
+            <span class="module-context">工作流变量</span>
+            <button id="add-variable-button" class="panel-action" title="添加变量"><i data-lucide="plus"></i></button>
+          </div>
+          <div id="variables-view" class="panel-content variables-content"></div>
+        </section>
+
+        <section id="module-editor" class="dock-module editor-surface">
+          <iframe id="editor-frame" title="工作流节点画布" src="./legacy/editor-frame.html?mode=canvas"></iframe>
+          <div id="loading-mask" class="loading-mask">
+            <span class="loading-spinner"></span>
+            <span>正在载入工作流</span>
+          </div>
+        </section>
+
+        <section id="module-details" class="dock-module details-module">
+          <iframe id="details-frame" title="节点详细信息" src="./legacy/editor-frame.html?mode=details"></iframe>
+        </section>
+
+        <section id="module-runtime" class="dock-module runtime-module">
+          <iframe id="runtime-log-frame" title="结构化运行日志" src="./runtime-log/index.html"></iframe>
+        </section>
+
+    </div>
+    <div id="app-toast" class="app-toast hidden"></div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

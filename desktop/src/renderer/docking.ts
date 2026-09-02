@@ -20,7 +20,7 @@ import { createElement, ExternalLink } from 'lucide';
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'editor' | 'details' | 'runtime' | 'contentBrowser';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime';
-export type WorkbenchPanelId = 'workflow' | 'settings' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'settings' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -62,6 +62,7 @@ export interface WorkbenchFrameController {
 
 export interface SharedPanelDockBridge {
   surface(panelId: SharedDockPanelId): SharedDockSurface | undefined;
+  show(panelId: SharedDockPanelId): void;
   toggle(panelId: SharedDockPanelId): void;
   resetSurfaces(): void;
   dispose(): void;
@@ -167,6 +168,15 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     initialWidth: 340,
     minimumWidth: 300,
     minimumHeight: 220,
+  },
+  referenceViewer: {
+    title: '引用查看器',
+    moduleElementId: 'module-reference-viewer',
+    reference: 'workflow',
+    direction: 'right',
+    initialWidth: 680,
+    minimumWidth: 420,
+    minimumHeight: 300,
   },
   contentBrowser: {
     ...SHARED_PANEL_DEFINITIONS.contentBrowser,
@@ -648,6 +658,9 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   if (restoredSettings && (restoredSettings.api.location.type === 'floating' || restoredSettings.api.location.type === 'popout')) {
     restoredSettings.api.close();
   }
+  // 引用查看器的内容依赖本次会话的当前目标；不要恢复成空白面板。
+  const restoredReferenceViewer = api.getPanel('referenceViewer');
+  if (restoredReferenceViewer) restoredReferenceViewer.api.close();
 
   const layoutDisposable = api.onDidLayoutChange(saveLayout);
   const panelDisposable = api.onDidActivePanelChange(() => onLayoutChange?.());
@@ -670,7 +683,18 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     if (panelId === 'workflow') return;
     const panel = api.getPanel(panelId);
     if (!panel || panel.api.location.type === 'popout') return;
-    void api.addPopoutGroup(panel, { popoutUrl: '/popout.html' }).then((opened) => {
+    const position = panelId === 'referenceViewer' ? {
+      left: window.screenX + 72,
+      top: window.screenY + 56,
+      width: Math.min(1280, Math.max(820, window.screen.availWidth - 144)),
+      height: Math.min(820, Math.max(560, window.screen.availHeight - 112)),
+    } : panelId === 'settings' ? {
+      left: window.screenX + 120,
+      top: window.screenY + 72,
+      width: 520,
+      height: Math.min(720, Math.max(480, window.screen.availHeight - 144)),
+    } : undefined;
+    void api.addPopoutGroup(panel, { popoutUrl: '/popout.html', position }).then((opened) => {
       if (!opened) onPopoutFailure?.();
     });
   };
@@ -763,9 +787,18 @@ export function connectSharedPanelDocking(
   ): void => {
     const data = event.getData();
     const panelId = getTransferredSharedPanelId(data, sourceApi);
-    if (!panelId || targetApi.getPanel(panelId)) return;
+    if (!panelId) return;
     const sourcePanel = sourceApi.getPanel(panelId);
     if (!sourcePanel) return;
+
+    // A stale layout can leave the same shared panel on both surfaces. When a
+    // duplicate is dragged across, keep the existing target instance and drop
+    // the source so the shared module remains single-instanced.
+    if (targetApi.getPanel(panelId)) {
+      sourceController.markDragHandled();
+      sourceApi.removePanel(sourcePanel);
+      return;
+    }
 
     sourceController.markDragHandled();
     const referencePanel = event.panel ?? event.group?.activePanel ?? targetApi.activePanel;
@@ -824,21 +857,33 @@ export function connectSharedPanelDocking(
       ? 'outer'
       : undefined;
 
-  for (const panelId of Object.keys(SHARED_PANEL_DEFINITIONS) as SharedDockPanelId[]) {
+  const reconcileSharedPanel = (panelId: SharedDockPanelId): void => {
     const innerPanel = innerApi.getPanel(panelId);
     const outerPanel = outerApi.getPanel(panelId);
     if (innerPanel && outerPanel) {
-      innerApi.removePanel(innerPanel);
-      outerApi.removePanel(outerPanel);
-      if (preferredSurface(panelId) === 'inner') docking.showPanel(panelId);
-      else workbenchFrame.show(panelId);
+      const keepInner = preferredSurface(panelId) === 'inner';
+      if (keepInner) outerApi.removePanel(outerPanel);
+      else innerApi.removePanel(innerPanel);
+      window.localStorage.setItem(SHARED_PANEL_SURFACE_KEYS[panelId], keepInner ? 'inner' : 'outer');
     } else if (innerPanel || outerPanel) {
       window.localStorage.setItem(SHARED_PANEL_SURFACE_KEYS[panelId], innerPanel ? 'inner' : 'outer');
     }
+  };
+
+  for (const panelId of Object.keys(SHARED_PANEL_DEFINITIONS) as SharedDockPanelId[]) {
+    reconcileSharedPanel(panelId);
   }
 
   return {
     surface,
+    show: (panelId) => {
+      reconcileSharedPanel(panelId);
+      const currentSurface = surface(panelId);
+      if (currentSurface === 'inner') docking.showPanel(panelId);
+      else if (currentSurface === 'outer') workbenchFrame.show(panelId);
+      else if (preferredSurface(panelId) === 'inner') docking.showPanel(panelId);
+      else workbenchFrame.show(panelId);
+    },
     toggle: (panelId) => {
       const currentSurface = surface(panelId);
       if (currentSurface === 'inner') docking.togglePanel(panelId);

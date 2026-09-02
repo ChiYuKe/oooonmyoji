@@ -45,7 +45,6 @@ import 'dockview/dist/styles/dockview.css';
 import type {
   BootstrapData,
   AssetImage,
-  ReferenceContext,
   ReferenceGraph,
   ReferenceItem,
   ReferenceNode,
@@ -522,22 +521,19 @@ async function refreshContentBrowser(): Promise<void> {
 
 let contentContextMenu: { owner: Document; menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
 let referenceViewerDocument: Document | undefined;
-let referenceViewerOverlay: HTMLElement | undefined;
+let referenceViewerPanel: HTMLElement | undefined;
 let referenceViewerBody: HTMLElement | undefined;
 let referenceViewerTrailEl: HTMLElement | undefined;
-let referenceViewerKeyDoc: Document | undefined;
 let referenceViewerKeyHandler: ((event: KeyboardEvent) => void) | undefined;
 let referenceTrail: string[] = [];
 let referenceViewerToken = 0;
-
-const referenceContextKindLabels: Record<ReferenceContext['kind'], string> = {
-  'workflow.run': '子工作流调用',
-  instance_parallel: '实例并行',
-  template: '模板匹配',
-  'template-binding': '模板绑定',
-  'asset-default': '变量默认值',
-  'catalog-entry': '奖励目录',
-};
+let referenceViewerGraph: ReferenceGraph | undefined;
+let referenceViewerCanvas: HTMLElement | undefined;
+let referenceViewerZoom = 1;
+let referenceViewerQuery = '';
+let referenceViewerPan = { x: 0, y: 0 };
+let referenceViewerResizeObserver: ResizeObserver | undefined;
+let referenceViewerLocationDisposable: { dispose(): void } | undefined;
 
 /** 把绝对路径转成项目相对路径（正斜杠）；不在项目内时原样返回。 */
 function relativeToProject(absolutePath: string): string {
@@ -613,16 +609,25 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
 
 function closeReferenceViewer(): void {
   referenceViewerToken += 1;
-  if (referenceViewerKeyDoc && referenceViewerKeyHandler) {
-    referenceViewerKeyDoc.removeEventListener('keydown', referenceViewerKeyHandler, true);
+  if (referenceViewerPanel && referenceViewerKeyHandler) {
+    referenceViewerPanel.removeEventListener('keydown', referenceViewerKeyHandler, true);
   }
-  referenceViewerOverlay?.remove();
-  referenceViewerOverlay = undefined;
+  workbenchFrame?.dockviewApi.getPanel('referenceViewer')?.api.close();
+  referenceViewerPanel?.remove();
+  referenceViewerResizeObserver?.disconnect();
+  referenceViewerLocationDisposable?.dispose();
+  referenceViewerPanel = undefined;
   referenceViewerBody = undefined;
   referenceViewerTrailEl = undefined;
-  referenceViewerKeyDoc = undefined;
   referenceViewerKeyHandler = undefined;
   referenceViewerDocument = undefined;
+  referenceViewerGraph = undefined;
+  referenceViewerCanvas = undefined;
+  referenceViewerZoom = 1;
+  referenceViewerQuery = '';
+  referenceViewerPan = { x: 0, y: 0 };
+  referenceViewerResizeObserver = undefined;
+  referenceViewerLocationDisposable = undefined;
   referenceTrail = [];
 }
 
@@ -638,70 +643,10 @@ function referenceKindLabel(kind: ReferenceNode['kind']): string {
   return '其他';
 }
 
-function referenceContextChips(contexts: ReferenceContext[], doc: Document): HTMLElement {
-  const chips = doc.createElement('span');
-  chips.className = 'reference-card-contexts';
-  const visible = contexts.slice(0, 6);
-  for (const context of visible) {
-    const chip = doc.createElement('span');
-    chip.className = 'reference-context-chip';
-    chip.textContent = `${referenceContextKindLabels[context.kind]} · ${context.label}`;
-    chip.title = context.reference;
-    chips.appendChild(chip);
-  }
-  if (contexts.length > visible.length) {
-    const more = doc.createElement('span');
-    more.className = 'reference-context-chip more';
-    more.textContent = `+${contexts.length - visible.length} 处`;
-    chips.appendChild(more);
-  }
-  return chips;
-}
-
-function referenceItemCard(item: ReferenceItem, doc: Document, navigable: boolean): HTMLButtonElement {
-  const card = doc.createElement('button');
-  card.type = 'button';
-  card.className = `reference-item-card${navigable ? ' navigable' : ''}`;
-  if (navigable) card.title = '点击查看该内容的引用';
-  const icon = doc.createElement('span');
-  icon.className = 'reference-item-icon';
-  icon.appendChild(referenceKindIcon(item.target.kind));
-  const main = doc.createElement('span');
-  main.className = 'reference-item-main';
-  const name = doc.createElement('span');
-  name.className = 'reference-item-name';
-  name.textContent = item.target.name;
-  main.appendChild(name);
-  if (item.target.workflowId) {
-    const idBadge = doc.createElement('span');
-    idBadge.className = 'reference-item-badge';
-    idBadge.textContent = item.target.workflowId;
-    main.appendChild(idBadge);
-  }
-  if (!item.target.exists) {
-    const missing = doc.createElement('span');
-    missing.className = 'reference-item-badge missing';
-    missing.textContent = '文件缺失';
-    main.appendChild(missing);
-  }
-  const pathEl = doc.createElement('span');
-  pathEl.className = 'reference-item-path';
-  pathEl.textContent = item.target.path;
-  main.appendChild(pathEl);
-  main.appendChild(referenceContextChips(item.contexts, doc));
-  card.append(icon, main);
-  if (navigable) {
-    const chevron = doc.createElement('span');
-    chevron.className = 'reference-item-chevron';
-    chevron.appendChild(createElement(ChevronRight, { width: '14', height: '14', 'aria-hidden': 'true' }));
-    card.appendChild(chevron);
-    card.addEventListener('click', () => navigateReferenceViewer(item.target.path));
-  }
-  return card;
-}
-
 function renderReferenceTrail(doc: Document): void {
   if (!referenceViewerTrailEl) return;
+  const backButton = doc.querySelector<HTMLButtonElement>('.reference-viewer-nav button');
+  if (backButton) backButton.disabled = referenceTrail.length <= 1;
   referenceViewerTrailEl.replaceChildren();
   referenceTrail.forEach((path, index) => {
     const crumb = doc.createElement('button');
@@ -723,26 +668,132 @@ function renderReferenceTrail(doc: Document): void {
   });
 }
 
-function renderReferenceSection(doc: Document, title: string, items: ReferenceItem[], emptyText: string, container: HTMLElement): void {
-  const heading = doc.createElement('div');
-  heading.className = 'reference-section-title';
-  const label = doc.createElement('span');
-  label.textContent = `${title}（${items.length}）`;
-  heading.appendChild(label);
-  container.appendChild(heading);
-  if (items.length === 0) {
-    const empty = doc.createElement('div');
-    empty.className = 'reference-section-empty';
-    empty.textContent = emptyText;
-    container.appendChild(empty);
-    return;
+function referenceNodeMatches(node: ReferenceNode, query: string): boolean {
+  if (!query) return true;
+  const haystack = `${node.name} ${node.path} ${node.workflowId ?? ''}`.toLocaleLowerCase();
+  return haystack.includes(query.toLocaleLowerCase());
+}
+
+function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceItem | undefined, node: ReferenceNode, side: 'target' | 'incoming' | 'outgoing', x: number, y: number, width: number): void {
+  const button = doc.createElement('button');
+  button.type = 'button';
+  button.className = `reference-graph-node ${side} kind-${node.kind}${node.exists ? '' : ' missing'}`;
+  button.style.left = `${x}px`;
+  button.style.top = `${y}px`;
+  button.style.width = `${width}px`;
+  button.setAttribute('aria-label', `${referenceKindLabel(node.kind)} ${node.name}`);
+  if (side !== 'target') {
+    button.title = '点击查看该内容的引用';
+    button.addEventListener('click', () => navigateReferenceViewer(node.path));
   }
-  const list = doc.createElement('div');
-  list.className = 'reference-item-list';
-  for (const item of items) {
-    list.appendChild(referenceItemCard(item, doc, true));
+  const icon = doc.createElement('span');
+  icon.className = 'reference-graph-node-icon';
+  icon.appendChild(referenceKindIcon(node.kind));
+  const text = doc.createElement('span');
+  text.className = 'reference-graph-node-text';
+  const name = doc.createElement('strong');
+  name.textContent = node.name;
+  const pathEl = doc.createElement('small');
+  pathEl.textContent = node.path;
+  text.append(name, pathEl);
+  if (item && item.contexts.length) {
+    const count = doc.createElement('em');
+    count.textContent = `${item.contexts.length} 处引用`;
+    text.appendChild(count);
   }
-  container.appendChild(list);
+  button.append(icon, text);
+  layer.appendChild(button);
+}
+
+function renderReferenceGraph(doc: Document, graph: ReferenceGraph): void {
+  const canvas = referenceViewerCanvas;
+  if (!canvas) return;
+  const zoomControls = canvas.querySelector<HTMLElement>('.reference-zoom-controls');
+  canvas.replaceChildren();
+  const edges = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  edges.classList.add('reference-graph-edges');
+  edges.setAttribute('aria-hidden', 'true');
+  const layer = doc.createElement('div');
+  layer.className = 'reference-graph-nodes';
+  canvas.append(edges, layer);
+  const width = Math.max(canvas.clientWidth, 320);
+  const height = Math.max(canvas.clientHeight, 440);
+  const hasBothSides = graph.referencedBy.length > 0 && graph.references.length > 0;
+  const nodeWidth = hasBothSides
+    ? Math.min(188, Math.max(108, (width - 80) / 3))
+    : Math.min(188, Math.max(142, (width - 64) / 2));
+  const nodeHeight = 70;
+  const filteredIncoming = graph.referencedBy.filter((item) => referenceNodeMatches(item.target, referenceViewerQuery));
+  const filteredOutgoing = graph.references.filter((item) => referenceNodeMatches(item.target, referenceViewerQuery));
+  const centerX = hasBothSides
+    ? width / 2 - nodeWidth / 2
+    : filteredIncoming.length > 0
+      ? width * .7 - nodeWidth / 2
+      : filteredOutgoing.length > 0
+        ? width * .3 - nodeWidth / 2
+        : width / 2 - nodeWidth / 2;
+  const centerY = height / 2 - nodeHeight / 2;
+  const sideMargin = width >= 720 ? 70 : 18;
+  const incomingX = sideMargin;
+  const outgoingX = width - nodeWidth - sideMargin;
+  const placeY = (index: number, total: number): number => Math.max(26, height / 2 - (total - 1) * 48 + index * 96 - nodeHeight / 2);
+  const paths: string[] = [];
+  filteredIncoming.forEach((item, index) => {
+    const y = placeY(index, filteredIncoming.length);
+    appendReferenceNode(doc, layer, item, item.target, 'incoming', incomingX, y, nodeWidth);
+    const sy = y + nodeHeight / 2;
+    paths.push(`M ${incomingX + nodeWidth} ${sy} C ${incomingX + nodeWidth + 80} ${sy}, ${centerX - 80} ${centerY + nodeHeight / 2}, ${centerX} ${centerY + nodeHeight / 2}`);
+  });
+  filteredOutgoing.forEach((item, index) => {
+    const y = placeY(index, filteredOutgoing.length);
+    appendReferenceNode(doc, layer, item, item.target, 'outgoing', outgoingX, y, nodeWidth);
+    const sy = y + nodeHeight / 2;
+    paths.push(`M ${centerX + nodeWidth} ${centerY + nodeHeight / 2} C ${centerX + nodeWidth + 80} ${centerY + nodeHeight / 2}, ${outgoingX - 80} ${sy}, ${outgoingX} ${sy}`);
+  });
+  appendReferenceNode(doc, layer, undefined, graph.target, 'target', centerX, centerY, nodeWidth);
+  edges.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  edges.setAttribute('preserveAspectRatio', 'none');
+  for (const pathData of paths) {
+    const edge = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+    edge.setAttribute('d', pathData);
+    edge.classList.add('reference-graph-edge');
+    edges.appendChild(edge);
+  }
+  if (zoomControls) canvas.appendChild(zoomControls);
+  canvas.style.setProperty('--reference-zoom', String(referenceViewerZoom));
+  canvas.style.setProperty('--reference-pan-x', `${referenceViewerPan.x}px`);
+  canvas.style.setProperty('--reference-pan-y', `${referenceViewerPan.y}px`);
+}
+
+function observeReferenceCanvas(): void {
+  const canvas = referenceViewerCanvas;
+  if (!canvas) return;
+  referenceViewerResizeObserver?.disconnect();
+  const ownerWindow = canvas.ownerDocument.defaultView;
+  const ResizeObserverCtor = ownerWindow?.ResizeObserver;
+  if (!ownerWindow || !ResizeObserverCtor) return;
+  let frameId: number | undefined;
+  referenceViewerResizeObserver = new ResizeObserverCtor(() => {
+    if (frameId !== undefined) ownerWindow.cancelAnimationFrame(frameId);
+    frameId = ownerWindow.requestAnimationFrame(() => {
+      frameId = undefined;
+      const graph = referenceViewerGraph;
+      if (graph && referenceViewerCanvas === canvas) renderReferenceGraph(canvas.ownerDocument, graph);
+    });
+  });
+  referenceViewerResizeObserver.observe(canvas);
+}
+
+function createReferenceControl(doc: Document, label: string, value: string, type: 'number' | 'checkbox' = 'number'): HTMLElement {
+  const row = doc.createElement('label');
+  row.className = 'reference-filter-row';
+  row.appendChild(doc.createTextNode(label));
+  const input = doc.createElement('input');
+  input.type = type;
+  if (type === 'checkbox') input.checked = true;
+  else { input.value = value; input.min = '1'; input.max = '20'; }
+  row.appendChild(input);
+  return row;
 }
 
 async function renderReferenceViewer(): Promise<void> {
@@ -776,79 +827,105 @@ async function renderReferenceViewer(): Promise<void> {
   }
   if (referenceViewerDocument !== doc || referenceViewerToken !== token || referenceTrail[referenceTrail.length - 1] !== current) return;
 
+  referenceViewerGraph = graph;
   body.replaceChildren();
-
-  // 目标卡片（静态）
-  const targetCard = doc.createElement('div');
-  targetCard.className = 'reference-target-card';
-  const targetIcon = doc.createElement('span');
-  targetIcon.className = 'reference-item-icon target';
-  targetIcon.appendChild(referenceKindIcon(graph.target.kind));
-  const targetMain = doc.createElement('span');
-  targetMain.className = 'reference-item-main';
-  const targetName = doc.createElement('span');
-  targetName.className = 'reference-item-name';
-  targetName.textContent = graph.target.name;
-  targetMain.appendChild(targetName);
-  const kindBadge = doc.createElement('span');
-  kindBadge.className = 'reference-item-badge kind';
-  kindBadge.textContent = referenceKindLabel(graph.target.kind);
-  targetMain.appendChild(kindBadge);
-  if (graph.target.workflowId) {
-    const idBadge = doc.createElement('span');
-    idBadge.className = 'reference-item-badge';
-    idBadge.textContent = graph.target.workflowId;
-    targetMain.appendChild(idBadge);
-  }
-  if (!graph.target.exists) {
-    const missing = doc.createElement('span');
-    missing.className = 'reference-item-badge missing';
-    missing.textContent = '文件缺失';
-    targetMain.appendChild(missing);
-  }
-  const targetPath = doc.createElement('span');
-  targetPath.className = 'reference-item-path';
-  targetPath.textContent = graph.target.path;
-  targetMain.appendChild(targetPath);
-  if (graph.target.description) {
-    const description = doc.createElement('span');
-    description.className = 'reference-item-description';
-    description.textContent = graph.target.description;
-    targetMain.appendChild(description);
-  }
-  targetCard.append(targetIcon, targetMain);
-  body.appendChild(targetCard);
-
-  // 谁引用了我
-  renderReferenceSection(doc, '被引用', graph.referencedBy, graph.target.exists ? '没有被其他内容引用' : '目标文件不存在，无法统计引用', body);
-  // 我引用了谁（工作流 / 奖励目录才展示）
-  if (graph.target.kind === 'workflow' || graph.target.kind === 'catalog') {
-    renderReferenceSection(doc, '引用了', graph.references, '没有引用其他内容', body);
-  }
+  const workspace = doc.createElement('div');
+  workspace.className = 'reference-workspace';
+  const sidebar = doc.createElement('aside');
+  sidebar.className = 'reference-sidebar';
+  const search = doc.createElement('label');
+  search.className = 'reference-search';
+  search.appendChild(createElement(Search, { width: '15', height: '15', 'aria-hidden': 'true' }));
+  const searchInput = doc.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = '搜索...';
+  searchInput.value = referenceViewerQuery;
+  searchInput.addEventListener('input', () => { referenceViewerQuery = searchInput.value.trim(); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  search.appendChild(searchInput);
+  sidebar.appendChild(search);
+  sidebar.appendChild(createReferenceControl(doc, '搜索引用者深度', '1'));
+  sidebar.appendChild(createReferenceControl(doc, '搜索依赖性深度', '1'));
+  sidebar.appendChild(createReferenceControl(doc, '搜索宽度限制', '20', 'checkbox'));
+  const filter = doc.createElement('label');
+  filter.className = 'reference-filter-row';
+  filter.appendChild(doc.createTextNode('集过滤器'));
+  const select = doc.createElement('select');
+  select.innerHTML = '<option>None</option><option>工作流</option><option>模板图片</option><option>奖励目录</option>';
+  filter.appendChild(select);
+  sidebar.appendChild(filter);
+  const summary = doc.createElement('div');
+  summary.className = 'reference-sidebar-summary';
+  summary.innerHTML = `<strong>${graph.target.name}</strong><span>${graph.target.path}</span><span>${graph.referencedBy.length} 个引用者 · ${graph.references.length} 个依赖</span>`;
+  sidebar.appendChild(summary);
+  const canvas = doc.createElement('div');
+  canvas.className = 'reference-graph-canvas';
+  referenceViewerCanvas = canvas;
+  let dragOrigin: { x: number; y: number; panX: number; panY: number } | undefined;
+  canvas.addEventListener('pointerdown', (event) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    dragOrigin = { x: event.clientX, y: event.clientY, panX: referenceViewerPan.x, panY: referenceViewerPan.y };
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!dragOrigin) return;
+    referenceViewerPan = { x: dragOrigin.panX + event.clientX - dragOrigin.x, y: dragOrigin.panY + event.clientY - dragOrigin.y };
+    canvas.style.setProperty('--reference-pan-x', `${referenceViewerPan.x}px`);
+    canvas.style.setProperty('--reference-pan-y', `${referenceViewerPan.y}px`);
+  });
+  const stopGraphDrag = (event: PointerEvent): void => {
+    if (!dragOrigin) return;
+    dragOrigin = undefined;
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  };
+  canvas.addEventListener('pointerup', stopGraphDrag);
+  canvas.addEventListener('pointercancel', stopGraphDrag);
+  const zoom = doc.createElement('div');
+  zoom.className = 'reference-zoom-controls';
+  const zoomOut = doc.createElement('button');
+  zoomOut.type = 'button'; zoomOut.title = '缩小'; zoomOut.appendChild(createElement(Minus, { width: '14', height: '14', 'aria-hidden': 'true' }));
+  zoomOut.addEventListener('click', () => { referenceViewerZoom = Math.max(.6, referenceViewerZoom - .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  const zoomIn = doc.createElement('button');
+  zoomIn.type = 'button'; zoomIn.title = '放大'; zoomIn.appendChild(createElement(Plus, { width: '14', height: '14', 'aria-hidden': 'true' }));
+  zoomIn.addEventListener('click', () => { referenceViewerZoom = Math.min(1.6, referenceViewerZoom + .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  zoom.append(zoomOut, zoomIn);
+  canvas.appendChild(zoom);
+  workspace.append(sidebar, canvas);
+  body.appendChild(workspace);
+  observeReferenceCanvas();
+  window.requestAnimationFrame(() => renderReferenceGraph(doc, graph));
 }
 
-function openReferenceViewer(path: string, doc: Document): void {
+function openReferenceViewer(path: string, _sourceDocument: Document): void {
   closeReferenceViewer();
+  const doc = document;
   referenceViewerDocument = doc;
   referenceTrail = [path];
 
-  const overlay = doc.createElement('div');
-  overlay.className = 'reference-viewer-overlay';
-  overlay.setAttribute('role', 'dialog');
-  overlay.setAttribute('aria-modal', 'true');
-  overlay.setAttribute('aria-label', '引用查看器');
+  workbenchFrame?.show('referenceViewer');
+  const host = doc.querySelector<HTMLElement>('#module-reference-viewer');
+  if (!host) return;
 
   const panel = doc.createElement('div');
   panel.className = 'reference-viewer';
+  panel.tabIndex = -1;
 
   const header = doc.createElement('div');
   header.className = 'reference-viewer-header';
-  const title = doc.createElement('div');
-  title.className = 'reference-viewer-title';
-  title.appendChild(createElement(Network, { width: '15', height: '15', 'aria-hidden': 'true' }));
-  title.appendChild(doc.createTextNode('引用查看器'));
   const trailEl = doc.createElement('div');
   trailEl.className = 'reference-viewer-trail';
+  const nav = doc.createElement('div');
+  nav.className = 'reference-viewer-nav';
+  const backButton = doc.createElement('button');
+  backButton.type = 'button'; backButton.className = 'panel-action'; backButton.title = '后退';
+  backButton.disabled = true;
+  backButton.appendChild(createElement(ArrowLeft, { width: '14', height: '14', 'aria-hidden': 'true' }));
+  backButton.addEventListener('click', () => { if (referenceTrail.length > 1) { referenceTrail.pop(); void renderReferenceViewer(); } });
+  nav.appendChild(backButton);
+  const refreshButton = doc.createElement('button');
+  refreshButton.type = 'button'; refreshButton.className = 'panel-action'; refreshButton.title = '刷新';
+  refreshButton.appendChild(createElement(RefreshCw, { width: '14', height: '14', 'aria-hidden': 'true' }));
+  refreshButton.addEventListener('click', () => void renderReferenceViewer());
+  nav.appendChild(refreshButton);
   const closeButton = doc.createElement('button');
   closeButton.type = 'button';
   closeButton.className = 'panel-action';
@@ -856,18 +933,17 @@ function openReferenceViewer(path: string, doc: Document): void {
   closeButton.setAttribute('aria-label', '关闭');
   closeButton.appendChild(createElement(X, { width: '14', height: '14', 'aria-hidden': 'true' }));
   closeButton.addEventListener('click', closeReferenceViewer);
-  header.append(title, trailEl, closeButton);
+  header.append(nav, trailEl, closeButton);
 
   const body = doc.createElement('div');
   body.className = 'reference-viewer-body';
 
   const footer = doc.createElement('div');
   footer.className = 'reference-viewer-footer';
-  footer.textContent = '点击卡片可逐层跳转 · Esc 关闭';
+  footer.textContent = '拖动画布可浏览引用关系 · 点击节点逐层跳转 · Esc 关闭';
 
   panel.append(header, body, footer);
-  overlay.appendChild(panel);
-  doc.body.appendChild(overlay);
+  host.replaceChildren(panel);
 
   const keyHandler = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return;
@@ -875,23 +951,36 @@ function openReferenceViewer(path: string, doc: Document): void {
     event.stopPropagation();
     closeReferenceViewer();
   };
-  doc.addEventListener('keydown', keyHandler, true);
-  overlay.addEventListener('pointerdown', (event) => {
-    if (event.target === overlay) closeReferenceViewer();
-  });
+  panel.addEventListener('keydown', keyHandler, true);
 
-  referenceViewerOverlay = overlay;
+  referenceViewerPanel = panel;
   referenceViewerBody = body;
   referenceViewerTrailEl = trailEl;
-  referenceViewerKeyDoc = doc;
   referenceViewerKeyHandler = keyHandler;
 
+  const dockPanel = workbenchFrame?.dockviewApi.getPanel('referenceViewer');
+  referenceViewerLocationDisposable = dockPanel?.api.onDidLocationChange(() => {
+    window.setTimeout(() => {
+      const ownerDocument = referenceViewerPanel?.ownerDocument;
+      if (dockPanel.api.location.type === 'popout' && ownerDocument && ownerDocument !== document) {
+        ownerDocument.title = '引用查看器 - Onmyoji Studio';
+        const popoutTitle = ownerDocument.querySelector<HTMLElement>('.popout-title');
+        if (popoutTitle) popoutTitle.textContent = '引用查看器';
+      }
+      observeReferenceCanvas();
+      if (referenceViewerGraph && referenceViewerCanvas) renderReferenceGraph(referenceViewerCanvas.ownerDocument, referenceViewerGraph);
+    }, 0);
+  });
+
   void renderReferenceViewer();
+  window.setTimeout(() => workbenchFrame?.popout('referenceViewer'), 0);
 }
 
 /** 跳转到引用图中的另一个节点（层层跳转）。 */
 function navigateReferenceViewer(path: string): void {
   referenceTrail.push(path);
+  referenceViewerQuery = '';
+  referenceViewerPan = { x: 0, y: 0 };
   void renderReferenceViewer();
 }
 
@@ -1257,7 +1346,8 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       currentText = text;
       await api.runWorkflow({ uri: currentUri, instanceId: String(message.instanceId ?? selectedInstance), text });
       setDirty(false);
-      docking?.showPanel('runtime');
+      if (sharedPanelDockBridge) sharedPanelDockBridge.show('runtime');
+      else docking?.showPanel('runtime');
       return;
     }
     if (type === 'stopWorkflow') {
@@ -1409,9 +1499,10 @@ function closeTitlebarMenus(): void {
 function updateDockMenuState(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-workbench-panel]').forEach((button) => {
     const panelId = button.dataset.workbenchPanel as WorkbenchPanelId;
-    const open = panelId === 'workflow' || panelId === 'settings'
-      ? workbenchFrame?.isOpen(panelId) ?? false
-      : Boolean(workbenchFrame?.isOpen(panelId) || docking?.isOpen(panelId));
+    const shared = panelId === 'contentBrowser' || panelId === 'runtime';
+    const open = shared
+      ? Boolean(workbenchFrame?.isOpen(panelId) || docking?.isOpen(panelId))
+      : workbenchFrame?.isOpen(panelId) ?? false;
     button.setAttribute('aria-checked', String(open));
     button.classList.toggle('checked', open);
   });
@@ -1438,6 +1529,7 @@ function openSettingsPanel(): void {
   settingsAutoRefresh.checked = autoRefreshInstances;
   settingsDefaultWorkflow.checked = loadDefaultWorkflowOnStart;
   workbenchFrame?.show('settings');
+  window.setTimeout(() => workbenchFrame?.popout('settings'), 0);
 }
 
 function readSettings(): void {
@@ -1491,8 +1583,17 @@ function bindUi(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-workbench-panel]').forEach((button) => {
     button.addEventListener('click', () => {
       const panelId = button.dataset.workbenchPanel as WorkbenchPanelId;
-      if (panelId === 'settings') workbenchFrame?.toggle('settings');
-      else if (panelId !== 'workflow') toggleSharedPanel(panelId);
+      if (panelId === 'settings') {
+        if (workbenchFrame?.isOpen('settings')) workbenchFrame.toggle('settings');
+        else openSettingsPanel();
+      }
+      else if (panelId === 'referenceViewer') {
+        if (workbenchFrame?.isOpen('referenceViewer')) closeReferenceViewer();
+        else if (currentUri) {
+          const relative = relativeToProject(displayFileUri(currentUri));
+          if (relative) openReferenceViewer(relative, document);
+        }
+      } else if (panelId !== 'workflow') toggleSharedPanel(panelId);
     });
   });
   document.querySelectorAll<HTMLButtonElement>('[data-dock-command]').forEach((button) => {

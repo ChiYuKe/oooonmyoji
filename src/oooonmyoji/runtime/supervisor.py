@@ -45,6 +45,7 @@ class _Group:
     records: dict[str, dict[str, Any] | None]
     done: threading.Event
     cancel_requested: bool = False
+    terminal_status: str | None = None
 
 
 def _apply_cancel_request(
@@ -209,10 +210,11 @@ class Supervisor:
 
     @staticmethod
     def _instance_parallel_node(workflow: WorkflowSpec) -> WorkflowNode | None:
-        root = workflow.node_map.get(workflow.root)
+        node_map = workflow.node_map
+        root = node_map.get(workflow.root)
         if root is None or len(root.children) != 1:
             return None
-        child = workflow.node_map.get(root.children[0])
+        child = node_map.get(root.children[0])
         return child if child is not None and child.type == "instance_parallel" else None
 
     def run(self, job_id: str, *, wait: bool = True, events_file: str | None = None) -> str:
@@ -328,9 +330,15 @@ class Supervisor:
 
     @staticmethod
     def _group_status(group: _Group) -> str:
+        if group.terminal_status is not None:
+            return group.terminal_status
         if len(group.records) < len(group.run_ids):
             return RunStatus.QUEUED.value
-        statuses = [record.get("status") if isinstance(record, dict) else RunStatus.FAILED.value for record in group.records.values()]
+        statuses = [
+            record.get("status") if isinstance(record, dict) else RunStatus.FAILED.value
+            for run_id in group.run_ids
+            for record in [group.records.get(run_id)]
+        ]
         if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
             return RunStatus.SUCCEEDED.value
         if all(status == RunStatus.SUCCEEDED.value for status in statuses):
@@ -344,6 +352,26 @@ class Supervisor:
         if finished:
             payload["finished_at"] = datetime.now(timezone.utc).isoformat()
         self._group_store(group.group_id).write(payload)
+
+    def _cancel_group_runs(self, group: _Group) -> None:
+        """Request cancellation for children that have not produced a record."""
+
+        group.cancel_requested = True
+        for run_id in group.run_ids:
+            if run_id in group.records:
+                continue
+            try:
+                self.cancel(run_id)
+            except KeyError:
+                # The result may have been handled between the record scan and
+                # the cancellation request.
+                continue
+
+    def _mark_group_timeout(self, group: _Group) -> None:
+        """Make timeout terminal without pretending unfinished children succeeded."""
+
+        self._cancel_group_runs(group)
+        group.terminal_status = RunStatus.FAILED.value
 
     def _run_instance_parallel(
         self,
@@ -409,11 +437,20 @@ class Supervisor:
                 self._run_groups[child_id] = group_id
         self._persist_group(group)
         if wait:
-            if node.wait_for == "all":
-                records = self.wait_for_all(child_ids, timeout_seconds=workflow.timeout_seconds, cancel_on_failure=node.cancel_on_failure)
-                group.records.update(records)
-            else:
-                self._wait_group_poll(group, timeout_seconds=workflow.timeout_seconds)
+            try:
+                if node.wait_for == "all":
+                    records = self.wait_for_all(
+                        child_ids,
+                        timeout_seconds=workflow.timeout_seconds,
+                        cancel_on_failure=node.cancel_on_failure,
+                    )
+                    group.records.update(records)
+                else:
+                    self._wait_group_poll(group, timeout_seconds=workflow.timeout_seconds)
+            except TimeoutError:
+                self._mark_group_timeout(group)
+                self._finish_group(group)
+                raise
             self._finish_group(group)
         else:
             thread = threading.Thread(
@@ -455,12 +492,7 @@ class Supervisor:
             statuses = [record.get("status") for record in group.records.values() if isinstance(record, dict)]
             if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
                 if group.node.cancel_on_failure:
-                    for run_id in group.run_ids:
-                        if run_id not in group.records:
-                            try:
-                                self.cancel(run_id)
-                            except KeyError:
-                                pass
+                    self._cancel_group_runs(group)
                 self._finish_group(group)
                 return
             if len(group.records) == len(group.run_ids):
@@ -470,19 +502,9 @@ class Supervisor:
                 return
             if group.node.cancel_on_failure and not failure_requested and any(status not in {None, RunStatus.SUCCEEDED.value, RunStatus.QUEUED.value, RunStatus.RUNNING.value, RunStatus.RETRYING.value} for status in statuses):
                 failure_requested = True
-                for run_id in group.run_ids:
-                    if run_id not in group.records:
-                        try:
-                            self.cancel(run_id)
-                        except KeyError:
-                            pass
+                self._cancel_group_runs(group)
             if deadline is not None and time.monotonic() >= deadline:
-                for run_id in group.run_ids:
-                    if run_id not in group.records:
-                        try:
-                            self.cancel(run_id)
-                        except KeyError:
-                            pass
+                self._mark_group_timeout(group)
                 self._finish_group(group)
                 return
             self.check_workers()
@@ -550,12 +572,14 @@ class Supervisor:
             self.check_workers()
             remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
             if remaining == 0.0:
+                cancel_pending()
                 raise TimeoutError(f"timed out waiting for runs: {', '.join(sorted(pending))}")
             try:
                 event_queue = self.event_queue
                 assert event_queue is not None
                 event = event_queue.get(timeout=remaining)
             except queue.Empty as exc:
+                cancel_pending()
                 raise TimeoutError(f"timed out waiting for runs: {', '.join(sorted(pending))}") from exc
             record = self.handle_event(event)
             if event.get("type") != "result":

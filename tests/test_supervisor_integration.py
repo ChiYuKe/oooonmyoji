@@ -11,7 +11,7 @@ import pytest
 
 from src.oooonmyoji.config import load_config
 from src.oooonmyoji.runtime.records import AtomicJsonStore
-from src.oooonmyoji.runtime.supervisor import Supervisor
+from src.oooonmyoji.runtime.supervisor import Supervisor, _Group
 from src.oooonmyoji.workflows.model import InstanceParallelRun, WorkflowNode, WorkflowSpec
 
 
@@ -164,6 +164,71 @@ def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Pat
     record = AtomicJsonStore(tmp_path / "runs" / f"{group_id}.json").read(default={})
     assert record["status"] == "succeeded"
     assert [item["instance"] for item in record["runs"]] == ["mumu-0", "mumu-1", "mumu-2"]
+
+
+def test_instance_parallel_timeout_persists_failed_group_and_cancels_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = Supervisor.__new__(Supervisor)
+    supervisor.config = SimpleNamespace(artifact_dir=tmp_path)
+    supervisor.event_queue = None
+    supervisor._stopping = False
+    supervisor._group_lock = threading.RLock()
+    cancelled: list[str] = []
+    monkeypatch.setattr(supervisor, "cancel", cancelled.append)
+
+    workflow = WorkflowSpec(
+        3,
+        "parallel",
+        "1.0.0",
+        "",
+        (1, 1),
+        "root",
+        1,
+        10,
+        {},
+        (WorkflowNode("root", "root"),),
+        tmp_path / "parallel.json",
+        "hash",
+        {},
+    )
+    node = WorkflowNode("run_all", "instance_parallel", wait_for="all")
+    group = _Group(
+        "group-timeout",
+        workflow,
+        node,
+        ["run-1", "run-2"],
+        [
+            {"run_id": "run-1", "instance": "one", "status": "queued"},
+            {"run_id": "run-2", "instance": "two", "status": "queued"},
+        ],
+        {},
+        threading.Event(),
+    )
+
+    supervisor._wait_group_poll(group, timeout_seconds=0)
+
+    assert cancelled == ["run-1", "run-2"]
+    assert group.terminal_status == "failed"
+    persisted = AtomicJsonStore(tmp_path / "runs" / "group-timeout.json").read(default={})
+    assert persisted["status"] == "failed"
+
+
+def test_wait_for_all_timeout_requests_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    supervisor = Supervisor.__new__(Supervisor)
+    supervisor.event_queue = queue.Queue()
+    supervisor._completed = {}
+    supervisor._runs = {"run-1": "one", "run-2": "two"}
+    supervisor.workers = {}
+    supervisor.check_workers = lambda: None
+    cancelled: list[str] = []
+    monkeypatch.setattr(supervisor, "cancel", cancelled.append)
+
+    with pytest.raises(TimeoutError):
+        supervisor.wait_for_all(["run-1", "run-2"], timeout_seconds=0)
+
+    assert set(cancelled) == {"run-1", "run-2"}
 
 
 @pytest.mark.skipif(

@@ -11,7 +11,7 @@
   --danger: #e06c75;
   --warning: #d9a441;
   --info: #58a6cf;
-  --ui-font: "Segoe UI Variable Text", "Microsoft YaHei UI", "Microsoft YaHei", var(--vscode-font-family, sans-serif);
+  --ui-font: "HarmonyOS Sans SC", "Segoe UI Variable Text", "Microsoft YaHei UI", "Microsoft YaHei", var(--vscode-font-family, sans-serif);
   --mono-font: var(--vscode-editor-font-family, "Cascadia Mono", "Cascadia Code", Consolas, monospace);
   font-family: var(--ui-font);
   font-size: 14px;

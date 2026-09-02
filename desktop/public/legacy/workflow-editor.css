@@ -28,7 +28,7 @@
   --warning: #d9a441;
   --wire: #a0a0a0;
   --grid: rgba(255, 255, 255, 0.055);
-  font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+  font-family: "HarmonyOS Sans SC", var(--vscode-font-family, "Segoe UI", sans-serif);
   font-size: 13px;
 }
 
@@ -290,7 +290,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 input[type="checkbox"] { width: 15px; height: 15px; min-height: 0; accent-color: var(--button); }
 textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-font-family, Consolas, monospace); font-size: 11px; }
 .description { color: var(--muted); font-size: 11px; line-height: 1.45; margin: 3px 0 10px; }
-.workflow-description-input { min-height: 72px; resize: vertical; font-family: var(--vscode-font-family, "Segoe UI", sans-serif); font-size: 12px; line-height: 1.45; }
+.workflow-description-input { min-height: 72px; resize: vertical; font-family: "HarmonyOS Sans SC", var(--vscode-font-family, "Segoe UI", sans-serif); font-size: 12px; line-height: 1.45; }
 .empty-section { padding: 7px 0 12px; color: var(--muted); font-size: 11px; }
 .field-hint { color: var(--muted); font-size: 10px; margin: -2px 0 6px; line-height: 1.35; }
 .readonly-value { min-height: 28px; padding: 6px 7px; border: 1px solid transparent; color: #c9cbd0; overflow: hidden; text-overflow: ellipsis; }

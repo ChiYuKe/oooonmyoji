@@ -83,10 +83,11 @@ def _workflow_inputs(path: Path | None) -> dict[str, Any]:
 
 
 def _is_instance_parallel_workflow(workflow: Any) -> bool:
-    root_node = workflow.node_map.get(workflow.root)
+    node_map = workflow.node_map
+    root_node = node_map.get(workflow.root)
     if root_node is None or len(root_node.children) != 1:
         return False
-    child = workflow.node_map.get(root_node.children[0])
+    child = node_map.get(root_node.children[0])
     return child is not None and child.type == "instance_parallel"
 
 

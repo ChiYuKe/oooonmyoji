@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -70,11 +71,35 @@ class AppConfig:
     save_screenshots: bool
     raw: dict[str, Any] = field(repr=False)
 
+    @cached_property
+    def _instance_index(self) -> dict[str, InstanceConfig]:
+        """Index instances once while preserving first-entry semantics."""
+
+        index: dict[str, InstanceConfig] = {}
+        for item in self.instances:
+            index.setdefault(item.id, item)
+        return index
+
+    @cached_property
+    def _job_index(self) -> dict[str, JobConfig]:
+        """Index jobs once while preserving first-entry semantics."""
+
+        index: dict[str, JobConfig] = {}
+        for item in self.jobs:
+            index.setdefault(item.id, item)
+        return index
+
     def instance(self, instance_id: str) -> InstanceConfig:
-        return next(item for item in self.instances if item.id == instance_id)
+        try:
+            return self._instance_index[instance_id]
+        except KeyError as exc:
+            raise StopIteration from exc
 
     def job(self, job_id: str) -> JobConfig:
-        return next(item for item in self.jobs if item.id == job_id)
+        try:
+            return self._job_index[job_id]
+        except KeyError as exc:
+            raise StopIteration from exc
 
     def workflow_path(self, workflow: str) -> Path:
         candidate = Path(workflow)

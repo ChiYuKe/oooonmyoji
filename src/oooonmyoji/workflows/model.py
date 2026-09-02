@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -77,9 +78,22 @@ class WorkflowSpec:
     raw: dict[str, Any] = field(repr=False)
     retry_safe: bool = False
 
+    @cached_property
+    def _node_index(self) -> dict[str, WorkflowNode]:
+        """Build the node index once for this immutable workflow snapshot."""
+
+        return {node.id: node for node in self.nodes}
+
     @property
     def node_map(self) -> dict[str, WorkflowNode]:
-        return {node.id: node for node in self.nodes}
+        """Return a node index without exposing the cached mutable dictionary.
+
+        A workflow snapshot never changes its ``nodes`` tuple, so rebuilding
+        this index on every lookup only adds hashing overhead.  Returning a
+        shallow copy preserves the original API's mutation isolation.
+        """
+
+        return dict(self._node_index)
 
     @property
     def public_inputs(self) -> tuple[str, ...]:

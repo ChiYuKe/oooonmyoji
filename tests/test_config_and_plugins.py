@@ -53,6 +53,17 @@ def test_config_and_workflow_manifest_validate(tmp_path: Path) -> None:
     assert workflows["simple"].resolution == (1920, 1080)
 
 
+def test_config_indexes_preserve_lookup_and_missing_id_behavior(tmp_path: Path) -> None:
+    config = load_config(_write_config(tmp_path))
+
+    assert config.instance("one").id == "one"
+    assert config.job("check").id == "check"
+    with pytest.raises(StopIteration):
+        config.instance("missing")
+    with pytest.raises(StopIteration):
+        config.job("missing")
+
+
 def test_template_match_actions_declare_structured_array_items(tmp_path: Path) -> None:
     action_dir = tmp_path / "plugins" / "actions"
     action_dir.mkdir(parents=True)

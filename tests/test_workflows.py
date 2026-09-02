@@ -290,6 +290,18 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
         validate(output_binding, actions)
 
 
+def test_workflow_node_map_is_cached_for_an_immutable_snapshot() -> None:
+    actions = registry(action_spec(EchoAction()))
+    parsed = validate(
+        tree([task("task", "test.echo")], "task"),
+        actions,
+    )
+
+    first = parsed.node_map
+    first.clear()
+    assert parsed.node_map["task"].id == "task"
+
+
 def test_validator_accepts_do_once_and_rejects_duplicate_or_extra_fields() -> None:
     actions = registry(action_spec(EchoAction()))
     ok = tree([task("a", "test.echo", decorators=[{"type": "do_once"}])], "a")

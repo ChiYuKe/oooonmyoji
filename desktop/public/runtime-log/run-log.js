@@ -101,7 +101,7 @@
     const multi = state.sources.length > 1;
     $('workflow-name').textContent = state.descriptor
       ? (multi ? `${state.descriptor.workflow} · ${source.label || source.instance}` : state.descriptor.workflow)
-      : '尚未运行';
+      : run.rows.length > 0 ? '最近一次运行' : '尚未运行';
     $('run-meta').textContent = state.descriptor
       ? [source.instance || state.descriptor.instance, run.runId || '等待运行事件'].filter(Boolean).join(' · ')
       : '等待工作流';
@@ -121,9 +121,13 @@
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', String(source.id === state.activeSource));
       const dot = document.createElement('span'); dot.className = `source-dot ${run ? run.status : 'idle'}`;
-      const label = document.createElement('strong'); label.textContent = source.label || source.instance;
-      const instance = document.createElement('span'); instance.textContent = source.instance;
-      button.append(dot, label, instance);
+      const labelText = source.label || source.instance;
+      const label = document.createElement('strong'); label.textContent = labelText;
+      button.append(dot, label);
+      if (source.instance && source.instance !== labelText) {
+        const instance = document.createElement('span'); instance.textContent = source.instance;
+        button.appendChild(instance);
+      }
       button.addEventListener('click', () => {
         state.activeSource = source.id;
         updateIdentity();
@@ -541,6 +545,15 @@
     const completed = run.rows.filter((row) => row.kind !== 'reward' && row.action && (row.status === 'succeeded' || row.status === 'matched')).length;
     const failed = run.rows.filter((row) => row.kind !== 'reward' && (row.status === 'failed' || row.status === 'not_matched')).length;
     const current = [...run.rows].reverse().find((row) => row.status === 'running');
+    // Older sessions can provide events without a run descriptor. Infer a
+    // display status from the rows so the summary does not contradict itself.
+    if (!state.descriptor && run.rows.length > 0) {
+      const hasHardFailure = run.rows.some((row) => row.status === 'failed');
+      const inferred = current ? 'running' : hasHardFailure ? 'failed' : 'succeeded';
+      $('status-label').textContent = statusText[inferred];
+      for (const name of Object.keys(statusText)) document.body.classList.remove(`status-${name}`);
+      document.body.classList.add(`status-${inferred}`);
+    }
     $('completed-count').textContent = String(completed);
     $('failed-count').textContent = String(failed);
     $('current-step').textContent = current ? (current.name || '未命名任务') : '-';

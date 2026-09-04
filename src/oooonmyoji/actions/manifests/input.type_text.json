@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "name": "input.type_text",
+  "version": "1.0.0",
+  "entry": "builtin:TypeTextAction",
+  "description": "向当前输入框输入文本。",
+  "parameters": { "text": { "type": "string", "required": true } },
+  "outputs": { "type": "object", "properties": { "text": { "type": "string" }, "length": { "type": "integer" } }, "additionalProperties": false },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

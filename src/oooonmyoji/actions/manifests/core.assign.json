@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "name": "core.assign",
+  "version": "1.0.0",
+  "entry": "builtin:AssignAction",
+  "description": "将值包装成节点输出，便于在分支和循环中传递数据。",
+  "parameters": { "name": { "type": "string", "required": true, "min_length": 1 }, "value": { "type": "any", "required": true } },
+  "outputs": { "type": "object", "properties": { "name": { "type": "string" }, "value": {} }, "required": ["name", "value"], "additionalProperties": false },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

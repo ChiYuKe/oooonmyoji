@@ -112,10 +112,17 @@ class TaskContextImpl:
         return self.template_matcher.find(frame, template_path, roi=reference_roi, threshold=threshold, max_results=max_results, scale_search=scale_search)
 
     def ocr(self, *, roi: Sequence[int] | None = None) -> list[OcrResult]:
+        """Recognize text from a fresh device frame.
+
+        OCR is used by polling actions such as ``vision.wait_any_text``.  A
+        cached frame would make those actions keep inspecting the screen from
+        before the preceding tap/key action, so every OCR request must capture
+        the current device state first.
+        """
         self.check_cancelled()
         if self.ocr_engine is None:
             raise RuntimeError("OCR is disabled or unavailable")
-        frame = self.last_frame or self.capture()
+        frame = self.capture()
         actual_roi = None
         if roi is not None:
             actual_roi = self.mapper.rect(Rect(*tuple(int(value) for value in roi))).as_tuple()
@@ -195,6 +202,20 @@ class TaskContextImpl:
         self.check_cancelled()
         actual_x, actual_y = self.mapper.point(x, y)
         self.device.tap(actual_x, actual_y, hold_ms=hold_ms)
+
+    def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration_ms: int = 300) -> None:
+        self.check_cancelled()
+        start = self.mapper.point(x1, y1)
+        end = self.mapper.point(x2, y2)
+        self.device.swipe(*start, *end, duration_ms=duration_ms)
+
+    def key(self, keycode: str) -> None:
+        self.check_cancelled()
+        self.device.key(keycode)
+
+    def type_text(self, text: str) -> None:
+        self.check_cancelled()
+        self.device.type_text(text)
 
     def wait_for(
         self,

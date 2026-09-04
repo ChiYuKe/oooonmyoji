@@ -53,6 +53,26 @@ def test_config_and_workflow_manifest_validate(tmp_path: Path) -> None:
     assert workflows["simple"].resolution == (1920, 1080)
 
 
+def test_workflow_loader_reuses_snapshot_until_file_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path))
+    registry = build_action_registry(config.action_dir)
+    loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
+    workflow_path = config.workflow_dir / "simple.json"
+
+    first = loader.load("simple")
+    second = loader.load("simple")
+    assert first is not second
+    assert first.file_hash == second.file_hash
+    first.raw["id"] = "mutated"
+    assert loader.load("simple").workflow_id == "simple"
+
+    original_stat = workflow_path.stat()
+    workflow_path.write_text(workflow_path.read_text(encoding="utf-8").replace("3.0.0", "3.0.1"), encoding="utf-8")
+    assert loader.load("simple").version == "3.0.1"
+    assert loader.load("simple").file_hash != first.file_hash
+    assert workflow_path.stat().st_mtime_ns >= original_stat.st_mtime_ns
+
+
 def test_config_indexes_preserve_lookup_and_missing_id_behavior(tmp_path: Path) -> None:
     config = load_config(_write_config(tmp_path))
 

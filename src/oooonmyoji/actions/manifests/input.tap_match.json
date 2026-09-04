@@ -39,6 +39,8 @@
   "outputs": {
     "type": "object",
     "properties": {
+      "origin_x": { "type": "integer" },
+      "origin_y": { "type": "integer" },
       "x": { "type": "integer" },
       "y": { "type": "integer" },
       "offset_x": { "type": "integer" },

@@ -51,6 +51,8 @@ def test_tap_applies_random_offset_and_interval(monkeypatch: pytest.MonkeyPatch)
     })
 
     assert result.output == {
+        "origin_x": 100,
+        "origin_y": 200,
         "x": 104,
         "y": 197,
         "offset_x": 4,
@@ -74,6 +76,8 @@ def test_tap_match_applies_variation_to_match_center(monkeypatch: pytest.MonkeyP
     })
 
     assert result.output == {
+        "origin_x": 120,
+        "origin_y": 210,
         "x": 122,
         "y": 211,
         "offset_x": 2,

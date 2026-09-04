@@ -104,6 +104,39 @@ class AdbDevice:
         if result.returncode != 0:
             raise DeviceInputError((result.stderr or result.stdout).strip())
 
+    def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300) -> None:
+        if not self.connected:
+            raise DeviceInputError("ADB device is not connected")
+        for x, y in ((x1, y1), (x2, y2)):
+            if not 0 <= x < self.width or not 0 <= y < self.height:
+                raise ValueError(f"swipe point ({x},{y}) is outside {self.width}x{self.height}")
+        if duration_ms < 0:
+            raise ValueError("duration_ms cannot be negative")
+        result = self._run("shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration_ms))
+        if result.returncode != 0:
+            raise DeviceInputError((result.stderr or result.stdout).strip())
+
+    def key(self, keycode: str) -> None:
+        if not self.connected:
+            raise DeviceInputError("ADB device is not connected")
+        value = str(keycode).strip()
+        if not value or any(char.isspace() for char in value):
+            raise ValueError("keycode must be a non-empty token")
+        result = self._run("shell", "input", "keyevent", value)
+        if result.returncode != 0:
+            raise DeviceInputError((result.stderr or result.stdout).strip())
+
+    def type_text(self, text: str) -> None:
+        if not self.connected:
+            raise DeviceInputError("ADB device is not connected")
+        value = str(text)
+        if not value:
+            return
+        escaped = value.replace("%", "%25").replace(" ", "%s").replace("&", "%26")
+        result = self._run("shell", "input", "text", escaped)
+        if result.returncode != 0:
+            raise DeviceInputError((result.stderr or result.stdout).strip())
+
     def health_check(self) -> bool:
         if not self.connected:
             return False

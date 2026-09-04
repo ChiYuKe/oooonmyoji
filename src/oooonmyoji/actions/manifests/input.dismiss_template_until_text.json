@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "name": "input.dismiss_template_until_text",
+  "version": "1.0.0",
+  "entry": "builtin:DismissTemplateUntilTextAction",
+  "description": "持续点击重复出现的模板提示，直到目标页面文本稳定出现。适合多层奖励和结算覆盖层。",
+  "parameters": {
+    "match": { "type": "object", "required": true },
+    "template": { "type": "asset", "required": true },
+    "template_roi": { "type": "rect" },
+    "done_texts": { "type": "array", "required": true, "min_items": 1, "items": { "type": "string", "min_length": 1 } },
+    "done_roi": { "type": "rect" },
+    "timeout_seconds": { "type": "number", "default": 30, "min": 0.1 },
+    "max_clicks": { "type": "integer", "default": 6, "min": 1 },
+    "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 },
+    "post_click_delay": { "type": "number", "default": 0.8, "min": 0 },
+    "stable_seconds": { "type": "number", "default": 0.5, "min": 0 },
+    "hold_ms": { "type": "integer", "default": 0, "min": 0 },
+    "random_offset": { "type": "integer", "default": 0, "min": 0 },
+    "random_interval": { "type": "array", "items": { "type": "number", "min": 0 }, "min_items": 2, "max_items": 2, "default": [0, 0] }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "click_count": { "type": "integer" },
+      "clicks": { "type": "array", "items": { "type": "object" } },
+      "matched_text": { "type": "string" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

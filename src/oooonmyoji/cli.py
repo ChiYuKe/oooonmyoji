@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+import queue
 import shutil
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,7 @@ from .devices.factory import resolve_adb_path
 from .devices.mumu import discover_mumu_path
 from .exceptions import AutomationError, ConfigError
 from .runtime.control import ControlServer, send_control
-from .runtime.instances import ensure_runtime_instance, expand_runtime_instances
+from .runtime.instances import discover_runtime_instances, ensure_runtime_instance, expand_runtime_instances
 from .runtime.records import AtomicJsonStore
 from .runtime.scheduler import Scheduler
 from .runtime.supervisor import Supervisor
@@ -166,14 +168,15 @@ def command_list_actions(args: argparse.Namespace) -> int:
 
 
 def command_list_instances(args: argparse.Namespace) -> int:
-    config = expand_runtime_instances(load_config(_config_path(args.config)))
+    config = load_config(_config_path(args.config))
+    instances = discover_runtime_instances(config)
     _print({"instances": [{
         "id": instance.id,
         "backend": instance.backend,
         "mumu_index": instance.mumu_index,
         "adb_serial": instance.adb_serial,
         "display_name": instance.display_name,
-    } for instance in config.instances if instance.enabled]})
+    } for instance in instances]})
     return 0
 
 
@@ -493,7 +496,6 @@ def command_serve(args: argparse.Namespace) -> int:
         return {"ok": False, "error": f"unknown command: {command}"}
 
     control = ControlServer(handler)
-    import threading
     control_thread = threading.Thread(target=control.serve_forever, daemon=True)
     control_thread.start()
     try:
@@ -506,12 +508,10 @@ def command_serve(args: argparse.Namespace) -> int:
                 event_queue = supervisor.event_queue
                 assert event_queue is not None
                 event = event_queue.get(timeout=0.25)
-            except Exception:
+            except queue.Empty:
                 event = None
             if event:
-                record = supervisor.handle_event(event)
-            else:
-                record = None
+                supervisor.handle_event(event)
             if event and event.get("type") == "result":
                 run_id = event.get("run_id")
                 job_id = pending.pop(run_id, None)

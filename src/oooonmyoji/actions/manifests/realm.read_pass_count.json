@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "name": "realm.read_pass_count",
+  "version": "1.0.0",
+  "entry": "builtin:ReadRealmPassCountAction",
+  "description": "读取结界突破券数量并输出 run/skip 调度模式。OCR 不可用或未识别时安全跳过结界突破。",
+  "parameters": {
+    "roi": {
+      "type": "rect",
+      "required": true,
+      "description": "结界突破券数字所在区域 [x, y, w, h]"
+    },
+    "minimum_passes": {
+      "type": "integer",
+      "default": 1,
+      "min": 0,
+      "description": "达到该数量才进入结界突破"
+    },
+    "key_texts": {
+      "type": "array",
+      "default": ["结界突破", "突破券", "结界券"],
+      "items": { "type": "string", "min_length": 1 }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "passes": { "type": "integer" },
+      "detected": { "type": "boolean" },
+      "should_enter": { "type": "boolean" },
+      "mode": { "enum": ["run", "skip"] },
+      "raw_text": { "type": "string" }
+    },
+    "required": ["passes", "detected", "should_enter", "mode", "raw_text"],
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

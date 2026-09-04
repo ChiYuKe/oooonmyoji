@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "name": "input.swipe",
+  "version": "1.0.0",
+  "entry": "builtin:SwipeAction",
+  "description": "从起点滑动到终点。",
+  "parameters": {
+    "x1": { "type": "number", "required": true },
+    "y1": { "type": "number", "required": true },
+    "x2": { "type": "number", "required": true },
+    "y2": { "type": "number", "required": true },
+    "duration_ms": { "type": "integer", "default": 300, "min": 0 }
+  },
+  "outputs": { "type": "object", "properties": { "x1": { "type": "integer" }, "y1": { "type": "integer" }, "x2": { "type": "integer" }, "y2": { "type": "integer" }, "duration_ms": { "type": "integer" } }, "additionalProperties": false },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

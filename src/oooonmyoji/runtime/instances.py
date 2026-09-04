@@ -69,6 +69,31 @@ def expand_runtime_instances(config: AppConfig) -> AppConfig:
     return config if instances == config.instances else replace(config, instances=instances)
 
 
+def discover_runtime_instances(config: AppConfig) -> tuple[InstanceConfig, ...]:
+    """Return only instances that are currently available to the editor.
+
+    The persisted configuration describes how an instance should be controlled;
+    it is not evidence that the emulator is running.  The editor uses this
+    narrower view so a stale ``mumu-N`` entry cannot appear as an online device.
+    """
+
+    configured = tuple(instance for instance in config.instances if instance.enabled)
+    if not config.discover_mumu_instances:
+        return configured
+
+    players = discover_running_mumu_players(config.mumu_path)
+    if not players:
+        return tuple(instance for instance in configured if instance.backend != "mumu")
+
+    merged = merge_mumu_players(configured, players)
+    active_indexes = {player.index for player in players}
+    return tuple(
+        instance
+        for instance in merged
+        if instance.backend != "mumu" or instance.mumu_index in active_indexes
+    )
+
+
 def ensure_runtime_instance(config: AppConfig, instance_id: str) -> AppConfig:
     """Allow a recently discovered mumu-N selection to survive a transient rescan failure."""
 
@@ -90,4 +115,4 @@ def ensure_runtime_instance(config: AppConfig, instance_id: str) -> AppConfig:
     return replace(config, instances=(*config.instances, dynamic))
 
 
-__all__ = ["ensure_runtime_instance", "expand_runtime_instances", "merge_mumu_players"]
+__all__ = ["discover_runtime_instances", "ensure_runtime_instance", "expand_runtime_instances", "merge_mumu_players"]

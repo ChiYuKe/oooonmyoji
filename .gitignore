@@ -7,11 +7,10 @@ tests/artifacts/
 artifacts/
 logs/
 config/config.json
+config/runtime-*.json
 
 # Local VS Code settings and packaged extension artifacts
 .vscode/
-# Abandoned VS Code source checkout; retained locally for reference only.
-vscode/
 # Local toolchain downloads (portable Node.js etc.)
 tools/
 *.vsix

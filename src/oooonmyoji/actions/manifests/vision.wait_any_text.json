@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "name": "vision.wait_any_text",
+  "version": "1.0.0",
+  "entry": "builtin:WaitAnyTextAction",
+  "description": "轮询 OCR，直到任一候选文本出现或全部消失。",
+  "parameters": {
+    "texts": {
+      "type": "array",
+      "required": true,
+      "min_items": 1,
+      "items": { "type": "string", "min_length": 1 }
+    },
+    "timeout_seconds": { "type": "number", "required": true, "min": 0 },
+    "present": { "type": "boolean", "default": true },
+    "allow_timeout": { "type": "boolean", "default": false },
+    "roi": { "type": "rect" },
+    "min_confidence": { "type": "number", "default": 0, "min": 0, "max": 1 }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "matched_text": { "type": "string" },
+      "confidence": { "type": "number" },
+      "present": { "type": "boolean" },
+      "timed_out": { "type": "boolean" }
+    },
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

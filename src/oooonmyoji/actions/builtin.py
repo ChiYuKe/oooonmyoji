@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 import time
 from typing import Any
 
@@ -141,6 +142,31 @@ class WaitTemplateAction(Action):
         return ActionResult.succeeded(output)
 
 
+class WaitAnyAction(Action):
+    name = "vision.wait_any"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        templates = arguments.get("templates", [])
+        if not isinstance(templates, list) or not templates:
+            return ActionResult.failed("templates must be a non-empty list", category="workflow")
+        deadline = time.monotonic() + float(arguments["timeout_seconds"])
+        threshold = float(arguments.get("threshold", 0.85))
+        while True:
+            context.check_cancelled()
+            context.capture()
+            for template in templates:
+                matches = context.find_template(str(template), roi=arguments.get("roi"), threshold=threshold)
+                if matches:
+                    return ActionResult.succeeded({
+                        "template": str(template),
+                        "match": matches[0].to_dict(),
+                        "elapsed_seconds": round(float(arguments["timeout_seconds"]) - max(0.0, deadline - time.monotonic()), 6),
+                    })
+            if time.monotonic() >= deadline:
+                return ActionResult.failed("none of the templates matched before timeout", category="not_matched")
+            time.sleep(0.1)
+
+
 class TapAction(Action):
     name = "input.tap"
 
@@ -149,12 +175,49 @@ class TapAction(Action):
         y = int(arguments["y"])
         clicked_x, clicked_y, interval_seconds = _tap_with_variation(context, x, y, arguments)
         return ActionResult.succeeded({
+            "origin_x": x,
+            "origin_y": y,
             "x": clicked_x,
             "y": clicked_y,
             "offset_x": clicked_x - x,
             "offset_y": clicked_y - y,
             "interval_seconds": interval_seconds,
         })
+
+
+class SwipeAction(Action):
+    name = "input.swipe"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        start = (int(arguments["x1"]), int(arguments["y1"]))
+        end = (int(arguments["x2"]), int(arguments["y2"]))
+        context.swipe(*start, *end, duration_ms=int(arguments.get("duration_ms", 300)))
+        return ActionResult.succeeded({"x1": start[0], "y1": start[1], "x2": end[0], "y2": end[1], "duration_ms": int(arguments.get("duration_ms", 300))})
+
+
+class KeyAction(Action):
+    name = "input.key"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        keycode = str(arguments["keycode"]).strip()
+        context.key(keycode)
+        return ActionResult.succeeded({"keycode": keycode})
+
+
+class TypeTextAction(Action):
+    name = "input.type_text"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        value = str(arguments["text"])
+        context.type_text(value)
+        return ActionResult.succeeded({"text": value, "length": len(value)})
+
+
+class AssignAction(Action):
+    name = "core.assign"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        return ActionResult.succeeded({"name": str(arguments["name"]), "value": arguments.get("value")})
 
 
 class TapMatchAction(Action):
@@ -181,6 +244,8 @@ class TapMatchAction(Action):
         y = int(round(float(reference[1]) + float(reference[3]) / 2))
         clicked_x, clicked_y, interval_seconds = _tap_with_variation(context, x, y, arguments)
         return ActionResult.succeeded({
+            "origin_x": x,
+            "origin_y": y,
             "x": clicked_x,
             "y": clicked_y,
             "offset_x": clicked_x - x,
@@ -188,6 +253,106 @@ class TapMatchAction(Action):
             "interval_seconds": interval_seconds,
             "revalidated": bool(arguments.get("revalidate", True)),
         })
+
+
+class DismissTemplateUntilTextAction(Action):
+    """Click a recurring overlay prompt until the destination page is stable."""
+
+    name = "input.dismiss_template_until_text"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        initial_match = arguments.get("match")
+        template = arguments.get("template")
+        done_texts = arguments.get("done_texts")
+        if not isinstance(initial_match, dict):
+            return ActionResult.failed("match must be an object", category="workflow")
+        if not isinstance(template, str) or not template:
+            return ActionResult.failed("template must be a non-empty string", category="workflow")
+        if not isinstance(done_texts, list) or not done_texts or not all(isinstance(item, str) and item for item in done_texts):
+            return ActionResult.failed("done_texts must be a non-empty array of strings", category="workflow")
+
+        timeout = float(arguments.get("timeout_seconds", 30))
+        max_clicks = int(arguments.get("max_clicks", 6))
+        threshold = float(arguments.get("threshold", 0.85))
+        post_click_delay = float(arguments.get("post_click_delay", 0.8))
+        stable_seconds = float(arguments.get("stable_seconds", 0.5))
+        if timeout <= 0 or max_clicks < 1 or post_click_delay < 0 or stable_seconds < 0:
+            return ActionResult.failed("timeout, max_clicks, and delays are invalid", category="workflow")
+        if not 0.0 <= threshold <= 1.0:
+            return ActionResult.failed("threshold must be between 0 and 1", category="workflow")
+
+        deadline = time.monotonic() + timeout
+        selected = initial_match
+        clicks: list[dict[str, Any]] = []
+        while True:
+            context.check_cancelled()
+            if time.monotonic() >= deadline:
+                return ActionResult.failed("timed out dismissing template overlay", category="vision", output={"clicks": clicks})
+
+            reference = selected.get("reference")
+            if not isinstance(reference, list) or len(reference) != 4:
+                return ActionResult.failed("match.reference is invalid", category="workflow")
+            x = int(round(float(reference[0]) + float(reference[2]) / 2))
+            y = int(round(float(reference[1]) + float(reference[3]) / 2))
+            clicked_x, clicked_y, interval_seconds = _tap_with_variation(context, x, y, arguments)
+            clicks.append({
+                "origin_x": x,
+                "origin_y": y,
+                "x": clicked_x,
+                "y": clicked_y,
+                "offset_x": clicked_x - x,
+                "offset_y": clicked_y - y,
+                "interval_seconds": interval_seconds,
+            })
+
+            delay_deadline = min(deadline, time.monotonic() + post_click_delay)
+            while time.monotonic() < delay_deadline:
+                context.check_cancelled()
+                time.sleep(min(0.1, delay_deadline - time.monotonic()))
+
+            while time.monotonic() < deadline:
+                context.check_cancelled()
+                context.capture()
+                matches = context.find_template(template, roi=arguments.get("template_roi"), threshold=threshold)
+                if matches:
+                    if len(clicks) >= max_clicks:
+                        return ActionResult.failed(
+                            f"template overlay remained after {max_clicks} clicks",
+                            category="vision",
+                            output={"clicks": clicks},
+                        )
+                    selected = matches[0].to_dict()
+                    break
+
+                try:
+                    results = context.ocr(roi=arguments.get("done_roi"))
+                except RuntimeError as exc:
+                    return ActionResult.failed(str(exc), category="ocr", output={"clicks": clicks})
+                matched = next((item for item in results if any(text in item.text for text in done_texts)), None)
+                if matched is not None:
+                    stable_deadline = min(deadline, time.monotonic() + stable_seconds)
+                    while time.monotonic() < stable_deadline:
+                        context.check_cancelled()
+                        time.sleep(min(0.1, stable_deadline - time.monotonic()))
+                    context.capture()
+                    matches = context.find_template(template, roi=arguments.get("template_roi"), threshold=threshold)
+                    if matches:
+                        if len(clicks) >= max_clicks:
+                            return ActionResult.failed(
+                                f"template overlay remained after {max_clicks} clicks",
+                                category="vision",
+                                output={"clicks": clicks},
+                            )
+                        selected = matches[0].to_dict()
+                        break
+                    return ActionResult.succeeded({
+                        "click_count": len(clicks),
+                        "clicks": clicks,
+                        "matched_text": matched.text,
+                    })
+                time.sleep(0.1)
+            else:
+                return ActionResult.failed("timed out dismissing template overlay", category="vision", output={"clicks": clicks})
 
 
 def _tap_with_variation(context: Any, x: int, y: int, arguments: dict[str, Any]) -> tuple[int, int, float]:
@@ -410,6 +575,171 @@ class WaitTextAction(Action):
         return ActionResult.succeeded({"matched": len(matches), "text": text, "present": present})
 
 
+class WaitAnyTextAction(Action):
+    """轮询 OCR，直到任一候选文本出现或全部消失。"""
+
+    name = "vision.wait_any_text"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        texts = arguments.get("texts")
+        if not isinstance(texts, list) or not texts or not all(isinstance(item, str) and item for item in texts):
+            return ActionResult.failed("texts must be a non-empty array of strings", category="workflow")
+        timeout = float(arguments.get("timeout_seconds", 30))
+        min_confidence = float(arguments.get("min_confidence", 0.0))
+        if not 0.0 <= min_confidence <= 1.0:
+            return ActionResult.failed("min_confidence must be between 0 and 1", category="workflow")
+        present = bool(arguments.get("present", True))
+        allow_timeout = bool(arguments.get("allow_timeout", False))
+        deadline = time.monotonic() + timeout
+        while True:
+            context.check_cancelled()
+            try:
+                results = context.ocr(roi=arguments.get("roi"))
+            except RuntimeError as exc:
+                return ActionResult.failed(str(exc), category="ocr")
+            matched = next(
+                (result for result in results if any(text in result.text for text in texts) and result.confidence >= min_confidence),
+                None,
+            )
+            if (matched is not None) is present:
+                return ActionResult.succeeded({
+                    "matched_text": matched.text if matched is not None else "",
+                    "confidence": matched.confidence if matched is not None else 0.0,
+                    "present": present,
+                })
+            if time.monotonic() >= deadline:
+                state = "appear" if present else "disappear"
+                if allow_timeout:
+                    return ActionResult.succeeded({
+                        "matched_text": "",
+                        "confidence": 0.0,
+                        # A timeout means the requested state was not observed.
+                        # For disappearance waits, the last known state remains present.
+                        "present": False if present else True,
+                        "timed_out": True,
+                    })
+                return ActionResult.failed(f"timed out waiting for OCR text to {state}: {texts}", category="vision")
+            time.sleep(0.1)
+
+
+class ReadRealmPassCountAction(Action):
+    """读取结界突破券数量；识别失败时返回 skip，避免误停御魂。"""
+
+    name = "realm.read_pass_count"
+
+    _number = re.compile(r"(?<!\d)(\d{1,4})(?!\d)")
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        minimum = int(arguments.get("minimum_passes", 1))
+        if minimum < 0:
+            return ActionResult.failed("minimum_passes must be non-negative", category="workflow")
+        key_texts = arguments.get("key_texts", ["结界突破", "突破券", "结界券"])
+        if not isinstance(key_texts, list) or not all(isinstance(item, str) for item in key_texts):
+            return ActionResult.failed("key_texts must be an array of strings", category="workflow")
+        try:
+            results = context.ocr(roi=arguments.get("roi"))
+        except RuntimeError as exc:
+            context.log("realm.pass_count_unavailable", error=str(exc))
+            return ActionResult.succeeded({"passes": 0, "detected": False, "should_enter": False, "mode": "skip", "raw_text": ""})
+        text = " ".join(result.text for result in results)
+        numbers: list[int] = []
+        for result in results:
+            numbers.extend(int(value) for value in ReadRealmPassCountAction._number.findall(result.text))
+        # Prefer numbers located in the same OCR item as a known label. If OCR
+        # split the label and number into separate items, use the first small
+        # count in the configured ROI as a conservative fallback.
+        labelled = [
+            int(value)
+            for result in results
+            if any(label in result.text for label in key_texts)
+            for value in ReadRealmPassCountAction._number.findall(result.text)
+        ]
+        passes = labelled[0] if labelled else (numbers[0] if numbers else 0)
+        return ActionResult.succeeded({
+            "passes": passes,
+            "detected": bool(numbers),
+            "should_enter": bool(numbers) and passes >= minimum,
+            "mode": "run" if bool(numbers) and passes >= minimum else "skip",
+            "raw_text": text,
+        })
+
+
+class DetectRealmProgressAction(Action):
+    """检测当前页 9 个目标的完成态并返回断点。"""
+
+    name = "realm.detect_progress"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        rois = arguments.get("target_rois")
+        if not isinstance(rois, list) or len(rois) != 9 or not all(isinstance(roi, list) and len(roi) == 4 for roi in rois):
+            return ActionResult.failed("target_rois must contain exactly 9 rects", category="workflow")
+        completed_texts = arguments.get("completed_texts", ["已挑战", "已击败", "胜利", "占领", "破"])
+        templates = arguments.get("completed_templates", [])
+        if not isinstance(completed_texts, list) or not all(isinstance(item, str) and item for item in completed_texts):
+            return ActionResult.failed("completed_texts must be an array of strings", category="workflow")
+        if not isinstance(templates, list) or not all(isinstance(item, str) and item for item in templates):
+            return ActionResult.failed("completed_templates must be an array of assets", category="workflow")
+        min_confidence = float(arguments.get("min_confidence", 0.45))
+        if not 0.0 <= min_confidence <= 1.0:
+            return ActionResult.failed("min_confidence must be between 0 and 1", category="workflow")
+        # The page title ROI only covers the header.  Scan the union of all
+        # target cards instead so completion stamps at the card's right edge
+        # are visible, while retaining the caller's per-card ROIs for matching.
+        scan_roi = arguments.get("progress_roi")
+        if scan_roi is None:
+            coordinates = [tuple(int(value) for value in roi) for roi in rois]
+            bounds = list(zip(*coordinates))
+            min_x = min(bounds[0])
+            min_y = min(bounds[1])
+            max_x = max(x + width for x, _, width, _ in coordinates)
+            max_y = max(y + height for _, y, _, height in coordinates)
+            padding = 96
+            scan_roi = [max(0, min_x - padding), max(0, min_y - padding), max_x - min_x + padding * 2, max_y - min_y + padding * 2]
+        try:
+            context.capture()
+            ocr_items = context.ocr(roi=scan_roi)
+        except RuntimeError as exc:
+            context.log("realm.progress_unavailable", error=str(exc))
+            return ActionResult.succeeded({
+                "detected": False,
+                "completed": [False] * 9,
+                "completed_count": 0,
+                "next_index": 1,
+                "source": "unavailable",
+                "evidence": [[] for _ in range(9)],
+            })
+        completed = [False] * 9
+        evidence: list[list[str]] = [[] for _ in range(9)]
+        # "破" is the game's standard completed-card stamp.  Keep it enabled
+        # even for older workflow files whose public text list predates it.
+        effective_completed_texts = list(dict.fromkeys([*completed_texts, "破"]))
+        for index, roi in enumerate(rois):
+            x, y, width, height = (int(value) for value in roi)
+            for item in ocr_items:
+                if item.confidence < min_confidence:
+                    continue
+                if x <= item.x <= x + width and y <= item.y <= y + height and any(text in item.text for text in effective_completed_texts):
+                    completed[index] = True
+                    evidence[index].append(item.text)
+            for template in templates:
+                try:
+                    if context.find_template(template, roi=roi, threshold=min_confidence):
+                        completed[index] = True
+                        evidence[index].append(template)
+                except (OSError, ValueError):
+                    continue
+        completed_count = sum(completed)
+        next_index = next((index + 1 for index, value in enumerate(completed) if not value), 9)
+        return ActionResult.succeeded({
+            "detected": any(completed),
+            "completed": completed,
+            "completed_count": completed_count,
+            "next_index": next_index,
+            "source": "ocr_or_template",
+            "evidence": evidence,
+        })
+
+
 # Action parameter metadata now lives in the shared manifest files under
 # ``src/oooonmyoji/actions/manifests/*.json`` (one per Action, consumed by both
 # the Python runtime and the TypeScript editor). This module only implements the
@@ -432,4 +762,8 @@ __all__ = [
     "TapMatchAction",
     "WaitTemplateAction",
     "WaitTextAction",
+    "WaitAnyTextAction",
+    "ReadRealmPassCountAction",
+    "DetectRealmProgressAction",
+    "DismissTemplateUntilTextAction",
 ]

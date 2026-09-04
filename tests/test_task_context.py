@@ -19,9 +19,11 @@ class FakeDevice:
 
     def __init__(self) -> None:
         self.taps: list[tuple[int, int, int]] = []
+        self.capture_count = 0
         self.frame = DeviceFrame(self.width, self.height, np.zeros((self.height, self.width, 3), dtype=np.uint8))
 
     def capture(self) -> DeviceFrame:
+        self.capture_count += 1
         return self.frame
 
     def tap(self, x: int, y: int, hold_ms: int = 0) -> None:
@@ -52,6 +54,7 @@ def test_task_context_maps_taps_and_translates_roi_ocr(tmp_path: Path) -> None:
     result = context.ocr(roi=(200, 100, 100, 100))[0]
     assert result.text == "中文"
     assert result.box[0] == (101, 52)
+    assert device.capture_count == 2
     context.tap(960, 540, hold_ms=25)
     assert device.taps == [(480, 270, 25)]
 

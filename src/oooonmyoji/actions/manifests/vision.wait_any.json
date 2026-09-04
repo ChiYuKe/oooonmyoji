@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "name": "vision.wait_any",
+  "version": "1.0.0",
+  "entry": "builtin:WaitAnyAction",
+  "description": "等待任意一个模板出现并返回首个命中项。",
+  "parameters": {
+    "templates": { "type": "array", "items": { "type": "asset" }, "min_items": 1, "required": true },
+    "timeout_seconds": { "type": "number", "required": true, "min": 0 },
+    "roi": { "type": "rect" },
+    "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 }
+  },
+  "outputs": { "type": "object", "properties": { "template": { "type": "string" }, "match": { "type": "object" }, "elapsed_seconds": { "type": "number" } }, "required": ["template", "match", "elapsed_seconds"], "additionalProperties": false },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

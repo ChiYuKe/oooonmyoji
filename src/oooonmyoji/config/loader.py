@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..exceptions import ConfigError
-from .model import AppConfig, InstanceConfig, JobConfig, OcrConfig, RetryConfig
+from .model import AppConfig, DebugConfig, InstanceConfig, JobConfig, OcrConfig, RetryConfig
 
 
 APP_CONFIG_SCHEMA: dict[str, Any] = {
@@ -95,6 +95,14 @@ APP_CONFIG_SCHEMA: dict[str, Any] = {
         "log_dir": {"type": "string", "minLength": 1},
         "artifact_dir": {"type": "string", "minLength": 1},
         "save_screenshots": {"type": "boolean"},
+        "debug": {
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "annotate_screenshots": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
     },
     "additionalProperties": False,
 }
@@ -327,6 +335,7 @@ def load_config(path: Path | str) -> AppConfig:
             retry_enabled=_bool(data.get("retry_enabled"), f"tasks[{index}].retry_enabled", False),
         ))
     scheduler = _object(raw.get("scheduler", {}), "scheduler")
+    debug_data = _object(raw.get("debug", {}), "debug")
     return AppConfig(
         schema_version=2,
         timezone=timezone,
@@ -345,6 +354,14 @@ def load_config(path: Path | str) -> AppConfig:
         log_dir=log_dir,
         artifact_dir=artifact_dir,
         save_screenshots=_bool(raw.get("save_screenshots"), "save_screenshots", False),
+        debug=DebugConfig(
+            enabled=_bool(debug_data.get("enabled"), "debug.enabled", False),
+            annotate_screenshots=_bool(
+                debug_data.get("annotate_screenshots"),
+                "debug.annotate_screenshots",
+                True,
+            ),
+        ),
         raw=raw,
     )
 

@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "name": "realm.detect_progress",
+  "version": "1.0.0",
+  "entry": "builtin:DetectRealmProgressAction",
+  "description": "扫描结界突破当前页 9 个目标的完成态，输出已完成数量和第一个未完成位置。",
+  "parameters": {
+    "target_rois": { "type": "array", "required": true, "min_items": 9, "max_items": 9, "items": { "type": "rect" } },
+    "page_roi": { "type": "rect", "required": true },
+    "completed_texts": { "type": "array", "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
+    "completed_templates": { "type": "array", "default": [], "items": { "type": "asset", "min_length": 1 } },
+    "min_confidence": { "type": "number", "default": 0.45, "min": 0, "max": 1 }
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "detected": { "type": "boolean" },
+      "completed": { "type": "array", "items": { "type": "boolean" }, "minItems": 9, "maxItems": 9 },
+      "completed_count": { "type": "integer" },
+      "next_index": { "type": "integer", "minimum": 1, "maximum": 9 },
+      "source": { "type": "string" },
+      "evidence": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } }
+    },
+    "required": ["detected", "completed", "completed_count", "next_index", "source", "evidence"],
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": false, "retry": "safe" }
+}

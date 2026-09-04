@@ -411,6 +411,20 @@ class MumuDevice:
         if down_result != 0 or up_result != 0:
             raise DeviceInputError(f"tap failed: down={down_result}, up={up_result}")
 
+    def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300) -> None:
+        """Send a swipe when the native SDK exposes a move primitive.
+
+        Older MuMu SDKs do not export touch-move; failing explicitly is safer
+        than silently reducing a swipe to a tap.
+        """
+        raise DeviceInputError("MuMu native backend does not expose swipe input; use the ADB backend")
+
+    def key(self, keycode: str) -> None:
+        raise DeviceInputError("MuMu native backend does not expose key input; use the ADB backend")
+
+    def type_text(self, text: str) -> None:
+        raise DeviceInputError("MuMu native backend does not expose text input; use the ADB backend")
+
     def health_check(self) -> bool:
         """Return whether the native connection still has a live handle."""
 

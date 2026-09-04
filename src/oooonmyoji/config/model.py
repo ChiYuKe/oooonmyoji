@@ -40,6 +40,12 @@ class RetryConfig:
 
 
 @dataclass(frozen=True)
+class DebugConfig:
+    enabled: bool = False
+    annotate_screenshots: bool = True
+
+
+@dataclass(frozen=True)
 class JobConfig:
     id: str
     workflow: str
@@ -69,6 +75,7 @@ class AppConfig:
     log_dir: Path
     artifact_dir: Path
     save_screenshots: bool
+    debug: DebugConfig
     raw: dict[str, Any] = field(repr=False)
 
     @cached_property
@@ -110,6 +117,7 @@ class AppConfig:
 
 __all__ = [
     "AppConfig",
+    "DebugConfig",
     "InstanceConfig",
     "JobConfig",
     "OcrConfig",

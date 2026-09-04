@@ -17,6 +17,11 @@
     runningDurationNodes: [],
   };
 
+  try {
+    const savedView = window.localStorage.getItem('onmyoji-studio.runtime-log-view');
+    if (savedView === 'steps' || savedView === 'engine') state.view = savedView;
+  } catch { /* 独立打开或受限环境下忽略 */ }
+
   const $ = (id) => document.getElementById(id);
   /** 时间线最多渲染的行数：超出时只显示最新的这一数量，统计数据仍按全部行计算。 */
   const MAX_VISIBLE_ROWS = 300;
@@ -722,8 +727,16 @@
 
   function closeLightbox() { $('lightbox').classList.add('hidden'); }
 
-  $('tab-steps').addEventListener('click', () => { state.view = 'steps'; render(); });
-  $('tab-engine').addEventListener('click', () => { state.view = 'engine'; render(); });
+  $('tab-steps').addEventListener('click', () => {
+    state.view = 'steps';
+    try { window.localStorage.setItem('onmyoji-studio.runtime-log-view', 'steps'); } catch { /* ignore */ }
+    render();
+  });
+  $('tab-engine').addEventListener('click', () => {
+    state.view = 'engine';
+    try { window.localStorage.setItem('onmyoji-studio.runtime-log-view', 'engine'); } catch { /* ignore */ }
+    render();
+  });
   $('btn-stop').addEventListener('click', () => desktopHost.postMessage({ type: 'stopWorkflow' }));
   $('btn-clear').addEventListener('click', () => desktopHost.postMessage({ type: 'clear' }));
   $('lightbox-close').addEventListener('click', closeLightbox);

@@ -11,9 +11,12 @@
   <link rel="stylesheet" href="./workflow-editor.css">
   <style>
     #topbar { display: none !important; }
-    main { height: 100%; }
-    #external-banner { top: 8px; }
+    main { height: calc(100% - 30px); }
+    #external-banner { top: 38px; }
     #inspector { background: #242424; }
+    #inspector-title { background: #2a2a2a; }
+    .desktop-details-mode #inspector-title { display: none !important; }
+    .desktop-details-mode #workflow-breadcrumb { display: none !important; }
   </style>
 </head>
 <body>
@@ -29,6 +32,7 @@
     <button id="btn-save" class="primary">保存</button>
     <button id="btn-more" class="icon-button">更多</button>
   </header>
+  <nav id="workflow-breadcrumb" aria-label="工作流层级"></nav>
   <div id="external-banner" class="hidden"></div>
   <main id="editor-main">
     <section id="canvas-wrap">

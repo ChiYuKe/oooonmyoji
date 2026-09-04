@@ -7,6 +7,7 @@ import type {
   RoiCaptureRequest,
   RoiCaptureResult,
   RunWorkflowRequest,
+  RuntimeDebugSettings,
   RuntimeInstance,
   RuntimeOutputEvent,
   RuntimeStateEvent,
@@ -68,12 +69,34 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
   private configuredInstances(): RuntimeInstance[] {
     try {
-      const parsed = parseRuntimeInstances(readJsonObject(this.configPath));
-      if (parsed.length > 0) return parsed;
+      const raw = readJsonObject(this.configPath);
+      if (raw.discover_mumu_instances === true) return [];
+      return parseRuntimeInstances(raw);
     } catch {
-      // Keep a usable fallback when configuration is not ready yet.
+      // Discovery failures are represented as an empty list instead of a fake device.
     }
-    return [{ id: 'mumu-0' }];
+    return [];
+  }
+
+  getDebugSettings(): RuntimeDebugSettings {
+    const raw = readJsonObject(this.configPath);
+    const debug = raw.debug && typeof raw.debug === 'object'
+      ? raw.debug as Record<string, unknown>
+      : {};
+    return {
+      enabled: debug.enabled === true,
+      annotateScreenshots: debug.annotate_screenshots !== false,
+    };
+  }
+
+  updateDebugSettings(settings: RuntimeDebugSettings): RuntimeDebugSettings {
+    const raw = readJsonObject(this.configPath);
+    raw.debug = {
+      enabled: settings.enabled,
+      annotate_screenshots: settings.annotateScreenshots,
+    };
+    fs.writeFileSync(this.configPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    return this.getDebugSettings();
   }
 
   async listInstances(): Promise<RuntimeInstance[]> {
@@ -92,7 +115,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve(instances && instances.length > 0 ? instances : fallback);
+        resolve(instances ?? fallback);
       };
       const timer = setTimeout(() => {
         child.kill();
@@ -135,10 +158,12 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     } catch {
       // The engine will provide the detailed parse failure in stderr.
     }
+    const available = new Set((await this.listInstances()).map((item) => item.id));
     if (runs.length > 0) {
-      const available = new Set((await this.listInstances()).map((item) => item.id));
       const missing = [...new Set(runs.map((item) => item.instance).filter((id) => !available.has(id)))];
       if (missing.length > 0) throw new Error(`未发现运行实例：${missing.join('、')}`);
+    } else if (!request.instanceId || !available.has(request.instanceId)) {
+      throw new Error('未发现运行实例，请先启动 MuMu 或连接 Android 设备');
     }
 
     const runDirectory = path.join(this.artifactDir, 'runs');
@@ -148,7 +173,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     this.startWatching(runs.length > 0
       ? runs.map((item) => path.join(runDirectory, `desktop-events-${stamp}-${item.instance}.jsonl`))
       : [eventsFile]);
-    const instance = request.instanceId || runs[0]?.instance || 'mumu-0';
+    const instance = request.instanceId || runs[0]?.instance || '';
     const args = [
       '-m', 'src.oooonmyoji.cli', '--config', this.configPath,
       'run-workflow', workflowReference,
@@ -324,7 +349,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
       const args = [
         '-m', 'src.oooonmyoji.tools.roi_editor',
         '--config', this.configPath,
-        '--instance', request.instanceId || 'mumu-0',
+        '--instance', request.instanceId || '',
         '--capture-only',
         '--result-file', resultFile,
         '--reference-width', String(request.referenceResolution[0]),
@@ -347,7 +372,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
         '-m', 'src.oooonmyoji.tools.template_check',
         '--config', this.configPath,
         '--project-root', this.project.projectRoot,
-        '--instance', request.instanceId || 'mumu-0',
+        '--instance', request.instanceId || '',
         '--template', request.template,
         '--threshold', String(request.threshold),
         '--max-results', String(request.maxResults),

@@ -101,6 +101,19 @@ export class WebviewManager implements vscode.Disposable {
   /** 进入子工作流视图时记录上级工作流 URI（支持多级嵌套返回）。 */
   private workflowBackStack: string[] = [];
 
+  private workflowTrail(): Array<{ uri: string; name: string }> {
+    const uris = [...this.workflowBackStack, this.docUri?.toString() ?? ''].filter(Boolean);
+    return uris.map((uri) => {
+      try {
+        const file = vscode.Uri.parse(uri).fsPath;
+        const extension = path.extname(file);
+        return { uri, name: path.basename(file, extension) || '工作流' };
+      } catch {
+        return { uri, name: '工作流' };
+      }
+    });
+  }
+
   /** 编辑器当前打开的工作流文件（供结构树等面板判断是否需要切换）。 */
   get currentUri(): vscode.Uri | undefined {
     return this.docUri;
@@ -159,6 +172,7 @@ export class WebviewManager implements vscode.Disposable {
       );
     }
     this.startInstanceRefresh();
+    this.workflowBackStack = [];
     this.docUri = uri;
     this.dirty = false;
     await this.sendInit();
@@ -306,6 +320,7 @@ export class WebviewManager implements vscode.Disposable {
   <button id="btn-save" class="primary" title="保存到 JSON">保存</button>
   <button id="btn-more" class="icon-button" title="更多操作">⋯</button>
 </header>
+<nav id="workflow-breadcrumb" aria-label="工作流层级"></nav>
 <div id="external-banner" class="hidden"></div>
 <main id="editor-main">
   <section id="canvas-wrap">
@@ -349,6 +364,7 @@ export class WebviewManager implements vscode.Disposable {
       document: { uri: this.docUri.toString(), name: path.basename(this.docUri.fsPath), text },
       workflows: await this.listWorkflowFiles(),
       canGoBack: this.workflowBackStack.length > 0,
+      workflowTrail: this.workflowTrail(),
       catalog: catalog.all(),
       refs,
       issues,
@@ -490,6 +506,7 @@ export class WebviewManager implements vscode.Disposable {
         const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
         if (saveText !== undefined) await this.saveCurrentText(saveText);
         this.docUri = vscode.Uri.parse(uri);
+        this.workflowBackStack = [];
         this.dirty = false;
         await this.sendInit();
         // 切换后回放最近运行事件，让子工作流视图也能看到运行情况
@@ -500,6 +517,7 @@ export class WebviewManager implements vscode.Disposable {
         const uri = await this.pickWorkflow();
         if (uri && this.docUri) {
           this.docUri = uri;
+          this.workflowBackStack = [];
           this.dirty = false;
           await this.sendInit();
           this.replayRunEvents();
@@ -543,6 +561,20 @@ export class WebviewManager implements vscode.Disposable {
         const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
         if (saveText !== undefined) await this.saveCurrentText(saveText);
         this.docUri = vscode.Uri.parse(previous);
+        this.dirty = false;
+        await this.sendInit();
+        this.replayRunEvents();
+        break;
+      }
+      case 'navigateWorkflowTrail': {
+        if (!this.docUri) break;
+        const index = Number(message.index);
+        const trail = [...this.workflowBackStack, this.docUri.toString()];
+        if (!Number.isInteger(index) || index < 0 || index >= trail.length - 1) break;
+        const saveText = typeof message.saveText === 'string' ? message.saveText : undefined;
+        if (saveText !== undefined) await this.saveCurrentText(saveText);
+        this.workflowBackStack = trail.slice(0, index);
+        this.docUri = vscode.Uri.parse(trail[index]);
         this.dirty = false;
         await this.sendInit();
         this.replayRunEvents();

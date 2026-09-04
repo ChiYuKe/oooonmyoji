@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createReadStream } from 'node:fs';
+import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import {
@@ -14,6 +14,7 @@ import {
 import type {
   RoiCaptureRequest,
   RunWorkflowRequest,
+  RuntimeDebugSettings,
   SaveCanvasRequest,
   SaveTemplateRequest,
   TemplateCheckRequest,
@@ -34,6 +35,7 @@ let project: ProjectService;
 let runtime: RuntimeService;
 let rendererServer: Server | undefined;
 let rendererBaseUrl = '';
+const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -95,6 +97,36 @@ function ownerWindow(event: IpcMainInvokeEvent): BrowserWindow {
   return owner;
 }
 
+function layoutStorePath(): string {
+  return path.join(app.getPath('userData'), LAYOUT_STORE_FILENAME);
+}
+
+function readLayoutStore(): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(layoutStorePath(), 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeLayout(key: unknown, value: unknown): void {
+  if (typeof key !== 'string' || key.length === 0 || key.length > 160 || (value !== null && typeof value !== 'string')) return;
+  try {
+    const store = readLayoutStore();
+    if (value === null) delete store[key];
+    else store[key] = value;
+    const filename = layoutStorePath();
+    mkdirSync(path.dirname(filename), { recursive: true });
+    writeFileSync(filename, JSON.stringify(store), 'utf8');
+  } catch {
+    // Layout persistence is best-effort; a renderer failure must not affect the app.
+  }
+}
+
 function registerIpc(): void {
   ipcMain.handle('window:minimize', (event) => ownerWindow(event).minimize());
   ipcMain.handle('window:toggle-maximize', (event) => {
@@ -106,6 +138,12 @@ function registerIpc(): void {
   });
   ipcMain.handle('window:close', (event) => ownerWindow(event).close());
   ipcMain.handle('window:is-maximized', (event) => ownerWindow(event).isMaximized());
+  ipcMain.on('layout:read', (event, key: unknown) => {
+    event.returnValue = typeof key === 'string' ? readLayoutStore()[key] ?? null : null;
+  });
+  ipcMain.on('layout:write', (_event, key: unknown, value: unknown) => {
+    writeLayout(key, value);
+  });
 
   ipcMain.handle('project:bootstrap', async () => project.bootstrap(await runtime.listInstances()));
   ipcMain.handle('project:get-workflow-init', async (_event, uri: string, selectedInstance: string, canGoBack: boolean) => {
@@ -129,6 +167,8 @@ function registerIpc(): void {
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => runtime.runWorkflow(request));
   ipcMain.handle('runtime:stop-workflow', () => runtime.stopWorkflow());
+  ipcMain.handle('runtime:get-debug-settings', () => runtime.getDebugSettings());
+  ipcMain.handle('runtime:update-debug-settings', (_event, settings: RuntimeDebugSettings) => runtime.updateDebugSettings(settings));
   ipcMain.handle('runtime:capture-roi', (_event, request: RoiCaptureRequest) => runtime.captureRoi(request));
   ipcMain.handle('runtime:check-template', (_event, request: TemplateCheckRequest) => runtime.checkTemplate(request));
 }

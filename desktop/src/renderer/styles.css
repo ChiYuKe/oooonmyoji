@@ -138,6 +138,37 @@ button { color: inherit; }
 .titlebar-spacer { flex: 1; }
 .header-spacer { flex: 1; }
 
+.desktop-more-menu {
+  position: fixed;
+  z-index: 1400;
+  min-width: 210px;
+  padding: 5px 0;
+  border: 1px solid #3b3b3b;
+  background: #252525;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .52);
+}
+.desktop-more-menu button {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 0;
+  background: transparent;
+  color: #d6d9df;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+  white-space: nowrap;
+}
+.desktop-more-menu button:hover,
+.desktop-more-menu button:focus-visible {
+  outline: 0;
+  background: #094771;
+  color: #fff;
+}
+.desktop-more-separator { height: 1px; margin: 4px 7px; background: #3b3b3b; }
+
 .window-controls {
   align-self: stretch;
   display: flex;
@@ -161,7 +192,7 @@ button { color: inherit; }
 .icon-button, .command-button, .panel-action {
   height: 28px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
 }
@@ -181,7 +212,7 @@ select {
   height: 28px;
   min-width: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   outline: 0;
   background: var(--surface-raised);
   color: var(--text);
@@ -238,30 +269,34 @@ select option:checked { color: #fff; }
 .dirty-indicator { width: 7px; height: 7px; border-radius: 50%; background: transparent; }
 .dirty-indicator.dirty { background: var(--yellow); }
 
-.tool-strip { gap: 8px; padding: 0 8px; border-bottom: 3px solid #2e2e2e; background: #202020; }
+.tool-strip { gap: 7px; padding: 0 8px; border-bottom: 2px solid #17191b; background: #1b1c1e; }
 .tool-group { display: flex; gap: 2px; }
 .tool-divider { width: 1px; height: 20px; background: var(--border); }
 .document-path { min-width: 0; margin-left: auto; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
 .dock-workspace-shell, .dock-workspace { min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; }
 .dock-module-host, .dock-module { width: 100%; height: 100%; min-width: 0; min-height: 0; }
-.dock-module { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
-.module-command-strip { flex: 0 0 30px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 9px; border-bottom: 1px solid var(--border-soft); background: #282828; }
+.dock-module { display: flex; flex-direction: column; overflow: hidden; background: var(--dock-panel-background, var(--surface)); }
+.module-command-strip { flex: 0 0 30px; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 9px; border-bottom: 0; background: var(--dock-panel-header-background, #2a2a2a); }
 .module-context { min-width: 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .panel-action { width: 28px; margin-left: auto; padding: 0; display: grid; place-items: center; }
 .panel-content { min-height: 0; flex: 1; overflow: auto; }
 
-.onmyoji-dockview {
+.onmyoji-dockview,
+.dockview-popout-host {
   --dv-tabs-and-actions-container-height: 35px;
   --dv-tabs-and-actions-container-font-size: 11px;
   --dv-group-view-background-color: #1b1b1b;
-  --dv-tabs-and-actions-container-background-color: #202020;
-  --dv-activegroup-visiblepanel-tab-background-color: #383838;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #303030;
-  --dv-activegroup-hiddenpanel-tab-background-color: #202020;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #202020;
-  --dv-tab-divider-color: #3b3b3b;
-  --dv-separator-border: #2e2e2e;
+  --dock-tab-row-background: #191a1c;
+  --dock-panel-background: #242424;
+  --dock-panel-header-background: #2a2a2a;
+  --dv-tabs-and-actions-container-background-color: var(--dock-tab-row-background);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--dock-panel-header-background);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--dock-panel-header-background);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--dock-tab-row-background);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--dock-tab-row-background);
+  --dv-tab-divider-color: #2d3034;
+  --dv-separator-border: #181a1c;
   --dv-active-sash-color: transparent;
   --dv-drag-over-background-color: rgba(63, 143, 196, .16);
   --dv-drag-over-border: 1px solid #4b88aa;
@@ -308,16 +343,20 @@ select option:checked { color: #fff; }
 .dockview-popout-host .dv-tab .dv-default-tab .dv-default-tab-action:hover { background-color: transparent; }
 .onmyoji-dockview .dv-split-view-container.dv-horizontal > .dv-view-container > .dv-view:not(:first-child) .dv-tabs-and-actions-container { padding-left: 3px; }
 .onmyoji-dockview .dv-split-view-container.dv-vertical > .dv-view-container > .dv-view:not(:first-child) .dv-tabs-and-actions-container { padding-top: 8px; }
-.onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container { border-bottom: 1px solid #333 !important; box-sizing: border-box !important; padding-top: 6px; }
+.onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container { border-bottom: 0 !important; box-sizing: border-box !important; padding-top: 6px; }
 .onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container .dv-tab { border-top: 0 !important; }
+.onmyoji-dockview .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab,
+.dockview-popout-host .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab {
+  background-color: var(--dock-panel-header-background);
+}
 .onmyoji-dockview .dv-split-view-container > .dv-view-container > .dv-view:first-child .dv-tabs-and-actions-container,
 .dockview-theme-vs .dv-view:first-child .dv-tabs-and-actions-container { padding-top: 4px; }
 .onmyoji-dockview .dv-content-container { min-width: 0; min-height: 0; }
 .onmyoji-dockview .dv-active-group .module-command-strip,
-.onmyoji-dockview .dv-active-group .content-browser-toolbar { background: #383838; }
+.onmyoji-dockview .dv-active-group .content-browser-toolbar { background: var(--dock-panel-header-background); }
 .onmyoji-dockview .dv-inactive-group .module-command-strip,
-.onmyoji-dockview .dv-inactive-group .content-browser-toolbar { background: #303030; }
-.onmyoji-dockview .dv-tab { letter-spacing: 0; border-radius: 6px 6px 0 0; }
+.onmyoji-dockview .dv-inactive-group .content-browser-toolbar { background: var(--dock-panel-header-background); }
+.onmyoji-dockview .dv-tab { letter-spacing: 0; border-radius: 4px 4px 0 0; }
 .onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action { padding: 5px; }
 .onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action svg { width: 7px; height: 7px; opacity: .55; }
 .onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action:hover svg { opacity: 1; }
@@ -374,8 +413,8 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .dockview-popout-host .popout-window-controls button:last-child:hover { background: #b43d45; color: #fff; }
 .dockview-popout-host .popout-window-controls svg { width: 13px; height: 13px; stroke-width: 1.7; }
 .dockview-popout-host .dv-popout-window { top: 28px !important; width: 100vw !important; height: calc(100vh - 28px) !important; }
-.dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container { padding-top: 6px; border-bottom: 1px solid #333; box-sizing: border-box; }
-.dockview-popout-host .dv-tab { border-radius: 6px 6px 0 0; }
+.dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container { padding-top: 6px; border-bottom: 0 !important; box-sizing: border-box; }
+.dockview-popout-host .dv-tab { border-radius: 4px 4px 0 0; }
 
 .empty-panel { padding: 18px 12px; color: var(--muted); font-size: 11px; text-align: center; }
 .tree-content { padding: 5px 0 10px; }
@@ -432,7 +471,7 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 
 .editor-surface { position: relative; min-width: 0; min-height: 0; background: #1b1b1b; }
 #editor-frame, #details-frame, #runtime-log-frame { width: 100%; height: 100%; display: block; border: 0; background: #1b1b1b; }
-.details-module { background: #242424; }
+.details-module { background: var(--dock-panel-background, #242424); }
 .loading-mask { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; background: #1b1b1b; color: var(--muted); }
 .loading-spinner { width: 22px; height: 22px; border: 2px solid #333a43; border-top-color: var(--blue-strong); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

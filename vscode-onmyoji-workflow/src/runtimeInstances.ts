@@ -39,7 +39,7 @@ export function parseRuntimeInstances(raw: unknown): RuntimeInstanceInfo[] {
   return instances;
 }
 
-/** 请求值优先，其次使用工作区记忆值，最后回退到第一个配置实例。 */
+/** 请求值优先，其次使用工作区记忆值；没有在线设备时保持空值。 */
 export function chooseRuntimeInstance(
   instances: RuntimeInstanceInfo[],
   requested?: string,
@@ -48,5 +48,5 @@ export function chooseRuntimeInstance(
   const ids = new Set(instances.map((item) => item.id));
   if (requested && ids.has(requested)) return requested;
   if (persisted && ids.has(persisted)) return persisted;
-  return instances[0]?.id ?? 'mumu-0';
+  return instances[0]?.id ?? '';
 }

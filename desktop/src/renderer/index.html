@@ -88,6 +88,10 @@
               <button class="icon-button" data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i></button>
               <button class="icon-button" data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i></button>
               <button class="icon-button" data-editor-command="addParallel" title="添加并行节点"><i data-lucide="columns-3"></i></button>
+              <button class="icon-button" data-editor-command="addGenericParallel" title="添加通用并发节点"><i data-lucide="split"></i></button>
+              <button class="icon-button" data-editor-command="addRepeatUntil" title="添加循环节点"><i data-lucide="repeat-2"></i></button>
+              <button class="icon-button" data-editor-command="addBranch" title="添加条件分支"><i data-lucide="git-fork"></i></button>
+              <button class="icon-button" data-editor-command="addSwitch" title="添加值分支"><i data-lucide="route"></i></button>
               <button class="icon-button" data-editor-command="addInstanceParallel" title="添加多实例节点"><i data-lucide="monitor-up"></i></button>
             </div>
             <span class="tool-divider"></span>
@@ -102,7 +106,7 @@
             <button id="run-button" class="command-button run-command" title="运行当前工作流"><i data-lucide="play"></i><span>运行</span></button>
             <button id="stop-button" class="icon-button" title="停止工作流" disabled><i data-lucide="square"></i></button>
             <button id="save-button" class="command-button" title="保存工作流"><i data-lucide="save"></i><span>保存</span></button>
-            <button id="more-button" class="icon-button" title="更多操作"><i data-lucide="ellipsis"></i></button>
+            <button id="more-button" class="icon-button" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis"></i></button>
             <div id="document-path" class="document-path"></div>
           </div>
 
@@ -169,6 +173,14 @@
                 <span>启动时加载默认工作流</span>
                 <input id="settings-default-workflow" type="checkbox" aria-label="启动时加载默认工作流">
               </label>
+              <label class="settings-row">
+                <span>Debug 逐步截图</span>
+                <input id="settings-debug-enabled" type="checkbox" aria-label="Debug 逐步截图">
+              </label>
+              <label class="settings-row">
+                <span>标注 ROI、匹配度和点击位置</span>
+                <input id="settings-debug-annotate" type="checkbox" aria-label="标注 Debug 截图">
+              </label>
             </section>
             <section class="settings-section">
               <h3 class="settings-section-title">关于</h3>
@@ -205,6 +217,10 @@
             <button data-editor-command="addSequence"><i data-lucide="list-tree"></i><span>顺序 Sequence</span></button>
             <button data-editor-command="addSelector"><i data-lucide="git-branch"></i><span>选择 Selector</span></button>
             <button data-editor-command="addParallel"><i data-lucide="columns-3"></i><span>简单并行</span></button>
+            <button data-editor-command="addGenericParallel"><i data-lucide="split"></i><span>通用并发</span></button>
+            <button data-editor-command="addRepeatUntil"><i data-lucide="repeat-2"></i><span>循环直到</span></button>
+            <button data-editor-command="addBranch"><i data-lucide="git-fork"></i><span>条件分支</span></button>
+            <button data-editor-command="addSwitch"><i data-lucide="route"></i><span>值分支</span></button>
             <button data-editor-command="addInstanceParallel"><i data-lucide="monitor-up"></i><span>多实例并行</span></button>
           </div>
         </section>

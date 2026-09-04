@@ -177,6 +177,8 @@ const contentBrowserSearch = document.querySelector<HTMLInputElement>('#content-
 const settingsContentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
 const settingsAutoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
 const settingsDefaultWorkflow = document.querySelector<HTMLInputElement>('#settings-default-workflow')!;
+const settingsDebugEnabled = document.querySelector<HTMLInputElement>('#settings-debug-enabled')!;
+const settingsDebugAnnotate = document.querySelector<HTMLInputElement>('#settings-debug-annotate')!;
 
 let bootstrap: BootstrapData | undefined;
 let currentUri = '';
@@ -209,6 +211,7 @@ let runtimeEngineOutput = '';
 let runtimeProcessResult: { code: number | null; signal: string | null; stopped: boolean } | undefined;
 let autoRefreshInstances = true;
 let loadDefaultWorkflowOnStart = true;
+let moreMenu: { menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
 
 function postToEditor(payload: Record<string, unknown>): void {
   postToFrame(editorFrame, payload);
@@ -295,6 +298,15 @@ function displayFileUri(uri: string): string {
   }
 }
 
+function workflowTrail(): Array<{ uri: string; name: string }> {
+  const uris = [...backStack, currentUri].filter(Boolean);
+  return uris.map((uri) => {
+    const descriptor = bootstrap?.workflows.find((item) => item.uri === uri);
+    const file = displayFileUri(uri).split(/[\\/]/).pop() || '';
+    return { uri, name: descriptor?.id || descriptor?.name?.replace(/\.json$/i, '') || file.replace(/\.json$/i, '') || '工作流' };
+  });
+}
+
 function resolveWorkflow(reference: string): WorkflowDescriptor | undefined {
   if (!bootstrap) return undefined;
   const normalized = reference.trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
@@ -311,21 +323,32 @@ function renderWorkflowSelect(workflows: WorkflowDescriptor[]): void {
 }
 
 function renderInstances(instances: RuntimeInstance[], requested = selectedInstance): void {
-  instanceSelect.replaceChildren(...instances.map((instance) => {
+  const options = instances.map((instance) => {
     const option = document.createElement('option');
     option.value = instance.id;
     // 选中态高亮和行间距由内部行元素承担：Chromium 会把 option 自身的 margin/border 强制清零
     const row = document.createElement('span');
     row.className = 'select-row';
-    row.textContent = instance.displayName ? `${instance.displayName} · ${instance.id}` : instance.id;
+    row.textContent = instance.displayName
+      || (instance.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instance.id);
     option.appendChild(row);
-    option.title = [instance.backend, instance.adbSerial].filter(Boolean).join(' · ');
+    option.title = [instance.displayName, instance.id, instance.backend, instance.adbSerial].filter(Boolean).join(' · ');
     return option;
-  }));
+  });
+  if (options.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.disabled = true;
+    option.textContent = '未检测到运行实例';
+    options.push(option);
+  }
+  instanceSelect.replaceChildren(...options);
   const ids = new Set(instances.map((instance) => instance.id));
-  selectedInstance = ids.has(requested) ? requested : instances[0]?.id ?? 'mumu-0';
+  selectedInstance = ids.has(requested) ? requested : instances[0]?.id ?? '';
   instanceSelect.value = selectedInstance;
-  document.querySelector<HTMLElement>('#instance-count')!.textContent = `${instances.length} 个实例`;
+  document.querySelector<HTMLElement>('#instance-count')!.textContent = instances.length > 0
+    ? `${instances.length} 个实例`
+    : '未检测到实例';
 }
 
 function contentParent(path: string): string {
@@ -1205,6 +1228,7 @@ async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> 
     currentEditorInit = init;
     if (init.document.uri !== currentUri) collapsedTreeNodes = new Set();
     currentUri = init.document.uri;
+    init.workflowTrail = workflowTrail();
     currentText = init.document.text;
     selectedInstance = init.selectedInstance;
     if (bootstrap) {
@@ -1337,6 +1361,18 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       if (previous) await loadWorkflow(previous);
       return;
     }
+    if (type === 'navigateWorkflowTrail') {
+      const index = Number(message.index);
+      const trail = [...backStack, currentUri];
+      if (!Number.isInteger(index) || index < 0 || index >= trail.length - 1) return;
+      if (typeof message.saveText === 'string') {
+        await api.saveWorkflow(currentUri, message.saveText);
+        currentText = message.saveText;
+      }
+      backStack = trail.slice(0, index);
+      await loadWorkflow(trail[index]);
+      return;
+    }
     if (type === 'reloadRequest') {
       await loadWorkflow(currentUri);
       return;
@@ -1417,6 +1453,11 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       await api.openWorkflowFile(currentUri);
       return;
     }
+    if (type === 'openWorkflowPicker') {
+      sharedPanelDockBridge?.show('contentBrowser');
+      window.setTimeout(() => contentBrowserSearch.focus(), 0);
+      return;
+    }
     if (type === 'openWorkflowTree') {
       showToast('结构树已显示在左侧');
       return;
@@ -1489,11 +1530,92 @@ function updateMaximizedState(maximized: boolean): void {
   createIcons({ icons: desktopIcons });
 }
 
+function closeMoreMenu(): void {
+  if (!moreMenu) return;
+  document.removeEventListener('pointerdown', moreMenu.dismiss, true);
+  document.removeEventListener('keydown', moreMenu.keyHandler, true);
+  window.removeEventListener('resize', closeMoreMenu);
+  window.removeEventListener('scroll', closeMoreMenu, true);
+  moreMenu.menu.remove();
+  moreMenu = undefined;
+  document.querySelector<HTMLButtonElement>('#more-button')?.setAttribute('aria-expanded', 'false');
+}
+
+function showMoreMenu(button: HTMLButtonElement): void {
+  closeMoreMenu();
+  const menu = document.createElement('div');
+  menu.className = 'desktop-more-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '更多操作');
+
+  const actions: Array<{ label: string; type: string } | 'separator'> = [
+    { label: '新建工作流', type: 'newWorkflow' },
+    { label: '选择其他工作流…', type: 'openWorkflowPicker' },
+    { label: '打开 JSON', type: 'openFile' },
+    'separator',
+    { label: '在结构树窗口查看', type: 'openWorkflowTree' },
+    'separator',
+    { label: '查看引用', type: 'openReferences' },
+    'separator',
+    { label: '重新加载', type: 'reloadRequest' },
+  ];
+  for (const action of actions) {
+    if (action === 'separator') {
+      const separator = document.createElement('div');
+      separator.className = 'desktop-more-separator';
+      separator.setAttribute('role', 'separator');
+      menu.appendChild(separator);
+      continue;
+    }
+    const entry = document.createElement('button');
+    entry.type = 'button';
+    entry.setAttribute('role', 'menuitem');
+    entry.textContent = action.label;
+    entry.addEventListener('click', () => {
+      closeMoreMenu();
+      void handleEditorMessage({ type: action.type }, editorFrame);
+    });
+    menu.appendChild(entry);
+  }
+
+  document.body.appendChild(menu);
+  const buttonRect = button.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const margin = 8;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  const left = Math.min(
+    Math.max(margin, buttonRect.right - menuRect.width),
+    Math.max(margin, viewportWidth - menuRect.width - margin),
+  );
+  const top = Math.min(
+    Math.max(margin, buttonRect.bottom + 4),
+    Math.max(margin, viewportHeight - menuRect.height - margin),
+  );
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  const dismiss = (event: Event): void => {
+    if (menu.contains(event.target as Node) || event.target === button) return;
+    closeMoreMenu();
+  };
+  const keyHandler = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') closeMoreMenu();
+  };
+  document.addEventListener('pointerdown', dismiss, true);
+  document.addEventListener('keydown', keyHandler, true);
+  window.addEventListener('resize', closeMoreMenu);
+  window.addEventListener('scroll', closeMoreMenu, true);
+  moreMenu = { menu, dismiss, keyHandler };
+  button.setAttribute('aria-expanded', 'true');
+}
+
 function closeTitlebarMenus(): void {
   document.querySelectorAll<HTMLElement>('.menu-root.open').forEach((root) => {
     root.classList.remove('open');
     root.querySelector<HTMLButtonElement>('.menu-trigger')?.setAttribute('aria-expanded', 'false');
   });
+  closeMoreMenu();
 }
 
 function updateDockMenuState(): void {
@@ -1524,10 +1646,18 @@ function popoutActivePanel(): void {
   else docking?.popoutActivePanel();
 }
 
+async function refreshDebugSettings(): Promise<void> {
+  const settings = await api.getDebugSettings();
+  settingsDebugEnabled.checked = settings.enabled;
+  settingsDebugAnnotate.checked = settings.annotateScreenshots;
+  settingsDebugAnnotate.disabled = !settings.enabled;
+}
+
 function openSettingsPanel(): void {
   settingsContentView.value = contentBrowserView;
   settingsAutoRefresh.checked = autoRefreshInstances;
   settingsDefaultWorkflow.checked = loadDefaultWorkflowOnStart;
+  void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
   workbenchFrame?.show('settings');
   window.setTimeout(() => workbenchFrame?.popout('settings'), 0);
 }
@@ -1577,6 +1707,27 @@ function bindUi(): void {
     loadDefaultWorkflowOnStart = settingsDefaultWorkflow.checked;
     window.localStorage.setItem('onmyoji-studio.settings.default-workflow', String(loadDefaultWorkflowOnStart));
   });
+  const saveDebugSettings = async (): Promise<void> => {
+    settingsDebugEnabled.disabled = true;
+    settingsDebugAnnotate.disabled = true;
+    try {
+      const settings = await api.updateDebugSettings({
+        enabled: settingsDebugEnabled.checked,
+        annotateScreenshots: settingsDebugAnnotate.checked,
+      });
+      settingsDebugEnabled.checked = settings.enabled;
+      settingsDebugAnnotate.checked = settings.annotateScreenshots;
+      showToast(settings.enabled ? 'Debug 逐步截图已开启，下次运行生效' : 'Debug 逐步截图已关闭');
+    } catch (error) {
+      showToast(`保存 Debug 设置失败：${String(error)}`);
+      await refreshDebugSettings().catch(() => undefined);
+    } finally {
+      settingsDebugEnabled.disabled = false;
+      settingsDebugAnnotate.disabled = !settingsDebugEnabled.checked;
+    }
+  };
+  settingsDebugEnabled.addEventListener('change', () => void saveDebugSettings());
+  settingsDebugAnnotate.addEventListener('change', () => void saveDebugSettings());
   document.querySelectorAll<HTMLButtonElement>('[data-dock-panel]').forEach((button) => {
     button.addEventListener('click', () => docking?.togglePanel(button.dataset.dockPanel as DockPanelId));
   });
@@ -1648,7 +1799,12 @@ function bindUi(): void {
   document.querySelector('#run-button')!.addEventListener('click', () => desktopControl('run'));
   document.querySelector('#stop-button')!.addEventListener('click', () => desktopControl('stop'));
   document.querySelector('#save-button')!.addEventListener('click', () => desktopControl('save'));
-  document.querySelector('#more-button')!.addEventListener('click', () => desktopControl('more'));
+  document.querySelector<HTMLButtonElement>('#more-button')!.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const button = event.currentTarget as HTMLButtonElement;
+    if (moreMenu) closeMoreMenu();
+    else showMoreMenu(button);
+  });
   document.querySelector('#window-minimize')!.addEventListener('click', () => void api.minimizeWindow());
   document.querySelector('#window-maximize')!.addEventListener('click', async () => updateMaximizedState(await api.toggleMaximizeWindow()));
   document.querySelector('#window-close')!.addEventListener('click', () => void api.closeWindow());

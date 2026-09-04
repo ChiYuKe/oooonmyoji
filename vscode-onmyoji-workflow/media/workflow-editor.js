@@ -18,9 +18,9 @@
   const VARIABLE_CARD_PORT_Y = 13;
   const VARIABLE_PIN_X = 10;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
-  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'instance_parallel', 'task'];
-  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
-  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', instance_parallel: '⇉', task: '▣' };
+  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'];
+  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
+  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', task: '▣' };
   const RUN_LABEL = {
     running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
     failed: '失败', cancelled: '已取消', branch_miss: '分支跳过',
@@ -33,6 +33,7 @@
     workflows: [],
     docUri: '',
     documentName: '',
+    workflowTrail: [],
     instances: [],
     instanceId: '',
     selected: new Set(),
@@ -81,7 +82,6 @@
   const workflowNodeVariables = (node) => subWorkflowRef(node) ? publicWorkflowVariables(subWorkflowRef(node)) : [];
   const nodeHeight = (node) => BASE_H
     + nodeVariablePins(node).length * RUN_VARIABLE_H
-    + workflowNodeVariables(node).length * RUN_VARIABLE_H
     + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
   const layout = () => {
     if (!state.raw._layout || typeof state.raw._layout !== 'object' || Array.isArray(state.raw._layout)) state.raw._layout = {};
@@ -99,17 +99,31 @@
     return state.raw._variableCards;
   }
 
+  function variableLinks() {
+    if (!state.raw || typeof state.raw !== 'object') return {};
+    if (!state.raw._variableLinks || typeof state.raw._variableLinks !== 'object' || Array.isArray(state.raw._variableLinks)) state.raw._variableLinks = {};
+    return state.raw._variableLinks;
+  }
+
+  function nextVariableCardId() {
+    const cards = variableCards();
+    let index = 1;
+    while (Object.prototype.hasOwnProperty.call(cards, `card_${index}`)) index += 1;
+    return `card_${index}`;
+  }
+
   function variableCardList() {
     const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
       ? state.raw.blackboard
       : {};
     return Object.entries(variableCards())
-      .filter(([name]) => Object.prototype.hasOwnProperty.call(blackboard, name))
-      .map(([name, value]) => ({
-        name,
+      .map(([id, value]) => ({
+        id,
+        name: value && typeof value.name === 'string' && value.name ? value.name : id,
         x: value && Number.isFinite(value.x) ? value.x : 0,
         y: value && Number.isFinite(value.y) ? value.y : 0,
-      }));
+      }))
+      .filter((card) => Object.prototype.hasOwnProperty.call(blackboard, card.name));
   }
 
   function variableTypeOf(name) {
@@ -117,17 +131,97 @@
     return definition && typeof definition === 'object' && definition.type ? definition.type : 'any';
   }
 
-  /** 节点卡片左侧的变量端点：所有绑定到 blackboard 变量的参数（勾选“公开”即建立绑定）。 */
+  /** 节点卡片左侧的变量端点：公开参数，以及子工作流的公开输入。 */
   function nodeVariablePins(node) {
-    if (!node || node.type !== 'task' || !node.params || typeof node.params !== 'object' || Array.isArray(node.params)) return [];
+    if (!node || node.type !== 'task') return [];
+    const params = node.params && typeof node.params === 'object' && !Array.isArray(node.params) ? node.params : {};
     const pins = [];
-    for (const [param, value] of Object.entries(node.params)) {
-      if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ref !== 'string') continue;
-      if (!value.ref.startsWith('blackboard.')) continue;
-      const variable = value.ref.slice('blackboard.'.length);
-      if (variable) pins.push({ param, variable, type: variableTypeOf(variable) });
+    const spec = catalogByName(node.action);
+    const publicParams = publicParameterNames(node);
+    for (const param of publicParams) {
+      if (!spec || !spec.parameters || !spec.parameters[param]) continue;
+      const value = params[param];
+      const variable = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.')
+        ? value.ref.slice('blackboard.'.length)
+        : '';
+      const definition = spec && spec.parameters ? spec.parameters[param] : null;
+      pins.push({ param, variable, type: variable ? variableTypeOf(variable) : definition && definition.type || 'any', label: param });
+    }
+    for (const variable of workflowNodeVariables(node)) {
+      const input = params.inputs && typeof params.inputs === 'object' ? params.inputs[variable.name] : null;
+      const ref = input && typeof input === 'object' && typeof input.ref === 'string' && input.ref.startsWith('blackboard.') ? input.ref.slice('blackboard.'.length) : '';
+      pins.push({ param: `inputs.${variable.name}`, variable: ref, type: variable.definition.type || 'any', label: variable.name });
     }
     return pins;
+  }
+
+  function publicParameterMetadata() {
+    if (!state.raw || typeof state.raw !== 'object') return {};
+    if (!state.raw._publicParams || typeof state.raw._publicParams !== 'object' || Array.isArray(state.raw._publicParams)) state.raw._publicParams = {};
+    return state.raw._publicParams;
+  }
+
+  function publicParameterNames(node) {
+    const value = state.raw && state.raw._publicParams && state.raw._publicParams[node && node.id];
+    if (Array.isArray(value)) return value.filter((name) => typeof name === 'string' && name);
+    if (value && typeof value === 'object') return Object.keys(value).filter((name) => value[name] === true);
+    return [];
+  }
+
+  function isParameterPublic(node, name) {
+    return publicParameterNames(node).includes(name);
+  }
+
+  /** 将旧版“公开即自动绑定”数据迁移为公开元数据，并保留现有引用。 */
+  function syncLegacyPublicParameters() {
+    if (!state.raw || Object.prototype.hasOwnProperty.call(state.raw, '_publicParams')) return false;
+    const blackboard = state.raw.blackboard;
+    if (!blackboard || typeof blackboard !== 'object' || Array.isArray(blackboard)) return false;
+    const metadata = {};
+    let changed = false;
+    for (const node of nodes()) {
+      if (!node || node.type !== 'task' || !node.params || typeof node.params !== 'object' || Array.isArray(node.params)) continue;
+      const names = Object.entries(node.params)
+        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.') && Object.prototype.hasOwnProperty.call(blackboard, value.ref.slice('blackboard.'.length)))
+        .map(([name]) => name);
+      if (names.length) { metadata[node.id] = names; changed = true; }
+    }
+    if (!changed) return false;
+    state.raw._publicParams = metadata;
+    return true;
+  }
+
+  function variableCardPosition(node, index = 0) {
+    const pos = position(node);
+    const left = pos.x - VARIABLE_CARD_W - 56;
+    const x = left >= 24 ? left : pos.x + NODE_W + 56;
+    const pinY = pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2;
+    return {
+      x: Math.round(x / 8) * 8,
+      y: Math.max(24, Math.round((pinY - VARIABLE_CARD_PORT_Y) / 8) * 8),
+    };
+  }
+
+  /** 将旧文档中已有的 blackboard 绑定迁移为可见的变量卡片。 */
+  function syncLegacyVariableCards() {
+    if (!state.raw || Object.prototype.hasOwnProperty.call(state.raw, '_variableCards')) return false;
+    const blackboard = state.raw.blackboard;
+    if (!blackboard || typeof blackboard !== 'object' || Array.isArray(blackboard)) return false;
+    const references = new Map();
+    for (const node of nodes()) {
+      nodeVariablePins(node).forEach((pin, index) => {
+        if (pin.variable && Object.prototype.hasOwnProperty.call(blackboard, pin.variable) && !references.has(pin.variable)) {
+          references.set(pin.variable, { node, index });
+        }
+      });
+    }
+    if (!references.size) return false;
+    const cards = variableCards();
+    for (const [name, reference] of references) {
+      const id = nextVariableCardId();
+      cards[id] = { name, ...variableCardPosition(reference.node, reference.index) };
+    }
+    return true;
   }
 
   function variablePinPosition(node, index) {
@@ -138,7 +232,11 @@
   function variableCompatibleWithPin(variableName, node, param) {
     if (!node) return false;
     const spec = node.action ? catalogByName(node.action) : null;
-    const definition = spec && spec.parameters ? spec.parameters[param] : undefined;
+    let definition = spec && spec.parameters ? spec.parameters[param] : undefined;
+    if (!definition && typeof param === 'string' && param.startsWith('inputs.')) {
+      const publicVariable = workflowNodeVariables(node).find((item) => `inputs.${item.name}` === param);
+      definition = publicVariable && publicVariable.definition;
+    }
     if (!definition) return true;
     const variableDefinition = state.raw.blackboard && state.raw.blackboard[variableName];
     return compatibleRefType(definitionSchema(definition), definitionSchema(variableDefinition));
@@ -342,6 +440,14 @@
     if (parent.type === 'root' && parent.children.length) parent.children.splice(0, 1);
     if (replaceIndex !== undefined && replaceIndex >= 0 && replaceIndex < parent.children.length) parent.children.splice(replaceIndex, 1, childId);
     else parent.children.push(childId);
+    if (parent.type === 'branch') {
+      if (!Array.isArray(parent.conditions)) parent.conditions = [];
+      while (parent.conditions.length < parent.children.length) parent.conditions.push({ eq: [1, 1] });
+    }
+    if (parent.type === 'switch') {
+      if (!Array.isArray(parent.cases)) parent.cases = [];
+      if (!parent.cases.some((item) => item && item.child === childId)) parent.cases.push({ value: parent.cases.length, child: childId });
+    }
     return true;
   }
 
@@ -350,6 +456,7 @@
     if (!parent || !Array.isArray(parent.children)) return;
     const index = parent.children.indexOf(childId);
     if (index >= 0) parent.children.splice(index, 1);
+    if (index >= 0 && parent.type === 'switch' && Array.isArray(parent.cases)) parent.cases = parent.cases.filter((item) => item && item.child !== childId);
   }
 
   function addNode(type, at) {
@@ -361,7 +468,22 @@
       node.params = {};
     } else if (type === 'instance_parallel') {
       delete node.children;
-      node.runs = [{ instance: state.instances[0]?.id || 'mumu-0', workflow: '', inputs: {} }];
+      node.runs = [{ instance: state.instances[0]?.id || '', workflow: '', inputs: {} }];
+      node.wait_for = 'all';
+      node.cancel_on_failure = true;
+    } else if (type === 'repeat_until') {
+      node.children = [];
+      node.condition = { eq: [1, 1] };
+      node.max_iterations = 100;
+    } else if (type === 'branch') {
+      node.children = [];
+      node.conditions = [];
+    } else if (type === 'switch') {
+      node.children = [];
+      node.expression = 0;
+      node.cases = [];
+    } else if (type === 'parallel') {
+      node.children = [];
       node.wait_for = 'all';
       node.cancel_on_failure = true;
     }
@@ -580,9 +702,33 @@
     return `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
   }
 
+  function renderVariableEdges(layer) {
+    const cards = new Map(variableCardList().map((card) => [card.id, card]));
+    const byName = new Map();
+    for (const card of variableCardList()) if (!byName.has(card.name)) byName.set(card.name, card);
+    const links = state.raw && state.raw._variableLinks && typeof state.raw._variableLinks === 'object' ? state.raw._variableLinks : {};
+    for (const node of nodes()) {
+      const pos = position(node);
+      nodeVariablePins(node).forEach((pin, index) => {
+        if (!pin.variable) return;
+        const card = cards.get(links[`${node.id}:${pin.param}`]) || byName.get(pin.variable);
+        if (!card) return;
+        const x1 = card.x + VARIABLE_CARD_W;
+        const y1 = card.y + VARIABLE_CARD_PORT_Y;
+        const x2 = pos.x + VARIABLE_PIN_X;
+        const y2 = pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2;
+        const bend = Math.max(32, Math.abs(x2 - x1) * 0.42);
+        svgEl('path', { class: 'variable-edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}` }, layer);
+      });
+    }
+  }
+
   function render() {
     if (!state.raw) return;
     ensureLayout();
+    const migratedPublic = syncLegacyPublicParameters();
+    const migratedCards = syncLegacyVariableCards();
+    if (migratedPublic || migratedCards) setDirty(true);
     graph.innerHTML = '';
     const root = svgEl('g', { class: 'graph-world', transform: `translate(${state.panX},${state.panY}) scale(${state.zoom})` }, graph);
     const wires = svgEl('g', { class: 'wires' }, root);
@@ -593,6 +739,8 @@
     const runCards = instanceRunCards();
     runCards.forEach((card) => renderInstanceRunEdge(wires, card));
     if (state.connect) renderConnection(wires);
+    const variableEdges = svgEl('g', { class: 'variable-edges' }, root);
+    renderVariableEdges(variableEdges);
     const cards = svgEl('g', { class: 'cards' }, root);
     nodes().forEach((node) => renderNode(cards, node));
     runCards.forEach((card) => renderInstanceRunCard(cards, card));
@@ -747,9 +895,10 @@
     if (run && run.status) classes.push(`run-${run.status}`);
     const group = svgEl('g', { class: classes.join(' '), transform: `translate(${pos.x},${pos.y})`, 'data-id': node.id }, layer);
     group.dataset.id = node.id;
-    const body = svgEl('rect', { class: 'node-box', width: NODE_W, height, rx: 5 }, group);
-    svgEl('rect', { class: 'node-head', width: NODE_W, height: 32, rx: 5 }, group);
-    svgEl('rect', { class: 'node-head-square', y: 26, width: NODE_W, height: 8 }, group);
+    const body = svgEl('rect', { class: 'node-box', width: NODE_W, height, rx: 6 }, group);
+    const head = svgEl('rect', { class: 'node-head', width: NODE_W, height: 32, rx: 6 }, group);
+    const headSquare = svgEl('rect', { class: 'node-head-square', y: 26, width: NODE_W, height: 8 }, group);
+    svgEl('rect', { class: 'node-accent', width: 4, height, rx: 2 }, group);
     svgEl('text', { class: 'node-icon', x: 13, y: 21 }, group).textContent = TYPE_ICON[node.type] || '•';
     svgEl('text', { class: 'node-type', x: 34, y: 20 }, group).textContent = TYPE_LABEL[node.type] || node.type;
     if (run && run.status) {
@@ -775,23 +924,14 @@
       const y = BASE_H + index * RUN_VARIABLE_H;
       svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
       svgEl('circle', { class: `port port-variable type-${pin.type}`, cx: VARIABLE_PIN_X, cy: y + RUN_VARIABLE_H / 2, r: 5.5 }, group);
-      svgEl('text', { class: 'pin-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(pin.variable, 14);
-      svgEl('text', { class: 'pin-variable-param', x: NODE_W - 10, y: y + 16, 'text-anchor': 'end' }, group).textContent = compactValue(pin.param, 14);
+      svgEl('text', { class: 'pin-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(pin.variable || pin.label || '未绑定', 14);
+      svgEl('text', { class: 'pin-variable-param', x: NODE_W - 10, y: y + 16, 'text-anchor': 'end' }, group).textContent = compactValue(pin.label || pin.param, 14);
       const hit = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_PIN_X, cy: y + RUN_VARIABLE_H / 2, r: 10, 'data-node': node.id, 'data-param': pin.param }, group);
       hit.addEventListener('pointerdown', (event) => startVariableConnectionFromPin(event, node.id, pin.param));
     });
-    const workflowVariables = workflowNodeVariables(node);
-    const workflowInputs = node.params && typeof node.params === 'object' ? node.params : {};
-    workflowVariables.forEach((variable, variableIndex) => {
-      const y = BASE_H + pinOffset + variableIndex * RUN_VARIABLE_H;
-      svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
-      svgEl('circle', { class: `instance-variable-pin type-${variable.definition.type || 'any'}`, cx: 10, cy: y + RUN_VARIABLE_H / 2, r: 5 }, group);
-      svgEl('text', { class: 'instance-variable-name', x: 21, y: y + 16 }, group).textContent = compactValue(variable.name, 15);
-      svgEl('text', { class: 'instance-variable-value', x: NODE_W - 10, y: y + 16, 'text-anchor': 'end' }, group).textContent = workflowInputVariableValue(workflowInputs, variable);
-    });
     const decorators = Array.isArray(node.decorators) ? node.decorators : [];
     decorators.forEach((decorator, index) => {
-      const y = BASE_H + pinOffset + workflowVariables.length * RUN_VARIABLE_H + index * DECO_H;
+      const y = BASE_H + pinOffset + index * DECO_H;
       svgEl('line', { class: 'decorator-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
       svgEl('text', { class: 'decorator-icon', x: 14, y: y + 15 }, group).textContent = '◇';
       svgEl('text', { class: 'decorator-label', x: 32, y: y + 15 }, group).textContent = decoratorLabel(decorator);
@@ -804,7 +944,7 @@
       const output = svgEl('circle', { class: 'port port-out', cx: NODE_W / 2, cy: height, r: PORT_R, 'data-node': node.id }, group);
       output.addEventListener('pointerdown', (event) => startConnection(event, node.id));
     }
-    body.addEventListener('mousedown', (event) => {
+    const handleNodeMouseDown = (event) => {
       if (event.button !== 0) { startNodeDrag(event, node.id); return; }
       const now = Date.now();
       const sameNode = lastClickNode === node.id;
@@ -818,7 +958,8 @@
         return;
       }
       startNodeDrag(event, node.id);
-    });
+    };
+    [body, head, headSquare].forEach((surface) => surface.addEventListener('mousedown', handleNodeMouseDown));
     if (subRef) {
       // 子流程节点右键菜单：直接进入子工作流视图
       body.addEventListener('contextmenu', (event) => {
@@ -928,7 +1069,7 @@
     svgEl('text', { class: 'variable-card-value', x: VARIABLE_CARD_W - 10, y: 44, 'text-anchor': 'end' }, group).textContent = variableValueSummary(definition);
     svgEl('circle', { class: `port port-variable-out type-${type}`, cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: PORT_R }, group);
     const port = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: 10, 'data-variable': card.name }, group);
-    port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.name));
+    port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.name, card.id));
     body.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault(); event.stopPropagation();
@@ -936,7 +1077,7 @@
       state.selectedVariable = card.name;
       state.inspector = 'variables';
       const point = worldPoint(event);
-      state.drag = { kind: 'variable-card', name: card.name, start: point, origin: { x: card.x, y: card.y }, before: snapshot(), moved: false };
+      state.drag = { kind: 'variable-card', id: card.id, name: card.name, start: point, origin: { x: card.x, y: card.y }, before: snapshot(), moved: false };
       render();
     });
     body.addEventListener('contextmenu', (event) => {
@@ -947,7 +1088,7 @@
       state.inspector = 'variables';
       render();
       showMenu(event.clientX, event.clientY, [
-        { label: '删除变量卡片', run: () => removeVariableCard(card.name) },
+        { label: '删除变量卡片', run: () => removeVariableCard(card.id) },
       ]);
     });
   }
@@ -958,9 +1099,12 @@
     return '未设默认';
   }
 
-  function removeVariableCard(name) {
-    if (!Object.prototype.hasOwnProperty.call(variableCards(), name)) return;
-    mutate(() => { delete variableCards()[name]; });
+  function removeVariableCard(id) {
+    if (!Object.prototype.hasOwnProperty.call(variableCards(), id)) return;
+    mutate(() => {
+      delete variableCards()[id];
+      for (const [key, cardId] of Object.entries(variableLinks())) if (cardId === id) delete variableLinks()[key];
+    });
   }
 
   /** 把变量卡片放到指定世界坐标；若附近有兼容端点则吸附到端点旁并建立绑定。 */
@@ -968,20 +1112,26 @@
     if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) return;
     if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, name)) { toast(`变量 ${name} 不存在`, true); return; }
     const target = options.connect === false ? null : variablePinTargetAt(point, name);
-    const existed = Object.prototype.hasOwnProperty.call(variableCards(), name);
     mutate(() => {
       const cards = variableCards();
+      const cardId = nextVariableCardId();
       if (target) {
         const node = nodeById(target.nodeId);
         const pos = position(node);
-        cards[name] = { x: Math.round((pos.x - VARIABLE_CARD_W - 56) / 8) * 8, y: Math.round((target.y - VARIABLE_CARD_H / 2) / 8) * 8 };
-        node.params[target.param] = { ref: `blackboard.${name}` };
+        const left = pos.x - VARIABLE_CARD_W - 56;
+        const x = left >= 24 ? left : pos.x + NODE_W + 56;
+        cards[cardId] = { name, x: Math.round(x / 8) * 8, y: Math.max(24, Math.round((target.y - VARIABLE_CARD_PORT_Y) / 8) * 8) };
+        variableLinks()[`${target.nodeId}:${target.param}`] = cardId;
+        if (target.param.startsWith('inputs.')) {
+          if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
+          node.params.inputs[target.param.slice('inputs.'.length)] = { ref: `blackboard.${name}` };
+        } else node.params[target.param] = { ref: `blackboard.${name}` };
       } else {
-        cards[name] = { x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
+        cards[cardId] = { name, x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
       }
     });
     if (target) toast(`已连接 参数 ${target.param} ← 变量 ${name}`);
-    else if (!existed) toast(`已添加变量卡片 ${name}`);
+    else toast(`已添加变量卡片 ${name}`);
   }
 
   /** 编辑器命令入口：在鼠标处（或视野中心）创建变量卡片。 */
@@ -989,7 +1139,6 @@
     const variableName = String(name ?? '').trim();
     if (!variableName) return;
     if (!state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, variableName)) { toast(`变量 ${variableName} 不存在`, true); return; }
-    if (Object.prototype.hasOwnProperty.call(variableCards(), variableName)) { toast('该变量的卡片已在画布中'); return; }
     if (!wrap.clientWidth || !wrap.clientHeight) return;
     const rect = wrap.getBoundingClientRect();
     const point = state.mouse || { x: (rect.width / 2 - state.panX) / state.zoom, y: (rect.height / 2 - state.panY) / state.zoom };
@@ -1171,14 +1320,14 @@
       const x = card.x + VARIABLE_CARD_W;
       const y = card.y + VARIABLE_CARD_PORT_Y;
       const distance = Math.hypot(point.x - x, point.y - y);
-      if (distance <= bestDistance) { best = { card: card.name, x, y }; bestDistance = distance; }
+      if (distance <= bestDistance) { best = { card: card.name, cardId: card.id, x, y }; bestDistance = distance; }
     }
     if (best) return best;
     // 落在卡片本体上时也视为连到该变量（允许重复连接当前变量，作为成功反馈）。
     for (const card of variableCardList()) {
       if (!variableCompatibleWithPin(card.name, node, param)) continue;
       if (point.x >= card.x && point.x <= card.x + VARIABLE_CARD_W && point.y >= card.y && point.y <= card.y + VARIABLE_CARD_H) {
-        return { card: card.name, x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
+        return { card: card.name, cardId: card.id, x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
       }
     }
     return null;
@@ -1192,11 +1341,11 @@
       : variableCardTargetAt(point, state.variableConnect.nodeId, state.variableConnect.param);
   }
 
-  function startVariableConnectionFromCard(event, name) {
+  function startVariableConnectionFromCard(event, name, cardId) {
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
     const point = worldPoint(event);
-    state.variableConnect = { direction: 'from-card', variable: name, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+    state.variableConnect = { direction: 'from-card', variable: name, cardId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
     state.selectedEdge = null;
     render();
   }
@@ -1226,15 +1375,21 @@
     state.variableConnect = null;
     releaseConnectionPointer(connection.pointerId);
     if (!target) { render(); return; }
-    if (connection.direction === 'from-card') connectVariableToPin(connection.variable, target.nodeId, target.param);
-    else connectVariableToPin(target.card, connection.nodeId, connection.param);
+    if (connection.direction === 'from-card') connectVariableToPin(connection.variable, target.nodeId, target.param, connection.cardId);
+    else connectVariableToPin(target.card, connection.nodeId, connection.param, target.cardId);
   }
 
   /** 用变量绑定节点参数端点（等价于把该参数接到对应变量）。 */
-  function connectVariableToPin(variable, nodeId, param) {
+  function connectVariableToPin(variable, nodeId, param, cardId) {
     const node = nodeById(nodeId);
     if (!node || !state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, variable)) return;
-    mutate(() => { node.params[param] = { ref: `blackboard.${variable}` }; });
+    mutate(() => {
+      if (param.startsWith('inputs.')) {
+        if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
+        node.params.inputs[param.slice('inputs.'.length)] = { ref: `blackboard.${variable}` };
+      } else node.params[param] = { ref: `blackboard.${variable}` };
+      if (cardId) variableLinks()[`${nodeId}:${param}`] = cardId;
+    });
     toast(`参数 ${param} ← 变量 ${variable}`);
   }
 
@@ -1243,7 +1398,7 @@
     if (!connection) return;
     let origin = null;
     if (connection.direction === 'from-card') {
-      const card = variableCardList().find((item) => item.name === connection.variable);
+      const card = variableCardList().find((item) => item.id === connection.cardId) || variableCardList().find((item) => item.name === connection.variable);
       if (card) origin = { x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
     } else {
       const node = nodeById(connection.nodeId);
@@ -1349,10 +1504,11 @@
       const dx = point.x - state.drag.start.x;
       const dy = point.y - state.drag.start.y;
       state.drag.moved = state.drag.moved || Math.abs(dx) + Math.abs(dy) > 2;
-      variableCards()[state.drag.name] = {
-        x: Math.round((state.drag.origin.x + dx) / 8) * 8,
-        y: Math.round((state.drag.origin.y + dy) / 8) * 8,
-      };
+      const card = variableCards()[state.drag.id];
+      if (card) {
+        card.x = Math.round((state.drag.origin.x + dx) / 8) * 8;
+        card.y = Math.round((state.drag.origin.y + dy) / 8) * 8;
+      }
     } else if (state.drag.kind === 'marquee' && state.marquee) {
       const point = worldPoint(event);
       state.marquee.x2 = point.x; state.marquee.y2 = point.y;
@@ -1536,12 +1692,24 @@
   function renderInstancePicker() {
     const picker = $('instance-select');
     picker.innerHTML = '';
-    const instances = state.instances.length ? state.instances : [{ id: 'mumu-0' }];
+    const instances = Array.isArray(state.instances) ? state.instances : [];
+    if (!instances.length) {
+      const option = el('option', '', '未检测到运行实例');
+      option.value = '';
+      option.disabled = true;
+      picker.appendChild(option);
+      state.instanceId = '';
+      picker.value = '';
+      picker.title = '请先启动 MuMu 或连接 Android 设备';
+      $('btn-run').title = '未检测到运行实例';
+      return;
+    }
     for (const instance of instances) {
-      const suffix = instance.backend ? ` (${instance.backend})` : '';
-      const name = instance.displayName ? ` · ${instance.displayName}` : '';
-      const option = el('option', '', `${instance.id}${name}${suffix}`);
+      const label = instance.displayName
+        || (instance.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instance.id);
+      const option = el('option', '', label);
       option.value = instance.id;
+      option.title = [instance.displayName, instance.id, instance.backend, instance.adbSerial].filter(Boolean).join(' · ');
       picker.appendChild(option);
     }
     if (!instances.some((instance) => instance.id === state.instanceId)) state.instanceId = instances[0].id;
@@ -1549,7 +1717,7 @@
     const selected = instances.find((instance) => instance.id === state.instanceId);
     picker.title = selected
       ? [selected.id, selected.displayName, selected.adbSerial].filter(Boolean).join(' · ')
-      : `运行实例：${state.instanceId}`;
+      : '请先启动 MuMu 或连接 Android 设备';
     $('btn-run').title = `在 ${state.instanceId} 执行当前工作流`;
   }
 
@@ -1571,6 +1739,40 @@
     }
     picker.value = state.docUri || '';
     picker.title = '切换工作流（无需重新打开）';
+  }
+
+  function navigateWorkflowTrail(index) {
+    const send = (saveText) => vscode.postMessage({ type: 'navigateWorkflowTrail', index, saveText });
+    if (!state.dirty) { send(undefined); return; }
+    const rect = $('workflow-breadcrumb').getBoundingClientRect();
+    showMenu(rect.left, rect.bottom + 4, [
+      { label: '保存并跳转', run: () => send(JSON.stringify(state.raw, null, 2) + '\n') },
+      { label: '放弃修改并跳转', run: () => send(undefined) },
+      'separator',
+      { label: '取消', run: () => {} },
+    ]);
+  }
+
+  function renderWorkflowBreadcrumb() {
+    const nav = $('workflow-breadcrumb');
+    if (!nav) return;
+    nav.innerHTML = '';
+    const trail = Array.isArray(state.workflowTrail) ? state.workflowTrail : [];
+    if (!trail.length) { nav.classList.add('hidden'); return; }
+    nav.classList.remove('hidden');
+    nav.appendChild(el('span', 'workflow-breadcrumb-mark', '◆'));
+    trail.forEach((item, index) => {
+      if (index > 0) nav.appendChild(el('span', 'workflow-breadcrumb-separator', '›'));
+      const current = index === trail.length - 1;
+      const button = el('button', `workflow-crumb${current ? ' current' : ''}`, item.name || '工作流');
+      button.type = 'button';
+      button.title = item.uri || item.name || '工作流';
+      if (current) {
+        button.disabled = true;
+        button.setAttribute('aria-current', 'page');
+      } else button.addEventListener('click', () => navigateWorkflowTrail(index));
+      nav.appendChild(button);
+    });
   }
 
   function checkbox(value, onChange) {
@@ -1649,7 +1851,7 @@
         node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture'; node.params = {};
       } else if (type === 'instance_parallel') {
         delete node.action; delete node.params; delete node.children; delete node.finish_mode;
-        node.runs = Array.isArray(node.runs) && node.runs.length ? node.runs : [{ instance: state.instances[0]?.id || 'mumu-0', workflow: '', inputs: {} }];
+        node.runs = Array.isArray(node.runs) && node.runs.length ? node.runs : [{ instance: state.instances[0]?.id || '', workflow: '', inputs: {} }];
         node.wait_for = node.wait_for === 'any' ? 'any' : 'all';
         node.cancel_on_failure = node.cancel_on_failure !== false;
       } else {
@@ -1657,6 +1859,11 @@
         node.children = [];
         delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
         if (type === 'simple_parallel') node.finish_mode = 'abort_background'; else delete node.finish_mode;
+        if (type === 'repeat_until') { node.condition = node.condition || { eq: [1, 1] }; node.max_iterations = node.max_iterations || 100; }
+        if (type === 'branch') node.conditions = Array.isArray(node.conditions) ? node.conditions : [];
+        if (type === 'switch') { node.expression = node.expression ?? 0; node.cases = Array.isArray(node.cases) ? node.cases : []; }
+        if (type === 'parallel') { node.wait_for = 'all'; node.cancel_on_failure = true; }
+        if (type !== 'parallel') { delete node.wait_for; delete node.cancel_on_failure; }
       }
     });
   }
@@ -1664,7 +1871,7 @@
   function renderTaskInspector(body, node) {
     section(body, 'Action');
     const row = field(body, '实现');
-    row.appendChild(selectInput(node.action || '', state.catalog.map((item) => ({ value: item.name, label: item.name })), (value) => mutate(() => { node.action = value; node.params = {}; })));
+    row.appendChild(selectInput(node.action || '', state.catalog.map((item) => ({ value: item.name, label: item.name })), (value) => mutate(() => { node.action = value; node.params = {}; delete publicParameterMetadata()[node.id]; })));
     const spec = catalogByName(node.action);
     if (spec && spec.description) body.appendChild(el('div', 'description', spec.description));
     section(body, '参数');
@@ -1968,84 +2175,24 @@
     return ref;
   }
 
-  function parameterBlackboardBinding(node, name) {
-    const value = node.params && node.params[name];
-    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ref !== 'string') return null;
-    const prefix = 'blackboard.';
-    if (!value.ref.startsWith(prefix)) return null;
-    const variableName = value.ref.slice(prefix.length);
-    const blackboard = state.raw && state.raw.blackboard;
-    if (!variableName || !blackboard || typeof blackboard !== 'object' || Array.isArray(blackboard)) return null;
-    const variable = blackboard[variableName];
-    return variable && typeof variable === 'object' && !Array.isArray(variable)
-      ? { name: variableName, definition: variable }
-      : null;
-  }
-
-  function publicParameterName(node, name) {
-    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
-    const normalize = (value, fallback) => String(value || '').trim().replace(/[^A-Za-z0-9_]/g, '_').replace(/^_+|_+$/g, '') || fallback;
-    const parameterName = normalize(name, 'parameter');
-    if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, parameterName)) return parameterName;
-    const nodeName = `${normalize(node.id, 'node')}_${parameterName}`;
-    if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, nodeName)) return nodeName;
-    let index = 2;
-    while (Object.prototype.hasOwnProperty.call(state.raw.blackboard, `${nodeName}_${index}`)) index += 1;
-    return `${nodeName}_${index}`;
-  }
-
-  function workflowDefinitionFromParameter(definition, value, root = true) {
-    const result = { type: definition.type || 'any' };
-    if (root) result.public = true;
-    if (typeof definition.description === 'string' && definition.description) result.description = definition.description;
-    if (typeof definition.editor === 'string' && definition.editor) result.editor = definition.editor;
-    if (typeof definition.min === 'number') result.min = definition.min;
-    if (typeof definition.max === 'number') result.max = definition.max;
-    if (typeof definition.minLength === 'number') result.min_length = definition.minLength;
-    if (typeof definition.maxLength === 'number') result.max_length = definition.maxLength;
-    if (Array.isArray(definition.enum) && definition.enum.length) result.enum = clone(definition.enum);
-    if (typeof definition.minItems === 'number') result.min_items = definition.minItems;
-    if (typeof definition.maxItems === 'number') result.max_items = definition.maxItems;
-    if (definition.items && typeof definition.items === 'object') result.items = workflowDefinitionFromParameter(definition.items, definition.items.default, false);
-    if (definition.properties && typeof definition.properties === 'object') {
-      result.properties = Object.fromEntries(Object.entries(definition.properties).map(([key, child]) => [
-        key,
-        workflowDefinitionFromParameter(child, child.default, false),
-      ]));
-    }
-    if (definition.required === true && !root) result.required = true;
-    if (value !== undefined) result.default = clone(value);
-    else if (definition.default !== undefined) result.default = clone(definition.default);
-    return result;
-  }
-
   function setParameterPublic(node, name, definition, checked) {
-    const binding = parameterBlackboardBinding(node, name);
-    if (binding) {
-      if (!checked) {
-        // 取消公开：解除变量绑定并恢复为变量默认值，卡片端点随之消失；变量失去全部引用时一并清理。
-        const variableDefinition = state.raw.blackboard[binding.name];
+    const metadata = publicParameterMetadata();
+    const names = new Set(publicParameterNames(node));
+    if (checked) names.add(name);
+    else {
+      names.delete(name);
+      const value = node.params && node.params[name];
+      if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.')) {
+        const variableName = value.ref.slice('blackboard.'.length);
+        const variableDefinition = state.raw.blackboard && state.raw.blackboard[variableName];
         node.params[name] = variableDefinition && Object.prototype.hasOwnProperty.call(variableDefinition, 'default')
           ? clone(variableDefinition.default)
-          : defaultValue(definition);
-        if (variableReferenceCount(binding.name) === 0) {
-          delete state.raw.blackboard[binding.name];
-          if (state.raw._variableCards && typeof state.raw._variableCards === 'object' && !Array.isArray(state.raw._variableCards)) delete state.raw._variableCards[binding.name];
-        }
-        return;
+          : definition.default !== undefined ? clone(definition.default) : defaultValue(definition);
       }
-      binding.definition.public = true;
-      return;
+      delete variableLinks()[`${node.id}:${name}`];
     }
-    if (!checked) return;
-    const current = Object.prototype.hasOwnProperty.call(node.params, name) ? node.params[name] : undefined;
-    const bound = current && typeof current === 'object' && !Array.isArray(current) && typeof current.ref === 'string';
-    const defaultInput = bound || current === undefined
-      ? definition.default !== undefined ? definition.default : defaultValue(definition)
-      : current;
-    const variableName = publicParameterName(node, name);
-    state.raw.blackboard[variableName] = workflowDefinitionFromParameter(definition, defaultInput);
-    node.params[name] = { ref: `blackboard.${variableName}` };
+    if (names.size) metadata[node.id] = [...names];
+    else delete metadata[node.id];
   }
 
   function renderParameter(body, node, name, definition) {
@@ -2059,10 +2206,9 @@
       const toggleLabel = el('label', 'parameter-enable'); toggleLabel.appendChild(enabled); toggleLabel.appendChild(el('span', '', '启用'));
       headingActions.appendChild(toggleLabel);
     }
-    const blackboardBinding = parameterBlackboardBinding(node, name);
-    const exposed = !!blackboardBinding && blackboardBinding.definition.public !== false;
+    const exposed = isParameterPublic(node, name);
     const publicToggle = el('label', 'parameter-public');
-    publicToggle.title = exposed && blackboardBinding ? `父工作流可传入 ${blackboardBinding.name}；不传时使用默认值` : '公开给父工作流；不传时使用当前值作为默认值';
+    publicToggle.title = exposed ? '显示节点输入端点；未连接变量时使用当前默认值' : '公开参数端点；不连接变量时保持当前默认值';
     publicToggle.appendChild(checkbox(exposed, (checked) => mutate(() => setParameterPublic(node, name, definition, checked))));
     publicToggle.appendChild(el('span', '', '公开'));
     headingActions.appendChild(publicToggle);
@@ -2089,6 +2235,7 @@
     const bound = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && Object.keys(value).length === 1;
     const mode = selectInput(bound ? 'binding' : 'literal', [{ value: 'literal', label: '固定值' }, { value: 'binding', label: '引用' }], (next) => mutate(() => {
       node.params[name] = next === 'binding' ? { ref: allRefs(node, definition)[0] || '' } : defaultValue(definition);
+      if (next !== 'binding') delete variableLinks()[`${node.id}:${name}`];
     }), 'value-mode');
     block.appendChild(mode);
     if (bound) {
@@ -2098,7 +2245,7 @@
       block.appendChild(selectInput(ref, options.map((item) => ({
         value: item,
         label: referenceLabel(item),
-      })), (next) => mutate(() => { node.params[name] = { ref: next }; }), 'full'));
+      })), (next) => mutate(() => { node.params[name] = { ref: next }; delete variableLinks()[`${node.id}:${name}`]; }), 'full'));
     } else {
       block.appendChild(literalControl(node, name, definition, value));
     }
@@ -2146,6 +2293,22 @@
     section(body, '复合节点');
     if (node.type === 'selector') body.appendChild(el('div', 'description', '按顺序执行，首个成功后返回成功。'));
     if (node.type === 'sequence') body.appendChild(el('div', 'description', '按顺序执行，首个失败后返回失败。'));
+    if (node.type === 'parallel') {
+      body.appendChild(el('div', 'description', '并发执行所有子节点。'));
+      const wait = field(body, '完成条件'); wait.appendChild(selectInput(node.wait_for || 'all', [{ value: 'all', label: '全部完成' }, { value: 'any', label: '任一成功' }], (value) => mutate(() => { node.wait_for = value; })));
+      const cancel = field(body, '失败时取消其他分支'); cancel.appendChild(checkbox(node.cancel_on_failure !== false, (value) => mutate(() => { node.cancel_on_failure = value; })));
+    }
+    if (node.type === 'repeat_until') {
+      body.appendChild(el('div', 'description', '重复执行唯一子节点，直到条件成立。'));
+      const condition = field(body, '结束条件'); const area = el('textarea', 'json-value'); area.value = JSON.stringify(node.condition || { eq: [1, 1] }); area.addEventListener('change', () => { try { mutate(() => { node.condition = JSON.parse(area.value); }); } catch { toast('条件不是有效 JSON', true); } }); condition.appendChild(area);
+      const max = field(body, '最大次数'); max.appendChild(textInput(node.max_iterations || 100, (value) => mutate(() => { node.max_iterations = Math.max(1, parseInt(value || '100', 10)); }), { type: 'number', min: 1, step: 1 }));
+    }
+    if (node.type === 'branch') {
+      body.appendChild(el('div', 'description', '按 conditions 顺序选择第一个成立的分支。')); const area = el('textarea', 'json-value'); area.value = JSON.stringify(node.conditions || [], null, 2); area.addEventListener('change', () => { try { mutate(() => { node.conditions = JSON.parse(area.value); }); } catch { toast('conditions 不是有效 JSON', true); } }); body.appendChild(area);
+    }
+    if (node.type === 'switch') {
+      body.appendChild(el('div', 'description', '按 expression 的值匹配 cases。')); const expression = field(body, '表达式'); const expr = el('textarea', 'json-value'); expr.value = JSON.stringify(node.expression ?? 0); expr.addEventListener('change', () => { try { mutate(() => { node.expression = JSON.parse(expr.value); }); } catch { toast('expression 不是有效 JSON', true); } }); expression.appendChild(expr); const cases = field(body, '分支映射'); const map = el('textarea', 'json-value'); map.value = JSON.stringify(node.cases || [], null, 2); map.addEventListener('change', () => { try { mutate(() => { node.cases = JSON.parse(map.value); }); } catch { toast('cases 不是有效 JSON', true); } }); cases.appendChild(map);
+    }
     if (node.type === 'simple_parallel') {
       body.appendChild(el('div', 'description', '第 1 个子节点是主 Task，第 2 个是后台分支。'));
       const finish = field(body, '结束模式');
@@ -2189,7 +2352,7 @@
       addRun.addEventListener('click', () => {
         const index = node.runs.length;
         mutate(() => {
-          node.runs.push({ instance: state.instances[0]?.id || 'mumu-0', workflow: '', inputs: {} });
+          node.runs.push({ instance: state.instances[0]?.id || '', workflow: '', inputs: {} });
           state.selected.clear(); state.selectedEdge = null; state.selectedRun = { nodeId: node.id, index };
         });
       });
@@ -2531,7 +2694,13 @@
       const names = Object.keys(state.raw.blackboard);
       const index = names.indexOf(name);
       delete state.raw.blackboard[name];
-      if (state.raw._variableCards && typeof state.raw._variableCards === 'object' && !Array.isArray(state.raw._variableCards)) delete state.raw._variableCards[name];
+      for (const [id, card] of Object.entries(variableCards())) {
+        const cardName = card && typeof card.name === 'string' ? card.name : id;
+        if (cardName === name) delete variableCards()[id];
+      }
+      for (const [key, cardId] of Object.entries(variableLinks())) {
+        if (!Object.prototype.hasOwnProperty.call(variableCards(), cardId)) delete variableLinks()[key];
+      }
       const remaining = Object.keys(state.raw.blackboard);
       state.selectedVariable = remaining[Math.min(Math.max(0, index), remaining.length - 1)] || '';
     });
@@ -2586,10 +2755,9 @@
       const next = {};
       for (const [key, value] of Object.entries(state.raw.blackboard)) next[key === oldName ? name : key] = value;
       state.raw.blackboard = next;
-      if (state.raw._variableCards && typeof state.raw._variableCards === 'object' && !Array.isArray(state.raw._variableCards)
-        && Object.prototype.hasOwnProperty.call(state.raw._variableCards, oldName)) {
-        state.raw._variableCards[name] = state.raw._variableCards[oldName];
-        delete state.raw._variableCards[oldName];
+      for (const [id, card] of Object.entries(variableCards())) {
+        const cardName = card && typeof card.name === 'string' ? card.name : id;
+        if (cardName === oldName && card && typeof card === 'object') card.name = name;
       }
       const remap = (item) => {
         if (Array.isArray(item)) return item.forEach(remap);
@@ -3378,6 +3546,10 @@
     else if (command === 'addSelector') addNode('selector');
     else if (command === 'addSequence') addNode('sequence');
     else if (command === 'addParallel') addNode('simple_parallel');
+    else if (command === 'addGenericParallel') addNode('parallel');
+    else if (command === 'addRepeatUntil') addNode('repeat_until');
+    else if (command === 'addBranch') addNode('branch');
+    else if (command === 'addSwitch') addNode('switch');
     else if (command === 'addInstanceParallel') addNode('instance_parallel');
     else if (command === 'autoLayout') { autoLayout(); fitView(); }
     else if (command === 'fitView') fitView();
@@ -3425,6 +3597,8 @@
     const items = [
       { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
       { label: '＋ Sequence', run: () => addNode('sequence', point) }, { label: '＋ Simple Parallel', run: () => addNode('simple_parallel', point) },
+      { label: '＋ Parallel', run: () => addNode('parallel', point) }, { label: '＋ Repeat Until', run: () => addNode('repeat_until', point) },
+      { label: '＋ Branch', run: () => addNode('branch', point) }, { label: '＋ Switch', run: () => addNode('switch', point) },
       { label: '＋ Instance Parallel', run: () => addNode('instance_parallel', point) },
       'separator',
     ];
@@ -3514,11 +3688,12 @@
       state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item) => item && typeof item.uri === 'string') : [];
       state.docUri = message.document.uri || '';
       state.documentName = message.document.name || '';
+      state.workflowTrail = Array.isArray(message.workflowTrail) ? message.workflowTrail : [];
       state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
       state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
       state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; state.undo = []; state.redo = []; state.run.clear(); state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
       $('btn-back').classList.toggle('hidden', !message.canGoBack);
-      renderWorkflowPicker(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
+      renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
       setTimeout(() => { if (!sameDocument) fitView(); }, 0);
     } else if (message.type === 'runEvent') handleRunEvent(message.event);
     else if (message.type === 'runtimeInstances') {

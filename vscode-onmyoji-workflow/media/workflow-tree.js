@@ -32,6 +32,12 @@
       ['rect', { x: 4.2, y: 2.4, width: 2.6, height: 11.2, rx: 1.3 }],
       ['rect', { x: 9.2, y: 2.4, width: 2.6, height: 11.2, rx: 1.3 }],
     ],
+    parallel: [
+      ['path', { d: 'M3 3.5 H13 M3 8 H13 M3 12.5 H13' }],
+    ],
+    repeat_until: [['path', { d: 'M13 7 A5 5 0 1 0 11 12' }], ['path', { d: 'M13 3.5 V7 H9.5' }]],
+    branch: [['path', { d: 'M8 2 V6 M8 6 L3 12 M8 6 L13 12' }]],
+    switch: [['path', { d: 'M3 3 H13 M8 3 V13 M8 8 H13' }]],
     instance_parallel: [
       ['path', { d: 'M2 4.5 H10 M6 1.5 L10 4.5 L6 7.5' }],
       ['path', { d: 'M6 11.5 H14 M10 8.5 L14 11.5 L10 14.5' }],

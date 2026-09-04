@@ -8,7 +8,7 @@ import {
   parseParameterDefinition,
 } from './catalog';
 
-export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'instance_parallel', 'task'] as const;
+export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'] as const;
 export const DECORATOR_TYPES = ['condition', 'cooldown', 'timeout', 'retry', 'repeat', 'do_once'] as const;
 export const PARALLEL_FINISH_MODES = ['abort_background', 'wait_for_background'] as const;
 export const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'] as const;
@@ -585,11 +585,15 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
       }
     } else {
       if ('action' in rawNode || 'params' in rawNode) issues.push(issue(path, `${node.type} 不能定义 action 或 params`, 'invalid-composite'));
-      if (['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
+      if (node.type !== 'parallel' && ['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
       if (node.type === 'root' && node.decorators.length) issues.push(issue([...path, 'decorators'], 'Root 不能挂装饰器', 'invalid-root'));
       if (!Array.isArray(rawNode.children)) issues.push(issue([...path, 'children'], `${node.type} 必须定义 children`, 'invalid-children'));
       if (node.type === 'root' && node.children.length !== 1) issues.push(issue([...path, 'children'], 'Root 必须恰好连接一个子节点', 'root-child-count'));
       if ((node.type === 'selector' || node.type === 'sequence') && node.children.length < 1) issues.push(issue([...path, 'children'], `${node.type} 至少需要一个子节点`, 'composite-child-count'));
+      if (node.type === 'parallel' && node.children.length < 2) issues.push(issue([...path, 'children'], 'Parallel 至少需要两个子节点', 'parallel-child-count'));
+      if (node.type === 'repeat_until' && node.children.length !== 1) issues.push(issue([...path, 'children'], 'Repeat Until 必须恰好有一个子节点', 'repeat-child-count'));
+      if (node.type === 'branch' && (!Array.isArray(rawNode.conditions) || rawNode.conditions.length !== node.children.length)) issues.push(issue([...path, 'conditions'], 'Branch 的 conditions 数量必须与 children 一致', 'branch-condition-count'));
+      if (node.type === 'switch' && (!Array.isArray(rawNode.cases) || rawNode.cases.length < 1)) issues.push(issue([...path, 'cases'], 'Switch 至少需要一个 case', 'switch-case-count'));
       if (node.type === 'simple_parallel') {
         if (node.children.length !== 2) issues.push(issue([...path, 'children'], 'Simple Parallel 必须恰好有两个子节点', 'parallel-child-count'));
         if (node.children[0] && nodeMap.get(node.children[0])?.type !== 'task') issues.push(issue([...path, 'children', 0], 'Simple Parallel 的第一个子节点必须是主 Task', 'parallel-main-task'));
@@ -666,6 +670,8 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog):
             },
             wait_for: { enum: [...INSTANCE_PARALLEL_WAIT_MODES] },
             cancel_on_failure: { type: 'boolean' },
+            condition: {}, conditions: { type: 'array' }, max_iterations: { type: 'integer', minimum: 1 },
+            expression: {}, cases: { type: 'array' }, default_child: { type: 'string', minLength: 1 },
           },
           additionalProperties: false,
         },

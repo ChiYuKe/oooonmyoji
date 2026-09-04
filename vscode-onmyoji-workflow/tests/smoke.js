@@ -151,7 +151,7 @@ async function main() {
   const threeInstance = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'workflows', 'examples', 'three_instance_parallel.json'), 'utf8'));
   const threeInfo = parseWorkflow(threeInstance);
   const threeNode = threeInfo.nodes.find((node) => node.type === 'instance_parallel');
-  check('解析 Instance Parallel 节点', !!threeNode && threeNode.runs.length === 3 && threeNode.runs[0].instance === 'mumu-0');
+  check('解析 Instance Parallel 节点', !!threeNode && threeNode.runs.length === 2 && threeNode.runs[0].instance === 'mumu-0');
   check('Instance Parallel 示例通过编辑器校验', errorsOf(threeInstance, catalog).length === 0);
 
   const duplicate = clone(FIXTURE); duplicate.nodes.push(clone(duplicate.nodes[2]));

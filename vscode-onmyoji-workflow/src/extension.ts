@@ -241,12 +241,13 @@ function getRuntimeConfigFile(): string {
 
 function getConfiguredRuntimeInstances(): RuntimeInstanceInfo[] {
   try {
-    const instances = parseRuntimeInstances(JSON.parse(fs.readFileSync(getRuntimeConfigFile(), 'utf8')));
-    if (instances.length > 0) return instances;
+    const raw = JSON.parse(fs.readFileSync(getRuntimeConfigFile(), 'utf8')) as Record<string, unknown>;
+    if (raw.discover_mumu_instances === true) return [];
+    return parseRuntimeInstances(raw);
   } catch {
-    // 配置错误由引擎报告；编辑器保留默认实例，避免工具栏失去运行入口。
+    // Discovery failures are represented as an empty list instead of a fake device.
   }
-  return [{ id: 'mumu-0' }];
+  return [];
 }
 
 async function getRuntimeInstances(): Promise<RuntimeInstanceInfo[]> {
@@ -271,7 +272,7 @@ async function getRuntimeInstances(): Promise<RuntimeInstanceInfo[]> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(instances && instances.length > 0 ? instances : fallback);
+      resolve(instances ?? fallback);
     };
     const timer = setTimeout(() => {
       child.kill();
@@ -387,7 +388,7 @@ async function checkTemplate(options: TemplateCheckOptions): Promise<TemplateChe
     '--project-root',
     projectRoot,
     '--instance',
-    options.instanceId ?? 'mumu-0',
+    options.instanceId ?? '',
     '--template',
     options.template,
     '--threshold',
@@ -534,6 +535,13 @@ async function runWorkflow(preferred?: vscode.Uri, requestedInstance?: string, e
   }
   const isMultiRun = orchestrationRuns.length > 0;
   const instance = isMultiRun ? orchestrationRuns[0].instance : await rememberRuntimeInstance(requestedInstance ?? '');
+  if (!isMultiRun && !instance) {
+    const message = '无法启动：未检测到运行实例。请先启动 MuMu 或连接 Android 设备。';
+    runLogManager.appendOutput(`${message}\n`, 'stderr');
+    sidebarProvider.setRunState('error', '未检测到实例');
+    void vscode.window.showErrorMessage(message);
+    return;
+  }
   const runSources = orchestrationRuns.map((run, index) => ({
     id: `${run.instance}-${index}`,
     label: run.instance,

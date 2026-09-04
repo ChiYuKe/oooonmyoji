@@ -194,6 +194,15 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
 
 const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow'];
 
+function readPersistedLayout(key: string): string | null {
+  const stored = window.onmyoji.readLayout(key);
+  return stored ?? window.localStorage.getItem(key);
+}
+
+function persistLayout(key: string, value: string): void {
+  window.onmyoji.writeLayout(key, value);
+}
+
 class ExistingModuleRenderer implements IContentRenderer {
   readonly element = document.createElement('div');
   private moduleElement?: HTMLElement;
@@ -474,7 +483,7 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
 
   const saveLayout = (): void => {
     if (suspendPersistence) return;
-    window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
+    persistLayout(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
     onLayoutChange?.();
   };
 
@@ -493,12 +502,13 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
   };
 
   let restored = false;
-  const savedLayout = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+  const savedLayout = readPersistedLayout(LAYOUT_STORAGE_KEY);
   if (savedLayout) {
     try {
       api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
       restored = api.totalPanels > 0;
     } catch {
+      window.onmyoji.writeLayout(LAYOUT_STORAGE_KEY, null);
       window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
     }
   }
@@ -506,7 +516,12 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
   suspendPersistence = false;
 
   const layoutDisposable = api.onDidLayoutChange(saveLayout);
-  const panelDisposable = api.onDidActivePanelChange(() => onLayoutChange?.());
+  const panelDisposable = api.onDidActivePanelChange(() => {
+    // 切换激活标签页/激活组也属于布局状态（activeView/activeGroup 参与序列化），
+    // 与结构变化一起持久化，保证重启后恢复最后激活的标签页。
+    saveLayout();
+    onLayoutChange?.();
+  });
 
   const showPanel = (panelId: DockPanelId): void => {
     addPanel(panelId);
@@ -547,6 +562,7 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     resetLayout,
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
+      saveLayout();
       layoutDisposable.dispose();
       panelDisposable.dispose();
       popoutFailureDisposable.dispose();
@@ -626,7 +642,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
 
   const saveLayout = (): void => {
     if (suspendPersistence) return;
-    window.localStorage.setItem(WORKBENCH_LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
+    persistLayout(WORKBENCH_LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
     onLayoutChange?.();
   };
 
@@ -639,12 +655,13 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   };
 
   let restored = false;
-  const savedLayout = window.localStorage.getItem(WORKBENCH_LAYOUT_STORAGE_KEY);
+  const savedLayout = readPersistedLayout(WORKBENCH_LAYOUT_STORAGE_KEY);
   if (savedLayout) {
     try {
       api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
       restored = api.totalPanels > 0;
     } catch {
+      window.onmyoji.writeLayout(WORKBENCH_LAYOUT_STORAGE_KEY, null);
       window.localStorage.removeItem(WORKBENCH_LAYOUT_STORAGE_KEY);
     }
   }
@@ -663,7 +680,12 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   if (restoredReferenceViewer) restoredReferenceViewer.api.close();
 
   const layoutDisposable = api.onDidLayoutChange(saveLayout);
-  const panelDisposable = api.onDidActivePanelChange(() => onLayoutChange?.());
+  const panelDisposable = api.onDidActivePanelChange(() => {
+    // 切换激活标签页/激活组也属于布局状态（activeView/activeGroup 参与序列化），
+    // 与结构变化一起持久化，保证重启后恢复最后激活的标签页。
+    saveLayout();
+    onLayoutChange?.();
+  });
 
   const show = (panelId: WorkbenchPanelId): void => {
     if (panelId === 'settings') {
@@ -720,6 +742,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     resetLayout,
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
+      saveLayout();
       layoutDisposable.dispose();
       panelDisposable.dispose();
       popoutFailureDisposable.dispose();
@@ -804,7 +827,7 @@ export function connectSharedPanelDocking(
     const referencePanel = event.panel ?? event.group?.activePanel ?? targetApi.activePanel;
     sourceApi.removePanel(sourcePanel);
     addSharedPanelAtDrop(targetApi, panelId, position, referencePanel);
-    window.localStorage.setItem(SHARED_PANEL_SURFACE_KEYS[panelId], surface);
+    persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], surface);
     onLayoutChange?.();
   };
 
@@ -847,7 +870,7 @@ export function connectSharedPanelDocking(
   });
 
   const preferredSurface = (panelId: SharedDockPanelId): SharedDockSurface => {
-    const stored = window.localStorage.getItem(SHARED_PANEL_SURFACE_KEYS[panelId]);
+    const stored = readPersistedLayout(SHARED_PANEL_SURFACE_KEYS[panelId]);
     return stored === 'inner' || stored === 'outer' ? stored : DEFAULT_SHARED_PANEL_SURFACES[panelId];
   };
 
@@ -864,9 +887,9 @@ export function connectSharedPanelDocking(
       const keepInner = preferredSurface(panelId) === 'inner';
       if (keepInner) outerApi.removePanel(outerPanel);
       else innerApi.removePanel(innerPanel);
-      window.localStorage.setItem(SHARED_PANEL_SURFACE_KEYS[panelId], keepInner ? 'inner' : 'outer');
+      persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], keepInner ? 'inner' : 'outer');
     } else if (innerPanel || outerPanel) {
-      window.localStorage.setItem(SHARED_PANEL_SURFACE_KEYS[panelId], innerPanel ? 'inner' : 'outer');
+      persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], innerPanel ? 'inner' : 'outer');
     }
   };
 
@@ -893,7 +916,7 @@ export function connectSharedPanelDocking(
     },
     resetSurfaces: () => {
       for (const panelId of Object.keys(DEFAULT_SHARED_PANEL_SURFACES) as SharedDockPanelId[]) {
-        window.localStorage.setItem(SHARED_PANEL_SURFACE_KEYS[panelId], DEFAULT_SHARED_PANEL_SURFACES[panelId]);
+        persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], DEFAULT_SHARED_PANEL_SURFACES[panelId]);
       }
     },
     dispose: () => {

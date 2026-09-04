@@ -169,6 +169,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               <button data-editor-command="addSelector"><span class="node-swatch selector" aria-hidden="true"></span><span>Selector</span></button>
               <button data-editor-command="addSequence"><span class="node-swatch sequence" aria-hidden="true"></span><span>Sequence</span></button>
               <button data-editor-command="addParallel"><span class="node-swatch parallel" aria-hidden="true"></span><span>Parallel</span></button>
+              <button data-editor-command="addGenericParallel"><span class="node-swatch parallel" aria-hidden="true"></span><span>并发分支</span></button>
+              <button data-editor-command="addRepeatUntil"><span class="node-swatch repeat-until" aria-hidden="true"></span><span>Repeat Until</span></button>
+              <button data-editor-command="addBranch"><span class="node-swatch branch" aria-hidden="true"></span><span>Branch</span></button>
+              <button data-editor-command="addSwitch"><span class="node-swatch switch" aria-hidden="true"></span><span>Switch</span></button>
               <button data-editor-command="addInstanceParallel"><span class="node-swatch instance-parallel" aria-hidden="true"></span><span>Instances</span></button>
             </div>
           </section>

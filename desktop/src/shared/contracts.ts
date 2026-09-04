@@ -76,6 +76,7 @@ export interface WorkflowEditorInit {
   };
   workflows: WorkflowDescriptor[];
   canGoBack: boolean;
+  workflowTrail?: Array<{ uri: string; name: string }>;
   catalog: ActionSpec[];
   refs: {
     blackboard: string[];
@@ -154,6 +155,11 @@ export interface RunWorkflowRequest {
   text: string;
 }
 
+export interface RuntimeDebugSettings {
+  enabled: boolean;
+  annotateScreenshots: boolean;
+}
+
 export interface SaveTemplateRequest {
   targetPath?: string;
   filename: string;
@@ -212,6 +218,8 @@ export interface OnmyojiDesktopApi {
   toggleMaximizeWindow(): Promise<boolean>;
   closeWindow(): Promise<void>;
   isWindowMaximized(): Promise<boolean>;
+  readLayout(key: string): string | null;
+  writeLayout(key: string, value: string | null): void;
   bootstrap(): Promise<BootstrapData>;
   getWorkflowInit(uri: string, selectedInstance: string, canGoBack: boolean): Promise<WorkflowEditorInit>;
   saveWorkflow(uri: string, text: string): Promise<void>;
@@ -221,6 +229,8 @@ export interface OnmyojiDesktopApi {
   getReferenceGraph(target: string): Promise<ReferenceGraph>;
   runWorkflow(request: RunWorkflowRequest): Promise<void>;
   stopWorkflow(): Promise<void>;
+  getDebugSettings(): Promise<RuntimeDebugSettings>;
+  updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
   listAssets(): Promise<AssetImage[]>;
   readAssetData(paths: string[]): Promise<Array<{ path: string; dataUrl: string }>>;

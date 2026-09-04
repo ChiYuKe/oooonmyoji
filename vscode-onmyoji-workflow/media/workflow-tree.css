@@ -110,6 +110,9 @@ main { height: calc(100% - 52px); min-height: 0; position: relative; }
 .tree-node.type-sequence .tree-icon { color: #e4b84c; }
 .tree-node.type-simple_parallel .tree-icon { color: #7cc6d8; }
 .tree-node.type-instance_parallel .tree-icon { color: #b49be8; }
+.tree-node.type-parallel .tree-icon { color: #7cc6d8; }
+.tree-node.type-repeat_until .tree-icon { color: #d6ad62; }
+.tree-node.type-branch .tree-icon, .tree-node.type-switch .tree-icon { color: #cf8f9c; }
 .tree-name {
   flex: 1;
   min-width: 0;

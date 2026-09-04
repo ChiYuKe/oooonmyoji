@@ -116,10 +116,12 @@ button.command:hover { background: var(--hover); }
 .compact-grid { margin-top: 2px; }
 .node-swatch { width: 9px; height: 9px; border: 1px solid color-mix(in srgb, currentColor 60%, transparent); border-radius: 2px; }
 .node-swatch.task { color: #747980; background: #555a61; }
-.node-swatch.selector { color: #67a27a; background: #40634d; }
-.node-swatch.sequence { color: #b5a353; background: #6c6237; }
-.node-swatch.parallel { color: #65a0b7; background: #3f6270; }
-.node-swatch.instance-parallel { color: #b49be8; background: #5d4c7e; }
+.node-swatch.selector { color: #35c875; background: #1f4b35; }
+.node-swatch.sequence { color: #e4b52f; background: #52431e; }
+.node-swatch.parallel { color: #31b8df; background: #1d4653; }
+.node-swatch.repeat-until { color: #ed8734; background: #5b351b; }
+.node-swatch.branch, .node-swatch.switch { color: #d85c9b; background: #55243e; }
+.node-swatch.instance-parallel { color: #9b6be8; background: #39275b; }
 .node-search-row { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 5px; }
 .node-search-row input { width: 100%; }
 

@@ -145,6 +145,36 @@ def test_reward_stats_retries_unresolved_quantity_with_local_crop(tmp_path: Path
     assert record["items"][0]["detections"][0]["quantity_ocr"]["source"] == "quantity_crop"
 
 
+def test_reward_stats_duplicate_screenshot_is_idempotent(tmp_path: Path) -> None:
+    screenshot, catalog = _write_reward_fixture(tmp_path)
+    calls: list[int] = []
+
+    def recognize(_image: object) -> list[OcrResult]:
+        calls.append(1)
+        return []
+
+    processor = RewardStatsProcessor(tmp_path / "artifacts", recognize, material_catalog=catalog)
+    request = {
+        "instance_id": "mumu-1",
+        "run_id": "run-idempotent",
+        "category": "souls",
+        "battle_index": 1,
+        "layer": 1,
+        "capture_index": 1,
+        "screenshot": str(screenshot),
+        "roi": [0, 0, 200, 100],
+    }
+    assert processor.submit(request)
+    assert processor.submit(dict(request))
+    assert processor.close(wait_seconds=5)
+    records = list((tmp_path / "artifacts" / "reward-stats").rglob("rewards-*.jsonl"))
+    assert len(records) == 1
+    assert len(records[0].read_text(encoding="utf-8").splitlines()) == 1
+    summary = json.loads(records[0].with_name("summary.json").read_text(encoding="utf-8"))
+    assert summary["total_screenshots"] == 1
+    assert len(calls) == 1
+
+
 def test_reward_screenshots_retain_latest_ten_battles_per_instance_across_runs(tmp_path: Path) -> None:
     fixture, _ = _write_reward_fixture(tmp_path)
     artifact_dir = tmp_path / "artifacts"

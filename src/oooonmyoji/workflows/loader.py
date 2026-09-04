@@ -7,6 +7,7 @@ import json
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+import threading
 from typing import Any
 
 from ..actions import ActionRegistry
@@ -22,12 +23,23 @@ class WorkflowLoader:
         self.workflow_dir = Path(workflow_dir).resolve()
         self.registry = registry
         self.project_root = (project_root or self.workflow_dir.parent).resolve()
+        self._cache: dict[Path, tuple[tuple[int, int, int], WorkflowSpec]] = {}
+        self._cache_lock = threading.RLock()
 
     def path_for(self, reference: str) -> Path:
         return resolve_workflow_path(self.workflow_dir, reference)
 
     def load(self, reference: str) -> WorkflowSpec:
         path = self.path_for(reference)
+        signature = self._file_signature(path)
+        if signature is not None:
+            with self._cache_lock:
+                cached = self._cache.get(path)
+            if cached is not None and cached[0] == signature:
+                # Path validation remains dynamic because a referenced asset
+                # may be removed while the workflow JSON itself is unchanged.
+                self.validate_paths(cached[1])
+                return deepcopy(cached[1])
         try:
             payload = path.read_bytes()
             raw = json.loads(payload.decode("utf-8"))
@@ -43,7 +55,25 @@ class WorkflowLoader:
             workflow_dir=self.workflow_dir,
         )
         self.validate_paths(spec)
-        return replace(spec, file_hash=hashlib.sha256(payload).hexdigest())
+        snapshot = replace(spec, file_hash=hashlib.sha256(payload).hexdigest())
+        if signature is not None:
+            with self._cache_lock:
+                self._cache[path] = (signature, snapshot)
+        return deepcopy(snapshot)
+
+    @staticmethod
+    def _file_signature(path: Path) -> tuple[int, int, int] | None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_size, stat.st_ctime_ns
+
+    def clear_cache(self) -> None:
+        """Drop in-process snapshots after an Action catalog refresh."""
+
+        with self._cache_lock:
+            self._cache.clear()
 
     def validate_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> None:
         try:

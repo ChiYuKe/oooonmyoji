@@ -7,8 +7,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "instance_parallel", "task")
-COMPOSITE_TYPES = ("root", "selector", "sequence", "simple_parallel", "instance_parallel")
+NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "task")
+COMPOSITE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel")
 DECORATOR_TYPES = ("condition", "cooldown", "timeout", "retry", "repeat", "do_once")
 PARALLEL_FINISH_MODES = ("abort_background", "wait_for_background")
 INSTANCE_PARALLEL_WAIT_MODES = ("all", "any")
@@ -47,6 +47,12 @@ class WorkflowNode:
     runs: tuple[InstanceParallelRun, ...] = ()
     wait_for: str = "all"
     cancel_on_failure: bool = True
+    condition: Any = None
+    conditions: tuple[Any, ...] = ()
+    max_iterations: int = 100
+    expression: Any = None
+    cases: tuple[tuple[Any, str], ...] = ()
+    default_child: str | None = None
 
     @property
     def is_task(self) -> bool:

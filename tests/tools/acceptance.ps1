@@ -26,11 +26,38 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-Node-Checked {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    Write-Host "`n=== $Name ===" -ForegroundColor Cyan
+    Push-Location $WorkingDirectory
+    try {
+        & npm @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$Name failed with exit code $LASTEXITCODE"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 Push-Location $repoRoot
 try {
     Invoke-Checked "default pytest" @("-m", "pytest", "-q")
     Invoke-Checked "mypy" @("-m", "mypy", "src")
     Invoke-Checked "doctor" @("-m", "src.oooonmyoji.cli", "--config", ".\config\config.example.json", "doctor")
+    Invoke-Checked "Python/TypeScript contract check" @("tests\contract_check.py")
+
+    Invoke-Node-Checked "desktop TypeScript and renderer build" (Join-Path $repoRoot "desktop") @("run", "build")
+    Invoke-Node-Checked "VS Code TypeScript build" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("exec", "tsc", "-p", "tsconfig.json")
+    Invoke-Node-Checked "VS Code Node smoke" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("tests\smoke.js")
+    Invoke-Node-Checked "VS Code DOM smoke" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("tests\editor-dom-smoke.js")
+    Invoke-Node-Checked "VS Code run-log DOM smoke" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("tests\run-log-dom-smoke.js")
 
     $oldRealOcr = $env:OOOONMYOJI_RUN_REAL_OCR
     $oldRealDevices = $env:OOOONMYOJI_RUN_REAL_DEVICES

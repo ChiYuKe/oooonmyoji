@@ -255,7 +255,71 @@ class WorkflowEngine:
             return last
         if node.type == "simple_parallel":
             return self._run_simple_parallel(node, deadline, branch_cancel)
+        if node.type == "parallel":
+            return self._run_parallel(node, deadline, branch_cancel)
+        if node.type == "repeat_until":
+            for _ in range(node.max_iterations):
+                result = self._run_node(node.children[0], deadline, branch_cancel)
+                if result.status != ActionStatus.SUCCEEDED:
+                    return result
+                with self._lock:
+                    allowed = ReferenceResolver(self.blackboard, dict(self.outputs)).condition(node.condition)
+                if allowed:
+                    return result
+            return _Outcome(ActionStatus.FAILED, error=f"repeat_until exceeded {node.max_iterations} iterations", category="workflow_limit")
+        if node.type == "branch":
+            for condition, child_id in zip(node.conditions, node.children):
+                with self._lock:
+                    allowed = ReferenceResolver(self.blackboard, dict(self.outputs)).condition(condition)
+                if allowed:
+                    return self._run_node(child_id, deadline, branch_cancel)
+            return _Outcome(ActionStatus.FAILED, error="no branch condition matched", category="condition")
+        if node.type == "switch":
+            with self._lock:
+                value = ReferenceResolver(self.blackboard, dict(self.outputs)).value(node.expression)
+            for case_value, child_id in node.cases:
+                if value == case_value:
+                    return self._run_node(child_id, deadline, branch_cancel)
+            if node.default_child is not None:
+                return self._run_node(node.default_child, deadline, branch_cancel)
+            return _Outcome(ActionStatus.FAILED, error="no switch case matched", category="condition")
         raise WorkflowError(f"unsupported Behavior Tree node type: {node.type}")
+
+    def _run_parallel(self, node: WorkflowNode, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
+        cancel = threading.Event()
+        outcomes: list[_Outcome | None] = [None] * len(node.children)
+        threads: list[threading.Thread] = []
+
+        def run_branch(index: int, child_id: str) -> None:
+            try:
+                outcomes[index] = self._run_node(child_id, deadline, cancel)
+            except BaseException as exc:
+                outcomes[index] = _Outcome(ActionStatus.FAILED, error=str(exc), category="parallel", fatal=True)
+
+        for index, child_id in enumerate(node.children):
+            thread = threading.Thread(target=run_branch, args=(index, child_id), name=f"bt-parallel-{child_id}", daemon=True)
+            threads.append(thread)
+            thread.start()
+        while True:
+            self._ensure_running(deadline, branch_cancel)
+            completed = [outcome for outcome in outcomes if outcome is not None]
+            if node.wait_for == "any" and any(outcome.status == ActionStatus.SUCCEEDED for outcome in completed):
+                cancel.set()
+                break
+            if node.cancel_on_failure and any(outcome.status in {ActionStatus.FAILED, ActionStatus.CANCELLED} for outcome in completed):
+                cancel.set()
+                break
+            if len(completed) == len(outcomes):
+                break
+            time.sleep(0.02)
+        for thread in threads:
+            thread.join(self.cancel_grace_seconds)
+        completed = [outcome for outcome in outcomes if outcome is not None]
+        if any(outcome.fatal for outcome in completed):
+            return next(outcome for outcome in completed if outcome.fatal)
+        if node.wait_for == "any":
+            return next((outcome for outcome in completed if outcome.status == ActionStatus.SUCCEEDED), completed[0])
+        return next((outcome for outcome in completed if outcome.status != ActionStatus.SUCCEEDED), _Outcome(ActionStatus.SUCCEEDED))
 
     def _run_simple_parallel(self, node: WorkflowNode, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         main_id, background_id = node.children
@@ -312,6 +376,8 @@ class WorkflowEngine:
         if result.status == ActionStatus.SUCCEEDED:
             with self._lock:
                 self.outputs[node.id] = output
+                if node.action == "core.assign" and isinstance(arguments.get("name"), str) and arguments["name"]:
+                    self.blackboard[arguments["name"]] = arguments.get("value")
             return _Outcome(ActionStatus.SUCCEEDED, output=output)
         if result.status == ActionStatus.CANCELLED:
             return _Outcome(

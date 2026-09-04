@@ -91,6 +91,49 @@ def test_wait_for_all_cancels_peer_after_failure(monkeypatch: pytest.MonkeyPatch
     assert cancelled == ["member-run"]
 
 
+def test_concurrent_submission_reserves_instance_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    instance = SimpleNamespace(id="mumu-0", enabled=True)
+    worker = SimpleNamespace(command_queue=queue.Queue())
+    supervisor = Supervisor.__new__(Supervisor)
+    supervisor.config = SimpleNamespace(instance=lambda _id: instance)
+    supervisor.workers = {instance.id: worker}
+    supervisor._runs = {}
+    supervisor._group_lock = threading.RLock()
+    supervisor._completed = {}
+    supervisor._groups = {}
+    supervisor._run_groups = {}
+    supervisor._stopping = False
+    supervisor.event_queue = queue.Queue()
+    workflow = WorkflowSpec(
+        3, "simple", "1.0.0", "", (1, 1), "root", 10, 10, {},
+        (WorkflowNode("root", "root", children=("task",)), WorkflowNode("task", "task", action="core.log")),
+        Path("simple.json"), "hash", {},
+    )
+    monkeypatch.setattr(supervisor, "start", lambda: None)
+    monkeypatch.setattr(supervisor, "check_workers", lambda: None)
+    monkeypatch.setattr(supervisor, "load_workflow", lambda _reference: workflow)
+    results: list[str] = []
+    errors: list[Exception] = []
+    barrier = threading.Barrier(2)
+
+    def submit() -> None:
+        barrier.wait()
+        try:
+            results.append(supervisor.run_workflow("simple", instance.id, wait=False))
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=submit) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+    assert worker.command_queue.qsize() == 1
+
+
 def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     instances = tuple(SimpleNamespace(id=f"mumu-{index}", enabled=True) for index in range(3))
     config = SimpleNamespace(

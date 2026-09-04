@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import queue
 import threading
@@ -23,6 +24,7 @@ from ..vision.template import TemplateMatcher
 from ..workflows.engine import WorkflowEngine
 from ..workflows.loader import WorkflowLoader
 from .context import TaskContextImpl
+from .debug import DebugStepRecorder
 from .logging import EventLogger
 from .records import AtomicJsonStore, RunRecord, RunStatus
 
@@ -235,6 +237,7 @@ class TaskRunner:
         record_store = AtomicJsonStore(self.config.artifact_dir / "runs" / f"{run_id}.json")
         record_lock = threading.RLock()
         steps_since_checkpoint = 0
+        debug_sequence = itertools.count(1)
 
         def checkpoint_record(*, force: bool = False) -> None:
             nonlocal steps_since_checkpoint
@@ -348,12 +351,37 @@ class TaskRunner:
                     instance_id=instance.id,
                     reward_stats_submitter=submit_reward_statistics if event_queue is not None else None,
                 )
+                debug_recorder = (
+                    DebugStepRecorder(
+                        context,
+                        annotate=self.config.debug.annotate_screenshots,
+                        sequence=debug_sequence,
+                    )
+                    if self.config.debug.enabled
+                    else None
+                )
 
                 def on_step(event: dict[str, Any]) -> None:
                     nonlocal steps_since_checkpoint
                     with record_lock:
                         nested_recoveries = _nested_branch_recovery_events(record.step_history, event)
-                        for step_event in (*nested_recoveries, event):
+                        for raw_step_event in (*nested_recoveries, event):
+                            step_event = dict(raw_step_event)
+                            if debug_recorder is not None:
+                                try:
+                                    debug_path = debug_recorder.record(step_event)
+                                except Exception as artifact_error:
+                                    step_event["debug_screenshot_error"] = str(artifact_error)
+                                    self.logger.emit(
+                                        "debug.screenshot_failed",
+                                        level=30,
+                                        run_id=run_id,
+                                        step_id=step_event.get("step_id"),
+                                        error=str(artifact_error),
+                                    )
+                                else:
+                                    if debug_path is not None:
+                                        step_event["debug_screenshot"] = str(debug_path)
                             record.current_step = str(step_event.get("step_id")) if step_event.get("step_id") is not None else None
                             record.append_step(step_event)
                             if context is not None and context.last_frame is not None:
@@ -362,7 +390,16 @@ class TaskRunner:
                                         record.details["last_frame"] = str(context.save_frame(context.last_frame, "last-frame.png"))
                                     except Exception as artifact_error:
                                         record.details["last_frame_error"] = str(artifact_error)
-                            writer.write(_step_event_payload(run_id, context, step_event, save_screenshots=self.config.save_screenshots))
+                            payload = _step_event_payload(
+                                run_id,
+                                context,
+                                step_event,
+                                save_screenshots=self.config.save_screenshots,
+                            )
+                            if step_event.get("debug_screenshot"):
+                                payload["screenshot"] = step_event["debug_screenshot"]
+                                payload["debug_screenshot"] = step_event["debug_screenshot"]
+                            writer.write(payload)
                             self._emit(event_queue, {"type": "step", "run_id": run_id, "step": dict(step_event)})
                             steps_since_checkpoint += 1
                         checkpoint_record()

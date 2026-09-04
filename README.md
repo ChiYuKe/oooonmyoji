@@ -280,8 +280,12 @@ Action 代码属于可信本地扩展；更新代码后需要重启监督器，�
 开启 `retry_enabled` 时，才会使用配置中的安全任务重试。
 
 事件写入 `logs/events-YYYY-MM-DD.jsonl`，同时输出控制台文本，默认保留
-14 天。运行器默认不保存步骤截图、缩略图或自动 `last-frame.png`；需要调试
-截图时，在配置中设置 `"save_screenshots": true`。工作流显式使用
+14 天。运行器默认不保存步骤截图、缩略图或自动 `last-frame.png`；只需要原始
+步骤截图时可设置 `"save_screenshots": true`。排查坐标和识别问题时设置
+`"debug": {"enabled": true, "annotate_screenshots": true}`，运行器会在
+`artifacts/<run-id>/debug/` 为每个任务节点保存唯一编号的截图，并标出 ROI、
+模板匹配度、原点击位置和随机偏移后的实际位置。桌面端可在“设置 > 运行”中
+切换逐步截图和标注，设置从下一次运行开始生效。工作流显式使用
 `core.save_frame` 时仍会保存指定截图。失败或中断运行写入
 `artifacts/<run-id>/`，包括失败元数据、OCR/模板结果和一张最终现场图；选择器
 正常回退产生的中间失败不会保存截图。

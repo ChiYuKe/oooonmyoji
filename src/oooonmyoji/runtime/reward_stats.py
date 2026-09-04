@@ -50,6 +50,12 @@ class RewardStatsProcessor:
         self.material_templates = _load_material_catalog(material_catalog)
         self._run_material_totals: dict[str, dict[str, dict[str, Any]]] = {}
         self._run_instances: dict[str, str] = {}
+        self._seen_screenshots: dict[str, None] = {}
+        self._inflight_screenshots: set[str] = set()
+        self._dedupe_limit = max(1024, queue_size * 32)
+        self._dedupe_lock = threading.Lock()
+        self._screenshot_index: dict[str, dict[tuple[str, int], list[tuple[Path, int]]]] = {}
+        self._indexed_instances: set[str] = set()
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=queue_size)
         self._closed = False
         self._stop_enqueued = False
@@ -58,10 +64,21 @@ class RewardStatsProcessor:
 
     def submit(self, request: dict[str, Any]) -> bool:
         if self._closed:
+            self._emit("reward_stats.closed", screenshot=request.get("screenshot"))
             return False
+        key = self._screenshot_key(request)
+        if key is not None:
+            with self._dedupe_lock:
+                if key in self._seen_screenshots or key in self._inflight_screenshots:
+                    self._emit("reward_stats.duplicate", screenshot=key, run_id=request.get("run_id"))
+                    return True
+                self._inflight_screenshots.add(key)
         try:
             self._queue.put_nowait(dict(request))
         except queue.Full:
+            if key is not None:
+                with self._dedupe_lock:
+                    self._inflight_screenshots.discard(key)
             self._emit("reward_stats.queue_full", request=request)
             return False
         return True
@@ -88,15 +105,37 @@ class RewardStatsProcessor:
                 if request is None:
                     return
                 self._process(request)
+                key = self._screenshot_key(request)
+                if key is not None:
+                    with self._dedupe_lock:
+                        self._inflight_screenshots.discard(key)
+                        self._seen_screenshots[key] = None
+                        while len(self._seen_screenshots) > self._dedupe_limit:
+                            oldest = next(iter(self._seen_screenshots))
+                            self._seen_screenshots.pop(oldest, None)
             except Exception as exc:
                 if request is not None:
+                    key = self._screenshot_key(request)
+                    if key is not None:
+                        with self._dedupe_lock:
+                            self._inflight_screenshots.discard(key)
                     self._write_record(request, status="failed", error=str(exc))
                     self._write_run_event(request, status="failed", error=str(exc), items=[])
                     self._emit("reward_stats.failed", error=str(exc), screenshot=request.get("screenshot"))
             finally:
                 if request is not None:
                     self._prune_reward_screenshots(request)
-                self._queue.task_done()
+                    self._queue.task_done()
+
+    @staticmethod
+    def _screenshot_key(request: dict[str, Any]) -> str | None:
+        value = request.get("screenshot")
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return str(Path(value).resolve(strict=False))
+        except (OSError, RuntimeError):
+            return value
 
     def _process(self, request: dict[str, Any]) -> None:
         image = _read_image(Path(str(request["screenshot"])))
@@ -194,38 +233,30 @@ class RewardStatsProcessor:
             return
 
         self._run_instances[run_id] = instance_id
-        groups: dict[tuple[str, int], list[tuple[Path, int]]] = {}
+        self._ensure_instance_index(instance_id)
+        groups = self._screenshot_index.setdefault(instance_id, {})
+        current_key = (run_id, battle_index)
+        current_entries = groups.setdefault(current_key, [])
+        if not any(path == screenshot for path, _ in current_entries):
+            current_entries.append((screenshot, processed_through))
         try:
-            run_directories = tuple(path for path in artifact_root.iterdir() if path.is_dir())
+            all_groups = {
+                key: [entry for entry in entries if entry[0].is_file()]
+                for key, entries in groups.items()
+            }
+            groups.clear()
+            groups.update({key: entries for key, entries in all_groups.items() if entries})
         except OSError as exc:
             self._emit("reward_stats.screenshot_prune_failed", instance_id=instance_id, error=str(exc))
             return
 
-        for run_directory in run_directories:
-            candidate_run_id = run_directory.name
-            if self._instance_for_run(candidate_run_id) != instance_id:
-                continue
-            reward_directory = run_directory / "rewards"
-            if not reward_directory.is_dir():
-                continue
-            try:
-                candidates = tuple(reward_directory.glob("reward-*-layer-*-capture-*.png"))
-            except OSError:
-                continue
-            for candidate in candidates:
-                match = _REWARD_SCREENSHOT_PATTERN.fullmatch(candidate.name)
-                if match is None:
-                    continue
-                try:
-                    modified_at = candidate.stat().st_mtime_ns
-                except OSError:
-                    continue
-                # Same-instance submissions are FIFO. Newer files may still be
-                # waiting for OCR, so only prune screenshots already reached.
-                if modified_at > processed_through:
-                    continue
-                key = (candidate_run_id, int(match.group("battle")))
-                groups.setdefault(key, []).append((candidate, modified_at))
+        # Same-instance submissions are FIFO. Newer files may still be waiting
+        # for OCR, so only prune screenshots already reached.
+        groups = {
+            key: [entry for entry in entries if entry[1] <= processed_through]
+            for key, entries in groups.items()
+        }
+        groups = {key: entries for key, entries in groups.items() if entries}
 
         ordered_groups = sorted(
             groups,
@@ -256,6 +287,42 @@ class RewardStatsProcessor:
                 retained_battles=REWARD_SCREENSHOT_RETENTION_BATTLES,
                 deleted_screenshots=deleted,
             )
+
+    def _ensure_instance_index(self, instance_id: str) -> None:
+        if instance_id in self._indexed_instances:
+            return
+        groups: dict[tuple[str, int], list[tuple[Path, int]]] = {}
+        artifact_root = self.artifact_dir.resolve()
+        try:
+            run_directories = tuple(path for path in artifact_root.iterdir() if path.is_dir())
+        except OSError as exc:
+            self._emit("reward_stats.screenshot_prune_failed", instance_id=instance_id, error=str(exc))
+            self._indexed_instances.add(instance_id)
+            self._screenshot_index[instance_id] = groups
+            return
+        for run_directory in run_directories:
+            candidate_run_id = run_directory.name
+            if self._instance_for_run(candidate_run_id) != instance_id:
+                continue
+            reward_directory = run_directory / "rewards"
+            if not reward_directory.is_dir():
+                continue
+            try:
+                candidates = tuple(reward_directory.glob("reward-*-layer-*-capture-*.png"))
+            except OSError:
+                continue
+            for candidate in candidates:
+                match = _REWARD_SCREENSHOT_PATTERN.fullmatch(candidate.name)
+                if match is None:
+                    continue
+                try:
+                    modified_at = candidate.stat().st_mtime_ns
+                except OSError:
+                    continue
+                key = (candidate_run_id, int(match.group("battle")))
+                groups.setdefault(key, []).append((candidate, modified_at))
+        self._screenshot_index[instance_id] = groups
+        self._indexed_instances.add(instance_id)
 
     def _instance_for_run(self, run_id: str) -> str | None:
         cached = self._run_instances.get(run_id)

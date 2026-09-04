@@ -112,6 +112,20 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                     },
                     "wait_for": {"enum": list(INSTANCE_PARALLEL_WAIT_MODES)},
                     "cancel_on_failure": {"type": "boolean"},
+                    "condition": {},
+                    "conditions": {"type": "array"},
+                    "max_iterations": {"type": "integer", "minimum": 1},
+                    "expression": {},
+                    "cases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["value", "child"],
+                            "properties": {"value": {}, "child": {"type": "string", "minLength": 1}},
+                            "additionalProperties": False,
+                        },
+                    },
+                    "default_child": {"type": "string", "minLength": 1},
                 },
                 "additionalProperties": False,
             },
@@ -206,6 +220,8 @@ def _guaranteed_output_node_ids(
         # A successful parallel node guarantees only that its main task
         # succeeded. The background branch may fail, still run, or be aborted.
         return _guaranteed_output_node_ids(str(children[0]), node_map, nested)
+    if node_type in {"parallel", "repeat_until", "branch", "switch"}:
+        return set()
     return set()
 
 
@@ -294,7 +310,7 @@ def _possibly_available_output_node_ids(
         if parent is None:
             break
         children = parent.get("children")
-        if parent.get("type") in {"sequence", "selector"} and isinstance(children, list):
+        if parent.get("type") in {"sequence", "selector", "branch", "switch"} and isinstance(children, list):
             try:
                 current_index = children.index(current)
             except ValueError:
@@ -636,10 +652,60 @@ def validate_workflow(
                 raise ConfigError(f"nodes[{index}] {node_type} cannot define {sorted(forbidden)}")
             params = {}
             action = None
+        if node_type == "repeat_until":
+            if len(children_raw) != 1:
+                raise ConfigError(f"nodes[{index}] repeat_until must contain exactly one child")
+            if "condition" not in item:
+                raise ConfigError(f"nodes[{index}] repeat_until requires condition")
+            # The body has completed before repeat_until evaluates its exit
+            # condition, so outputs produced inside that body are valid here.
+            # Keep the stricter execution-point rule for all other bindings.
+            node_map_for_repeat = {str(node["id"]): node for node in nodes_raw}
+            body_outputs = _possible_output_node_ids_in_subtree(str(children_raw[0]), node_map_for_repeat)
+            repeat_condition_outputs = possibly_available_node_ids | body_outputs
+            _validate_value(item["condition"], node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=repeat_condition_outputs, possibly_available_node_ids=repeat_condition_outputs, path=f"nodes[{index}].condition", condition=True)
+            max_iterations = item.get("max_iterations", 100)
+            if isinstance(max_iterations, bool) or not isinstance(max_iterations, int) or max_iterations < 1:
+                raise ConfigError(f"nodes[{index}].max_iterations must be a positive integer")
+        elif node_type == "branch":
+            if not children_raw:
+                raise ConfigError(f"nodes[{index}] branch must contain at least one child")
+            conditions = item.get("conditions")
+            if not isinstance(conditions, list) or len(conditions) != len(children_raw):
+                raise ConfigError(f"nodes[{index}].conditions must match branch children")
+            for condition_index, condition_value in enumerate(conditions):
+                _validate_value(condition_value, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"nodes[{index}].conditions[{condition_index}]", condition=True)
+        elif node_type == "switch":
+            if "expression" not in item:
+                raise ConfigError(f"nodes[{index}] switch requires expression")
+            cases = item.get("cases")
+            if not isinstance(cases, list) or not cases:
+                raise ConfigError(f"nodes[{index}].cases must be a non-empty array")
+            for case_index, case in enumerate(cases):
+                if not isinstance(case, dict) or not isinstance(case.get("child"), str) or "value" not in case:
+                    raise ConfigError(f"nodes[{index}].cases[{case_index}] must define value and child")
+        elif node_type == "parallel":
+            if len(children_raw) < 2:
+                raise ConfigError(f"nodes[{index}] parallel must contain at least two children")
+            wait_for = item.get("wait_for", "all")
+            if wait_for not in {"all", "any"}:
+                raise ConfigError(f"nodes[{index}].wait_for must be all or any")
+            if not isinstance(item.get("cancel_on_failure", True), bool):
+                raise ConfigError(f"nodes[{index}].cancel_on_failure must be a boolean")
         if node_type != "simple_parallel" and "finish_mode" in item:
             raise ConfigError(f"nodes[{index}].finish_mode is only valid for simple_parallel")
         if node_type != "instance_parallel" and any(field in item for field in ("runs", "wait_for", "cancel_on_failure")):
-            raise ConfigError(f"nodes[{index}] instance_parallel fields are only valid for instance_parallel")
+            if node_type != "parallel":
+                raise ConfigError(f"nodes[{index}] instance_parallel fields are only valid for instance_parallel")
+        node_fields = {"condition", "max_iterations", "conditions", "expression", "cases", "default_child"}
+        allowed_fields = {
+            "repeat_until": {"condition", "max_iterations"},
+            "branch": {"conditions"},
+            "switch": {"expression", "cases", "default_child"},
+        }.get(node_type, set())
+        invalid_fields = (set(item) & node_fields) - allowed_fields
+        if invalid_fields:
+            raise ConfigError(f"nodes[{index}] fields {sorted(invalid_fields)} are not valid for {node_type}")
         decorators = _parse_decorators(decorators_raw, node_index=index, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids)
         if node_type == "root" and decorators:
             raise ConfigError(f"nodes[{index}] root cannot have decorators")
@@ -666,6 +732,12 @@ def validate_workflow(
             runs=instance_runs,
             wait_for=str(item.get("wait_for", "all")),
             cancel_on_failure=bool(item.get("cancel_on_failure", True)),
+            condition=deepcopy(item.get("condition")),
+            conditions=tuple(deepcopy(item.get("conditions", []))),
+            max_iterations=int(item.get("max_iterations", 100)),
+            expression=deepcopy(item.get("expression")),
+            cases=tuple((deepcopy(case.get("value")), str(case["child"])) for case in item.get("cases", []) if isinstance(case, dict) and "child" in case),
+            default_child=str(item["default_child"]) if isinstance(item.get("default_child"), str) else None,
         ))
 
     node_map = {node.id: node for node in parsed}
@@ -687,6 +759,17 @@ def validate_workflow(
                 raise ConfigError(f"simple_parallel node {node.id} must contain exactly two children")
             elif node_map[node.children[0]].type != "task":
                 raise ConfigError(f"simple_parallel node {node.id} requires a task as its first (main) child")
+        if node.type == "switch":
+            case_children = [child for _, child in node.cases]
+            if any(child not in node_map for child in case_children):
+                raise ConfigError(f"switch node {node.id} references an unknown case child")
+            if node.default_child is not None and node.default_child not in node_map:
+                raise ConfigError(f"switch node {node.id} references an unknown default child")
+            expected_children = set(case_children)
+            if node.default_child is not None:
+                expected_children.add(node.default_child)
+            if set(node.children) != expected_children:
+                raise ConfigError(f"switch node {node.id} children must list every case/default child exactly once")
         if node.type == "instance_parallel":
             if node.children:
                 raise ConfigError(f"instance_parallel node {node.id} cannot contain children")

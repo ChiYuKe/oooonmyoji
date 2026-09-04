@@ -44,5 +44,9 @@
   },
   "log_dir": "logs",
   "artifact_dir": "artifacts",
-  "save_screenshots": false
+  "save_screenshots": false,
+  "debug": {
+    "enabled": false,
+    "annotate_screenshots": true
+  }
 }

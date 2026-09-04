@@ -31,7 +31,12 @@ class StubDevice:
         return None
 
 
-def _write_config(path: Path, *, save_screenshots: bool | None = None) -> Path:
+def _write_config(
+    path: Path,
+    *,
+    save_screenshots: bool | None = None,
+    debug: dict[str, bool] | None = None,
+) -> Path:
     (path / "config").mkdir()
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
@@ -61,6 +66,8 @@ def _write_config(path: Path, *, save_screenshots: bool | None = None) -> Path:
     }
     if save_screenshots is not None:
         config["save_screenshots"] = save_screenshots
+    if debug is not None:
+        config["debug"] = debug
     config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path
 
@@ -125,6 +132,31 @@ def test_run_events_file_can_keep_screenshot_artifacts_when_enabled(tmp_path: Pa
     else:
         assert isinstance(done["thumbnail"], str)
         assert len(done["thumbnail"]) > 16
+
+
+def test_debug_mode_saves_annotated_task_screenshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(tmp_path, debug={"enabled": True, "annotate_screenshots": True}))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    job = JobConfig(
+        id="wf-run",
+        workflow="wf",
+        instance="fake",
+        inputs={},
+        schedule={"type": "manual"},
+        enabled=True,
+        retry_enabled=False,
+    )
+    events_path = tmp_path / "artifacts" / "runs" / "events-debug.jsonl"
+
+    record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-debug", events_file=events_path)
+
+    assert record.status.value == "succeeded"
+    screenshots = list((tmp_path / "artifacts" / "run-debug" / "debug").glob("*.png"))
+    assert [path.name for path in screenshots] == ["000001-wf-cap-succeeded.png"]
+    lines = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    done = [line for line in lines if line.get("step_id") == "cap" and line["step"]["status"] == "succeeded"][-1]
+    assert done["debug_screenshot"] == str(screenshots[0])
+    assert done["screenshot"] == str(screenshots[0])
 
 
 def test_run_events_file_truncates_on_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

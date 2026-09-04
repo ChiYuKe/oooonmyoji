@@ -1,7 +1,8 @@
 {
   "schema_version": 3,
   "id": "mumu_1_souls_loop",
-  "version": "3.1.0",
+  "version": "4.0.0",
+  "description": "MuMu-1 单实例御魂循环入口：预检当前页面，优先使用统一恢复流程，失败时回退到兼容路径。",
   "resolution": [
     1920,
     1080
@@ -11,7 +12,17 @@
     "timeout_seconds": 7200,
     "max_steps": 1000
   },
-  "blackboard": {},
+  "blackboard": {
+    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
+    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
+    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
+    "realm_entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
+    "realm_target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } }
+    ,
+    "realm_target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
+    "realm_completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
+    "realm_completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } }
+  },
   "nodes": [
     {
       "id": "root",
@@ -114,12 +125,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 0.5,
         "roi": [
-          450,
-          80,
-          650,
-          350
+          0,
+          0,
+          1920,
+          500
         ],
-        "threshold": 0.65,
+        "threshold": 0.4,
         "scale_search": false
       }
     },
@@ -177,12 +188,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 20,
         "roi": [
-          450,
-          80,
-          650,
-          350
+          0,
+          0,
+          1920,
+          500
         ],
-        "threshold": 0.65,
+        "threshold": 0.4,
         "scale_search": false
       }
     },
@@ -191,11 +202,24 @@
       "type": "selector",
       "name": "恢复到御魂副本页",
       "children": [
+        "shared_entry",
         "already_at_floor",
         "from_souls_type",
         "from_explore_map",
         "from_courtyard"
       ]
+    },
+    {
+      "id": "shared_entry",
+      "type": "task",
+      "name": "优先使用统一多状态恢复流程",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "souls/shared/task_in_souls.json",
+        "inputs": {
+          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png"
+        }
+      }
     },
     {
       "id": "already_at_floor",
@@ -409,12 +433,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-1.png",
         "timeout_seconds": 5,
         "roi": [
-          450,
-          80,
-          650,
-          350
+          0,
+          0,
+          1920,
+          500
         ],
-        "threshold": 0.65,
+        "threshold": 0.4,
         "scale_search": false
       }
     },
@@ -527,13 +551,7 @@
       "id": "battle_loop",
       "type": "sequence",
       "name": "循环战斗 30 次",
-      "children": [
-        "wait_challenge",
-        "tap_challenge",
-        "prepare_lineup",
-        "await_victory",
-        "settlement"
-      ],
+      "children": ["wait_challenge", "tap_challenge", "prepare_lineup", "await_victory", "settlement"],
       "decorators": [
         {
           "type": "repeat",
@@ -546,7 +564,33 @@
       ]
     },
     {
+      "id": "realm_scheduler",
+      "type": "task",
+      "name": "御魂回合前检查结界突破券",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "realm/shared/schedule_from_souls.json",
+        "inputs": {
+          "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
+          "realm_threshold": { "ref": "blackboard.realm_threshold" },
+          "pass_roi": { "ref": "blackboard.realm_pass_roi" },
+          "entry_point": { "ref": "blackboard.realm_entry_point" },
+          "target_points": { "ref": "blackboard.realm_target_points" },
+          "target_rois": { "ref": "blackboard.realm_target_rois" },
+          "completed_texts": { "ref": "blackboard.realm_completed_texts" },
+          "completed_templates": { "ref": "blackboard.realm_completed_templates" },
+          "souls_courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png"
+        }
+      }
+    },
+    {
       "id": "wait_challenge",
+      "type": "sequence",
+      "name": "检查结界券后等待挑战按钮",
+      "children": ["realm_scheduler", "wait_challenge_detect"]
+    },
+    {
+      "id": "wait_challenge_detect",
       "type": "task",
       "name": "等待挑战按钮",
       "action": "vision.wait_template",
@@ -570,7 +614,7 @@
       "action": "input.tap_match",
       "params": {
         "match": {
-          "ref": "nodes.wait_challenge.output.0"
+          "ref": "nodes.wait_challenge_detect.output.0"
         },
         "revalidate": true,
         "random_offset": 5,

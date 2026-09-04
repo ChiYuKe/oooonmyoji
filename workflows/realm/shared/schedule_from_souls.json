@@ -1,0 +1,76 @@
+{
+  "schema_version": 3,
+  "id": "realm_schedule_from_souls",
+  "version": "1.0.0",
+  "description": "御魂回合边界调度器：当结界突破券达到阈值时切换到结界突破，券耗尽后恢复御魂。",
+  "resolution": [1920, 1080],
+  "root": "root",
+  "limits": { "timeout_seconds": 7200, "max_steps": 3200 },
+  "blackboard": {
+    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
+    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
+    "pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
+    "entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
+    "map_entry_point": { "type": "rect", "public": true, "default": [850, 520, 0, 0] },
+    "retry_point": { "type": "rect", "public": true, "default": [1300, 760, 0, 0] },
+    "retry_confirm_texts": { "type": "array", "public": true, "default": ["是否再次挑战", "再次挑战"], "items": { "type": "string", "min_length": 1 } },
+    "retry_confirm_roi": { "type": "rect", "public": true, "default": [600, 350, 720, 380] },
+    "retry_confirm_point": { "type": "rect", "public": true, "default": [1135, 650, 0, 0] },
+    "retry_confirm_checkbox_point": { "type": "rect", "public": true, "default": [810, 540, 0, 0] },
+    "page_texts": { "type": "array", "public": true, "default": ["结界突破"], "items": { "type": "string", "min_length": 1 } },
+    "page_roi": { "type": "rect", "public": true, "default": [0, 0, 1920, 260] },
+    "battle_texts": { "type": "array", "public": true, "default": ["战斗", "退出", "点击屏幕继续"], "items": { "type": "string", "min_length": 1 } },
+    "victory_texts": { "type": "array", "public": true, "default": ["胜利", "结算", "奖励", "点击屏幕继续"], "items": { "type": "string", "min_length": 1 } },
+    "battle_roi": { "type": "rect", "public": true, "default": [0, 0, 1920, 1080] },
+    "settlement_point": { "type": "rect", "public": true, "default": [1760, 980, 0, 0] },
+    "target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } },
+    "attack_point": { "type": "rect", "public": true, "default": [1570, 580, 0, 0] },
+    "target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
+    "completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
+    "completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } },
+    "souls_courtyard_template": { "type": "asset", "public": true, "default": "assets/templates/souls/courtyard-explore/mumu-1.png" },
+    "leave_current_screen": { "type": "boolean", "public": true, "default": true }
+  },
+  "nodes": [
+    { "id": "root", "type": "root", "name": "御魂与结界突破调度", "children": ["enabled_gate"] },
+    { "id": "enabled_gate", "type": "selector", "name": "按实例开关决定是否检测结界券", "children": ["enabled_schedule", "disabled_schedule"] },
+    {
+      "id": "enabled_schedule", "type": "sequence", "name": "检测阈值并按需切换", "children": ["read_passes", "route"] ,
+      "decorators": [{ "type": "condition", "expression": { "eq": [{ "ref": "blackboard.enable_realm_raid" }, true] } }]
+    },
+    { "id": "disabled_schedule", "type": "task", "name": "实例未启用结界突破", "action": "core.log", "params": { "message": "当前实例未启用结界突破券检测，继续御魂" }, "decorators": [{ "type": "condition", "expression": { "eq": [{ "ref": "blackboard.enable_realm_raid" }, false] } }] },
+    { "id": "read_passes", "type": "task", "name": "读取结界突破券并比较阈值", "action": "realm.read_pass_count", "params": { "roi": { "ref": "blackboard.pass_roi" }, "minimum_passes": { "ref": "blackboard.realm_threshold" } } },
+    { "id": "route", "type": "switch", "name": "达到 30 张就进入结界突破", "expression": { "ref": "nodes.read_passes.output.mode" }, "cases": [{ "value": "run", "child": "run_realm" }, { "value": "skip", "child": "continue_souls" }], "children": ["run_realm", "continue_souls"] },
+    {
+      "id": "run_realm", "type": "task", "name": "停止御魂并执行结界突破", "action": "workflow.run",
+      "params": {
+        "workflow": "realm/shared/realm_raid_loop.json",
+        "inputs": {
+          "entry_point": { "ref": "blackboard.entry_point" },
+          "pass_roi": { "ref": "blackboard.pass_roi" },
+          "minimum_passes": 1,
+          "page_texts": { "ref": "blackboard.page_texts" },
+          "page_roi": { "ref": "blackboard.page_roi" },
+          "battle_texts": { "ref": "blackboard.battle_texts" },
+          "victory_texts": { "ref": "blackboard.victory_texts" },
+          "battle_roi": { "ref": "blackboard.battle_roi" },
+          "settlement_point": { "ref": "blackboard.settlement_point" },
+          "target_points": { "ref": "blackboard.target_points" },
+          "target_rois": { "ref": "blackboard.target_rois" },
+          "attack_point": { "ref": "blackboard.attack_point" },
+          "completed_texts": { "ref": "blackboard.completed_texts" },
+          "completed_templates": { "ref": "blackboard.completed_templates" },
+          "leave_current_screen": { "ref": "blackboard.leave_current_screen" },
+          "retry_point": { "ref": "blackboard.retry_point" },
+          "retry_confirm_texts": { "ref": "blackboard.retry_confirm_texts" },
+          "retry_confirm_roi": { "ref": "blackboard.retry_confirm_roi" },
+          "retry_confirm_point": { "ref": "blackboard.retry_confirm_point" },
+          "retry_confirm_checkbox_point": { "ref": "blackboard.retry_confirm_checkbox_point" },
+          "resume_souls": true,
+          "souls_courtyard_template": { "ref": "blackboard.souls_courtyard_template" }
+        }
+      }
+    },
+    { "id": "continue_souls", "type": "task", "name": "券未达到阈值，继续御魂", "action": "core.log", "params": { "message": "结界突破券未达到阈值，继续当前御魂流程" } }
+  ]
+}

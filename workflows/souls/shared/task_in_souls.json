@@ -1,233 +1,312 @@
 {
   "schema_version": 3,
   "id": "task_in_souls",
-  "version": "3.0.0",
-  "resolution": [
-    1920,
-    1080
-  ],
+  "version": "4.0.1",
+  "description": "将当前客户端从已知页面恢复到御魂副本挑战页。按挑战页、八岐大蛇页、探索地图、庭院四种状态依次判断，所有点击均基于刚刚确认的视觉结果。",
+  "resolution": [1920, 1080],
   "root": "root",
-  "limits": {
-    "timeout_seconds": 300,
-    "max_steps": 1000
+  "limits": {"timeout_seconds": 300, "max_steps": 100},
+  "blackboard": {
+    "courtyard_template": {
+      "type": "asset",
+      "public": true,
+      "default": "assets/templates/souls/courtyard-explore/mumu-0.png",
+      "description": "当前实例庭院中的探索入口模板"
+    }
   },
-  "blackboard": {},
   "nodes": [
     {
       "id": "root",
       "type": "root",
-      "children": [
-        "sequence_1"
-      ]
+      "name": "进入御魂挑战页",
+      "children": ["detect_current_page"]
     },
     {
-      "id": "selector_1",
+      "id": "detect_current_page",
       "type": "selector",
-      "children": [
-        "task_8",
-        "sequence_2"
-      ],
-      "name": "已经在御魂界面"
+      "name": "判断当前所在页面并选择恢复路径",
+      "children": ["already_on_challenge_page", "from_orochi_page", "from_explore_map", "from_courtyard"]
     },
     {
-      "id": "sequence_1",
-      "type": "sequence",
-      "children": [
-        "selector_1"
-      ]
-    },
-    {
-      "id": "sequence_2",
-      "type": "sequence",
-      "children": [
-        "selector_2",
-        "task_6",
-        "task_4",
-        "task_7"
-      ],
-      "name": "看到八岐大蛇卡片"
-    },
-    {
-      "id": "selector_2",
-      "type": "selector",
-      "children": [
-        "task_3",
-        "sequence_3"
-      ],
-      "name": "找到八岐大蛇卡片",
-      "decorators": []
-    },
-    {
-      "id": "task_3",
+      "id": "already_on_challenge_page",
       "type": "task",
+      "name": "已经在御魂挑战页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 2,
+        "roi": [1500, 720, 420, 360],
+        "threshold": 0.88,
+        "scale_search": false
+      },
+      "decorators": [{"type": "retry", "attempts": 2, "delay_seconds": 0.3}]
+    },
+    {
+      "id": "from_orochi_page",
+      "type": "sequence",
+      "name": "从八岐大蛇页进入御魂挑战",
+      "children": ["detect_orochi_card", "tap_orochi_card", "wait_challenge_after_orochi"]
+    },
+    {
+      "id": "detect_orochi_card",
+      "type": "task",
+      "name": "检测八岐大蛇副本卡片",
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/souls-orochi.png",
-        "roi": [
-          333,
-          98,
-          226,
-          619
-        ],
-        "timeout_seconds": 1
-      },
-      "name": "匹配八岐大蛇模板"
+        "timeout_seconds": 2,
+        "roi": [0, 80, 600, 850],
+        "threshold": 0.88,
+        "scale_search": false
+      }
     },
     {
-      "id": "task_4",
+      "id": "tap_orochi_card",
       "type": "task",
+      "name": "点击八岐大蛇副本卡片",
       "action": "input.tap_match",
       "params": {
-        "match": {
-          "ref": "nodes.task_6.output.0"
-        },
-        "random_offset": 5
-      },
-      "name": "点击八岐大蛇卡片"
-    },
-    {
-      "id": "sequence_3",
-      "type": "sequence",
-      "children": [
-        "task_2",
-        "task_5"
-      ],
-      "name": "在地图界面"
-    },
-    {
-      "id": "task_2",
-      "type": "task",
-      "action": "vision.wait_template",
-      "params": {
-        "template": "assets\\templates\\souls\\souls-yuhun.png",
-        "timeout_seconds": 1,
-        "roi": [
-          66,
-          924,
-          702,
-          154
-        ]
-      },
-      "name": "匹配御魂选项"
-    },
-    {
-      "id": "task_5",
-      "type": "task",
-      "action": "input.tap_match",
-      "params": {
-        "match": {
-          "ref": "nodes.task_2.output.0"
-        },
+        "match": {"ref": "nodes.detect_orochi_card.output.0"},
+        "revalidate": true,
         "random_offset": 5,
-        "hold_ms": 1
-      },
-      "name": "点击御魂选项"
+        "random_interval": [0.2, 0.6]
+      }
     },
     {
-      "id": "task_6",
+      "id": "wait_challenge_after_orochi",
       "type": "task",
+      "name": "确认八岐大蛇页已进入挑战页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-challenge.png",
+        "timeout_seconds": 20,
+        "roi": [1500, 720, 420, 360],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "from_explore_map",
+      "type": "sequence",
+      "name": "从探索地图进入御魂挑战",
+      "children": ["detect_souls_map_entry", "tap_souls_map_entry", "wait_orochi_after_map", "tap_orochi_after_map", "wait_challenge_after_map"]
+    },
+    {
+      "id": "detect_souls_map_entry",
+      "type": "task",
+      "name": "检测地图中的御魂入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-yuhun.png",
+        "timeout_seconds": 2,
+        "roi": [60, 880, 740, 200],
+        "threshold": 0.86,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_souls_map_entry",
+      "type": "task",
+      "name": "点击地图中的御魂入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.detect_souls_map_entry.output.0"},
+        "revalidate": true,
+        "hold_ms": 1,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_orochi_after_map",
+      "type": "task",
+      "name": "等待地图打开八岐大蛇页",
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/souls-orochi.png",
-        "timeout_seconds": 5,
-        "roi": [
-          123,
-          123,
-          407,
-          603
-        ],
-        "threshold": 0.9
-      },
-      "name": "匹配八岐大蛇卡片"
+        "timeout_seconds": 20,
+        "roi": [0, 80, 600, 850],
+        "threshold": 0.88,
+        "scale_search": false
+      }
     },
     {
-      "id": "task_7",
+      "id": "tap_orochi_after_map",
       "type": "task",
+      "name": "点击地图路径中的八岐大蛇",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_orochi_after_map.output.0"},
+        "revalidate": true,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_challenge_after_map",
+      "type": "task",
+      "name": "确认地图路径已进入挑战页",
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/souls-challenge.png",
-        "timeout_seconds": 5,
-        "roi": [
-          1343,
-          766,
-          577,
-          314
-        ],
-        "threshold": 0.9
-      },
-      "name": "看到御魂挑战"
+        "timeout_seconds": 20,
+        "roi": [1500, 720, 420, 360],
+        "threshold": 0.88,
+        "scale_search": false
+      }
     },
     {
-      "id": "task_8",
+      "id": "from_courtyard",
+      "type": "sequence",
+      "name": "从庭院进入御魂挑战",
+      "children": ["ensure_courtyard_entry", "detect_courtyard_for_tap", "tap_courtyard_explore", "wait_map_after_courtyard", "tap_map_after_courtyard", "wait_orochi_after_courtyard", "tap_orochi_after_courtyard", "wait_challenge_after_courtyard"]
+    },
+    {
+      "id": "ensure_courtyard_entry",
+      "type": "selector",
+      "name": "确认庭院探索入口可用",
+      "children": ["detect_courtyard_explore", "wake_courtyard_ui"]
+    },
+    {
+      "id": "detect_courtyard_explore",
       "type": "task",
+      "name": "检测庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {"ref": "blackboard.courtyard_template"},
+        "timeout_seconds": 5,
+        "roi": [0, 0, 1920, 500],
+        "threshold": 0.4,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "wake_courtyard_ui",
+      "type": "sequence",
+      "name": "唤醒隐藏的庭院界面后重试",
+      "children": ["tap_courtyard_wake", "detect_courtyard_after_wake"]
+    },
+    {
+      "id": "tap_courtyard_wake",
+      "type": "task",
+      "name": "点击庭院空白区域唤醒界面",
+      "action": "input.key",
+      "params": {
+        "keycode": "BACK"
+      }
+    },
+    {
+      "id": "detect_courtyard_after_wake",
+      "type": "task",
+      "name": "确认唤醒后的庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {"ref": "blackboard.courtyard_template"},
+        "timeout_seconds": 5,
+        "roi": [0, 0, 1920, 500],
+        "threshold": 0.4,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "detect_courtyard_for_tap",
+      "type": "task",
+      "name": "点击前再次确认庭院探索入口",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {"ref": "blackboard.courtyard_template"},
+        "timeout_seconds": 3,
+        "roi": [0, 0, 1920, 500],
+        "threshold": 0.4,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_courtyard_explore",
+      "type": "task",
+      "name": "点击庭院探索入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.detect_courtyard_for_tap.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_map_after_courtyard",
+      "type": "task",
+      "name": "等待庭院进入探索地图",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/map-souls.png",
+        "timeout_seconds": 20,
+        "roi": [100, 820, 340, 260],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_map_after_courtyard",
+      "type": "task",
+      "name": "点击探索地图中的御魂入口",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_map_after_courtyard.output.0"},
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_orochi_after_courtyard",
+      "type": "task",
+      "name": "等待庭院路径打开八岐大蛇页",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/souls-orochi.png",
+        "timeout_seconds": 20,
+        "roi": [0, 80, 600, 850],
+        "threshold": 0.88,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_orochi_after_courtyard",
+      "type": "task",
+      "name": "点击庭院路径中的八岐大蛇",
+      "action": "input.tap_match",
+      "params": {
+        "match": {"ref": "nodes.wait_orochi_after_courtyard.output.0"},
+        "revalidate": true,
+        "random_offset": 5,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_challenge_after_courtyard",
+      "type": "task",
+      "name": "确认庭院路径已进入挑战页",
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/souls-challenge.png",
-        "timeout_seconds": 1,
-        "roi": [
-          1343,
-          766,
-          577,
-          314
-        ],
-        "threshold": 0.9
-      },
-      "name": "看到御魂挑战"
+        "timeout_seconds": 20,
+        "roi": [1500, 720, 420, 360],
+        "threshold": 0.88,
+        "scale_search": false
+      }
     }
   ],
   "_layout": {
-    "root": {
-      "x": 643,
-      "y": 0
-    },
-    "selector_1": {
-      "x": 643,
-      "y": 416
-    },
-    "sequence_1": {
-      "x": 643,
-      "y": 208
-    },
-    "sequence_2": {
-      "x": 1287,
-      "y": 624
-    },
-    "selector_2": {
-      "x": 581,
-      "y": 832
-    },
-    "task_3": {
-      "x": 332,
-      "y": 1040
-    },
-    "task_4": {
-      "x": 1660,
-      "y": 832
-    },
-    "sequence_3": {
-      "x": 830,
-      "y": 1040
-    },
-    "task_2": {
-      "x": 664,
-      "y": 1248
-    },
-    "task_5": {
-      "x": 996,
-      "y": 1248
-    },
-    "task_6": {
-      "x": 1328,
-      "y": 832
-    },
-    "task_7": {
-      "x": 1992,
-      "y": 832
-    },
-    "task_8": {
-      "x": 0,
-      "y": 624
-    }
-  },
-  "description": "此task是专门负责进入御魂副本挑战按钮界面"
+    "root": {"x": 0, "y": 0},
+    "detect_current_page": {"x": 0, "y": 208},
+    "already_on_challenge_page": {"x": -664, "y": 416},
+    "from_orochi_page": {"x": 0, "y": 416},
+    "from_explore_map": {"x": 664, "y": 416},
+    "from_courtyard": {"x": 1328, "y": 416},
+    "ensure_courtyard_entry": {"x": 1328, "y": 624},
+    "wake_courtyard_ui": {"x": 1660, "y": 832},
+    "tap_courtyard_wake": {"x": 1660, "y": 1040},
+    "detect_courtyard_after_wake": {"x": 1992, "y": 1040}
+  }
 }

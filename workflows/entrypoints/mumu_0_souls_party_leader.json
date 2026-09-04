@@ -1,7 +1,8 @@
 {
   "schema_version": 3,
   "id": "mumu_0_souls_party_leader",
-  "version": "3.0.1",
+  "version": "4.0.0",
+  "description": "MuMu-0 队长入口：恢复页面、创建私密协战房间、邀请队员，并按运行轮次执行组队御魂。",
   "resolution": [
     1920,
     1080
@@ -33,7 +34,16 @@
       "public": true,
       "default": "assets/templates/souls/party/member-invite-target.png",
       "description": "好友邀请列表中的目标队友名字模板"
-    }
+    },
+    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
+    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
+    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
+    "realm_entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
+    "realm_target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } }
+    ,
+    "realm_target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
+    "realm_completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
+    "realm_completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } }
   },
   "nodes": [
     {
@@ -110,6 +120,7 @@
       "name": "进入悲鸣并创建仅邀请队伍",
       "children": [
         "enter_souls_floor",
+        "realm_scheduler",
         "wait_party_button",
         "tap_party_button",
         "wait_create_team",
@@ -163,12 +174,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-0.png",
         "timeout_seconds": 1,
         "roi": [
-          250,
-          100,
-          1000,
-          250
+          0,
+          0,
+          1920,
+          500
         ],
-        "threshold": 0.58,
+        "threshold": 0.4,
         "scale_search": false
       }
     },
@@ -190,12 +201,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-0.png",
         "timeout_seconds": 5,
         "roi": [
-          250,
-          100,
-          1000,
-          250
+          0,
+          0,
+          1920,
+          500
         ],
-        "threshold": 0.58,
+        "threshold": 0.4,
         "scale_search": false
       }
     },
@@ -208,12 +219,12 @@
         "template": "assets/templates/souls/courtyard-explore/mumu-0.png",
         "timeout_seconds": 5,
         "roi": [
-          250,
-          100,
-          1000,
-          250
+          0,
+          0,
+          1920,
+          500
         ],
-        "threshold": 0.58,
+        "threshold": 0.4,
         "scale_search": false
       }
     },
@@ -783,13 +794,37 @@
       ]
     },
     {
+      "id": "realm_scheduler",
+      "type": "task",
+      "name": "组队御魂启动前检查结界券",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "realm/shared/schedule_from_souls.json",
+        "inputs": {
+          "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
+          "realm_threshold": { "ref": "blackboard.realm_threshold" },
+          "pass_roi": { "ref": "blackboard.realm_pass_roi" },
+          "entry_point": { "ref": "blackboard.realm_entry_point" },
+          "target_points": { "ref": "blackboard.realm_target_points" },
+          "target_rois": { "ref": "blackboard.realm_target_rois" },
+          "completed_texts": { "ref": "blackboard.realm_completed_texts" },
+          "completed_templates": { "ref": "blackboard.realm_completed_templates" },
+          "leave_current_screen": false,
+          "souls_courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
+        }
+      }
+    },
+    {
       "id": "task_in_souls_1",
       "type": "task",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls/shared/task_in_souls.json"
+        "workflow": "souls/shared/task_in_souls.json",
+        "inputs": {
+          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
+        }
       },
-      "name": "进入御魂挑战界面"
+      "name": "优先使用统一多状态恢复流程"
     }
   ],
   "_layout": {

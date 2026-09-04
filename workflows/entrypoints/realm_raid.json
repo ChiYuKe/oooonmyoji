@@ -1,0 +1,42 @@
+{
+  "schema_version": 3,
+  "id": "realm_raid",
+  "version": "1.0.0",
+  "description": "单独运行结界突破；支持按实例覆盖入口坐标、券区域、九个目标坐标和 OCR 文本。",
+  "resolution": [1920, 1080],
+  "root": "root",
+  "limits": { "timeout_seconds": 7200, "max_steps": 3000 },
+  "blackboard": {
+    "entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
+    "map_entry_point": { "type": "rect", "public": true, "default": [850, 520, 0, 0] },
+    "pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
+    "page_texts": { "type": "array", "public": true, "default": ["结界突破"], "items": { "type": "string", "min_length": 1 } },
+    "page_roi": { "type": "rect", "public": true, "default": [0, 0, 1920, 260] },
+    "battle_texts": { "type": "array", "public": true, "default": ["战斗", "退出", "点击屏幕继续", "点击屏幕", "继续"], "items": { "type": "string", "min_length": 1 } },
+    "victory_texts": { "type": "array", "public": true, "default": ["胜利", "结算", "奖励", "获得", "点击屏幕继续", "点击屏幕", "继续"], "items": { "type": "string", "min_length": 1 } },
+    "settlement_template": { "type": "asset", "public": true, "default": "assets/templates/souls/souls-victory-continue.png" },
+    "settlement_roi": { "type": "rect", "public": true, "default": [650, 900, 650, 180] },
+    "battle_roi": { "type": "rect", "public": true, "default": [0, 0, 1920, 1080] },
+    "target_points": { "type": "array", "public": true, "default": [[450, 275, 0, 0], [960, 275, 0, 0], [1500, 275, 0, 0], [450, 475, 0, 0], [960, 475, 0, 0], [1500, 475, 0, 0], [450, 675, 0, 0], [960, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } },
+    "attack_points": { "type": "array", "public": true, "default": [[580, 580, 0, 0], [1080, 580, 0, 0], [1570, 580, 0, 0], [580, 780, 0, 0], [1080, 780, 0, 0], [1570, 780, 0, 0], [580, 950, 0, 0], [1080, 950, 0, 0], [1570, 950, 0, 0]], "items": { "type": "rect" } },
+    "prepare_point": { "type": "rect", "public": true, "default": [1780, 900, 0, 0] },
+    "exit_confirm_texts": { "type": "array", "public": true, "default": ["确认退出战斗吗", "确认退出战斗", "确认退出"], "items": { "type": "string", "min_length": 1 } },
+    "exit_confirm_roi": { "type": "rect", "public": true, "default": [600, 350, 720, 380] },
+    "exit_confirm_point": { "type": "rect", "public": true, "default": [1110, 635, 0, 0] },
+    "retry_point": { "type": "rect", "public": true, "default": [1300, 760, 0, 0] },
+    "retry_confirm_texts": { "type": "array", "public": true, "default": ["是否再次挑战", "再次挑战"], "items": { "type": "string", "min_length": 1 } },
+    "retry_confirm_roi": { "type": "rect", "public": true, "default": [600, 350, 720, 380] },
+    "retry_confirm_point": { "type": "rect", "public": true, "default": [1135, 650, 0, 0] },
+    "retry_confirm_checkbox_point": { "type": "rect", "public": true, "default": [810, 540, 0, 0] },
+    "attack_point": { "type": "rect", "public": true, "default": [1570, 580, 0, 0] },
+    "target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
+    "completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
+    "completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } },
+    "leave_current_screen": { "type": "boolean", "public": true, "default": true },
+    "souls_courtyard_template": { "type": "asset", "public": true, "default": "assets/templates/souls/courtyard-explore/mumu-1.png" }
+  },
+  "nodes": [
+    { "id": "root", "type": "root", "name": "单独运行结界突破", "children": ["run"] },
+    { "id": "run", "type": "task", "name": "执行结界突破直到券耗尽", "action": "workflow.run", "params": { "workflow": "realm/shared/realm_raid_loop.json", "inputs": { "entry_point": { "ref": "blackboard.entry_point" }, "map_entry_point": { "ref": "blackboard.map_entry_point" }, "pass_roi": { "ref": "blackboard.pass_roi" }, "page_texts": { "ref": "blackboard.page_texts" }, "page_roi": { "ref": "blackboard.page_roi" }, "battle_texts": { "ref": "blackboard.battle_texts" }, "victory_texts": { "ref": "blackboard.victory_texts" }, "settlement_template": { "ref": "blackboard.settlement_template" }, "settlement_roi": { "ref": "blackboard.settlement_roi" }, "battle_roi": { "ref": "blackboard.battle_roi" }, "target_points": { "ref": "blackboard.target_points" }, "target_rois": { "ref": "blackboard.target_rois" }, "completed_texts": { "ref": "blackboard.completed_texts" }, "completed_templates": { "ref": "blackboard.completed_templates" }, "attack_points": { "ref": "blackboard.attack_points" }, "prepare_point": { "ref": "blackboard.prepare_point" }, "exit_confirm_texts": { "ref": "blackboard.exit_confirm_texts" }, "exit_confirm_roi": { "ref": "blackboard.exit_confirm_roi" }, "exit_confirm_point": { "ref": "blackboard.exit_confirm_point" }, "retry_point": { "ref": "blackboard.retry_point" }, "retry_confirm_texts": { "ref": "blackboard.retry_confirm_texts" }, "retry_confirm_roi": { "ref": "blackboard.retry_confirm_roi" }, "retry_confirm_point": { "ref": "blackboard.retry_confirm_point" }, "retry_confirm_checkbox_point": { "ref": "blackboard.retry_confirm_checkbox_point" }, "leave_current_screen": { "ref": "blackboard.leave_current_screen" }, "resume_souls": false, "souls_courtyard_template": { "ref": "blackboard.souls_courtyard_template" } } } }
+  ]
+}

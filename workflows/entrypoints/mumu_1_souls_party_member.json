@@ -15,14 +15,29 @@
       "required": true,
       "default": 9999,
       "enum": [1, 9999]
-    }
+    },
+    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
+    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
+    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
+    "realm_entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
+    "realm_target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } }
+    ,
+    "realm_target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
+    "realm_completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
+    "realm_completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } }
   },
   "nodes": [
     {
       "id": "root",
       "type": "root",
       "name": "mumu1 御魂组队队员",
-      "children": ["battle_plan"]
+      "children": ["main"]
+    },
+    {
+      "id": "main",
+      "type": "sequence",
+      "name": "启动调度后执行组队御魂",
+      "children": ["realm_scheduler", "battle_plan"]
     },
     {
       "id": "battle_plan",
@@ -81,6 +96,28 @@
         {"type": "repeat", "count": 9998},
         {"type": "timeout", "seconds": 1209000}
       ]
+    }
+    ,
+    {
+      "id": "realm_scheduler",
+      "type": "task",
+      "name": "组队队员启动前检查结界券",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "realm/shared/schedule_from_souls.json",
+        "inputs": {
+          "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
+          "realm_threshold": { "ref": "blackboard.realm_threshold" },
+          "pass_roi": { "ref": "blackboard.realm_pass_roi" },
+          "entry_point": { "ref": "blackboard.realm_entry_point" },
+          "target_points": { "ref": "blackboard.realm_target_points" },
+          "target_rois": { "ref": "blackboard.realm_target_rois" },
+          "completed_texts": { "ref": "blackboard.realm_completed_texts" },
+          "completed_templates": { "ref": "blackboard.realm_completed_templates" },
+          "leave_current_screen": false,
+          "souls_courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png"
+        }
+      }
     }
   ]
 }

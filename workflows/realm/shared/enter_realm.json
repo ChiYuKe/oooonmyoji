@@ -1,0 +1,97 @@
+{
+  "schema_version": 3,
+  "id": "realm_enter",
+  "version": "1.0.0",
+  "description": "确认当前已在结界突破页；否则从配置的入口坐标进入并等待页面稳定。",
+  "resolution": [1920, 1080],
+  "root": "root",
+  "limits": { "timeout_seconds": 90, "max_steps": 40 },
+  "blackboard": {
+    "entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
+    "map_entry_point": { "type": "rect", "public": true, "default": [850, 520, 0, 0] },
+    "courtyard_template": { "type": "asset", "public": true, "default": "assets/templates/souls/courtyard-explore/mumu-0.png" },
+    "page_texts": {
+      "type": "array", "public": true, "default": ["结界突破"],
+      "items": { "type": "string", "min_length": 1 }
+    },
+    "page_roi": { "type": "rect", "public": true, "default": [0, 0, 1920, 260] },
+    "settlement_template": { "type": "asset", "public": true, "default": "assets/templates/souls/souls-victory-continue.png" },
+    "settlement_roi": { "type": "rect", "public": true, "default": [650, 900, 650, 180] },
+    "leave_current_screen": { "type": "boolean", "public": true, "default": false }
+  },
+  "nodes": [
+    { "id": "root", "type": "root", "name": "进入结界突破", "children": ["entry"] },
+    { "id": "entry", "type": "selector", "name": "清理残留结算并识别当前页面", "children": ["clear_stale_settlement", "already_on_page", "from_courtyard", "navigate_to_page"] },
+    {
+      "id": "clear_stale_settlement", "type": "sequence", "name": "清理上次战斗残留结算层", "children": ["detect_stale_settlement", "dismiss_stale_settlement"]
+    },
+    {
+      "id": "detect_stale_settlement", "type": "task", "name": "检测残留结算按钮", "action": "vision.wait_template",
+      "params": { "template": { "ref": "blackboard.settlement_template" }, "timeout_seconds": 1, "roi": { "ref": "blackboard.settlement_roi" }, "threshold": 0.86 }
+    },
+    {
+      "id": "dismiss_stale_settlement", "type": "task", "name": "点击结算按钮直到回到目标页", "action": "input.dismiss_template_until_text",
+      "params": { "match": { "ref": "nodes.detect_stale_settlement.output.0" }, "template": { "ref": "blackboard.settlement_template" }, "template_roi": { "ref": "blackboard.settlement_roi" }, "done_texts": { "ref": "blackboard.page_texts" }, "done_roi": { "ref": "blackboard.page_roi" }, "timeout_seconds": 15, "max_clicks": 4, "threshold": 0.86, "post_click_delay": 0.8, "stable_seconds": 0.5, "random_offset": 8, "random_interval": [0.2, 0.5] }
+    },
+    {
+      "id": "from_courtyard", "type": "sequence", "name": "从庭院经探索地图进入", "children": ["wait_courtyard", "tap_courtyard", "wait_map", "tap_map_realm", "wait_page_from_courtyard"]
+    },
+    {
+      "id": "wait_courtyard", "type": "task", "name": "检测庭院探索入口", "action": "vision.wait_template",
+      "params": { "template": { "ref": "blackboard.courtyard_template" }, "timeout_seconds": 5, "roi": [0, 0, 1920, 500], "threshold": 0.4 }
+    },
+    {
+      "id": "tap_courtyard", "type": "task", "name": "点击庭院探索入口", "action": "input.tap_match",
+      "params": { "match": { "ref": "nodes.wait_courtyard.output.0" }, "revalidate": true, "random_offset": 4, "random_interval": [0.2, 0.6] }
+    },
+    {
+      "id": "wait_map", "type": "task", "name": "等待探索地图出现", "action": "vision.wait_template",
+      "params": { "template": "assets/templates/souls/map-souls.png", "timeout_seconds": 20, "roi": [150, 850, 250, 230], "threshold": 0.88 }
+    },
+    {
+      "id": "tap_map_realm", "type": "task", "name": "点击地图结界突破入口", "action": "input.tap",
+      "params": { "x": { "ref": "blackboard.map_entry_point.0" }, "y": { "ref": "blackboard.map_entry_point.1" }, "random_offset": 4, "random_interval": [0.2, 0.6] }
+    },
+    {
+      "id": "wait_page_from_courtyard", "type": "task", "name": "确认庭院路径已进入结界突破页", "action": "vision.wait_any_text",
+      "params": { "texts": { "ref": "blackboard.page_texts" }, "timeout_seconds": 25, "roi": { "ref": "blackboard.page_roi" }, "min_confidence": 0.45 }
+    },
+    {
+      "id": "already_on_page", "type": "task", "name": "已经在结界突破页", "action": "vision.wait_any_text",
+      "params": {
+        "texts": { "ref": "blackboard.page_texts" },
+        "timeout_seconds": 1,
+        "roi": { "ref": "blackboard.page_roi" },
+        "min_confidence": 0.45
+      }
+    },
+    {
+      "id": "navigate_to_page", "type": "sequence", "name": "从当前页面进入结界突破", "children": ["leave_screen", "tap_entry", "wait_page"]
+    },
+    {
+      "id": "leave_screen", "type": "task", "name": "按需离开御魂或协战页面", "action": "input.key",
+      "params": { "keycode": "BACK" },
+      "decorators": [
+        { "type": "condition", "expression": { "eq": [{ "ref": "blackboard.leave_current_screen" }, true] } }
+      ]
+    },
+    {
+      "id": "tap_entry", "type": "task", "name": "点击结界突破入口", "action": "input.tap",
+      "params": {
+        "x": { "ref": "blackboard.entry_point.0" },
+        "y": { "ref": "blackboard.entry_point.1" },
+        "random_offset": 4,
+        "random_interval": [0.2, 0.6]
+      }
+    },
+    {
+      "id": "wait_page", "type": "task", "name": "等待结界突破页", "action": "vision.wait_any_text",
+      "params": {
+        "texts": { "ref": "blackboard.page_texts" },
+        "timeout_seconds": 25,
+        "roi": { "ref": "blackboard.page_roi" },
+        "min_confidence": 0.45
+      }
+    }
+  ]
+}

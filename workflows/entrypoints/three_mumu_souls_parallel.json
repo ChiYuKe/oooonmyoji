@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "three_mumu_souls_parallel",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "description": "同时启动三个 MuMu 实例：mumu-0 作为队长，mumu-1 作为队员，mumu-2 执行御魂循环",
   "resolution": [
     1920,
@@ -33,6 +33,100 @@
       "public": true,
       "default": "assets/templates/souls/party/member-invite-target.png",
       "description": "队长在好友邀请列表中定位目标队友的名字模板"
+    },
+    "enable_realm_raid": {
+      "type": "boolean",
+      "public": true,
+      "default": false
+    },
+    "realm_threshold": {
+      "type": "integer",
+      "public": true,
+      "default": 30,
+      "min": 1
+    },
+    "realm_pass_roi": {
+      "type": "rect",
+      "public": true,
+      "default": [
+        1450,
+        0,
+        470,
+        180
+      ]
+    },
+    "realm_entry_point": {
+      "type": "rect",
+      "public": true,
+      "default": [
+        450,
+        1000,
+        0,
+        0
+      ]
+    },
+    "realm_target_points": {
+      "type": "array",
+      "public": true,
+      "default": [
+        [
+          450,
+          380,
+          0,
+          0
+        ],
+        [
+          960,
+          380,
+          0,
+          0
+        ],
+        [
+          1470,
+          380,
+          0,
+          0
+        ],
+        [
+          450,
+          610,
+          0,
+          0
+        ],
+        [
+          960,
+          610,
+          0,
+          0
+        ],
+        [
+          1470,
+          610,
+          0,
+          0
+        ],
+        [
+          450,
+          840,
+          0,
+          0
+        ],
+        [
+          960,
+          840,
+          0,
+          0
+        ],
+        [
+          1470,
+          840,
+          0,
+          0
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
     }
   },
   "root": "root",
@@ -64,6 +158,21 @@
             },
             "invite_target_template": {
               "ref": "blackboard.invite_target_template"
+            },
+            "enable_realm_raid": {
+              "ref": "blackboard.enable_realm_raid"
+            },
+            "realm_threshold": {
+              "ref": "blackboard.realm_threshold"
+            },
+            "realm_pass_roi": {
+              "ref": "blackboard.realm_pass_roi"
+            },
+            "realm_entry_point": {
+              "ref": "blackboard.realm_entry_point"
+            },
+            "realm_target_points": {
+              "ref": "blackboard.realm_target_points"
             }
           }
         },
@@ -73,6 +182,21 @@
           "inputs": {
             "rounds": {
               "ref": "blackboard.rounds"
+            },
+            "enable_realm_raid": {
+              "ref": "blackboard.enable_realm_raid"
+            },
+            "realm_threshold": {
+              "ref": "blackboard.realm_threshold"
+            },
+            "realm_pass_roi": {
+              "ref": "blackboard.realm_pass_roi"
+            },
+            "realm_entry_point": {
+              "ref": "blackboard.realm_entry_point"
+            },
+            "realm_target_points": {
+              "ref": "blackboard.realm_target_points"
             }
           }
         }

@@ -139,6 +139,23 @@ def test_realm_progress_reports_completed_target_count() -> None:
     assert result.output["detected"] is True
 
 
+def test_realm_progress_target_limit_selects_only_next_incomplete_target() -> None:
+    context = OcrContext(["已击败"])
+    result = DetectRealmProgressAction().execute(
+        context,
+        {
+            "target_rois": [[0, 0, 100, 100]] * 3 + [[100, 0, 100, 100]] * 6,
+            "page_roi": [0, 0, 200, 100],
+            "completed_texts": ["已击败"],
+            "target_limit": 1,
+        },
+    )
+
+    assert result.status.value == "succeeded"
+    assert result.output["completed"][:3] == [True, True, True]
+    assert result.output["selected"] == [False, False, False, True, False, False, False, False, False]
+
+
 def test_realm_progress_fails_closed_with_schema_complete_output() -> None:
     class Disabled(OcrContext):
         def ocr(self, *, roi: object = None) -> list[object]:
@@ -156,6 +173,7 @@ def test_realm_progress_fails_closed_with_schema_complete_output() -> None:
     assert result.status.value == "succeeded"
     assert result.output["detected"] is False
     assert result.output["completed"] == [False] * 9
+    assert result.output["selected"] == [False] * 9
     assert result.output["evidence"] == [[] for _ in range(9)]
 
 
@@ -193,15 +211,15 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
             "eq": [{"ref": "blackboard.passes_available"}, True]
         }
         assert run["decorators"][0]["expression"] == {
-            "eq": [{"ref": f"nodes.detect_progress.output.completed.{index - 1}"}, False]
+            "eq": [{"ref": f"nodes.detect_progress.output.selected.{index - 1}"}, True]
         }
         assert skip["decorators"][0]["expression"] == {
-            "eq": [{"ref": f"nodes.detect_progress.output.completed.{index - 1}"}, True]
+            "eq": [{"ref": f"nodes.detect_progress.output.selected.{index - 1}"}, False]
         }
     assert nodes["target_9_reset"]["children"] == ["target_9_reset_run", "target_9_reset_skip"]
     assert nodes["target_9_final"]["children"] == ["target_9_final_run", "target_9_final_skip"]
     assert nodes["target_9_reset_run"]["decorators"][0]["expression"] == {
-        "eq": [{"ref": "nodes.detect_progress.output.completed.8"}, False]
+        "eq": [{"ref": "nodes.detect_progress.output.selected.8"}, True]
     }
     assert nodes["target_9_reset_run"]["children"][:4] == [
         "wait_target_page_9_initial", "read_passes_before_9a", "set_passes_before_9a", "tap_9"
@@ -238,8 +256,13 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
         assert settle["params"]["done_texts"] == {"ref": "blackboard.page_texts"}
     assert nodes["settle_9"]["params"]["match"] == {"ref": "nodes.wait_victory_9_final.output.0"}
     assert nodes["target_9_final_skip"]["decorators"][0]["expression"] == {
-        "eq": [{"ref": "nodes.detect_progress.output.completed.8"}, True]
+        "eq": [{"ref": "nodes.detect_progress.output.selected.8"}, False]
     }
+    assert workflow["blackboard"]["target_limit"]["default"] == 9
+    assert nodes["detect_progress"]["params"]["target_limit"] == {"ref": "blackboard.target_limit"}
     assert nodes["raid_until_empty"]["condition"] == {
-        "eq": [{"ref": "nodes.read_passes_after_page.output.mode"}, "skip"]
+        "or": [
+            {"eq": [{"ref": "nodes.read_passes_after_page.output.mode"}, "skip"]},
+            {"lt": [{"ref": "blackboard.target_limit"}, 9]},
+        ]
     }

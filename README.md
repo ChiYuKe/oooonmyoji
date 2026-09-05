@@ -71,6 +71,14 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999
 ```
 
+组队前让吃鱼检查结界突破券；达到 30 张时先清结界，清完后由扫地工重复邀请并恢复御魂：
+
+```powershell
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999 --enable-member-realm-raid --realm-threshold 30
+```
+
+该开关只传给队员实例（默认 `mumu-1`），队长实例不会执行结界突破。未指定开关时保持原有组队行为。
+
 `run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
 `config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
 参数可以是工作流 ID、JSON 文件名或 `workflows/` 下的相对路径（包含子目录）；需要覆盖输入时可传入 JSON 文件：

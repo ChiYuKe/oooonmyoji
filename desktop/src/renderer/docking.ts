@@ -13,6 +13,7 @@ import {
   type ITabRenderer,
   type PanelTransfer,
   type Position,
+  type PositionResolver,
   type TabPartInitParameters,
   positionToDirection,
 } from 'dockview';
@@ -68,8 +69,8 @@ export interface SharedPanelDockBridge {
   dispose(): void;
 }
 
-const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v7';
-const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v6';
+const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v8';
+const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v7';
 const SHARED_PANEL_SURFACE_KEYS: Record<SharedDockPanelId, string> = {
   contentBrowser: 'onmyoji-studio.content-browser-dock-surface',
   runtime: 'onmyoji-studio.runtime-dock-surface',
@@ -193,6 +194,12 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
 };
 
 const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow'];
+
+// Dropping over panel content means "join this tab group" everywhere. Layout
+// splits are created by the application defaults, not by ambiguous edge zones.
+const MERGE_ONLY_DROP_POSITION_RESOLVER: PositionResolver = {
+  resolve: ({ zones }) => zones.has('center') ? { position: 'center' } : null,
+};
 
 function readPersistedLayout(key: string): string | null {
   const stored = window.onmyoji.readLayout(key);
@@ -454,6 +461,8 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     popoutUrl: '/popout.html',
     floatingGroupDragHandle: 'titlebar',
     dndStrategy: 'auto',
+    dndEdges: false,
+    dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
     createRightHeaderActionComponent: () => new PopoutHeaderAction(),
     createComponent: () => new ExistingModuleRenderer(modules, moduleStore),
   });
@@ -612,6 +621,8 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     popoutUrl: '/popout.html',
     floatingGroupDragHandle: 'titlebar',
     dndStrategy: 'auto',
+    dndEdges: false,
+    dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
     createRightHeaderActionComponent: () => new PopoutHeaderAction((group) => !groupContainsWorkflow(group)),
     createTabComponent: ({ name }) => name === 'fixed-workbench' ? new FixedWorkbenchTab() : undefined,
     createComponent: () => new ExistingModuleRenderer(modules, moduleStore),

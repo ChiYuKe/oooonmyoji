@@ -8,14 +8,14 @@
   const DECO_H = 22;
   const PORT_R = 7;
   const RUN_CARD_W = 250;
-  const RUN_CARD_BASE_H = 84;
+  const RUN_CARD_BASE_H = 78;
   const RUN_VARIABLE_H = 24;
   const RUN_CARD_GAP_X = 48;
   const RUN_CARD_GAP_Y = 92;
-  const PREVIEW = { x: 154, y: 38, width: 92, height: 44 };
-  const VARIABLE_CARD_W = 150;
-  const VARIABLE_CARD_H = 54;
-  const VARIABLE_CARD_PORT_Y = 13;
+  const PREVIEW = { x: 164, y: 48, width: 82, height: 34 };
+  const VARIABLE_CARD_W = 168;
+  const VARIABLE_CARD_H = 58;
+  const VARIABLE_CARD_PORT_Y = 29;
   const VARIABLE_PIN_X = 10;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'];
@@ -950,29 +950,33 @@
     if (run && run.status) classes.push(`run-${run.status}`);
     const group = svgEl('g', { class: classes.join(' '), transform: `translate(${pos.x},${pos.y})`, 'data-id': node.id }, layer);
     group.dataset.id = node.id;
-    const body = svgEl('rect', { class: 'node-box', width: NODE_W, height, rx: 6 }, group);
-    const head = svgEl('rect', { class: 'node-head', width: NODE_W, height: 32, rx: 6 }, group);
-    const headSquare = svgEl('rect', { class: 'node-head-square', y: 26, width: NODE_W, height: 8 }, group);
-    svgEl('rect', { class: 'node-accent', width: 4, height, rx: 2 }, group);
-    svgEl('text', { class: 'node-icon', x: 13, y: 21 }, group).textContent = TYPE_ICON[node.type] || '•';
-    svgEl('text', { class: 'node-type', x: 34, y: 20 }, group).textContent = TYPE_LABEL[node.type] || node.type;
-    if (run && run.status) {
-      svgEl('rect', { class: 'run-badge', x: NODE_W - 72, y: 7, width: 62, height: 18, rx: 3 }, group);
-      svgEl('circle', { class: 'run-dot', cx: NODE_W - 63, cy: 16, r: 4 }, group);
-      svgEl('text', { class: 'run-label', x: NODE_W - 15, y: 20, 'text-anchor': 'end' }, group).textContent = RUN_LABEL[run.status] || run.status;
+    const body = svgEl('rect', { class: 'node-box', width: NODE_W, height, rx: 4 }, group);
+    const head = svgEl('rect', { class: 'node-head', x: 1, y: 3, width: NODE_W - 2, height: 36, rx: 3 }, group);
+    svgEl('rect', { class: 'node-accent', width: NODE_W, height: 3, rx: 2 }, group);
+    svgEl('line', { class: 'node-header-rule', x1: 1, y1: 39, x2: NODE_W - 1, y2: 39 }, group);
+    const iconPlate = svgEl('rect', { class: 'node-icon-plate', x: 10, y: 10, width: 22, height: 22, rx: 3 }, group);
+    svgEl('text', { class: 'node-icon', x: 21, y: 26, 'text-anchor': 'middle' }, group).textContent = TYPE_ICON[node.type] || '•';
+    const hasRunStatus = Boolean(run && run.status);
+    svgEl('text', { class: 'node-name', x: 41, y: 20 }, group).textContent = compactValue(node.name || node.id, hasRunStatus ? 10 : 16);
+    svgEl('text', { class: 'node-type', x: 41, y: 32 }, group).textContent = TYPE_LABEL[node.type] || node.type;
+    if (hasRunStatus) {
+      svgEl('rect', { class: 'run-badge', x: NODE_W - 76, y: 10, width: 66, height: 22, rx: 3 }, group);
+      svgEl('circle', { class: 'run-dot', cx: NODE_W - 65, cy: 21, r: 3.5 }, group);
+      svgEl('text', { class: 'run-label', x: NODE_W - 15, y: 25, 'text-anchor': 'end' }, group).textContent = RUN_LABEL[run.status] || run.status;
       const title = svgEl('title', {}, group);
       title.textContent = [RUN_LABEL[run.status] || run.status, run.error].filter(Boolean).join('：');
     }
-    svgEl('text', { class: 'node-name', x: 14, y: 53 }, group).textContent = node.name || node.id;
     const subtitle = node.type === 'task'
-      ? (subRef ? `⇢ ${subRef.split(/[\\/]/).pop()}` : (node.action || '未选择 Action'))
+      ? (subRef ? `↳ ${subRef.split(/[\\/]/).pop()}` : (node.action || '未选择 Action'))
       : compositeSubtitle(node);
-    svgEl('text', { class: 'node-subtitle', x: 14, y: 72 }, group).textContent = subtitle;
+    svgEl('text', { class: 'node-field-label', x: 14, y: 55 }, group).textContent = node.type === 'task' ? 'ACTION' : 'FLOW';
+    svgEl('text', { class: 'node-subtitle', x: 14, y: 71 }, group).textContent = compactValue(subtitle, template || (run && run.thumbnail) ? 13 : 22);
+    svgEl('text', { class: 'node-meta', x: 14, y: 87 }, group).textContent = compactValue(`ID  ${node.id}`, template || (run && run.thumbnail) ? 14 : 18);
     if (run && run.thumbnail) {
       const uri = run.thumbnail.startsWith('data:') ? run.thumbnail : `data:image/png;base64,${run.thumbnail}`;
       renderNodePreview(group, { uri, path: '' }, 'step-thumb', 'xMidYMid slice', run.screenshot || uri);
     } else if (template) renderNodePreview(group, template, 'template-thumb', 'xMidYMid meet');
-    else if (run && Number.isFinite(run.duration)) svgEl('text', { class: 'node-duration', x: NODE_W - 12, y: 72, 'text-anchor': 'end' }, group).textContent = `${run.duration} ms`;
+    else if (run && Number.isFinite(run.duration)) svgEl('text', { class: 'node-duration', x: NODE_W - 12, y: 87, 'text-anchor': 'end' }, group).textContent = `${run.duration} ms`;
     const pins = nodeVariablePins(node);
     const pinOffset = pins.length * RUN_VARIABLE_H;
     pins.forEach((pin, index) => {
@@ -1015,7 +1019,7 @@
       }
       startNodeDrag(event, node.id);
     };
-    [body, head, headSquare].forEach((surface) => surface.addEventListener('mousedown', handleNodeMouseDown));
+    [body, head, iconPlate].forEach((surface) => surface.addEventListener('mousedown', handleNodeMouseDown));
     if (subRef) {
       // 子流程节点右键菜单：直接进入子工作流视图
       body.addEventListener('contextmenu', (event) => {
@@ -1060,14 +1064,17 @@
       'data-run-key': card.key,
     }, layer);
     group.dataset.runKey = card.key;
-    const body = svgEl('rect', { class: 'instance-run-card-box', width: RUN_CARD_W, height: card.height, rx: 5 }, group);
-    svgEl('rect', { class: 'instance-run-card-head', width: RUN_CARD_W, height: 30, rx: 5 }, group);
-    svgEl('rect', { class: 'instance-run-card-head-square', y: 24, width: RUN_CARD_W, height: 8 }, group);
-    svgEl('text', { class: 'instance-run-card-icon', x: 13, y: 20 }, group).textContent = '▣';
-    svgEl('text', { class: 'instance-run-card-type', x: 34, y: 20 }, group).textContent = 'CHILD WORKFLOW';
-    svgEl('text', { class: 'instance-run-card-instance', x: 14, y: 51 }, group).textContent = card.run.instance || '未选择实例';
+    const body = svgEl('rect', { class: 'instance-run-card-box', width: RUN_CARD_W, height: card.height, rx: 4 }, group);
+    svgEl('rect', { class: 'instance-run-card-head', x: 1, y: 3, width: RUN_CARD_W - 2, height: 34, rx: 3 }, group);
+    svgEl('rect', { class: 'instance-run-card-accent', width: RUN_CARD_W, height: 3, rx: 2 }, group);
+    svgEl('line', { class: 'instance-run-card-header-rule', x1: 1, y1: 37, x2: RUN_CARD_W - 1, y2: 37 }, group);
+    svgEl('rect', { class: 'instance-run-card-icon-plate', x: 10, y: 9, width: 22, height: 22, rx: 3 }, group);
+    svgEl('text', { class: 'instance-run-card-icon', x: 21, y: 25, 'text-anchor': 'middle' }, group).textContent = '▣';
+    svgEl('text', { class: 'instance-run-card-instance', x: 41, y: 19 }, group).textContent = compactValue(card.run.instance || '未选择实例', 16);
+    svgEl('text', { class: 'instance-run-card-type', x: 41, y: 31 }, group).textContent = 'CHILD WORKFLOW';
     const workflowName = String(card.run.workflow || '未选择工作流').split(/[\\/]/).pop();
-    svgEl('text', { class: 'instance-run-card-workflow', x: 14, y: 69 }, group).textContent = compactValue(workflowName, 31);
+    svgEl('text', { class: 'instance-run-card-field-label', x: 14, y: 53 }, group).textContent = 'WORKFLOW';
+    svgEl('text', { class: 'instance-run-card-workflow', x: 14, y: 69 }, group).textContent = compactValue(workflowName, 22);
     card.variables.forEach((variable, variableIndex) => {
       const y = RUN_CARD_BASE_H + variableIndex * RUN_VARIABLE_H;
       svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: RUN_CARD_W, y2: y }, group);
@@ -1117,13 +1124,15 @@
       'data-variable': card.name,
     }, layer);
     group.dataset.variable = card.name;
-    const body = svgEl('rect', { class: 'variable-card-box', width: VARIABLE_CARD_W, height: VARIABLE_CARD_H, rx: 5 }, group);
-    svgEl('rect', { class: 'variable-card-head', width: VARIABLE_CARD_W, height: 26, rx: 5 }, group);
-    svgEl('rect', { class: 'variable-card-head-square', y: 20, width: VARIABLE_CARD_W, height: 7 }, group);
-    svgEl('circle', { class: `variable-card-dot type-${type}`, cx: 12, cy: VARIABLE_CARD_PORT_Y, r: 4.5 }, group);
-    svgEl('text', { class: 'variable-card-name', x: 22, y: 17 }, group).textContent = compactValue(card.name, 12);
-    svgEl('text', { class: 'variable-card-type', x: 12, y: 44 }, group).textContent = `${type}${definition.public !== false ? ' · 公开' : ' · 私有'}`;
-    svgEl('text', { class: 'variable-card-value', x: VARIABLE_CARD_W - 10, y: 44, 'text-anchor': 'end' }, group).textContent = variableValueSummary(definition);
+    const body = svgEl('rect', { class: 'variable-card-box', width: VARIABLE_CARD_W, height: VARIABLE_CARD_H, rx: 4 }, group);
+    svgEl('rect', { class: 'variable-card-head', x: 1, y: 3, width: VARIABLE_CARD_W - 2, height: 30, rx: 3 }, group);
+    svgEl('rect', { class: 'variable-card-accent', width: VARIABLE_CARD_W, height: 3, rx: 2 }, group);
+    svgEl('line', { class: 'variable-card-header-rule', x1: 1, y1: 33, x2: VARIABLE_CARD_W - 1, y2: 33 }, group);
+    svgEl('circle', { class: `variable-card-dot type-${type}`, cx: 15, cy: 18, r: 4.5 }, group);
+    svgEl('text', { class: 'variable-card-name', x: 28, y: 21 }, group).textContent = compactValue(card.name, 9);
+    svgEl('text', { class: 'variable-card-type', x: VARIABLE_CARD_W - 10, y: 20, 'text-anchor': 'end' }, group).textContent = String(type).toUpperCase();
+    svgEl('text', { class: 'variable-card-access', x: 12, y: 50 }, group).textContent = definition.public !== false ? 'PUBLIC' : 'PRIVATE';
+    svgEl('text', { class: 'variable-card-value', x: VARIABLE_CARD_W - 12, y: 50, 'text-anchor': 'end' }, group).textContent = variableValueSummary(definition);
     svgEl('circle', { class: `port port-variable-out type-${type}`, cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: PORT_R }, group);
     const port = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: 10, 'data-variable': card.name }, group);
     port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.name, card.id));
@@ -1151,7 +1160,7 @@
   }
 
   function variableValueSummary(definition) {
-    if (definition && Object.prototype.hasOwnProperty.call(definition, 'default')) return compactValue(definition.default, 13);
+    if (definition && Object.prototype.hasOwnProperty.call(definition, 'default')) return compactValue(definition.default, 10);
     if (definition && definition.required === true) return '必填';
     return '未设默认';
   }

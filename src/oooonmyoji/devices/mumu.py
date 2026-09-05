@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .adb import AdbDevice
 from ..exceptions import DeviceCaptureError, DeviceConnectionError, DeviceError, DeviceInputError
 
 
@@ -210,6 +211,8 @@ class MumuDevice:
         instance_index: int = 0,
         package: str | None = None,
         capture_timing: bool = False,
+        adb_serial: str | None = None,
+        adb_path: Path | str = "adb",
     ) -> None:
         if os.name != "nt":
             raise MumuDeviceError("MuMu native IPC is supported on Windows only")
@@ -222,6 +225,9 @@ class MumuDevice:
         self.instance_id = str(instance_index)
         self.package = package
         self.capture_timing = capture_timing
+        self.adb_serial = adb_serial
+        self.adb_path = adb_path
+        self._adb_input: AdbDevice | None = None
         self.last_capture_timing: CaptureTiming | None = None
         dll_path = find_renderer_dll(self.mumu_path)
         if dll_path is None:
@@ -420,7 +426,15 @@ class MumuDevice:
         raise DeviceInputError("MuMu native backend does not expose swipe input; use the ADB backend")
 
     def key(self, keycode: str) -> None:
-        raise DeviceInputError("MuMu native backend does not expose key input; use the ADB backend")
+        if not self.adb_serial:
+            raise DeviceInputError("MuMu native backend does not expose key input; configure adb_serial for key fallback")
+        if self._adb_input is None:
+            self._adb_input = AdbDevice(
+                self.adb_serial,
+                adb_path=self.adb_path,
+                instance_id=self.instance_id,
+            ).connect()
+        self._adb_input.key(keycode)
 
     def type_text(self, text: str) -> None:
         raise DeviceInputError("MuMu native backend does not expose text input; use the ADB backend")
@@ -436,6 +450,9 @@ class MumuDevice:
         return frame
 
     def close(self) -> None:
+        if self._adb_input is not None:
+            self._adb_input.close()
+            self._adb_input = None
         handle, self.handle = self.handle, 0
         if handle:
             try:

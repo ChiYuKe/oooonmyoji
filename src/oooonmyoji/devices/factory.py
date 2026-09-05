@@ -21,7 +21,13 @@ def create_backend(config: AppConfig, instance: InstanceConfig, *, backend_name:
         return AdbDevice(instance.adb_serial, adb_path=resolve_adb_path(config), instance_id=instance.id)
     if name != "mumu":
         raise DeviceConnectionError(f"unsupported device backend: {name}")
-    return MumuDevice(config.mumu_path, instance.mumu_index, instance.package)
+    return MumuDevice(
+        config.mumu_path,
+        instance.mumu_index,
+        instance.package,
+        adb_serial=instance.adb_serial,
+        adb_path=resolve_adb_path(config),
+    )
 
 
 def connect_at_task_boundary(

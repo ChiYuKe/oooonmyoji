@@ -13,7 +13,6 @@
   - `souls/shared/`：多个入口复用的进入副本、准备阵容、等待胜利和奖励统计流程。
   - `examples/`：用于开发验证的示例工作流。
 - `assets/templates/`：按功能和实例分组的游戏模板图。
-- `vscode-onmyoji-workflow/`：侧边栏控制、可视化编辑器和运行日志插件。
 - `config/`：示例配置和本机运行配置。
 - `plugins/actions/`：可选的可信本地 Action。
 - `tests/`：单元测试、集成测试和设备测试工具。

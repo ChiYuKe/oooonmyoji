@@ -54,10 +54,6 @@ try {
     Invoke-Checked "Python/TypeScript contract check" @("tests\contract_check.py")
 
     Invoke-Node-Checked "desktop TypeScript and renderer build" (Join-Path $repoRoot "desktop") @("run", "build")
-    Invoke-Node-Checked "VS Code TypeScript build" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("exec", "tsc", "-p", "tsconfig.json")
-    Invoke-Node-Checked "VS Code Node smoke" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("tests\smoke.js")
-    Invoke-Node-Checked "VS Code DOM smoke" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("tests\editor-dom-smoke.js")
-    Invoke-Node-Checked "VS Code run-log DOM smoke" (Join-Path $repoRoot "vscode-onmyoji-workflow") @("tests\run-log-dom-smoke.js")
 
     $oldRealOcr = $env:OOOONMYOJI_RUN_REAL_OCR
     $oldRealDevices = $env:OOOONMYOJI_RUN_REAL_DEVICES

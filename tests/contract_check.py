@@ -23,24 +23,18 @@ def _exported_values(source: str, name: str) -> tuple[str, ...]:
 
 def main() -> int:
     desktop = (PROJECT_ROOT / "desktop/src/main/core/workflow.ts").read_text(encoding="utf-8")
-    vscode = (PROJECT_ROOT / "vscode-onmyoji-workflow/src/workflow.ts").read_text(encoding="utf-8")
     checks = {
         "desktop NODE_TYPES": _exported_values(desktop, "NODE_TYPES") == tuple(NODE_TYPES),
-        "vscode NODE_TYPES": _exported_values(vscode, "NODE_TYPES") == tuple(NODE_TYPES),
         "desktop DECORATOR_TYPES": _exported_values(desktop, "DECORATOR_TYPES") == tuple(DECORATOR_TYPES),
-        "vscode DECORATOR_TYPES": _exported_values(vscode, "DECORATOR_TYPES") == tuple(DECORATOR_TYPES),
         "desktop PARALLEL_FINISH_MODES": _exported_values(desktop, "PARALLEL_FINISH_MODES") == tuple(PARALLEL_FINISH_MODES),
-        "vscode PARALLEL_FINISH_MODES": _exported_values(vscode, "PARALLEL_FINISH_MODES") == tuple(PARALLEL_FINISH_MODES),
         "desktop INSTANCE_PARALLEL_WAIT_MODES": _exported_values(desktop, "INSTANCE_PARALLEL_WAIT_MODES") == tuple(INSTANCE_PARALLEL_WAIT_MODES),
-        "vscode INSTANCE_PARALLEL_WAIT_MODES": _exported_values(vscode, "INSTANCE_PARALLEL_WAIT_MODES") == tuple(INSTANCE_PARALLEL_WAIT_MODES),
     }
     expected_statuses = {"queued", "running", "retrying", "succeeded", "failed", "cancelled", "interrupted"}
     checks["Python runtime statuses"] = {status.value for status in RunStatus} == expected_statuses
-    for path in (PROJECT_ROOT / "desktop/public/runtime-log/run-log.js", PROJECT_ROOT / "vscode-onmyoji-workflow/media/run-log.js"):
-        source = path.read_text(encoding="utf-8")
-        checks[f"status mapping {path.parent.parent.name}"] = all(
-            re.search(rf"\b{re.escape(status)}\s*:", source) for status in expected_statuses
-        )
+    source = (PROJECT_ROOT / "desktop/public/runtime-log/run-log.js").read_text(encoding="utf-8")
+    checks["status mapping desktop"] = all(
+        re.search(rf"\b{re.escape(status)}\s*:", source) for status in expected_statuses
+    )
     failures = [name for name, ok in checks.items() if not ok]
     for name, ok in checks.items():
         print(f"[{'OK' if ok else 'FAIL'}] {name}")

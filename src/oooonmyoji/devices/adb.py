@@ -31,9 +31,12 @@ class AdbDevice:
         self.connected = False
 
     def _run(self, *arguments: str, timeout: float | None = None, text: bool = True) -> subprocess.CompletedProcess:
+        return self._run_adb("-s", self.serial, *arguments, timeout=timeout, text=text)
+
+    def _run_adb(self, *arguments: str, timeout: float | None = None, text: bool = True) -> subprocess.CompletedProcess:
         try:
             return subprocess.run(
-                [self.adb_path, "-s", self.serial, *arguments],
+                [self.adb_path, *arguments],
                 check=False,
                 capture_output=True,
                 timeout=timeout or self.command_timeout,
@@ -44,6 +47,10 @@ class AdbDevice:
 
     def connect(self) -> "AdbDevice":
         result = self._run("get-state")
+        if result.returncode != 0 and re.fullmatch(r"(?:[^:\s]+|\[[^\]]+\]):\d+", self.serial):
+            connect_result = self._run_adb("connect", self.serial)
+            if connect_result.returncode == 0:
+                result = self._run("get-state")
         if result.returncode != 0 or result.stdout.strip() != "device":
             message = (result.stderr or result.stdout).strip() or "device is not online"
             raise DeviceConnectionError(f"ADB {self.serial} is unavailable: {message}")

@@ -12,6 +12,7 @@ import pytest
 from src.oooonmyoji.config import load_config
 from src.oooonmyoji.runtime.records import AtomicJsonStore
 from src.oooonmyoji.runtime.supervisor import Supervisor, _Group
+from src.oooonmyoji.devices.lock import InstanceLock
 from src.oooonmyoji.workflows.model import InstanceParallelRun, WorkflowNode, WorkflowSpec
 
 
@@ -272,6 +273,49 @@ def test_wait_for_all_timeout_requests_cancellation(monkeypatch: pytest.MonkeyPa
         supervisor.wait_for_all(["run-1", "run-2"], timeout_seconds=0)
 
     assert set(cancelled) == {"run-1", "run-2"}
+
+
+def test_startup_reconciles_only_unlocked_stale_runs_and_their_group(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+    runs_dir = artifact_dir / "runs"
+    unlocked_id = "workflow-unlocked"
+    locked_id = "workflow-locked"
+    AtomicJsonStore(runs_dir / f"{unlocked_id}.json").write({
+        "run_id": unlocked_id,
+        "instance_id": "mumu-0",
+        "status": "running",
+        "details": {},
+    })
+    AtomicJsonStore(runs_dir / f"{locked_id}.json").write({
+        "run_id": locked_id,
+        "instance_id": "mumu-1",
+        "status": "running",
+    })
+    AtomicJsonStore(runs_dir / "group-stale.json").write({
+        "group_id": "group-stale",
+        "status": "queued",
+        "run_ids": [unlocked_id],
+        "runs": [{"run_id": unlocked_id, "instance": "mumu-0", "status": "queued"}],
+    })
+    held_lock = InstanceLock(artifact_dir / "locks", "mumu-1")
+    held_lock.acquire()
+    supervisor = Supervisor.__new__(Supervisor)
+    supervisor.config = SimpleNamespace(artifact_dir=artifact_dir)
+    supervisor.logger = SimpleNamespace(emit=lambda *_args, **_kwargs: None)
+    try:
+        reconciled = supervisor._reconcile_stale_run_records(stale_after_seconds=0)
+    finally:
+        held_lock.release()
+
+    assert set(reconciled) == {unlocked_id, "group-stale"}
+    unlocked = AtomicJsonStore(runs_dir / f"{unlocked_id}.json").read()
+    locked = AtomicJsonStore(runs_dir / f"{locked_id}.json").read()
+    group = AtomicJsonStore(runs_dir / "group-stale.json").read()
+    assert unlocked["status"] == "interrupted"
+    assert unlocked["details"]["reconciled_at_startup"] is True
+    assert locked["status"] == "running"
+    assert group["status"] == "interrupted"
+    assert group["runs"][0]["status"] == "interrupted"
 
 
 @pytest.mark.skipif(

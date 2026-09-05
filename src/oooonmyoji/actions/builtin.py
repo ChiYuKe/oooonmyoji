@@ -157,14 +157,157 @@ class WaitAnyAction(Action):
             for template in templates:
                 matches = context.find_template(str(template), roi=arguments.get("roi"), threshold=threshold)
                 if matches:
+                    match = matches[0].to_dict()
+                    match["template"] = str(template)
+                    match["threshold"] = threshold
+                    if arguments.get("roi") is not None:
+                        match["roi"] = list(arguments["roi"])
                     return ActionResult.succeeded({
                         "template": str(template),
-                        "match": matches[0].to_dict(),
+                        "match": match,
                         "elapsed_seconds": round(float(arguments["timeout_seconds"]) - max(0.0, deadline - time.monotonic()), 6),
                     })
             if time.monotonic() >= deadline:
                 return ActionResult.failed("none of the templates matched before timeout", category="not_matched")
             time.sleep(0.1)
+
+
+def _state_candidates(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("states must be a non-empty array")
+    candidates: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for index, raw in enumerate(value):
+        if not isinstance(raw, dict):
+            raise ValueError(f"states[{index}] must be an object")
+        name = raw.get("name")
+        template = raw.get("template")
+        texts = raw.get("texts", [])
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"states[{index}].name must be a non-empty string")
+        if name in names:
+            raise ValueError(f"duplicate state name: {name}")
+        if template is not None and (not isinstance(template, str) or not template):
+            raise ValueError(f"states[{index}].template must be a non-empty string")
+        if not isinstance(texts, list) or not all(isinstance(text, str) and text for text in texts):
+            raise ValueError(f"states[{index}].texts must be an array of non-empty strings")
+        if template is None and not texts:
+            raise ValueError(f"states[{index}] requires template or texts")
+        threshold = float(raw.get("threshold", 0.85))
+        min_confidence = float(raw.get("min_confidence", 0.0))
+        if not 0.0 <= threshold <= 1.0 or not 0.0 <= min_confidence <= 1.0:
+            raise ValueError(f"states[{index}] confidence thresholds must be between 0 and 1")
+        names.add(name)
+        candidates.append(raw)
+    return candidates
+
+
+def _ocr_current(context: Any, roi: object) -> list[Any]:
+    method = getattr(context, "ocr_current", None)
+    if callable(method):
+        return method(roi=roi)
+    return context.ocr(roi=roi)
+
+
+def _ocr_match(item: Any) -> dict[str, Any]:
+    if hasattr(item, "to_dict"):
+        value = dict(item.to_dict())
+    else:
+        value = {
+            "text": str(getattr(item, "text", "")),
+            "confidence": round(float(getattr(item, "confidence", 0.0)), 6),
+        }
+    box = value.get("box")
+    if isinstance(box, list) and box:
+        points = [point for point in box if isinstance(point, list) and len(point) >= 2]
+        if points:
+            xs = [float(point[0]) for point in points]
+            ys = [float(point[1]) for point in points]
+            value["reference"] = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+    elif hasattr(item, "x") and hasattr(item, "y"):
+        value["reference"] = [float(item.x), float(item.y), 0.0, 0.0]
+    return value
+
+
+def _detect_state_current(context: Any, candidates: list[dict[str, Any]], *, allow_ocr: bool) -> dict[str, Any] | None:
+    template_hits: list[dict[str, Any]] = []
+    for candidate in candidates:
+        template = candidate.get("template")
+        if not isinstance(template, str):
+            continue
+        matches = context.find_template(
+            template,
+            roi=candidate.get("roi"),
+            threshold=float(candidate.get("threshold", 0.85)),
+            scale_search=bool(candidate.get("scale_search", False)),
+        )
+        if not matches:
+            continue
+        match = matches[0].to_dict()
+        match["template"] = template
+        match["threshold"] = float(candidate.get("threshold", 0.85))
+        if candidate.get("roi") is not None:
+            match["roi"] = list(candidate["roi"])
+        template_hits.append({
+            "state": candidate["name"],
+            "source": "template",
+            "confidence": float(match.get("confidence", 0.0)),
+            "match": match,
+        })
+    if template_hits:
+        return max(template_hits, key=lambda item: item["confidence"])
+    if not allow_ocr:
+        return None
+
+    ocr_cache: dict[tuple[int, ...] | None, list[Any]] = {}
+    for candidate in candidates:
+        texts = candidate.get("texts", [])
+        if not texts:
+            continue
+        roi_value = candidate.get("text_roi", candidate.get("roi"))
+        roi_key = tuple(int(value) for value in roi_value) if roi_value is not None else None
+        if roi_key not in ocr_cache:
+            ocr_cache[roi_key] = _ocr_current(context, roi_value)
+        minimum = float(candidate.get("min_confidence", 0.0))
+        for item in ocr_cache[roi_key]:
+            confidence = float(getattr(item, "confidence", 0.0))
+            text = str(getattr(item, "text", ""))
+            if confidence >= minimum and any(expected in text for expected in texts):
+                return {
+                    "state": candidate["name"],
+                    "source": "ocr",
+                    "confidence": confidence,
+                    "match": _ocr_match(item),
+                }
+    return None
+
+
+def _capture_state(context: Any, candidates: list[dict[str, Any]], *, allow_ocr: bool = True) -> dict[str, Any] | None:
+    context.check_cancelled()
+    context.capture()
+    return _detect_state_current(context, candidates, allow_ocr=allow_ocr)
+
+
+class DetectStateAction(Action):
+    """Recognize one of several independently configured states on one frame."""
+
+    name = "vision.detect_state"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        started = time.perf_counter()
+        try:
+            candidates = _state_candidates(arguments.get("states"))
+            detected = _capture_state(context, candidates, allow_ocr=bool(arguments.get("allow_ocr", True)))
+        except (RuntimeError, ValueError) as exc:
+            return ActionResult.failed(str(exc), category="vision")
+        elapsed = round(time.perf_counter() - started, 6)
+        if detected is None:
+            return ActionResult.failed(
+                "none of the configured states matched",
+                category="not_matched",
+                output={"state": "", "source": "none", "confidence": 0.0, "match": {}, "elapsed_seconds": elapsed},
+            )
+        return ActionResult.succeeded({**detected, "elapsed_seconds": elapsed})
 
 
 class TapAction(Action):
@@ -235,6 +378,36 @@ class TapMatchAction(Action):
             context.capture()
             matches = context.find_template(template, roi=match.get("roi"), threshold=float(match.get("threshold", 0.85)))
             if not matches:
+                disappeared_states = arguments.get("disappeared_states", [])
+                if disappeared_states:
+                    try:
+                        candidates = _state_candidates(disappeared_states)
+                    except ValueError as exc:
+                        return ActionResult.failed(str(exc), category="workflow")
+                    disappeared_timeout = float(arguments.get("disappeared_state_timeout_seconds", 0.0))
+                    if disappeared_timeout < 0:
+                        return ActionResult.failed("disappeared_state_timeout_seconds must be non-negative", category="workflow")
+                    disappeared_deadline = time.monotonic() + disappeared_timeout
+                    while True:
+                        detected = _detect_state_current(context, candidates, allow_ocr=False)
+                        if detected is not None:
+                            return ActionResult.succeeded({
+                                "origin_x": 0,
+                                "origin_y": 0,
+                                "x": 0,
+                                "y": 0,
+                                "offset_x": 0,
+                                "offset_y": 0,
+                                "interval_seconds": 0.0,
+                                "revalidated": True,
+                                "skipped": True,
+                                "final_state": detected["state"],
+                            })
+                        if time.monotonic() >= disappeared_deadline:
+                            break
+                        context.check_cancelled()
+                        time.sleep(min(0.1, max(0.0, disappeared_deadline - time.monotonic())))
+                        context.capture()
                 return ActionResult.failed("template match is no longer present", category="vision")
             selected = matches[0].to_dict()
         reference = selected.get("reference")
@@ -252,24 +425,32 @@ class TapMatchAction(Action):
             "offset_y": clicked_y - y,
             "interval_seconds": interval_seconds,
             "revalidated": bool(arguments.get("revalidate", True)),
+            "skipped": False,
+            "final_state": "",
         })
 
 
 class DismissTemplateUntilTextAction(Action):
-    """Click a recurring overlay prompt until the destination page is stable."""
+    """Click a recurring overlay until a configured template or text state is stable."""
 
     name = "input.dismiss_template_until_text"
 
     def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
         initial_match = arguments.get("match")
         template = arguments.get("template")
-        done_texts = arguments.get("done_texts")
+        done_texts = arguments.get("done_texts", [])
+        try:
+            done_states = _state_candidates(arguments["done_states"]) if arguments.get("done_states") else []
+        except ValueError as exc:
+            return ActionResult.failed(str(exc), category="workflow")
         if not isinstance(initial_match, dict):
             return ActionResult.failed("match must be an object", category="workflow")
         if not isinstance(template, str) or not template:
             return ActionResult.failed("template must be a non-empty string", category="workflow")
-        if not isinstance(done_texts, list) or not done_texts or not all(isinstance(item, str) and item for item in done_texts):
-            return ActionResult.failed("done_texts must be a non-empty array of strings", category="workflow")
+        if not isinstance(done_texts, list) or not all(isinstance(item, str) and item for item in done_texts):
+            return ActionResult.failed("done_texts must be an array of non-empty strings", category="workflow")
+        if not done_texts and not done_states:
+            return ActionResult.failed("done_texts or done_states must be configured", category="workflow")
 
         timeout = float(arguments.get("timeout_seconds", 30))
         max_clicks = int(arguments.get("max_clicks", 6))
@@ -324,8 +505,37 @@ class DismissTemplateUntilTextAction(Action):
                     selected = matches[0].to_dict()
                     break
 
+                if done_states:
+                    try:
+                        detected = _detect_state_current(
+                            context,
+                            done_states,
+                            allow_ocr=bool(arguments.get("allow_ocr", True)),
+                        )
+                    except RuntimeError as exc:
+                        return ActionResult.failed(str(exc), category="ocr", output={"clicks": clicks})
+                    if detected is not None:
+                        stable_deadline = min(deadline, time.monotonic() + stable_seconds)
+                        while time.monotonic() < stable_deadline:
+                            context.check_cancelled()
+                            time.sleep(min(0.1, stable_deadline - time.monotonic()))
+                        confirmed = _capture_state(
+                            context,
+                            done_states,
+                            allow_ocr=bool(arguments.get("allow_ocr", True)),
+                        )
+                        if confirmed is not None and confirmed["state"] == detected["state"]:
+                            return ActionResult.succeeded({
+                                "click_count": len(clicks),
+                                "clicks": clicks,
+                                "matched_text": "",
+                                "final_state": confirmed["state"],
+                                "source": confirmed["source"],
+                                "confidence": confirmed["confidence"],
+                            })
+
                 try:
-                    results = context.ocr(roi=arguments.get("done_roi"))
+                    results = _ocr_current(context, arguments.get("done_roi")) if done_texts else []
                 except RuntimeError as exc:
                     return ActionResult.failed(str(exc), category="ocr", output={"clicks": clicks})
                 matched = next((item for item in results if any(text in item.text for text in done_texts)), None)
@@ -349,10 +559,245 @@ class DismissTemplateUntilTextAction(Action):
                         "click_count": len(clicks),
                         "clicks": clicks,
                         "matched_text": matched.text,
+                        "final_state": "",
+                        "source": "ocr",
+                        "confidence": float(getattr(matched, "confidence", 0.0)),
                     })
                 time.sleep(0.1)
             else:
                 return ActionResult.failed("timed out dismissing template overlay", category="vision", output={"clicks": clicks})
+
+
+def _recovery_failure(context: Any, message: str, output: dict[str, Any], arguments: dict[str, Any]) -> ActionResult:
+    try:
+        frame = context.last_frame
+        if frame is None:
+            frame = context.capture()
+        saved = context.save_frame(frame, str(arguments.get("failure_frame_name", "recovery-failure.png")))
+        output["failure_frame"] = str(saved)
+    except Exception as exc:
+        output["failure_frame"] = ""
+        output["failure_frame_error"] = str(exc)
+    return ActionResult.failed(message, category="recovery", output=output)
+
+
+def _sleep_cancelled(context: Any, seconds: float, deadline: float) -> None:
+    end = min(deadline, time.monotonic() + max(0.0, seconds))
+    while time.monotonic() < end:
+        context.check_cancelled()
+        time.sleep(min(0.1, max(0.0, end - time.monotonic())))
+
+
+class RecoverStateAction(Action):
+    """Recover a known UI state using bounded, confirmed transitions."""
+
+    name = "input.recover_state"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        started = time.monotonic()
+        try:
+            states = _state_candidates(arguments.get("states"))
+        except ValueError as exc:
+            return ActionResult.failed(str(exc), category="workflow")
+        targets = arguments.get("target_states")
+        transitions = arguments.get("transitions")
+        overlay_states = arguments.get("overlay_states", [])
+        if not isinstance(targets, list) or not targets or not all(isinstance(item, str) and item for item in targets):
+            return ActionResult.failed("target_states must be a non-empty array of strings", category="workflow")
+        if not isinstance(transitions, list) or not all(isinstance(item, dict) for item in transitions):
+            return ActionResult.failed("transitions must be an array of objects", category="workflow")
+        if not isinstance(overlay_states, list) or not all(isinstance(item, str) and item for item in overlay_states):
+            return ActionResult.failed("overlay_states must be an array of strings", category="workflow")
+
+        state_names = {candidate["name"] for candidate in states}
+        if not set(targets).issubset(state_names) or not set(overlay_states).issubset(state_names):
+            return ActionResult.failed("target_states and overlay_states must reference configured states", category="workflow")
+        by_source: dict[str, dict[str, Any]] = {}
+        for index, transition in enumerate(transitions):
+            source = transition.get("from")
+            kind = transition.get("type")
+            if not isinstance(source, str) or source not in state_names:
+                return ActionResult.failed(f"transitions[{index}].from is not a configured state", category="workflow")
+            if source in by_source:
+                return ActionResult.failed(f"duplicate recovery transition for state: {source}", category="workflow")
+            if kind not in {"tap_match", "tap_template", "tap", "key"}:
+                return ActionResult.failed(f"transitions[{index}].type is invalid", category="workflow")
+            retry_unchanged = transition.get("retry_if_unchanged_seconds")
+            if retry_unchanged is not None and (
+                isinstance(retry_unchanged, bool)
+                or not isinstance(retry_unchanged, (int, float))
+                or float(retry_unchanged) < 0
+            ):
+                return ActionResult.failed(
+                    f"transitions[{index}].retry_if_unchanged_seconds must be non-negative",
+                    category="workflow",
+                )
+            by_source[source] = transition
+
+        timeout = float(arguments.get("timeout_seconds", 15.0))
+        confirm_timeout = float(arguments.get("confirm_timeout_seconds", 5.0))
+        poll_interval = float(arguments.get("poll_interval_seconds", 0.1))
+        post_action_delay = float(arguments.get("post_action_delay", 0.35))
+        max_returns = int(arguments.get("max_return_attempts", 3))
+        max_overlays = int(arguments.get("max_overlay_clicks", 6))
+        max_transitions = int(arguments.get("max_transitions", 12))
+        if min(timeout, confirm_timeout) <= 0 or poll_interval < 0 or post_action_delay < 0:
+            return ActionResult.failed("recovery timeouts and delays are invalid", category="workflow")
+        if min(max_returns, max_overlays, max_transitions) < 1:
+            return ActionResult.failed("recovery limits must be positive", category="workflow")
+
+        deadline = started + timeout
+        allow_ocr = bool(arguments.get("allow_ocr", True))
+        actions: list[dict[str, Any]] = []
+        return_attempts = 0
+        overlay_clicks = 0
+        transition_count = 0
+        initial_state_timeout = float(arguments.get("initial_state_timeout_seconds", 0.0))
+        if initial_state_timeout < 0:
+            return ActionResult.failed("initial_state_timeout_seconds must be non-negative", category="workflow")
+        initial_deadline = min(deadline, time.monotonic() + initial_state_timeout)
+        detected: dict[str, Any] | None = None
+        while True:
+            detected = _capture_state(context, states, allow_ocr=False)
+            if detected is not None or time.monotonic() >= initial_deadline:
+                break
+            _sleep_cancelled(context, poll_interval, initial_deadline)
+        if detected is None and allow_ocr:
+            detected = _detect_state_current(context, states, allow_ocr=True)
+        if detected is None:
+            return _recovery_failure(context, "current page is not a configured state", {
+                "state": "", "source": "none", "confidence": 0.0, "actions": actions,
+                "return_attempts": return_attempts, "overlay_clicks": overlay_clicks,
+                "elapsed_seconds": round(time.monotonic() - started, 6),
+            }, arguments)
+
+        while True:
+            context.check_cancelled()
+            state = str(detected["state"])
+            if state in targets:
+                return ActionResult.succeeded({
+                    **detected,
+                    "actions": actions,
+                    "return_attempts": return_attempts,
+                    "overlay_clicks": overlay_clicks,
+                    "elapsed_seconds": round(time.monotonic() - started, 6),
+                    "failure_frame": "",
+                })
+            transition = by_source.get(state)
+            if transition is None:
+                return _recovery_failure(context, f"no recovery transition is configured for state: {state}", {
+                    **detected, "actions": actions, "return_attempts": return_attempts,
+                    "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                }, arguments)
+            if transition_count >= max_transitions:
+                return _recovery_failure(context, f"recovery exceeded {max_transitions} confirmed transitions", {
+                    **detected, "actions": actions, "return_attempts": return_attempts,
+                    "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                }, arguments)
+
+            is_overlay = state in overlay_states
+            is_return = bool(transition.get("return_action", False))
+            if is_overlay and overlay_clicks >= max_overlays:
+                return _recovery_failure(context, f"overlay remained after {max_overlays} clicks", {
+                    **detected, "actions": actions, "return_attempts": return_attempts,
+                    "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                }, arguments)
+            if is_return and return_attempts >= max_returns:
+                return _recovery_failure(context, f"recovery exceeded {max_returns} return attempts", {
+                    **detected, "actions": actions, "return_attempts": return_attempts,
+                    "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                }, arguments)
+
+            kind = str(transition["type"])
+            action_record: dict[str, Any] = {"from": state, "type": kind}
+            if kind == "tap_match":
+                reference = detected.get("match", {}).get("reference")
+                if not isinstance(reference, list) or len(reference) != 4:
+                    return _recovery_failure(context, f"state {state} has no clickable match", {
+                        **detected, "actions": actions, "return_attempts": return_attempts,
+                        "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                    }, arguments)
+                x = int(round(float(reference[0]) + float(reference[2]) / 2))
+                y = int(round(float(reference[1]) + float(reference[3]) / 2))
+                clicked_x, clicked_y, interval = _tap_with_variation(context, x, y, arguments)
+                action_record.update({"x": clicked_x, "y": clicked_y, "interval_seconds": interval})
+            elif kind == "tap_template":
+                template = transition.get("template")
+                if not isinstance(template, str) or not template:
+                    return ActionResult.failed(f"transition for {state} requires template", category="workflow")
+                context.capture()
+                matches = context.find_template(
+                    template,
+                    roi=transition.get("roi"),
+                    threshold=float(transition.get("threshold", 0.85)),
+                    scale_search=bool(transition.get("scale_search", False)),
+                )
+                if not matches:
+                    return _recovery_failure(context, f"transition template is absent for state: {state}", {
+                        **detected, "actions": actions, "return_attempts": return_attempts,
+                        "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                    }, arguments)
+                reference = matches[0].to_dict()["reference"]
+                x = int(round(float(reference[0]) + float(reference[2]) / 2))
+                y = int(round(float(reference[1]) + float(reference[3]) / 2))
+                clicked_x, clicked_y, interval = _tap_with_variation(context, x, y, arguments)
+                action_record.update({"x": clicked_x, "y": clicked_y, "template": template, "interval_seconds": interval})
+            elif kind == "tap":
+                if isinstance(transition.get("x"), bool) or not isinstance(transition.get("x"), int):
+                    return ActionResult.failed(f"transition for {state} requires integer x/y", category="workflow")
+                if isinstance(transition.get("y"), bool) or not isinstance(transition.get("y"), int):
+                    return ActionResult.failed(f"transition for {state} requires integer x/y", category="workflow")
+                clicked_x, clicked_y, interval = _tap_with_variation(
+                    context, int(transition["x"]), int(transition["y"]), arguments,
+                )
+                action_record.update({"x": clicked_x, "y": clicked_y, "interval_seconds": interval})
+            else:
+                keycode = transition.get("keycode")
+                if not isinstance(keycode, str) or not keycode:
+                    return ActionResult.failed(f"transition for {state} requires keycode", category="workflow")
+                context.key(keycode)
+                action_record["keycode"] = keycode
+
+            transition_count += 1
+            if is_overlay:
+                overlay_clicks += 1
+            if is_return:
+                return_attempts += 1
+            actions.append(action_record)
+            _sleep_cancelled(context, post_action_delay, deadline)
+
+            confirmation_deadline = min(deadline, time.monotonic() + confirm_timeout)
+            confirmation_started = time.monotonic()
+            confirmed: dict[str, Any] | None = None
+            while time.monotonic() < confirmation_deadline:
+                # Actions commonly enter a short loading animation. Template-only
+                # polling keeps that transient state cheap and lets the next real
+                # page appear; OCR fallback is reserved for initial recognition.
+                confirmed = _capture_state(context, states, allow_ocr=False)
+                retry_unchanged = transition.get("retry_if_unchanged_seconds")
+                if (
+                    confirmed is not None
+                    and not is_overlay
+                    and confirmed["state"] == state
+                    and retry_unchanged is not None
+                    and time.monotonic() - confirmation_started >= float(retry_unchanged)
+                ):
+                    action_record["retry_reason"] = "state_unchanged"
+                    break
+                expected = transition.get("expected_states", [])
+                expected_ok = not expected or (isinstance(expected, list) and confirmed is not None and confirmed["state"] in expected)
+                changed = confirmed is not None and (is_overlay or confirmed["state"] != state)
+                if confirmed is not None and expected_ok and changed:
+                    break
+                confirmed = None
+                _sleep_cancelled(context, poll_interval, confirmation_deadline)
+            if confirmed is None:
+                return _recovery_failure(context, f"state did not change after recovery action from: {state}", {
+                    **detected, "actions": actions, "return_attempts": return_attempts,
+                    "overlay_clicks": overlay_clicks, "elapsed_seconds": round(time.monotonic() - started, 6),
+                }, arguments)
+            action_record["to"] = confirmed["state"]
+            detected = confirmed
 
 
 def _tap_with_variation(context: Any, x: int, y: int, arguments: dict[str, Any]) -> tuple[int, int, float]:
@@ -680,8 +1125,11 @@ class DetectRealmProgressAction(Action):
         if not isinstance(templates, list) or not all(isinstance(item, str) and item for item in templates):
             return ActionResult.failed("completed_templates must be an array of assets", category="workflow")
         min_confidence = float(arguments.get("min_confidence", 0.45))
+        target_limit = int(arguments.get("target_limit", 9))
         if not 0.0 <= min_confidence <= 1.0:
             return ActionResult.failed("min_confidence must be between 0 and 1", category="workflow")
+        if not 1 <= target_limit <= 9:
+            return ActionResult.failed("target_limit must be between 1 and 9", category="workflow")
         # The page title ROI only covers the header.  Scan the union of all
         # target cards instead so completion stamps at the card's right edge
         # are visible, while retaining the caller's per-card ROIs for matching.
@@ -697,12 +1145,13 @@ class DetectRealmProgressAction(Action):
             scan_roi = [max(0, min_x - padding), max(0, min_y - padding), max_x - min_x + padding * 2, max_y - min_y + padding * 2]
         try:
             context.capture()
-            ocr_items = context.ocr(roi=scan_roi)
+            ocr_items = _ocr_current(context, scan_roi)
         except RuntimeError as exc:
             context.log("realm.progress_unavailable", error=str(exc))
             return ActionResult.succeeded({
                 "detected": False,
                 "completed": [False] * 9,
+                "selected": [False] * 9,
                 "completed_count": 0,
                 "next_index": 1,
                 "source": "unavailable",
@@ -730,9 +1179,16 @@ class DetectRealmProgressAction(Action):
                     continue
         completed_count = sum(completed)
         next_index = next((index + 1 for index, value in enumerate(completed) if not value), 9)
+        selected = [False] * 9
+        remaining = target_limit
+        for index, is_completed in enumerate(completed):
+            if not is_completed and remaining > 0:
+                selected[index] = True
+                remaining -= 1
         return ActionResult.succeeded({
             "detected": any(completed),
             "completed": completed,
+            "selected": selected,
             "completed_count": completed_count,
             "next_index": next_index,
             "source": "ocr_or_template",
@@ -749,6 +1205,7 @@ class DetectRealmProgressAction(Action):
 __all__ = [
     "AssertAction",
     "CaptureAction",
+    "DetectStateAction",
     "EnqueueRewardStatsAction",
     "LogAction",
     "MatchTemplateAction",
@@ -766,4 +1223,5 @@ __all__ = [
     "ReadRealmPassCountAction",
     "DetectRealmProgressAction",
     "DismissTemplateUntilTextAction",
+    "RecoverStateAction",
 ]

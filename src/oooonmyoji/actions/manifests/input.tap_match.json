@@ -15,6 +15,26 @@
       "default": true,
       "description": "点击前重新截图验证匹配是否仍在，默认 true"
     },
+    "disappeared_states": {
+      "type": "array",
+      "default": [],
+      "description": "复核时原模板已消失后允许确认的下一状态；命中时不点击并返回成功",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "required": true, "min_length": 1 },
+          "template": { "type": "asset" },
+          "roi": { "type": "rect" },
+          "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 }
+        }
+      }
+    },
+    "disappeared_state_timeout_seconds": {
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "description": "原模板消失后等待允许下一状态的最长时间"
+    },
     "hold_ms": {
       "type": "integer",
       "default": 0,
@@ -46,7 +66,9 @@
       "offset_x": { "type": "integer" },
       "offset_y": { "type": "integer" },
       "interval_seconds": { "type": "number" },
-      "revalidated": { "type": "boolean" }
+      "revalidated": { "type": "boolean" },
+      "skipped": { "type": "boolean" },
+      "final_state": { "type": "string" }
     },
     "additionalProperties": false
   },

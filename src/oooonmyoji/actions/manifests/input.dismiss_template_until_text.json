@@ -8,8 +8,26 @@
     "match": { "type": "object", "required": true },
     "template": { "type": "asset", "required": true },
     "template_roi": { "type": "rect" },
-    "done_texts": { "type": "array", "required": true, "min_items": 1, "items": { "type": "string", "min_length": 1 } },
+    "done_texts": { "type": "array", "default": [], "items": { "type": "string", "min_length": 1 } },
     "done_roi": { "type": "rect" },
+    "done_states": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "required": true, "min_length": 1 },
+          "template": { "type": "asset" },
+          "roi": { "type": "rect" },
+          "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 },
+          "scale_search": { "type": "boolean", "default": false },
+          "texts": { "type": "array", "items": { "type": "string", "min_length": 1 }, "default": [] },
+          "text_roi": { "type": "rect" },
+          "min_confidence": { "type": "number", "default": 0, "min": 0, "max": 1 }
+        }
+      }
+    },
+    "allow_ocr": { "type": "boolean", "default": true },
     "timeout_seconds": { "type": "number", "default": 30, "min": 0.1 },
     "max_clicks": { "type": "integer", "default": 6, "min": 1 },
     "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 },
@@ -24,7 +42,10 @@
     "properties": {
       "click_count": { "type": "integer" },
       "clicks": { "type": "array", "items": { "type": "object" } },
-      "matched_text": { "type": "string" }
+      "matched_text": { "type": "string" },
+      "final_state": { "type": "string" },
+      "source": { "type": "string" },
+      "confidence": { "type": "number" }
     },
     "additionalProperties": false
   },

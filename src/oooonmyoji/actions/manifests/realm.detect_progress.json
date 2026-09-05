@@ -9,19 +9,21 @@
     "page_roi": { "type": "rect", "required": true },
     "completed_texts": { "type": "array", "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
     "completed_templates": { "type": "array", "default": [], "items": { "type": "asset", "min_length": 1 } },
-    "min_confidence": { "type": "number", "default": 0.45, "min": 0, "max": 1 }
+    "min_confidence": { "type": "number", "default": 0.45, "min": 0, "max": 1 },
+    "target_limit": { "type": "integer", "default": 9, "min": 1, "max": 9 }
   },
   "outputs": {
     "type": "object",
     "properties": {
       "detected": { "type": "boolean" },
       "completed": { "type": "array", "items": { "type": "boolean" }, "minItems": 9, "maxItems": 9 },
+      "selected": { "type": "array", "items": { "type": "boolean" }, "minItems": 9, "maxItems": 9 },
       "completed_count": { "type": "integer" },
       "next_index": { "type": "integer", "minimum": 1, "maximum": 9 },
       "source": { "type": "string" },
       "evidence": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } }
     },
-    "required": ["detected", "completed", "completed_count", "next_index", "source", "evidence"],
+    "required": ["detected", "completed", "selected", "completed_count", "next_index", "source", "evidence"],
     "additionalProperties": false
   },
   "effects": { "side_effect": false, "retry": "safe" }

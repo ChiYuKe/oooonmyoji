@@ -119,10 +119,25 @@ class TaskContextImpl:
         before the preceding tap/key action, so every OCR request must capture
         the current device state first.
         """
+        return self._ocr_frame(self.capture(), roi=roi)
+
+    def ocr_current(self, *, roi: Sequence[int] | None = None) -> list[OcrResult]:
+        """Recognize text on the latest capture without capturing again.
+
+        Multi-state detection uses this method only after all template candidates
+        miss, so template matching and the OCR fallback describe one screen.
+        """
+
+        self.check_cancelled()
+        frame = self.last_frame
+        if frame is None:
+            frame = self.capture()
+        return self._ocr_frame(frame, roi=roi)
+
+    def _ocr_frame(self, frame: DeviceFrame, *, roi: Sequence[int] | None = None) -> list[OcrResult]:
         self.check_cancelled()
         if self.ocr_engine is None:
             raise RuntimeError("OCR is disabled or unavailable")
-        frame = self.capture()
         actual_roi = None
         if roi is not None:
             actual_roi = self.mapper.rect(Rect(*tuple(int(value) for value in roi))).as_tuple()

@@ -27,3 +27,5 @@ desktop/release/
 
 # Stray artifacts from scripts with unexpanded %SystemDrive% env var
 desktop/%SystemDrive%/
+/%SystemDrive%/
+.workbuddy-ai/

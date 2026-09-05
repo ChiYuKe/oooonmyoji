@@ -21,7 +21,7 @@ class BehaviorDecorator:
     seconds: float | None = None
     attempts: int = 1
     delay_seconds: float = 0.0
-    count: int = 1
+    count: Any = 1
     reset_on_failure: bool = False
 
 

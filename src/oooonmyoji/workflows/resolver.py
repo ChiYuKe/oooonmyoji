@@ -15,14 +15,18 @@ def is_binding(value: Any) -> bool:
 
 
 class ReferenceResolver:
-    def __init__(self, blackboard: dict[str, Any], outputs: dict[str, Any]) -> None:
+    def __init__(self, blackboard: dict[str, Any], outputs: dict[str, Any], runtime: dict[str, Any] | None = None) -> None:
         self.blackboard = blackboard
         self.outputs = outputs
+        self.runtime = runtime or {}
 
     def reference(self, value: str, *, default: Any = _NO_DEFAULT) -> Any:
         parts = value.split(".")
         if len(parts) >= 2 and parts[0] == "blackboard" and all(parts[1:]):
             current: Any = self.blackboard
+            path = parts[1:]
+        elif len(parts) >= 2 and parts[0] == "runtime" and all(parts[1:]):
+            current = self.runtime
             path = parts[1:]
         elif len(parts) >= 4 and parts[0] == "nodes" and parts[2] == "output" and all(parts[1:]):
             current = self.outputs

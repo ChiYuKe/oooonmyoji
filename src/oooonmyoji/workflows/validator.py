@@ -24,6 +24,11 @@ from .model import (
 from .resolver import is_binding
 
 CONDITION_OPERATORS = {"exists", "eq", "ne", "gt", "gte", "lt", "lte", "contains", "and", "or", "not"}
+RUNTIME_REFERENCE_SCHEMAS = {
+    "runtime.repeat.index": {"type": "integer"},
+    "runtime.repeat.count": {"type": "integer"},
+    "runtime.repeat.final": {"type": "boolean"},
+}
 OPTIONAL_DECORATOR_FIELDS = {"retry": {"delay_seconds"}, "do_once": {"reset_on_failure"}}
 _BINDING_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -89,7 +94,12 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                                 "seconds": {"type": "number", "exclusiveMinimum": 0},
                                 "attempts": {"type": "integer", "minimum": 1},
                                 "delay_seconds": {"type": "number", "minimum": 0},
-                                "count": {"type": "integer", "minimum": 1},
+                                "count": {
+                                    "anyOf": [
+                                        {"type": "integer", "minimum": 1},
+                                        deepcopy(_BINDING_SCHEMA),
+                                    ]
+                                },
                                 "reset_on_failure": {"type": "boolean"},
                             },
                             "additionalProperties": False,
@@ -331,6 +341,9 @@ def _ref_schema(
     path: str,
 ) -> dict[str, Any]:
     parts = value.split(".")
+    runtime_schema = RUNTIME_REFERENCE_SCHEMAS.get(value)
+    if runtime_schema is not None:
+        return runtime_schema
     if len(parts) >= 2 and parts[0] == "blackboard" and all(parts[1:]):
         resolved = _schema_at_path(blackboard_schema, parts[1:])
         if resolved is not None:
@@ -486,6 +499,18 @@ def _parse_decorators(
             parsed.append(BehaviorDecorator(type=kind, attempts=int(item["attempts"]), delay_seconds=float(item.get("delay_seconds", 0.0))))
         elif kind == "do_once":
             parsed.append(BehaviorDecorator(type=kind, reset_on_failure=bool(item.get("reset_on_failure", False))))
+        elif kind == "repeat":
+            _validate_value(
+                item["count"],
+                node_ids=node_ids,
+                blackboard_schema=blackboard_schema,
+                output_schemas=output_schemas,
+                available_node_ids=available_node_ids,
+                possibly_available_node_ids=possibly_available_node_ids,
+                path=f"{path}.count",
+                expected_schema={"type": "integer"},
+            )
+            parsed.append(BehaviorDecorator(type=kind, count=item["count"]))
         else:
             parsed.append(BehaviorDecorator(type=kind, count=int(item["count"])))
     return tuple(parsed)

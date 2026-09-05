@@ -89,6 +89,7 @@ class WorkflowEngine:
         self._steps = 0
         self._cooldowns: dict[str, float] = {}
         self._done_once: set[str] = set()
+        self._runtime_local = threading.local()
         self._workflow_deadline = 0.0
         self._current_step: str | None = None
 
@@ -130,6 +131,19 @@ class WorkflowEngine:
             requires_worker_restart=self.requires_worker_restart,
         )
 
+    def _repeat_stack(self) -> list[dict[str, Any]]:
+        stack = getattr(self._runtime_local, "repeat_stack", None)
+        if stack is None:
+            stack = []
+            self._runtime_local.repeat_stack = stack
+        return stack
+
+    def _resolver(self) -> ReferenceResolver:
+        stack = self._repeat_stack()
+        runtime = {"repeat": dict(stack[-1])} if stack else {}
+        with self._lock:
+            return ReferenceResolver(self.blackboard, dict(self.outputs), runtime)
+
     def _run_node(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         self._ensure_running(deadline, branch_cancel)
         with self._lock:
@@ -147,7 +161,7 @@ class WorkflowEngine:
                 continue
             try:
                 with self._lock:
-                    resolver = ReferenceResolver(self.blackboard, dict(self.outputs))
+                    resolver = self._resolver()
                 allowed = resolver.condition(decorator.expression)
             except Exception as exc:
                 outcome = _Outcome(ActionStatus.FAILED, error=f"condition decorator failed: {exc}", category="condition")
@@ -181,21 +195,43 @@ class WorkflowEngine:
         retry = self._decorator(node, "retry")
         repeat = self._decorator(node, "repeat")
         attempts = retry.attempts if retry is not None else 1
-        repeat_count = repeat.count if repeat is not None else 1
+        repeat_count = 1
+        if repeat is not None:
+            try:
+                with self._lock:
+                    resolved_count = self._resolver().value(repeat.count)
+                if isinstance(resolved_count, bool) or not isinstance(resolved_count, int) or resolved_count < 1:
+                    raise ValueError("repeat count must resolve to a positive integer")
+                repeat_count = resolved_count
+            except Exception as exc:
+                outcome = _Outcome(ActionStatus.FAILED, error=f"repeat decorator failed: {exc}", category="workflow")
+                self._record_node(node, outcome, started_perf, started_at, decorator="repeat")
+                return outcome
         outcome = _Outcome(ActionStatus.FAILED, error="node did not execute", category="workflow")
         attempts_used = 0
         repeats_used = 0
         try:
             for repeat_index in range(repeat_count):
                 repeats_used = repeat_index + 1
-                for attempt in range(1, attempts + 1):
-                    attempts_used += 1
-                    self._ensure_running(node_deadline, branch_cancel)
-                    outcome = self._run_core(node, node_deadline, branch_cancel)
-                    if outcome.status != ActionStatus.FAILED or outcome.fatal:
-                        break
-                    if attempt < attempts and retry is not None and retry.delay_seconds:
-                        self._sleep(retry.delay_seconds, node_deadline, branch_cancel)
+                repeat_stack = self._repeat_stack()
+                if repeat is not None:
+                    repeat_stack.append({
+                        "index": repeat_index + 1,
+                        "count": repeat_count,
+                        "final": repeat_index + 1 == repeat_count,
+                    })
+                try:
+                    for attempt in range(1, attempts + 1):
+                        attempts_used += 1
+                        self._ensure_running(node_deadline, branch_cancel)
+                        outcome = self._run_core(node, node_deadline, branch_cancel)
+                        if outcome.status != ActionStatus.FAILED or outcome.fatal:
+                            break
+                        if attempt < attempts and retry is not None and retry.delay_seconds:
+                            self._sleep(retry.delay_seconds, node_deadline, branch_cancel)
+                finally:
+                    if repeat is not None:
+                        repeat_stack.pop()
                 if outcome.status != ActionStatus.SUCCEEDED:
                     break
         except _ExecutionLimit:
@@ -263,20 +299,20 @@ class WorkflowEngine:
                 if result.status != ActionStatus.SUCCEEDED:
                     return result
                 with self._lock:
-                    allowed = ReferenceResolver(self.blackboard, dict(self.outputs)).condition(node.condition)
+                    allowed = self._resolver().condition(node.condition)
                 if allowed:
                     return result
             return _Outcome(ActionStatus.FAILED, error=f"repeat_until exceeded {node.max_iterations} iterations", category="workflow_limit")
         if node.type == "branch":
             for condition, child_id in zip(node.conditions, node.children):
                 with self._lock:
-                    allowed = ReferenceResolver(self.blackboard, dict(self.outputs)).condition(condition)
+                    allowed = self._resolver().condition(condition)
                 if allowed:
                     return self._run_node(child_id, deadline, branch_cancel)
             return _Outcome(ActionStatus.FAILED, error="no branch condition matched", category="condition")
         if node.type == "switch":
             with self._lock:
-                value = ReferenceResolver(self.blackboard, dict(self.outputs)).value(node.expression)
+                value = self._resolver().value(node.expression)
             for case_value, child_id in node.cases:
                 if value == case_value:
                     return self._run_node(child_id, deadline, branch_cancel)
@@ -290,11 +326,16 @@ class WorkflowEngine:
         outcomes: list[_Outcome | None] = [None] * len(node.children)
         threads: list[threading.Thread] = []
 
+        runtime_stack = list(self._repeat_stack())
+
         def run_branch(index: int, child_id: str) -> None:
+            self._runtime_local.repeat_stack = list(runtime_stack)
             try:
                 outcomes[index] = self._run_node(child_id, deadline, cancel)
             except BaseException as exc:
                 outcomes[index] = _Outcome(ActionStatus.FAILED, error=str(exc), category="parallel", fatal=True)
+            finally:
+                del self._runtime_local.repeat_stack
 
         for index, child_id in enumerate(node.children):
             thread = threading.Thread(target=run_branch, args=(index, child_id), name=f"bt-parallel-{child_id}", daemon=True)
@@ -327,12 +368,16 @@ class WorkflowEngine:
         finished = threading.Event()
         result_box: list[_Outcome] = []
 
+        runtime_stack = list(self._repeat_stack())
+
         def background() -> None:
+            self._runtime_local.repeat_stack = list(runtime_stack)
             try:
                 result_box.append(self._run_node(background_id, deadline, background_cancel))
             except BaseException as exc:
                 result_box.append(_Outcome(ActionStatus.FAILED, error=str(exc), category="parallel", fatal=True))
             finally:
+                del self._runtime_local.repeat_stack
                 finished.set()
 
         thread = threading.Thread(target=background, name=f"bt-background-{background_id}", daemon=True)
@@ -356,7 +401,7 @@ class WorkflowEngine:
         assert node.action is not None
         action = self.registry.get(node.action)
         with self._lock:
-            resolver = ReferenceResolver(self.blackboard, dict(self.outputs))
+            resolver = self._resolver()
         try:
             arguments = resolver.value(node.params)
             self._validate_action_input(action.input_schema, arguments, node.id)
@@ -466,7 +511,7 @@ class WorkflowEngine:
             return None
         try:
             with self._lock:
-                resolver = ReferenceResolver(self.blackboard, dict(self.outputs))
+                resolver = self._resolver()
             return _summary(resolver.value(node.params))
         except Exception:
             # A failed reference is still useful in the event as its unresolved source.

@@ -457,6 +457,61 @@ def test_engine_do_once_runs_action_only_once_across_repeat_iterations() -> None
     assert all(item["decorator"] == "do_once" for item in once_events[1:])
 
 
+def test_engine_repeat_count_can_bind_to_blackboard_integer() -> None:
+    echo_action = CountingAction()
+    echo_action.name = "test.echo"
+    actions = registry(action_spec(echo_action))
+    raw = tree([
+        task(
+            "repeatable",
+            "test.echo",
+            decorators=[{"type": "repeat", "count": {"ref": "blackboard.rounds"}}],
+        ),
+    ], "repeatable")
+    raw["blackboard"] = {
+        "rounds": {"type": "integer", "default": 1, "min": 1},
+    }
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {"rounds": 3}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert echo_action.calls == 3
+
+
+def test_engine_repeat_runtime_context_selects_the_final_iteration() -> None:
+    class RecordingAction(Action):
+        name = "test.record"
+
+        def __init__(self) -> None:
+            self.values: list[object] = []
+
+        def execute(self, context: Context, arguments: dict[str, Any]) -> ActionResult:
+            self.values.append(arguments.get("value"))
+            return ActionResult.succeeded({"value": arguments.get("value")})
+
+    action = RecordingAction()
+    actions = registry(action_spec(action))
+    raw = tree([
+        {
+            "id": "loop",
+            "type": "selector",
+            "decorators": [{"type": "repeat", "count": {"ref": "blackboard.rounds"}}],
+            "children": ["final", "ordinary"],
+        },
+        task(
+            "final",
+            "test.record",
+            params={"value": "finish"},
+            decorators=[{"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, True]}}],
+        ),
+        task("ordinary", "test.record", params={"value": {"ref": "runtime.repeat.index"}}),
+    ], "loop")
+    raw["blackboard"] = {"rounds": {"type": "integer", "default": 1, "min": 1}}
+
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {"rounds": 3}).run()
+
+    assert result.status == ActionStatus.SUCCEEDED
+    assert action.values == [1, 2, "finish"]
+
+
 def test_engine_do_once_reset_on_failure_retries_until_success() -> None:
     fail_then_succeed = RetryAction()
     echo_action = CountingAction()
@@ -777,23 +832,53 @@ def test_party_member_setup_phase_accepts_return_to_lobby() -> None:
         assert lobby_phase_condition in nodes[node_id]["decorators"]
 
 
+def test_party_entrypoints_recover_to_souls_after_the_final_round() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    entrypoints = (
+        ("mumu_0_souls_party_leader.json", "mumu-0.png"),
+        ("mumu_1_souls_party_member.json", "mumu-1.png"),
+    )
+
+    for filename, courtyard_name in entrypoints:
+        raw = json.loads((project_root / "workflows/entrypoints" / filename).read_text(encoding="utf-8"))
+        nodes = {node["id"]: node for node in raw["nodes"]}
+        main_children = nodes["main"]["children"]
+        assert main_children.index("final_recovery") > main_children.index("battle_plan")
+        final_recovery = nodes["final_recovery"]
+        assert final_recovery["params"]["workflow"] == "shared/recover_to_souls.json"
+        assert final_recovery["params"]["inputs"]["courtyard_template"].endswith(courtyard_name)
+
+
+def test_party_leader_member_detection_tolerates_live_nameplate_effects() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    leader_entry = json.loads(
+        (project_root / "workflows/entrypoints/mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
+    )
+    leader_round = json.loads(
+        (project_root / "workflows/souls/party/leader_round.json").read_text(encoding="utf-8")
+    )
+
+    entry_nodes = {node["id"]: node for node in leader_entry["nodes"]}
+    round_nodes = {node["id"]: node for node in leader_round["nodes"]}
+    assert entry_nodes["detect_member_present"]["params"]["threshold"] == 0.8
+    assert entry_nodes["tap_create_team"]["params"]["revalidate"] is True
+    assert entry_nodes["retry_create_dialog"]["children"] == [
+        "wait_create_team",
+        "tap_create_team",
+        "wait_create_confirm_after_retry",
+    ]
+    assert entry_nodes["retry_create_dialog"]["decorators"][0]["type"] == "retry"
+    assert round_nodes["wait_member_present"]["params"]["threshold"] == 0.8
+
+
 def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
     project_root = Path(__file__).resolve().parents[1]
-    workflow_nodes = []
-    workflow_paths = (
-        project_root / "workflows" / "souls" / "party" / "member_round.json",
-        project_root / "workflows" / "entrypoints" / "mumu_1_souls_loop.json",
-    )
-    for workflow_path in workflow_paths:
-        raw = json.loads(workflow_path.read_text(encoding="utf-8"))
-        workflow_nodes.extend(
-            node
-            for node in raw["nodes"]
-            if node.get("params", {}).get("template")
-            == "assets/templates/souls/courtyard-explore/mumu-1.png"
-        )
-
-    assert len(workflow_nodes) == 6
+    member = json.loads((project_root / "workflows/souls/party/member_round.json").read_text(encoding="utf-8"))
+    workflow_nodes = [
+        node for node in member["nodes"]
+        if node.get("params", {}).get("template") == "assets/templates/souls/courtyard-explore/mumu-1.png"
+    ]
+    assert len(workflow_nodes) == 3
     for node in workflow_nodes:
         params = node["params"]
         x, y, width, height = params["roi"]
@@ -802,3 +887,45 @@ def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
         assert y <= 145
         assert y + height >= 265
         assert params["threshold"] <= 0.65
+
+    shared = json.loads((project_root / "workflows/shared/recover_to_souls.json").read_text(encoding="utf-8"))
+    recover = next(node for node in shared["nodes"] if node["id"] == "recover")
+    courtyard = next(state for state in recover["params"]["states"] if state["name"] == "courtyard")
+    assert courtyard["template"] == {"ref": "blackboard.courtyard_template"}
+    assert courtyard["roi"] == [0, 0, 1920, 500]
+    assert courtyard["threshold"] <= 0.65
+
+    bounty = next(state for state in recover["params"]["states"] if state["name"] == "bounty_popup")
+    assert bounty["template"] == {"ref": "blackboard.bounty_reject_template"}
+    assert "bounty_popup" in recover["params"]["overlay_states"]
+    transition = next(item for item in recover["params"]["transitions"] if item["from"] == "bounty_popup")
+    assert transition["type"] == "tap_match"
+    realm_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "realm_raid")
+    assert "bounty_popup" in realm_transition["expected_states"]
+    party_room_transition = next(
+        item for item in recover["params"]["transitions"] if item["from"] == "party_room"
+    )
+    assert "party_browser" in party_room_transition["expected_states"]
+    continue_prompt = next(state for state in recover["params"]["states"] if state["name"] == "continue_prompt")
+    assert continue_prompt["template"] == {"ref": "blackboard.continue_prompt_template"}
+    continue_transition = next(
+        item for item in recover["params"]["transitions"] if item["from"] == "continue_prompt"
+    )
+    assert continue_transition["type"] == "tap_template"
+    assert continue_transition["template"] == {"ref": "blackboard.continue_cancel_template"}
+    party_exit_transition = next(
+        item for item in recover["params"]["transitions"] if item["from"] == "party_exit_confirm"
+    )
+    assert "party_browser" in party_exit_transition["expected_states"]
+    assert party_exit_transition["type"] == "tap_template"
+    assert party_exit_transition["template"] == {"ref": "blackboard.party_exit_button_template"}
+    souls_type = next(state for state in recover["params"]["states"] if state["name"] == "souls_type")
+    assert souls_type["template"] == {"ref": "blackboard.souls_type_template"}
+    souls_type_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "souls_type")
+    assert souls_type_transition["type"] == "tap"
+    assert souls_type_transition["x"] == {"ref": "blackboard.souls_type_entry_point.0"}
+    treasure = next(state for state in recover["params"]["states"] if state["name"] == "treasure_popup")
+    assert treasure["template"] == {"ref": "blackboard.treasure_template"}
+    treasure_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "treasure_popup")
+    assert treasure_transition["type"] == "tap"
+    assert treasure_transition["x"] == {"ref": "blackboard.treasure_close_point.0"}

@@ -11,7 +11,7 @@
     "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
     "pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
     "entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
-    "map_entry_point": { "type": "rect", "public": true, "default": [850, 520, 0, 0] },
+    "map_realm_template": { "type": "asset", "public": true, "default": "assets/templates/realm/map-entry.png" },
     "retry_point": { "type": "rect", "public": true, "default": [1300, 760, 0, 0] },
     "retry_confirm_texts": { "type": "array", "public": true, "default": ["是否再次挑战", "再次挑战"], "items": { "type": "string", "min_length": 1 } },
     "retry_confirm_roi": { "type": "rect", "public": true, "default": [600, 350, 720, 380] },
@@ -47,6 +47,7 @@
         "workflow": "realm/shared/realm_raid_loop.json",
         "inputs": {
           "entry_point": { "ref": "blackboard.entry_point" },
+          "map_realm_template": { "ref": "blackboard.map_realm_template" },
           "pass_roi": { "ref": "blackboard.pass_roi" },
           "minimum_passes": 1,
           "page_texts": { "ref": "blackboard.page_texts" },

@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "mumu_1_souls_party_member",
-  "version": "3.0.1",
+  "version": "4.1.0",
   "resolution": [1920, 1080],
   "root": "root",
   "limits": {
@@ -12,9 +12,9 @@
     "rounds": {
       "type": "integer",
       "public": true,
-      "required": true,
       "default": 9999,
-      "enum": [1, 9999]
+      "min": 1,
+      "max": 9999
     },
     "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
     "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
@@ -37,65 +37,65 @@
       "id": "main",
       "type": "sequence",
       "name": "启动调度后执行组队御魂",
-      "children": ["realm_scheduler", "battle_plan"]
+      "children": ["realm_scheduler", "entry_recovery", "battle_plan", "final_recovery"]
+    },
+    {
+      "id": "entry_recovery",
+      "type": "task",
+      "name": "清理残留页面并保留可接受邀请状态",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "shared/recover_to_souls.json",
+        "inputs": {
+          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png",
+          "target_states": ["party_room", "invite_popup", "souls_challenge"]
+        }
+      }
+    },
+    {
+      "id": "final_recovery",
+      "type": "task",
+      "name": "末轮后退出队伍并确认御魂挑战页",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "shared/recover_to_souls.json",
+        "inputs": {
+          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png"
+        }
+      }
     },
     {
       "id": "battle_plan",
       "type": "selector",
-      "name": "选择单轮验证或 9999 轮运行",
-      "children": ["single_round", "long_run_plan"]
+      "name": "按公开轮数执行并在末轮停止自动准备",
+      "children": ["final_round", "automatic_round"],
+      "decorators": [
+        {"type": "repeat", "count": {"ref": "blackboard.rounds"}},
+        {"type": "timeout", "seconds": 1209000}
+      ]
     },
     {
-      "id": "single_round",
+      "id": "final_round",
       "type": "task",
-      "name": "接受邀请并完成 1 轮",
+      "name": "最后一轮完成后停止等待续邀",
       "action": "workflow.run",
       "params": {
         "workflow": "souls/party/member_round.json",
         "inputs": {"phase": "finish"}
       },
       "decorators": [
-        {
-          "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.rounds"}, 1]}
-        }
+        {"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, true]}}
       ]
     },
     {
-      "id": "long_run_plan",
-      "type": "sequence",
-      "name": "首轮启用自动准备后连续运行 9999 轮",
-      "children": ["setup_auto_ready_round", "repeat_auto_ready_rounds"],
-      "decorators": [
-        {
-          "type": "condition",
-          "expression": {"eq": [{"ref": "blackboard.rounds"}, 9999]}
-        }
-      ]
-    },
-    {
-      "id": "setup_auto_ready_round",
+      "id": "automatic_round",
       "type": "task",
-      "name": "首轮接受限时邀请并启用不再提示",
+      "name": "非末轮启用或沿用自动准备",
       "action": "workflow.run",
       "params": {
         "workflow": "souls/party/member_round.json",
         "inputs": {"phase": "setup_auto_ready"}
       }
-    },
-    {
-      "id": "repeat_auto_ready_rounds",
-      "type": "task",
-      "name": "自动接受邀请并完成后 9998 轮",
-      "action": "workflow.run",
-      "params": {
-        "workflow": "souls/party/member_round.json",
-        "inputs": {"phase": "auto_ready"}
-      },
-      "decorators": [
-        {"type": "repeat", "count": 9998},
-        {"type": "timeout", "seconds": 1209000}
-      ]
     }
     ,
     {

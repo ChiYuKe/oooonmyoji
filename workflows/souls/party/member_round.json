@@ -82,8 +82,8 @@
       "type": "selector",
       "name": "设置自动准备或确认设置已生效",
       "children": [
-        "configure_auto_ready",
-        "auto_ready_already_active"
+        "auto_ready_already_active",
+        "configure_auto_ready"
       ]
     },
     {
@@ -142,7 +142,7 @@
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
-        "timeout_seconds": 30,
+        "timeout_seconds": 1,
         "roi": [
           80,
           0,
@@ -538,12 +538,60 @@
     {
       "id": "settle_to_round_destination",
       "type": "selector",
-      "name": "关闭奖励并返回地图、庭院或协战房间",
+      "name": "使用统一恢复层清理组队结算",
+      "children": [
+        "recover_round_destination",
+        "legacy_settlement_disabled"
+      ]
+    },
+    {
+      "id": "legacy_settlement_disabled",
+      "type": "selector",
+      "name": "已停用的两次固定点击结算分支",
       "children": [
         "settled_direct",
         "settled_after_one_tap",
         "settled_after_two_taps"
+      ],
+      "decorators": [
+        { "type": "condition", "expression": { "eq": [true, false] } }
       ]
+    },
+    {
+      "id": "recover_round_destination",
+      "type": "task",
+      "name": "统一清理奖励并确认自动准备邀请或协战房间",
+      "action": "input.recover_state",
+      "params": {
+        "states": [
+          { "name": "auto_ready_invite", "template": "assets/templates/souls/party/auto-ready-invite-button.png", "roi": [0, 304, 867, 168], "threshold": 0.85 },
+          { "name": "party_room", "template": "assets/templates/souls/party/lobby-title.png", "roi": [80, 0, 350, 120], "threshold": 0.88 },
+          { "name": "settlement", "template": "assets/templates/souls/souls-victory-continue.png", "roi": [650, 900, 650, 180], "threshold": 0.86 },
+          { "name": "experience", "template": "assets/templates/shared/experience-complete.png", "roi": [300, 450, 1350, 450], "threshold": 0.88 },
+          { "name": "bounty_popup", "template": "assets/templates/shared/bounty-reject.png", "roi": [1150, 680, 260, 190], "threshold": 0.9 },
+          { "name": "treasure_popup", "template": "assets/templates/shared/treasure-title.png", "roi": [650, 150, 620, 230], "threshold": 0.9 }
+        ],
+        "target_states": ["auto_ready_invite", "party_room"],
+        "overlay_states": ["settlement", "experience", "bounty_popup", "treasure_popup"],
+        "transitions": [
+          { "from": "settlement", "type": "tap_match", "expected_states": ["settlement", "experience", "bounty_popup", "treasure_popup", "auto_ready_invite", "party_room"] },
+          { "from": "experience", "type": "tap", "x": 960, "y": 1025, "expected_states": ["settlement", "bounty_popup", "treasure_popup", "auto_ready_invite", "party_room"] },
+          { "from": "bounty_popup", "type": "tap_match", "expected_states": ["auto_ready_invite", "party_room"] },
+          { "from": "treasure_popup", "type": "tap", "x": 960, "y": 1025, "expected_states": ["settlement", "auto_ready_invite", "party_room"] }
+        ],
+        "allow_ocr": false,
+        "timeout_seconds": 30,
+        "initial_state_timeout_seconds": 8,
+        "confirm_timeout_seconds": 12,
+        "max_return_attempts": 3,
+        "max_overlay_clicks": 6,
+        "max_transitions": 10,
+        "failure_frame_name": "recovery/member-party-settlement-failure.png",
+        "post_action_delay": 0.35,
+        "poll_interval_seconds": 0.1,
+        "random_offset": 8,
+        "random_interval": [0.15, 0.35]
+      }
     },
     {
       "id": "settled_direct",

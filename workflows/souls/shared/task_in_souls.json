@@ -192,7 +192,7 @@
       "name": "点击庭院空白区域唤醒界面",
       "action": "input.key",
       "params": {
-        "keycode": "BACK"
+        "keycode": "KEYCODE_BACK"
       }
     },
     {

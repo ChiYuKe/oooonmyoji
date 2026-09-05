@@ -66,7 +66,7 @@
         "match": {
           "ref": "nodes.wait_ready.output.0"
         },
-        "revalidate": false,
+        "revalidate": true,
         "random_offset": 5,
         "random_interval": [
           0.2,

@@ -66,7 +66,11 @@
         "match": {
           "ref": "nodes.wait_victory.output.0"
         },
-        "revalidate": false,
+        "revalidate": true,
+        "disappeared_states": [
+          { "name": "experience", "template": "assets/templates/shared/experience-complete.png", "roi": [300, 450, 1350, 450], "threshold": 0.88 },
+          { "name": "treasure_popup", "template": "assets/templates/shared/treasure-title.png", "roi": [650, 150, 620, 230], "threshold": 0.9 }
+        ],
         "random_offset": 8,
         "random_interval": [
           0.2,

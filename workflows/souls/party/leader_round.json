@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "souls_party_leader_round",
-  "version": "3.0.0",
+  "version": "3.4.0",
   "resolution": [
     1920,
     1080
@@ -69,7 +69,7 @@
           450,
           180
         ],
-        "threshold": 0.9,
+        "threshold": 0.8,
         "scale_search": false
       }
     },
@@ -208,12 +208,60 @@
     {
       "id": "settle_to_round_destination",
       "type": "selector",
-      "name": "关闭奖励并等待续邀弹窗或协战房间",
+      "name": "使用统一恢复层清理组队结算",
+      "children": [
+        "recover_round_destination",
+        "legacy_settlement_disabled"
+      ]
+    },
+    {
+      "id": "legacy_settlement_disabled",
+      "type": "selector",
+      "name": "已停用的两次固定点击结算分支",
       "children": [
         "destination_direct",
         "destination_after_one_tap",
         "destination_after_two_taps"
+      ],
+      "decorators": [
+        { "type": "condition", "expression": { "eq": [true, false] } }
       ]
+    },
+    {
+      "id": "recover_round_destination",
+      "type": "task",
+      "name": "统一清理奖励并确认续邀弹窗或协战房间",
+      "action": "input.recover_state",
+      "params": {
+        "states": [
+          { "name": "continue_prompt", "template": "assets/templates/souls/party/continue-invite-prompt.png", "roi": [690, 405, 540, 115], "threshold": 0.9 },
+          { "name": "party_room", "template": "assets/templates/souls/party/lobby-title.png", "roi": [80, 0, 350, 120], "threshold": 0.88 },
+          { "name": "settlement", "template": "assets/templates/souls/souls-victory-continue.png", "roi": [650, 900, 650, 180], "threshold": 0.86 },
+          { "name": "experience", "template": "assets/templates/shared/experience-complete.png", "roi": [300, 450, 1350, 450], "threshold": 0.88 },
+          { "name": "bounty_popup", "template": "assets/templates/shared/bounty-reject.png", "roi": [1150, 680, 260, 190], "threshold": 0.9 },
+          { "name": "treasure_popup", "template": "assets/templates/shared/treasure-title.png", "roi": [650, 150, 620, 230], "threshold": 0.9 }
+        ],
+        "target_states": ["continue_prompt", "party_room"],
+        "overlay_states": ["settlement", "experience", "bounty_popup", "treasure_popup"],
+        "transitions": [
+          { "from": "settlement", "type": "tap_match", "expected_states": ["settlement", "experience", "bounty_popup", "treasure_popup", "continue_prompt", "party_room"] },
+          { "from": "experience", "type": "tap", "x": 960, "y": 1025, "expected_states": ["settlement", "bounty_popup", "treasure_popup", "continue_prompt", "party_room"] },
+          { "from": "bounty_popup", "type": "tap_match", "expected_states": ["continue_prompt", "party_room"] },
+          { "from": "treasure_popup", "type": "tap", "x": 960, "y": 1025, "expected_states": ["settlement", "continue_prompt", "party_room"] }
+        ],
+        "allow_ocr": false,
+        "timeout_seconds": 30,
+        "initial_state_timeout_seconds": 8,
+        "confirm_timeout_seconds": 12,
+        "max_return_attempts": 3,
+        "max_overlay_clicks": 6,
+        "max_transitions": 10,
+        "failure_frame_name": "recovery/leader-party-settlement-failure.png",
+        "post_action_delay": 0.35,
+        "poll_interval_seconds": 0.1,
+        "random_offset": 8,
+        "random_interval": [0.15, 0.35]
+      }
     },
     {
       "id": "destination_direct",
@@ -276,11 +324,11 @@
         {
           "type": "condition",
           "expression": {
-            "eq": [
+            "ne": [
               {
                 "ref": "blackboard.phase"
               },
-              "auto_invite"
+              "finish"
             ]
           }
         }
@@ -385,11 +433,11 @@
         {
           "type": "condition",
           "expression": {
-            "eq": [
+            "ne": [
               {
                 "ref": "blackboard.phase"
               },
-              "auto_invite"
+              "finish"
             ]
           }
         }
@@ -494,11 +542,11 @@
         {
           "type": "condition",
           "expression": {
-            "eq": [
+            "ne": [
               {
                 "ref": "blackboard.phase"
               },
-              "auto_invite"
+              "finish"
             ]
           }
         }
@@ -516,13 +564,11 @@
     },
     {
       "id": "setup_auto_invite",
-      "type": "sequence",
-      "name": "首轮启用默认邀请好友",
+      "type": "selector",
+      "name": "设置默认邀请或确认已经生效",
       "children": [
-        "wait_default_invite_checkbox",
-        "tap_default_invite_checkbox",
-        "tap_continue_confirm",
-        "wait_lobby_after_confirm"
+        "auto_invite_already_active",
+        "configure_auto_invite"
       ],
       "decorators": [
         {
@@ -537,6 +583,30 @@
           }
         }
       ]
+    },
+    {
+      "id": "configure_auto_invite",
+      "type": "sequence",
+      "name": "配置默认邀请好友",
+      "children": [
+        "wait_default_invite_checkbox",
+        "tap_default_invite_checkbox",
+        "tap_continue_confirm",
+        "wait_lobby_after_confirm"
+      ]
+    },
+    {
+      "id": "auto_invite_already_active",
+      "type": "task",
+      "name": "默认邀请已经生效",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/lobby-title.png",
+        "timeout_seconds": 1,
+        "roi": [80, 0, 350, 120],
+        "threshold": 0.88,
+        "scale_search": false
+      }
     },
     {
       "id": "wait_default_invite_checkbox",
@@ -609,16 +679,10 @@
     {
       "id": "cancel_after_final",
       "type": "task",
-      "name": "最后一轮取消续邀",
-      "action": "input.tap",
+      "name": "最后一轮等待入口统一退出队伍",
+      "action": "core.log",
       "params": {
-        "x": 780,
-        "y": 650,
-        "random_offset": 5,
-        "random_interval": [
-          0.2,
-          0.6
-        ]
+        "message": "最后一轮结算完成，由入口恢复层退出协战房间"
       },
       "decorators": [
         {

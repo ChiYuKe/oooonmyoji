@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "id": "mumu_0_souls_party_leader",
-  "version": "4.0.0",
+  "version": "5.4.0",
   "description": "MuMu-0 队长入口：恢复页面、创建私密协战房间、邀请队员，并按运行轮次执行组队御魂。",
   "resolution": [
     1920,
@@ -10,18 +10,15 @@
   "root": "root",
   "limits": {
     "timeout_seconds": 1209600,
-    "max_steps": 1000
+    "max_steps": 2200
   },
   "blackboard": {
     "rounds": {
       "type": "integer",
       "public": true,
-      "required": true,
       "default": 9999,
-      "enum": [
-        1,
-        9999
-      ]
+      "min": 1,
+      "max": 9999
     },
     "member_present_template": {
       "type": "asset",
@@ -34,6 +31,14 @@
       "public": true,
       "default": "assets/templates/souls/party/member-invite-target.png",
       "description": "好友邀请列表中的目标队友名字模板"
+    },
+    "member_join_timeout": {
+      "type": "number",
+      "public": true,
+      "default": 30,
+      "min": 5,
+      "max": 120,
+      "description": "每次发送邀请后等待目标队友入房的秒数"
     },
     "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
     "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
@@ -57,12 +62,25 @@
     {
       "id": "main",
       "type": "sequence",
-      "name": "建队、邀请并完成 9999 轮",
+      "name": "建队、邀请并按配置轮数执行",
       "children": [
         "ensure_party_room",
         "ensure_member_invited",
-        "battle_plan"
+        "battle_plan",
+        "final_recovery"
       ]
+    },
+    {
+      "id": "final_recovery",
+      "type": "task",
+      "name": "末轮后退出队伍并确认御魂挑战页",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "shared/recover_to_souls.json",
+        "inputs": {
+          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
+        }
+      }
     },
     {
       "id": "wake_hidden_ui",
@@ -123,9 +141,7 @@
         "realm_scheduler",
         "wait_party_button",
         "tap_party_button",
-        "wait_create_team",
-        "tap_create_team",
-        "ensure_create_dialog_open",
+        "retry_create_dialog",
         "wait_create_confirm",
         "tap_private_permission",
         "tap_create_confirm",
@@ -382,7 +398,7 @@
           400,
           180
         ],
-        "threshold": 0.9,
+        "threshold": 0.88,
         "scale_search": false
       }
     },
@@ -404,38 +420,12 @@
       }
     },
     {
-      "id": "ensure_create_dialog_open",
-      "type": "selector",
-      "name": "确认创建队伍弹窗已打开",
-      "children": [
-        "detect_create_dialog_quick",
-        "retry_create_dialog"
-      ]
-    },
-    {
-      "id": "detect_create_dialog_quick",
-      "type": "task",
-      "name": "快速检测创建确认按钮",
-      "action": "vision.wait_template",
-      "params": {
-        "template": "assets/templates/souls/party/create-confirm-button.png",
-        "timeout_seconds": 2,
-        "roi": [
-          1150,
-          780,
-          350,
-          220
-        ],
-        "threshold": 0.9,
-        "scale_search": false
-      }
-    },
-    {
       "id": "retry_create_dialog",
       "type": "sequence",
       "name": "重试打开创建队伍弹窗",
       "children": [
-        "tap_create_team_retry",
+        "wait_create_team",
+        "tap_create_team",
         "wait_create_confirm_after_retry"
       ],
       "decorators": [
@@ -445,23 +435,6 @@
           "delay_seconds": 0.5
         }
       ]
-    },
-    {
-      "id": "tap_create_team_retry",
-      "type": "task",
-      "name": "再次打开创建队伍弹窗",
-      "action": "input.tap_match",
-      "params": {
-        "match": {
-          "ref": "nodes.wait_create_team.output.0"
-        },
-        "revalidate": true,
-        "random_offset": 4,
-        "random_interval": [
-          0.2,
-          0.6
-        ]
-      }
     },
     {
       "id": "wait_create_confirm_after_retry",
@@ -556,6 +529,17 @@
       "children": [
         "member_already_present",
         "send_initial_invite"
+      ],
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 180,
+          "delay_seconds": 0.5
+        },
+        {
+          "type": "timeout",
+          "seconds": 7200
+        }
       ]
     },
     {
@@ -582,7 +566,7 @@
           450,
           180
         ],
-        "threshold": 0.9,
+        "threshold": 0.8,
         "scale_search": false,
         "present": true
       }
@@ -596,7 +580,8 @@
         "wait_invite_target",
         "tap_invite_target",
         "wait_invite_button",
-        "tap_invite_button"
+        "tap_invite_button",
+        "wait_member_after_invite"
       ]
     },
     {
@@ -687,39 +672,48 @@
       }
     },
     {
-      "id": "battle_plan",
-      "type": "selector",
-      "name": "选择单轮验证或 9999 轮运行",
-      "children": [
-        "single_round_plan",
-        "long_run_plan"
-      ]
+      "id": "wait_member_after_invite",
+      "type": "task",
+      "name": "确认目标队友接受邀请并进入房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {
+          "ref": "blackboard.member_present_template"
+        },
+        "timeout_seconds": {
+          "ref": "blackboard.member_join_timeout"
+        },
+        "roi": [
+          700,
+          100,
+          450,
+          180
+        ],
+        "threshold": 0.8,
+        "scale_search": false,
+        "present": true
+      }
     },
     {
-      "id": "single_round_plan",
-      "type": "sequence",
-      "name": "单轮验证",
-      "children": [
-        "single_final_round"
-      ],
+      "id": "battle_plan",
+      "type": "selector",
+      "name": "按公开轮数执行并在末轮停止续邀",
+      "children": ["final_round", "automatic_round"],
       "decorators": [
         {
-          "type": "condition",
-          "expression": {
-            "eq": [
-              {
-                "ref": "blackboard.rounds"
-              },
-              1
-            ]
-          }
+          "type": "repeat",
+          "count": { "ref": "blackboard.rounds" }
+        },
+        {
+          "type": "timeout",
+          "seconds": 1209000
         }
       ]
     },
     {
-      "id": "single_final_round",
+      "id": "final_round",
       "type": "task",
-      "name": "完成单轮并停止续邀",
+      "name": "最后一轮完成后取消续邀",
       "action": "workflow.run",
       "params": {
         "workflow": "souls/party/leader_round.json",
@@ -729,34 +723,18 @@
             "ref": "blackboard.member_present_template"
           }
         }
-      }
-    },
-    {
-      "id": "long_run_plan",
-      "type": "sequence",
-      "name": "首轮启用默认邀请后连续运行 9999 轮",
-      "children": [
-        "setup_auto_invite_round",
-        "repeat_auto_invite_rounds"
-      ],
+      },
       "decorators": [
         {
           "type": "condition",
-          "expression": {
-            "eq": [
-              {
-                "ref": "blackboard.rounds"
-              },
-              9999
-            ]
-          }
+          "expression": { "eq": [{ "ref": "runtime.repeat.final" }, true] }
         }
       ]
     },
     {
-      "id": "setup_auto_invite_round",
+      "id": "automatic_round",
       "type": "task",
-      "name": "首轮勾选默认邀请好友",
+      "name": "非末轮启用或沿用自动续邀",
       "action": "workflow.run",
       "params": {
         "workflow": "souls/party/leader_round.json",
@@ -767,31 +745,6 @@
           }
         }
       }
-    },
-    {
-      "id": "repeat_auto_invite_rounds",
-      "type": "task",
-      "name": "默认邀请下完成后 9998 轮",
-      "action": "workflow.run",
-      "params": {
-        "workflow": "souls/party/leader_round.json",
-        "inputs": {
-          "phase": "auto_invite",
-          "member_present_template": {
-            "ref": "blackboard.member_present_template"
-          }
-        }
-      },
-      "decorators": [
-        {
-          "type": "repeat",
-          "count": 9998
-        },
-        {
-          "type": "timeout",
-          "seconds": 1209000
-        }
-      ]
     },
     {
       "id": "realm_scheduler",
@@ -819,7 +772,7 @@
       "type": "task",
       "action": "workflow.run",
       "params": {
-        "workflow": "souls/shared/task_in_souls.json",
+        "workflow": "shared/recover_to_souls.json",
         "inputs": {
           "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
         }

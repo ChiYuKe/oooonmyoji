@@ -159,9 +159,7 @@
             "invite_target_template": {
               "ref": "blackboard.invite_target_template"
             },
-            "enable_realm_raid": {
-              "ref": "blackboard.enable_realm_raid"
-            },
+            "enable_realm_raid": false,
             "realm_threshold": {
               "ref": "blackboard.realm_threshold"
             },

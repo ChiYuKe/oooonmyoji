@@ -79,7 +79,7 @@ python -m src.oooonmyoji.cli --config .\config\config.json run-workflow three_mu
 ```
 
 该入口默认把 `mumu-0` 作为队长、`mumu-1` 作为队员、`mumu-2` 执行御魂循环；
-将 `blackboard.rounds` 设为 `1` 可先做一轮验证，默认值为 `9999`。
+将 `blackboard.rounds` 设为 `1` 可先做一轮验证，也可直接传入 `10`、`30` 或任意 `1..9999` 的轮数；默认值仍为 `9999`。
 
 ## 现有公共流程
 
@@ -96,6 +96,7 @@ python -m src.oooonmyoji.cli --config .\config\config.json run-workflow three_mu
 - `realm/shared/realm_raid_loop.json`：结界突破主循环。每页固定处理 9 个目标，前 8 个正常挑战；第 9 个目标按“进入战斗、返回列表”重复 4 次，第 5 次正式击败。券读到 0 后结束，输入 `resume_souls=true` 时会按配置模板恢复御魂。
 - 结界页每轮开始会通过 `realm.detect_progress` 扫描 9 个目标区域，输出 `completed_count`、`completed[]` 和 `next_index`。完成态可用 OCR 文本（默认“已挑战/已击败/胜利/占领”）或 `completed_templates` 配置；识别不到完成标记时会安全回退为从第 1 个目标执行。
 - `realm/shared/schedule_from_souls.json`：御魂回合边界调度器。入口的 `enable_realm_raid` 默认是 `false`；打开后，`realm_threshold` 默认为 30，达到阈值才切换结界突破。
+- `run-party-souls --enable-member-realm-raid --realm-threshold 30`：只让队员在监听邀请前执行上述调度。队长会在房间内按最新画面重新发送邀请，每次发送后确认队员入房；最长等待两小时，超时后停止并保留失败现场。
 - `entrypoints/realm_raid.json`：单独运行结界突破的通用入口，不绑定具体实例。可在运行输入中覆盖 `entry_point`、`pass_roi`、`target_points`、`target_rois`、`completed_texts`、`completed_templates`、`battle_texts` 和 `victory_texts`。
 
 结界突破页面没有硬编码模板依赖，默认使用 OCR 识别页面、战斗和结算状态；九个目标坐标和券数字区域都属于入口公开变量，可以按实例分别配置。单人御魂会在每轮挑战前检查；组队入口也公开同一套配置，启动建队前可先执行结界突破。

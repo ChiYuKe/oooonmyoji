@@ -31,6 +31,60 @@ PARTY_SOULS_LEADER_WORKFLOW = "entrypoints/mumu_0_souls_party_leader.json"
 PARTY_SOULS_MEMBER_WORKFLOW = "entrypoints/mumu_1_souls_party_member.json"
 
 
+def _party_rounds(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ConfigError("party rounds must be an integer between 1 and 9999")
+    try:
+        rounds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("party rounds must be an integer between 1 and 9999") from exc
+    if not 1 <= rounds <= 9999:
+        raise ConfigError("party rounds must be between 1 and 9999")
+    return rounds
+
+
+def _party_rounds_argument(value: str) -> int:
+    try:
+        return _party_rounds(value)
+    except ConfigError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _realm_threshold(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ConfigError("realm threshold must be a positive integer")
+    try:
+        threshold = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("realm threshold must be a positive integer") from exc
+    if threshold < 1:
+        raise ConfigError("realm threshold must be a positive integer")
+    return threshold
+
+
+def _realm_threshold_argument(value: str) -> int:
+    try:
+        return _realm_threshold(value)
+    except ConfigError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _party_workflow_inputs(
+    rounds: int,
+    *,
+    enable_member_realm_raid: bool,
+    realm_threshold: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return (
+        {"rounds": rounds},
+        {
+            "rounds": rounds,
+            "enable_realm_raid": enable_member_realm_raid,
+            "realm_threshold": realm_threshold,
+        },
+    )
+
+
 def _config_path(value: str | None) -> Path:
     if value:
         return Path(value).resolve()
@@ -285,6 +339,8 @@ def _run_party_souls_local(
     leader_instance: str,
     member_instance: str,
     rounds: int,
+    enable_member_realm_raid: bool = False,
+    realm_threshold: int = 30,
     leader_events_file: Path | None = None,
     member_events_file: Path | None = None,
 ) -> int:
@@ -300,18 +356,23 @@ def _run_party_souls_local(
         raise ConfigError("party leader or member instance does not exist") from exc
     config = replace(config, instances=(leader, member))
     supervisor = Supervisor(config)
+    leader_inputs, member_inputs = _party_workflow_inputs(
+        rounds,
+        enable_member_realm_raid=enable_member_realm_raid,
+        realm_threshold=realm_threshold,
+    )
     try:
         member_run_id = supervisor.run_workflow(
             PARTY_SOULS_MEMBER_WORKFLOW,
             member_instance,
-            {"rounds": rounds},
+            member_inputs,
             wait=False,
             events_file=str(member_events_file) if member_events_file else None,
         )
         leader_run_id = supervisor.run_workflow(
             PARTY_SOULS_LEADER_WORKFLOW,
             leader_instance,
-            {"rounds": rounds},
+            leader_inputs,
             wait=False,
             events_file=str(leader_events_file) if leader_events_file else None,
         )
@@ -365,6 +426,8 @@ def command_run_workflow(args: argparse.Namespace) -> int:
 
 def command_run_party_souls(args: argparse.Namespace) -> int:
     path = _config_path(args.config)
+    rounds = _party_rounds(args.rounds)
+    realm_threshold = _realm_threshold(args.realm_threshold)
     leader_workflow, _ = _prepare_workflow_run(path, PARTY_SOULS_LEADER_WORKFLOW, args.leader_instance, None)
     member_workflow, _ = _prepare_workflow_run(path, PARTY_SOULS_MEMBER_WORKFLOW, args.member_instance, None)
     if args.leader_instance == args.member_instance:
@@ -376,7 +439,9 @@ def command_run_party_souls(args: argparse.Namespace) -> int:
             "leader_instance": args.leader_instance,
             "member_workflow": member_workflow,
             "member_instance": args.member_instance,
-            "rounds": args.rounds,
+            "rounds": rounds,
+            "enable_member_realm_raid": args.enable_member_realm_raid,
+            "realm_threshold": realm_threshold,
             "leader_events_file": str(args.leader_events_file) if args.leader_events_file else None,
             "member_events_file": str(args.member_events_file) if args.member_events_file else None,
         })
@@ -387,7 +452,9 @@ def command_run_party_souls(args: argparse.Namespace) -> int:
             path,
             args.leader_instance,
             args.member_instance,
-            args.rounds,
+            rounds,
+            args.enable_member_realm_raid,
+            realm_threshold,
             args.leader_events_file,
             args.member_events_file,
         )
@@ -454,9 +521,14 @@ def command_serve(args: argparse.Namespace) -> int:
         if command == "run-party-souls":
             leader_instance = str(request["leader_instance"])
             member_instance = str(request["member_instance"])
-            rounds = int(request.get("rounds", 9999))
-            if rounds not in {1, 9999}:
-                return {"ok": False, "error": "party rounds must be 1 or 9999"}
+            try:
+                rounds = _party_rounds(request.get("rounds", 9999))
+                enable_member_realm_raid = request.get("enable_member_realm_raid", False)
+                if not isinstance(enable_member_realm_raid, bool):
+                    raise ConfigError("enable_member_realm_raid must be a boolean")
+                realm_threshold = _realm_threshold(request.get("realm_threshold", 30))
+            except ConfigError as exc:
+                return {"ok": False, "error": str(exc)}
             if leader_instance == member_instance:
                 return {"ok": False, "error": "party leader and member must use different instances"}
             runtime_config = expand_runtime_instances(load_config(config.config_path))
@@ -464,10 +536,15 @@ def command_serve(args: argparse.Namespace) -> int:
             runtime_config = ensure_runtime_instance(runtime_config, member_instance)
             supervisor.ensure_instance(runtime_config.instance(leader_instance))
             supervisor.ensure_instance(runtime_config.instance(member_instance))
+            leader_inputs, member_inputs = _party_workflow_inputs(
+                rounds,
+                enable_member_realm_raid=enable_member_realm_raid,
+                realm_threshold=realm_threshold,
+            )
             member_run_id = supervisor.run_workflow(
                 str(request["member_workflow"]),
                 member_instance,
-                {"rounds": rounds},
+                member_inputs,
                 wait=False,
                 events_file=request.get("member_events_file"),
             )
@@ -475,7 +552,7 @@ def command_serve(args: argparse.Namespace) -> int:
                 leader_run_id = supervisor.run_workflow(
                     str(request["leader_workflow"]),
                     leader_instance,
-                    {"rounds": rounds},
+                    leader_inputs,
                     wait=False,
                     events_file=request.get("leader_events_file"),
                 )
@@ -544,11 +621,29 @@ def build_parser() -> argparse.ArgumentParser:
     run_workflow.set_defaults(function=command_run_workflow)
     run_party_souls = subparsers.add_parser(
         "run-party-souls",
-        help="mumu-0 发起御魂组队邀请，mumu-1 接受并协同刷 9999 次",
+        help="mumu-0 发起御魂组队邀请，mumu-1 接受并协同刷指定轮数",
     )
     run_party_souls.add_argument("--leader-instance", default="mumu-0", help="队长实例 ID，默认 mumu-0")
     run_party_souls.add_argument("--member-instance", default="mumu-1", help="队员实例 ID，默认 mumu-1")
-    run_party_souls.add_argument("--rounds", type=int, choices=(1, 9999), default=9999, help="运行 1 轮验证或连续运行 9999 轮")
+    run_party_souls.add_argument(
+        "--rounds",
+        type=_party_rounds_argument,
+        default=9999,
+        metavar="1..9999",
+        help="运行轮数，范围 1..9999（默认 9999）",
+    )
+    run_party_souls.add_argument(
+        "--enable-member-realm-raid",
+        action="store_true",
+        help="吃鱼在监听组队邀请前检查突破券，达到阈值时先清结界突破",
+    )
+    run_party_souls.add_argument(
+        "--realm-threshold",
+        type=_realm_threshold_argument,
+        default=30,
+        metavar="N",
+        help="吃鱼触发结界突破的突破券数量（默认 30）",
+    )
     run_party_souls.add_argument("--leader-events-file", type=Path, help="可选的队长运行事件 JSONL 输出文件")
     run_party_souls.add_argument("--member-events-file", type=Path, help="可选的队员运行事件 JSONL 输出文件")
     run_party_souls.set_defaults(function=command_run_party_souls)

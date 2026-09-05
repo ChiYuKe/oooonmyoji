@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from src.oooonmyoji import cli as cli_module
 from src.oooonmyoji.cli import build_parser
 from src.oooonmyoji.workflows.loader import WorkflowLoader
@@ -35,6 +37,9 @@ def test_cli_accepts_party_souls_instances() -> None:
         "mumu-1",
         "--rounds",
         "1",
+        "--enable-member-realm-raid",
+        "--realm-threshold",
+        "30",
         "--leader-events-file",
         "leader.jsonl",
         "--member-events-file",
@@ -45,14 +50,41 @@ def test_cli_accepts_party_souls_instances() -> None:
     assert args.leader_instance == "mumu-0"
     assert args.member_instance == "mumu-1"
     assert args.rounds == 1
+    assert args.enable_member_realm_raid is True
+    assert args.realm_threshold == 30
     assert args.leader_events_file == Path("leader.jsonl")
     assert args.member_events_file == Path("member.jsonl")
+
+
+@pytest.mark.parametrize("rounds", [1, 10, 30, 9999])
+def test_cli_accepts_any_supported_party_round_count(rounds: int) -> None:
+    args = build_parser().parse_args(["run-party-souls", "--rounds", str(rounds)])
+
+    assert args.rounds == rounds
+
+
+@pytest.mark.parametrize("rounds", [0, 10000])
+def test_cli_rejects_out_of_range_party_round_count(rounds: int) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["run-party-souls", "--rounds", str(rounds)])
 
 
 def test_cli_defaults_party_souls_to_9999_rounds() -> None:
     args = build_parser().parse_args(["run-party-souls"])
 
     assert args.rounds == 9999
+    assert args.enable_member_realm_raid is False
+    assert args.realm_threshold == 30
+
+
+@pytest.mark.parametrize("threshold", [0, -1])
+def test_cli_rejects_non_positive_realm_threshold(threshold: int) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([
+            "run-party-souls",
+            "--realm-threshold",
+            str(threshold),
+        ])
 
 
 def test_party_command_forwards_separate_event_files(monkeypatch, tmp_path: Path) -> None:
@@ -70,14 +102,33 @@ def test_party_command_forwards_separate_event_files(monkeypatch, tmp_path: Path
         leader_instance="mumu-0",
         member_instance="mumu-1",
         rounds=9999,
+        enable_member_realm_raid=True,
+        realm_threshold=30,
         leader_events_file=tmp_path / "leader.jsonl",
         member_events_file=tmp_path / "member.jsonl",
     )
 
     assert cli_module.command_run_party_souls(args) == 0
     assert captured["rounds"] == 9999
+    assert captured["enable_member_realm_raid"] is True
+    assert captured["realm_threshold"] == 30
     assert captured["leader_events_file"] == str(tmp_path / "leader.jsonl")
     assert captured["member_events_file"] == str(tmp_path / "member.jsonl")
+
+
+def test_party_workflow_inputs_enable_realm_only_for_member() -> None:
+    leader_inputs, member_inputs = cli_module._party_workflow_inputs(
+        10,
+        enable_member_realm_raid=True,
+        realm_threshold=30,
+    )
+
+    assert leader_inputs == {"rounds": 10}
+    assert member_inputs == {
+        "rounds": 10,
+        "enable_realm_raid": True,
+        "realm_threshold": 30,
+    }
 
 
 def test_direct_workflow_loads_without_a_config_task(tmp_path: Path) -> None:

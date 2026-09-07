@@ -1,43 +1,216 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "mumu_1_souls_party_member",
-  "version": "4.1.0",
-  "resolution": [1920, 1080],
+  "version": "4.2.0",
+  "description": "MuMu-1 队员入口：等待并接受队长邀请，按配置轮数完成组队御魂，达到券数阈值后执行结界突破。",
+  "resolution": [
+    1920,
+    1080
+  ],
   "root": "root",
   "limits": {
     "timeout_seconds": 1209600,
     "max_steps": 1000
   },
-  "blackboard": {
-    "rounds": {
+  "inputs": {
+    "运行轮数": {
       "type": "integer",
-      "public": true,
       "default": 9999,
       "min": 1,
       "max": 9999
     },
-    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
-    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
-    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
-    "realm_entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
-    "realm_target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } }
-    ,
-    "realm_target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
-    "realm_completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
-    "realm_completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } }
+    "启用结界突破": {
+      "type": "boolean",
+      "default": true
+    },
+    "结界突破阈值": {
+      "type": "integer",
+      "default": 30,
+      "min": 1
+    },
+    "结界通关识别区域": {
+      "type": "rect",
+      "default": [
+        1450,
+        0,
+        470,
+        180
+      ]
+    },
+    "结界突破入口位置": {
+      "type": "rect",
+      "default": [
+        450,
+        1000,
+        0,
+        0
+      ]
+    },
+    "结界目标点击位置列表": {
+      "type": "array",
+      "default": [
+        [
+          500,
+          275,
+          0,
+          0
+        ],
+        [
+          1000,
+          275,
+          0,
+          0
+        ],
+        [
+          1500,
+          275,
+          0,
+          0
+        ],
+        [
+          500,
+          475,
+          0,
+          0
+        ],
+        [
+          1000,
+          475,
+          0,
+          0
+        ],
+        [
+          1500,
+          475,
+          0,
+          0
+        ],
+        [
+          500,
+          675,
+          0,
+          0
+        ],
+        [
+          1000,
+          675,
+          0,
+          0
+        ],
+        [
+          1500,
+          675,
+          0,
+          0
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    },
+    "结界目标识别区域列表": {
+      "type": "array",
+      "default": [
+        [
+          220,
+          220,
+          500,
+          190
+        ],
+        [
+          720,
+          220,
+          500,
+          190
+        ],
+        [
+          1220,
+          220,
+          500,
+          190
+        ],
+        [
+          220,
+          420,
+          500,
+          190
+        ],
+        [
+          720,
+          420,
+          500,
+          190
+        ],
+        [
+          1220,
+          420,
+          500,
+          190
+        ],
+        [
+          220,
+          620,
+          500,
+          190
+        ],
+        [
+          720,
+          620,
+          500,
+          190
+        ],
+        [
+          1220,
+          620,
+          500,
+          190
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    },
+    "结界完成文字列表": {
+      "type": "array",
+      "default": [
+        "已挑战",
+        "已击败",
+        "胜利",
+        "占领"
+      ],
+      "items": {
+        "type": "string",
+        "min_length": 1
+      }
+    },
+    "结界完成模板列表": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "asset",
+        "min_length": 1
+      }
+    }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
       "type": "root",
       "name": "mumu1 御魂组队队员",
-      "children": ["main"]
+      "children": [
+        "main"
+      ]
     },
     {
       "id": "main",
       "type": "sequence",
       "name": "启动调度后执行组队御魂",
-      "children": ["realm_scheduler", "entry_recovery", "battle_plan", "final_recovery"]
+      "children": [
+        "entry_recovery",
+        "battle_plan",
+        "final_recovery"
+      ]
     },
     {
       "id": "entry_recovery",
@@ -47,8 +220,12 @@
       "params": {
         "workflow": "shared/recover_to_souls.json",
         "inputs": {
-          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png",
-          "target_states": ["party_room", "invite_popup", "souls_challenge"]
+          "庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-1.png",
+          "目标状态列表": [
+            "party_room",
+            "invite_popup",
+            "souls_challenge"
+          ]
         }
       }
     },
@@ -60,18 +237,29 @@
       "params": {
         "workflow": "shared/recover_to_souls.json",
         "inputs": {
-          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png"
+          "庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-1.png"
         }
       }
     },
     {
       "id": "battle_plan",
       "type": "selector",
-      "name": "按公开轮数执行并在末轮停止自动准备",
-      "children": ["final_round", "automatic_round"],
+      "name": "按配置轮数执行并在末轮停止自动准备",
+      "children": [
+        "final_round",
+        "automatic_round"
+      ],
       "decorators": [
-        {"type": "repeat", "count": {"ref": "blackboard.rounds"}},
-        {"type": "timeout", "seconds": 1209000}
+        {
+          "type": "repeat",
+          "count": {
+            "ref": "inputs.运行轮数"
+          }
+        },
+        {
+          "type": "timeout",
+          "seconds": 1209000
+        }
       ]
     },
     {
@@ -81,10 +269,46 @@
       "action": "workflow.run",
       "params": {
         "workflow": "souls/party/member_round.json",
-        "inputs": {"phase": "finish"}
+        "inputs": {
+          "执行阶段": "finish",
+          "启用结界突破": {
+            "ref": "inputs.启用结界突破"
+          },
+          "结界突破阈值": {
+            "ref": "inputs.结界突破阈值"
+          },
+          "结界通关识别区域": {
+            "ref": "inputs.结界通关识别区域"
+          },
+          "结界突破入口位置": {
+            "ref": "inputs.结界突破入口位置"
+          },
+          "结界目标点击位置列表": {
+            "ref": "inputs.结界目标点击位置列表"
+          },
+          "结界目标识别区域列表": {
+            "ref": "inputs.结界目标识别区域列表"
+          },
+          "结界完成文字列表": {
+            "ref": "inputs.结界完成文字列表"
+          },
+          "结界完成模板列表": {
+            "ref": "inputs.结界完成模板列表"
+          }
+        }
       },
       "decorators": [
-        {"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, true]}}
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "runtime.repeat.final"
+              },
+              true
+            ]
+          }
+        }
       ]
     },
     {
@@ -94,30 +318,47 @@
       "action": "workflow.run",
       "params": {
         "workflow": "souls/party/member_round.json",
-        "inputs": {"phase": "setup_auto_ready"}
-      }
-    }
-    ,
-    {
-      "id": "realm_scheduler",
-      "type": "task",
-      "name": "组队队员启动前检查结界券",
-      "action": "workflow.run",
-      "params": {
-        "workflow": "realm/shared/schedule_from_souls.json",
         "inputs": {
-          "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
-          "realm_threshold": { "ref": "blackboard.realm_threshold" },
-          "pass_roi": { "ref": "blackboard.realm_pass_roi" },
-          "entry_point": { "ref": "blackboard.realm_entry_point" },
-          "target_points": { "ref": "blackboard.realm_target_points" },
-          "target_rois": { "ref": "blackboard.realm_target_rois" },
-          "completed_texts": { "ref": "blackboard.realm_completed_texts" },
-          "completed_templates": { "ref": "blackboard.realm_completed_templates" },
-          "leave_current_screen": false,
-          "souls_courtyard_template": "assets/templates/souls/courtyard-explore/mumu-1.png"
+          "执行阶段": "setup_auto_ready",
+          "启用结界突破": {
+            "ref": "inputs.启用结界突破"
+          },
+          "结界突破阈值": {
+            "ref": "inputs.结界突破阈值"
+          },
+          "结界通关识别区域": {
+            "ref": "inputs.结界通关识别区域"
+          },
+          "结界突破入口位置": {
+            "ref": "inputs.结界突破入口位置"
+          },
+          "结界目标点击位置列表": {
+            "ref": "inputs.结界目标点击位置列表"
+          },
+          "结界目标识别区域列表": {
+            "ref": "inputs.结界目标识别区域列表"
+          },
+          "结界完成文字列表": {
+            "ref": "inputs.结界完成文字列表"
+          },
+          "结界完成模板列表": {
+            "ref": "inputs.结界完成模板列表"
+          }
         }
-      }
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "runtime.repeat.final"
+              },
+              false
+            ]
+          }
+        }
+      ]
     }
   ]
 }

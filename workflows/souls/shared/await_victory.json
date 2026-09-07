@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "await_victory",
   "version": "1.0.0",
   "resolution": [
@@ -11,14 +11,32 @@
     "timeout_seconds": 300,
     "max_steps": 10
   },
-  "blackboard": {
-    "timeout_seconds": {
+  "inputs": {
+    "总超时时间": {
       "type": "number",
-      "public": true,
       "default": 240,
       "min": 0
+    },
+    "奖励页点击横坐标": {
+      "type": "integer",
+      "default": 1500,
+      "min": 0,
+      "max": 1920
+    },
+    "奖励页点击纵坐标": {
+      "type": "integer",
+      "default": 700,
+      "min": 0,
+      "max": 1080
+    },
+    "奖励页前进等待时间": {
+      "type": "number",
+      "default": 0.8,
+      "min": 0,
+      "max": 10
     }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -34,7 +52,11 @@
       "name": "等待并点击胜利页继续",
       "children": [
         "wait_victory",
-        "tap_victory"
+        "tap_victory",
+        "pause_for_daruma",
+        "tap_daruma_advance",
+        "wait_reward",
+        "settle_reward_animation"
       ]
     },
     {
@@ -45,7 +67,7 @@
       "params": {
         "template": "assets/templates/souls/souls-victory-continue.png",
         "timeout_seconds": {
-          "ref": "blackboard.timeout_seconds"
+          "ref": "inputs.总超时时间"
         },
         "roi": [
           650,
@@ -77,6 +99,65 @@
           0.6
         ]
       }
+    },
+    {
+      "id": "wait_reward",
+      "type": "task",
+      "name": "等待奖励图标稳定出现",
+      "action": "vision.wait_any",
+      "params": {
+        "templates": [
+          "assets/templates/rewards/coin.png",
+          "assets/templates/rewards/experience.png",
+          "assets/templates/rewards/friendship-points.png",
+          "assets/templates/rewards/material-shikigami.png",
+          "assets/templates/rewards/obsession-scroll.png",
+          "assets/templates/rewards/orochi-scale-fragment.png",
+          "assets/templates/rewards/parade-pass.png",
+          "assets/templates/rewards/realm-raid-pass.png",
+          "assets/templates/rewards/souls-gold-material.png",
+          "assets/templates/rewards/souls-red-scroll.png"
+        ],
+        "timeout_seconds": 15,
+        "roi": [320, 200, 1280, 640],
+        "threshold": 0.88
+      }
+    },
+    {
+      "id": "pause_for_daruma",
+      "type": "task",
+      "name": "等待达摩出现",
+      "action": "core.sleep",
+      "params": {
+        "seconds": 0.4
+      }
+    },
+    {
+      "id": "tap_daruma_advance",
+      "type": "task",
+      "name": "达摩出现后点击空白处加速奖励",
+      "action": "input.tap",
+      "params": {
+        "x": {
+          "ref": "inputs.奖励页点击横坐标"
+        },
+        "y": {
+          "ref": "inputs.奖励页点击纵坐标"
+        },
+        "random_offset": 0,
+        "random_interval": [0, 0]
+      }
+    },
+    {
+      "id": "settle_reward_animation",
+      "type": "task",
+      "name": "等待奖励动画完成",
+      "action": "core.sleep",
+      "params": {
+        "seconds": {
+          "ref": "inputs.奖励页前进等待时间"
+        }
+      }
     }
   ],
   "_layout": {
@@ -95,7 +176,23 @@
     "tap_victory": {
       "x": 332,
       "y": 416
+    },
+    "pause_for_daruma": {
+      "x": 664,
+      "y": 416
+    },
+    "tap_daruma_advance": {
+      "x": 996,
+      "y": 416
+    },
+    "wait_reward": {
+      "x": 1160,
+      "y": 416
+    },
+    "settle_reward_animation": {
+      "x": 1328,
+      "y": 416
     }
   },
-  "description": "等待御魂战斗胜利并点击继续，供队伍和单人入口复用"
+  "description": "等待御魂战斗胜利，点击继续，待达摩出现后点击空白处加速奖励展开，再交给统计，供队伍和单人入口复用"
 }

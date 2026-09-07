@@ -1,7 +1,8 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "souls_party_leader_round",
-  "version": "3.4.0",
+  "version": "3.4.1",
+  "description": "完成队长单轮组队御魂：确认队友、发起挑战、准备阵容、等待胜利并清理结算页面。",
   "resolution": [
     1920,
     1080
@@ -11,10 +12,9 @@
     "timeout_seconds": 600,
     "max_steps": 100
   },
-  "blackboard": {
-    "phase": {
+  "inputs": {
+    "执行阶段": {
       "type": "string",
-      "public": true,
       "required": true,
       "default": "finish",
       "enum": [
@@ -23,13 +23,13 @@
         "auto_invite"
       ]
     },
-    "member_present_template": {
+    "队员已在场模板": {
       "type": "asset",
-      "public": true,
       "default": "assets/templates/souls/party/member-present.png",
       "description": "用于确认目标队友已经进入协战房间"
     }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -49,6 +49,7 @@
         "tap_party_challenge",
         "prepare_lineup_if_needed",
         "await_victory",
+        "stats_reward_layer_1",
         "settle_to_round_destination",
         "choose_after_battle_action"
       ]
@@ -60,7 +61,7 @@
       "action": "vision.wait_template",
       "params": {
         "template": {
-          "ref": "blackboard.member_present_template"
+          "ref": "inputs.队员已在场模板"
         },
         "timeout_seconds": 180,
         "roi": [
@@ -161,7 +162,7 @@
       "params": {
         "workflow": "souls/shared/prepare_lineup.json",
         "inputs": {
-          "timeout_seconds": 10
+          "总超时时间": 10
         }
       }
     },
@@ -201,7 +202,7 @@
       "params": {
         "workflow": "souls/shared/await_victory.json",
         "inputs": {
-          "timeout_seconds": 240
+          "总超时时间": 240
         }
       }
     },
@@ -295,7 +296,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_invite"
             ]
@@ -326,7 +327,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -339,7 +340,6 @@
       "type": "sequence",
       "name": "关闭一层奖励后等待目标界面",
       "children": [
-        "stats_reward_layer_1",
         "dismiss_reward_once",
         "wait_destination_after_one"
       ]
@@ -352,8 +352,8 @@
       "params": {
         "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
-          "category": "souls",
-          "layer": 1
+          "任务类别": "souls",
+          "奖励层级": 1
         }
       }
     },
@@ -404,7 +404,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_invite"
             ]
@@ -435,7 +435,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -461,8 +461,8 @@
       "params": {
         "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
-          "category": "souls",
-          "layer": 2
+          "任务类别": "souls",
+          "奖励层级": 2
         }
       }
     },
@@ -513,7 +513,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_invite"
             ]
@@ -544,7 +544,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -576,7 +576,7 @@
           "expression": {
             "eq": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "setup_auto_invite"
             ]
@@ -690,7 +690,7 @@
           "expression": {
             "eq": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -712,7 +712,7 @@
           "expression": {
             "eq": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_invite"
             ]

@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "prepare_lineup",
   "version": "1.0.0",
   "resolution": [
@@ -11,14 +11,14 @@
     "timeout_seconds": 60,
     "max_steps": 10
   },
-  "blackboard": {
-    "timeout_seconds": {
+  "inputs": {
+    "总超时时间": {
       "type": "number",
-      "public": true,
       "default": 10,
       "min": 0
     }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -45,7 +45,7 @@
       "params": {
         "template": "assets/templates/souls/souls-ready.png",
         "timeout_seconds": {
-          "ref": "blackboard.timeout_seconds"
+          "ref": "inputs.总超时时间"
         },
         "roi": [
           1500,

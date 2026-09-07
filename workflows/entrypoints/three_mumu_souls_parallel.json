@@ -1,8 +1,8 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "three_mumu_souls_parallel",
   "version": "4.0.0",
-  "description": "同时启动三个 MuMu 实例：mumu-0 作为队长，mumu-1 作为队员，mumu-2 执行御魂循环",
+  "description": "同时启动两个 MuMu 实例：mumu-0 作为队长，mumu-1 作为队员",
   "resolution": [
     1920,
     1080
@@ -11,10 +11,9 @@
     "timeout_seconds": 1209600,
     "max_steps": 1000
   },
-  "blackboard": {
-    "rounds": {
+  "inputs": {
+    "运行轮数": {
       "type": "integer",
-      "public": true,
       "required": false,
       "enum": [
         1,
@@ -22,32 +21,27 @@
       ],
       "default": 9999
     },
-    "member_present_template": {
+    "队员已在场模板": {
       "type": "asset",
-      "public": true,
       "default": "assets/templates/souls/party/member-present.png",
       "description": "队长用于确认目标队友已经进入协战房间"
     },
-    "invite_target_template": {
+    "邀请目标模板": {
       "type": "asset",
-      "public": true,
       "default": "assets/templates/souls/party/member-invite-target.png",
       "description": "队长在好友邀请列表中定位目标队友的名字模板"
     },
-    "enable_realm_raid": {
+    "启用结界突破": {
       "type": "boolean",
-      "public": true,
-      "default": false
+      "default": true
     },
-    "realm_threshold": {
+    "结界突破阈值": {
       "type": "integer",
-      "public": true,
       "default": 30,
       "min": 1
     },
-    "realm_pass_roi": {
+    "结界通关识别区域": {
       "type": "rect",
-      "public": true,
       "default": [
         1450,
         0,
@@ -55,9 +49,8 @@
         180
       ]
     },
-    "realm_entry_point": {
+    "结界突破入口位置": {
       "type": "rect",
-      "public": true,
       "default": [
         450,
         1000,
@@ -65,9 +58,8 @@
         0
       ]
     },
-    "realm_target_points": {
+    "结界目标点击位置列表": {
       "type": "array",
-      "public": true,
       "default": [
         [
           450,
@@ -130,6 +122,7 @@
     }
   },
   "root": "root",
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -150,27 +143,14 @@
           "instance": "mumu-0",
           "workflow": "entrypoints/mumu_0_souls_party_leader.json",
           "inputs": {
-            "rounds": {
-              "ref": "blackboard.rounds"
+            "运行轮数": {
+              "ref": "inputs.运行轮数"
             },
-            "member_present_template": {
-              "ref": "blackboard.member_present_template"
+            "队员已在场模板": {
+              "ref": "inputs.队员已在场模板"
             },
-            "invite_target_template": {
-              "ref": "blackboard.invite_target_template"
-            },
-            "enable_realm_raid": false,
-            "realm_threshold": {
-              "ref": "blackboard.realm_threshold"
-            },
-            "realm_pass_roi": {
-              "ref": "blackboard.realm_pass_roi"
-            },
-            "realm_entry_point": {
-              "ref": "blackboard.realm_entry_point"
-            },
-            "realm_target_points": {
-              "ref": "blackboard.realm_target_points"
+            "邀请目标模板": {
+              "ref": "inputs.邀请目标模板"
             }
           }
         },
@@ -178,23 +158,23 @@
           "instance": "mumu-1",
           "workflow": "entrypoints/mumu_1_souls_party_member.json",
           "inputs": {
-            "rounds": {
-              "ref": "blackboard.rounds"
+            "运行轮数": {
+              "ref": "inputs.运行轮数"
             },
-            "enable_realm_raid": {
-              "ref": "blackboard.enable_realm_raid"
+            "启用结界突破": {
+              "ref": "inputs.启用结界突破"
             },
-            "realm_threshold": {
-              "ref": "blackboard.realm_threshold"
+            "结界突破阈值": {
+              "ref": "inputs.结界突破阈值"
             },
-            "realm_pass_roi": {
-              "ref": "blackboard.realm_pass_roi"
+            "结界通关识别区域": {
+              "ref": "inputs.结界通关识别区域"
             },
-            "realm_entry_point": {
-              "ref": "blackboard.realm_entry_point"
+            "结界突破入口位置": {
+              "ref": "inputs.结界突破入口位置"
             },
-            "realm_target_points": {
-              "ref": "blackboard.realm_target_points"
+            "结界目标点击位置列表": {
+              "ref": "inputs.结界目标点击位置列表"
             }
           }
         }

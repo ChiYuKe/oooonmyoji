@@ -1,7 +1,8 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "souls_party_member_round",
-  "version": "3.0.3",
+  "version": "3.0.4",
+  "description": "完成队员单轮组队御魂：接受邀请、准备阵容、等待胜利、统计奖励，并在券数达到阈值时切换到结界突破。",
   "resolution": [
     1920,
     1080
@@ -11,10 +12,9 @@
     "timeout_seconds": 600,
     "max_steps": 100
   },
-  "blackboard": {
-    "phase": {
+  "inputs": {
+    "执行阶段": {
       "type": "string",
-      "public": true,
       "required": true,
       "default": "finish",
       "enum": [
@@ -22,8 +22,181 @@
         "setup_auto_ready",
         "auto_ready"
       ]
+    },
+    "启用结界突破": {
+      "type": "boolean",
+      "default": false
+    },
+    "结界突破阈值": {
+      "type": "integer",
+      "default": 30,
+      "min": 1
+    },
+    "结界通关识别区域": {
+      "type": "rect",
+      "default": [
+        1450,
+        0,
+        470,
+        180
+      ]
+    },
+    "结界突破入口位置": {
+      "type": "rect",
+      "default": [
+        450,
+        1000,
+        0,
+        0
+      ]
+    },
+    "结界目标点击位置列表": {
+      "type": "array",
+      "default": [
+        [
+          500,
+          275,
+          0,
+          0
+        ],
+        [
+          1000,
+          275,
+          0,
+          0
+        ],
+        [
+          1500,
+          275,
+          0,
+          0
+        ],
+        [
+          500,
+          475,
+          0,
+          0
+        ],
+        [
+          1000,
+          475,
+          0,
+          0
+        ],
+        [
+          1500,
+          475,
+          0,
+          0
+        ],
+        [
+          500,
+          675,
+          0,
+          0
+        ],
+        [
+          1000,
+          675,
+          0,
+          0
+        ],
+        [
+          1500,
+          675,
+          0,
+          0
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    },
+    "结界目标识别区域列表": {
+      "type": "array",
+      "default": [
+        [
+          220,
+          220,
+          500,
+          190
+        ],
+        [
+          720,
+          220,
+          500,
+          190
+        ],
+        [
+          1220,
+          220,
+          500,
+          190
+        ],
+        [
+          220,
+          420,
+          500,
+          190
+        ],
+        [
+          720,
+          420,
+          500,
+          190
+        ],
+        [
+          1220,
+          420,
+          500,
+          190
+        ],
+        [
+          220,
+          620,
+          500,
+          190
+        ],
+        [
+          720,
+          620,
+          500,
+          190
+        ],
+        [
+          1220,
+          620,
+          500,
+          190
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    },
+    "结界完成文字列表": {
+      "type": "array",
+      "default": [
+        "已挑战",
+        "已击败",
+        "胜利",
+        "占领"
+      ],
+      "items": {
+        "type": "string",
+        "min_length": 1
+      }
+    },
+    "结界完成模板列表": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "asset",
+        "min_length": 1
+      }
     }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -42,7 +215,9 @@
         "detect_lineup_state",
         "prepare_lineup_if_needed",
         "await_victory",
+        "stats_reward_layer_1",
         "settle_to_round_destination",
+        "realm_scheduler",
         "choose_after_battle_action"
       ]
     },
@@ -69,7 +244,7 @@
           "expression": {
             "eq": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "setup_auto_ready"
             ]
@@ -167,7 +342,7 @@
           "expression": {
             "eq": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -189,7 +364,7 @@
           "expression": {
             "eq": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -491,7 +666,7 @@
       "params": {
         "workflow": "souls/shared/prepare_lineup.json",
         "inputs": {
-          "timeout_seconds": 10
+          "总超时时间": 10
         }
       }
     },
@@ -531,7 +706,7 @@
       "params": {
         "workflow": "souls/shared/await_victory.json",
         "inputs": {
-          "timeout_seconds": 240
+          "总超时时间": 240
         }
       }
     },
@@ -540,8 +715,34 @@
       "type": "selector",
       "name": "使用统一恢复层清理组队结算",
       "children": [
+        "recover_final_round",
         "recover_round_destination",
         "legacy_settlement_disabled"
+      ]
+    },
+    {
+      "id": "recover_final_round",
+      "type": "task",
+      "name": "末轮直接恢复到御魂挑战页",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "shared/recover_to_souls.json",
+        "inputs": {
+          "庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-1.png"
+        }
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "inputs.执行阶段"
+              },
+              "finish"
+            ]
+          }
+        }
       ]
     },
     {
@@ -554,7 +755,15 @@
         "settled_after_two_taps"
       ],
       "decorators": [
-        { "type": "condition", "expression": { "eq": [true, false] } }
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              true,
+              false
+            ]
+          }
+        }
       ]
     },
     {
@@ -564,20 +773,128 @@
       "action": "input.recover_state",
       "params": {
         "states": [
-          { "name": "auto_ready_invite", "template": "assets/templates/souls/party/auto-ready-invite-button.png", "roi": [0, 304, 867, 168], "threshold": 0.85 },
-          { "name": "party_room", "template": "assets/templates/souls/party/lobby-title.png", "roi": [80, 0, 350, 120], "threshold": 0.88 },
-          { "name": "settlement", "template": "assets/templates/souls/souls-victory-continue.png", "roi": [650, 900, 650, 180], "threshold": 0.86 },
-          { "name": "experience", "template": "assets/templates/shared/experience-complete.png", "roi": [300, 450, 1350, 450], "threshold": 0.88 },
-          { "name": "bounty_popup", "template": "assets/templates/shared/bounty-reject.png", "roi": [1150, 680, 260, 190], "threshold": 0.9 },
-          { "name": "treasure_popup", "template": "assets/templates/shared/treasure-title.png", "roi": [650, 150, 620, 230], "threshold": 0.9 }
+          {
+            "name": "auto_ready_invite",
+            "template": "assets/templates/souls/party/auto-ready-invite-button.png",
+            "roi": [
+              0,
+              304,
+              867,
+              168
+            ],
+            "threshold": 0.85
+          },
+          {
+            "name": "party_room",
+            "template": "assets/templates/souls/party/lobby-title.png",
+            "roi": [
+              80,
+              0,
+              350,
+              120
+            ],
+            "threshold": 0.88
+          },
+          {
+            "name": "settlement",
+            "template": "assets/templates/souls/souls-victory-continue.png",
+            "roi": [
+              650,
+              900,
+              650,
+              180
+            ],
+            "threshold": 0.86
+          },
+          {
+            "name": "experience",
+            "template": "assets/templates/shared/experience-complete.png",
+            "roi": [
+              300,
+              450,
+              1350,
+              450
+            ],
+            "threshold": 0.88
+          },
+          {
+            "name": "bounty_popup",
+            "template": "assets/templates/shared/bounty-reject.png",
+            "roi": [
+              1150,
+              680,
+              260,
+              190
+            ],
+            "threshold": 0.9
+          },
+          {
+            "name": "treasure_popup",
+            "template": "assets/templates/shared/treasure-title.png",
+            "roi": [
+              650,
+              150,
+              620,
+              230
+            ],
+            "threshold": 0.9
+          }
         ],
-        "target_states": ["auto_ready_invite", "party_room"],
-        "overlay_states": ["settlement", "experience", "bounty_popup", "treasure_popup"],
+        "target_states": [
+          "auto_ready_invite",
+          "party_room"
+        ],
+        "overlay_states": [
+          "settlement",
+          "experience",
+          "bounty_popup",
+          "treasure_popup"
+        ],
         "transitions": [
-          { "from": "settlement", "type": "tap_match", "expected_states": ["settlement", "experience", "bounty_popup", "treasure_popup", "auto_ready_invite", "party_room"] },
-          { "from": "experience", "type": "tap", "x": 960, "y": 1025, "expected_states": ["settlement", "bounty_popup", "treasure_popup", "auto_ready_invite", "party_room"] },
-          { "from": "bounty_popup", "type": "tap_match", "expected_states": ["auto_ready_invite", "party_room"] },
-          { "from": "treasure_popup", "type": "tap", "x": 960, "y": 1025, "expected_states": ["settlement", "auto_ready_invite", "party_room"] }
+          {
+            "from": "settlement",
+            "type": "tap_match",
+            "expected_states": [
+              "settlement",
+              "experience",
+              "bounty_popup",
+              "treasure_popup",
+              "auto_ready_invite",
+              "party_room"
+            ]
+          },
+          {
+            "from": "experience",
+            "type": "tap",
+            "x": 960,
+            "y": 1025,
+            "expected_states": [
+              "settlement",
+              "bounty_popup",
+              "treasure_popup",
+              "auto_ready_invite",
+              "party_room"
+            ]
+          },
+          {
+            "from": "bounty_popup",
+            "type": "tap_match",
+            "expected_states": [
+              "auto_ready_invite",
+              "party_room"
+            ]
+          },
+          {
+            "from": "treasure_popup",
+            "type": "tap",
+            "x": 960,
+            "y": 1025,
+            "expected_states": [
+              "settlement",
+              "auto_ready_invite",
+              "party_room"
+            ]
+          }
         ],
         "allow_ocr": false,
         "timeout_seconds": 30,
@@ -590,7 +907,10 @@
         "post_action_delay": 0.35,
         "poll_interval_seconds": 0.1,
         "random_offset": 8,
-        "random_interval": [0.15, 0.35]
+        "random_interval": [
+          0.15,
+          0.35
+        ]
       }
     },
     {
@@ -626,7 +946,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -657,7 +977,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -688,7 +1008,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -701,7 +1021,6 @@
       "type": "sequence",
       "name": "关闭一层奖励",
       "children": [
-        "stats_reward_layer_1",
         "dismiss_reward_once",
         "pause_after_reward_once",
         "wait_reward_overlay_gone_after_one",
@@ -711,13 +1030,19 @@
     {
       "id": "stats_reward_layer_1",
       "type": "task",
-      "name": "后台统计第一层奖励",
+      "name": "统计奖励并追踪吃鱼的结界突破券",
       "action": "workflow.run",
       "params": {
         "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
-          "category": "souls",
-          "layer": 1
+          "任务类别": "souls",
+          "奖励层级": 1,
+          "统计结界通关": {
+            "ref": "inputs.启用结界突破"
+          },
+          "结界突破阈值": {
+            "ref": "inputs.结界突破阈值"
+          }
         }
       }
     },
@@ -797,7 +1122,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -828,7 +1153,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -859,7 +1184,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
             ]
@@ -887,8 +1212,8 @@
       "params": {
         "workflow": "souls/shared/reward_statistics.json",
         "inputs": {
-          "category": "souls",
-          "layer": 2
+          "任务类别": "souls",
+          "奖励层级": 2
         }
       }
     },
@@ -968,7 +1293,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -999,7 +1324,7 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "auto_ready"
             ]
@@ -1030,9 +1355,86 @@
           "expression": {
             "ne": [
               {
-                "ref": "blackboard.phase"
+                "ref": "inputs.执行阶段"
               },
               "finish"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "realm_scheduler",
+      "type": "selector",
+      "name": "按奖励页复核结果决定是否清结界",
+      "children": [
+        "run_realm",
+        "continue_souls"
+      ]
+    },
+    {
+      "id": "run_realm",
+      "type": "task",
+      "name": "已确认 30 张，清理结界并恢复御魂",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "realm/shared/realm_raid_loop.json",
+        "inputs": {
+          "入口点击位置": {
+            "ref": "inputs.结界突破入口位置"
+          },
+          "通关状态识别区域": {
+            "ref": "inputs.结界通关识别区域"
+          },
+          "最少通关次数": 1,
+          "目标点击位置列表": {
+            "ref": "inputs.结界目标点击位置列表"
+          },
+          "目标识别区域列表": {
+            "ref": "inputs.结界目标识别区域列表"
+          },
+          "完成状态文字列表": {
+            "ref": "inputs.结界完成文字列表"
+          },
+          "完成状态模板列表": {
+            "ref": "inputs.结界完成模板列表"
+          },
+          "离开当前页面": true,
+          "恢复御魂任务": true,
+          "御魂庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-1.png"
+        }
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.stats_reward_layer_1.output.output.enqueue_reward.should_enter_realm"
+              },
+              true
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "continue_souls",
+      "type": "task",
+      "name": "券数未到 30，继续组队御魂",
+      "action": "core.log",
+      "params": {
+        "message": "结界突破券尚未复核到 30 张，继续组队御魂"
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.stats_reward_layer_1.output.output.enqueue_reward.should_enter_realm"
+              },
+              false
             ]
           }
         }

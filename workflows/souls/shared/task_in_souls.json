@@ -1,19 +1,19 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "task_in_souls",
   "version": "4.0.1",
   "description": "将当前客户端从已知页面恢复到御魂副本挑战页。按挑战页、八岐大蛇页、探索地图、庭院四种状态依次判断，所有点击均基于刚刚确认的视觉结果。",
   "resolution": [1920, 1080],
   "root": "root",
   "limits": {"timeout_seconds": 300, "max_steps": 100},
-  "blackboard": {
-    "courtyard_template": {
+  "inputs": {
+    "庭院入口模板": {
       "type": "asset",
-      "public": true,
       "default": "assets/templates/souls/courtyard-explore/mumu-0.png",
       "description": "当前实例庭院中的探索入口模板"
     }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -173,7 +173,7 @@
       "name": "检测庭院探索入口",
       "action": "vision.wait_template",
       "params": {
-        "template": {"ref": "blackboard.courtyard_template"},
+        "template": {"ref": "inputs.庭院入口模板"},
         "timeout_seconds": 5,
         "roi": [0, 0, 1920, 500],
         "threshold": 0.4,
@@ -201,7 +201,7 @@
       "name": "确认唤醒后的庭院探索入口",
       "action": "vision.wait_template",
       "params": {
-        "template": {"ref": "blackboard.courtyard_template"},
+        "template": {"ref": "inputs.庭院入口模板"},
         "timeout_seconds": 5,
         "roi": [0, 0, 1920, 500],
         "threshold": 0.4,
@@ -214,7 +214,7 @@
       "name": "点击前再次确认庭院探索入口",
       "action": "vision.wait_template",
       "params": {
-        "template": {"ref": "blackboard.courtyard_template"},
+        "template": {"ref": "inputs.庭院入口模板"},
         "timeout_seconds": 3,
         "roi": [0, 0, 1920, 500],
         "threshold": 0.4,

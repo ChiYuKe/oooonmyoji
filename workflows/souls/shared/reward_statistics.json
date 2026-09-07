@@ -1,7 +1,8 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "reward_statistics",
   "version": "3.0.0",
+  "description": "统计御魂奖励并维护结界突破券数量；首次发现券数时读取已拥有数量，达到阈值后再确认并返回调度结果。",
   "resolution": [
     1920,
     1080
@@ -11,22 +12,26 @@
     "timeout_seconds": 15,
     "max_steps": 10
   },
-  "blackboard": {
-    "category": {
+  "inputs": {
+    "任务类别": {
       "type": "string",
-      "public": true,
       "required": true,
       "default": "souls"
     },
-    "layer": {
+    "奖励层级": {
       "type": "integer",
-      "public": true,
       "required": true,
       "default": 1,
       "min": 1,
       "max": 9
-    }
+    },
+    "统计结界通关": { "type": "boolean", "default": false },
+    "结界突破阈值": { "type": "integer", "default": 30, "min": 1 },
+    "结界通关模板": { "type": "asset", "default": "assets/templates/rewards/realm-raid-pass.png" },
+    "结界弹窗识别区域": { "type": "rect", "default": [300, 150, 1320, 650] },
+    "结界弹窗关闭位置": { "type": "rect", "default": [1700, 850, 0, 0] }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -43,17 +48,22 @@
       "action": "stats.enqueue_reward",
       "params": {
         "category": {
-          "ref": "blackboard.category"
+          "ref": "inputs.任务类别"
         },
         "layer": {
-          "ref": "blackboard.layer"
+          "ref": "inputs.奖励层级"
         },
         "roi": [
           320,
           200,
           1280,
           640
-        ]
+        ],
+        "track_realm_pass": { "ref": "inputs.统计结界通关" },
+        "realm_threshold": { "ref": "inputs.结界突破阈值" },
+        "realm_pass_template": { "ref": "inputs.结界通关模板" },
+        "realm_popup_roi": { "ref": "inputs.结界弹窗识别区域" },
+        "realm_popup_close_point": { "ref": "inputs.结界弹窗关闭位置" }
       }
     }
   ]

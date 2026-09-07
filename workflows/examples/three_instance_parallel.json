@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "three_instance_parallel",
   "version": "2.0.1",
   "description": "同时启动三个 MuMu 实例，各自执行指定入口工作流",
@@ -11,10 +11,9 @@
     "timeout_seconds": 1209600,
     "max_steps": 1000
   },
-  "blackboard": {
-    "rounds": {
+  "inputs": {
+    "运行轮数": {
       "type": "integer",
-      "public": true,
       "required": false,
       "default": 9999,
       "enum": [
@@ -22,13 +21,98 @@
         9999
       ]
     },
-    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
-    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
-    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
-    "realm_entry_point": { "type": "rect", "public": true, "default": [1760, 900, 0, 0] },
-    "realm_target_points": { "type": "array", "public": true, "default": [[450, 380, 0, 0], [960, 380, 0, 0], [1470, 380, 0, 0], [450, 610, 0, 0], [960, 610, 0, 0], [1470, 610, 0, 0], [450, 840, 0, 0], [960, 840, 0, 0], [1470, 840, 0, 0]], "items": { "type": "rect" } }
+    "启用结界突破": {
+      "type": "boolean",
+      "default": true
+    },
+    "结界突破阈值": {
+      "type": "integer",
+      "default": 30,
+      "min": 1
+    },
+    "结界通关识别区域": {
+      "type": "rect",
+      "default": [
+        1450,
+        0,
+        470,
+        180
+      ]
+    },
+    "结界突破入口位置": {
+      "type": "rect",
+      "default": [
+        1760,
+        900,
+        0,
+        0
+      ]
+    },
+    "结界目标点击位置列表": {
+      "type": "array",
+      "default": [
+        [
+          450,
+          380,
+          0,
+          0
+        ],
+        [
+          960,
+          380,
+          0,
+          0
+        ],
+        [
+          1470,
+          380,
+          0,
+          0
+        ],
+        [
+          450,
+          610,
+          0,
+          0
+        ],
+        [
+          960,
+          610,
+          0,
+          0
+        ],
+        [
+          1470,
+          610,
+          0,
+          0
+        ],
+        [
+          450,
+          840,
+          0,
+          0
+        ],
+        [
+          960,
+          840,
+          0,
+          0
+        ],
+        [
+          1470,
+          840,
+          0,
+          0
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    }
   },
   "root": "root",
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -49,39 +133,54 @@
           "instance": "mumu-0",
           "workflow": "entrypoints/mumu_0_souls_party_leader.json",
           "inputs": {
-            "rounds": {
-              "ref": "blackboard.rounds"
-            },
-            "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
-            "realm_threshold": { "ref": "blackboard.realm_threshold" },
-            "realm_pass_roi": { "ref": "blackboard.realm_pass_roi" },
-            "realm_entry_point": { "ref": "blackboard.realm_entry_point" },
-            "realm_target_points": { "ref": "blackboard.realm_target_points" }
+            "运行轮数": {
+              "ref": "inputs.运行轮数"
+            }
           }
         },
         {
           "instance": "mumu-1",
           "workflow": "entrypoints/mumu_1_souls_party_member.json",
           "inputs": {
-            "rounds": {
-              "ref": "blackboard.rounds"
+            "运行轮数": {
+              "ref": "inputs.运行轮数"
             },
-            "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
-            "realm_threshold": { "ref": "blackboard.realm_threshold" },
-            "realm_pass_roi": { "ref": "blackboard.realm_pass_roi" },
-            "realm_entry_point": { "ref": "blackboard.realm_entry_point" },
-            "realm_target_points": { "ref": "blackboard.realm_target_points" }
+            "启用结界突破": {
+              "ref": "inputs.启用结界突破"
+            },
+            "结界突破阈值": {
+              "ref": "inputs.结界突破阈值"
+            },
+            "结界通关识别区域": {
+              "ref": "inputs.结界通关识别区域"
+            },
+            "结界突破入口位置": {
+              "ref": "inputs.结界突破入口位置"
+            },
+            "结界目标点击位置列表": {
+              "ref": "inputs.结界目标点击位置列表"
+            }
           }
         },
         {
           "instance": "mumu-2",
           "workflow": "entrypoints/mumu_1_souls_loop.json",
           "inputs": {
-            "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
-            "realm_threshold": { "ref": "blackboard.realm_threshold" },
-            "realm_pass_roi": { "ref": "blackboard.realm_pass_roi" },
-            "realm_entry_point": { "ref": "blackboard.realm_entry_point" },
-            "realm_target_points": { "ref": "blackboard.realm_target_points" }
+            "启用结界突破": {
+              "ref": "inputs.启用结界突破"
+            },
+            "结界突破阈值": {
+              "ref": "inputs.结界突破阈值"
+            },
+            "结界通关识别区域": {
+              "ref": "inputs.结界通关识别区域"
+            },
+            "结界突破入口位置": {
+              "ref": "inputs.结界突破入口位置"
+            },
+            "结界目标点击位置列表": {
+              "ref": "inputs.结界目标点击位置列表"
+            }
           }
         }
       ]

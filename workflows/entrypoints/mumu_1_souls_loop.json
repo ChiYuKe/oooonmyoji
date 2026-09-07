@@ -1,84 +1,492 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "mumu_1_souls_loop",
   "version": "5.0.0",
-  "description": "MuMu-1 单人御魂：统一恢复任意已知页面，按公开轮数执行，并逐状态确认结算。",
-  "resolution": [1920, 1080],
+  "description": "MuMu-1 单人御魂：统一恢复任意已知页面，按配置轮数执行，并逐状态确认结算。",
+  "resolution": [
+    1920,
+    1080
+  ],
   "root": "root",
-  "limits": { "timeout_seconds": 1209600, "max_steps": 3000 },
-  "blackboard": {
-    "rounds": { "type": "integer", "public": true, "default": 30, "min": 1, "max": 9999 },
-    "recovery_timeout": { "type": "number", "public": true, "default": 15, "min": 1, "max": 60 },
-    "challenge_timeout": { "type": "number", "public": true, "default": 30, "min": 1 },
-    "prepare_timeout": { "type": "number", "public": true, "default": 30, "min": 1 },
-    "battle_timeout": { "type": "number", "public": true, "default": 180, "min": 1 },
-    "settlement_timeout": { "type": "number", "public": true, "default": 20, "min": 1 },
-    "courtyard_template": { "type": "asset", "public": true, "default": "assets/templates/souls/courtyard-explore/mumu-1.png" },
-    "challenge_template": { "type": "asset", "public": true, "default": "assets/templates/souls/souls-challenge.png" },
-    "ready_template": { "type": "asset", "public": true, "default": "assets/templates/souls/souls-ready.png" },
-    "souls_type_template": { "type": "asset", "public": true, "default": "assets/templates/souls/souls-type-title.png" },
-    "souls_type_entry_point": { "type": "rect", "public": true, "default": [300, 400, 0, 0] },
-    "map_souls_template": { "type": "asset", "public": true, "default": "assets/templates/souls/map-souls.png" },
-    "settlement_template": { "type": "asset", "public": true, "default": "assets/templates/souls/souls-victory-continue.png" },
-    "realm_template": { "type": "asset", "public": true, "default": "assets/templates/realm/realm-title.png" },
-    "bounty_reject_template": { "type": "asset", "public": true, "default": "assets/templates/shared/bounty-reject.png" },
-    "treasure_template": { "type": "asset", "public": true, "default": "assets/templates/shared/treasure-title.png" },
-    "treasure_close_point": { "type": "rect", "public": true, "default": [960, 1025, 0, 0] },
-    "realm_close_point": { "type": "rect", "public": true, "default": [1815, 210, 0, 0] },
-    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
-    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
-    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
-    "realm_entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
-    "realm_target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } },
-    "realm_target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
-    "realm_completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
-    "realm_completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } }
+  "limits": {
+    "timeout_seconds": 1209600,
+    "max_steps": 3000
   },
+  "inputs": {
+    "运行轮数": {
+      "type": "integer",
+      "default": 30,
+      "min": 1,
+      "max": 9999
+    },
+    "页面恢复超时时间": {
+      "type": "number",
+      "default": 15,
+      "min": 1,
+      "max": 60
+    },
+    "挑战超时时间": {
+      "type": "number",
+      "default": 30,
+      "min": 1
+    },
+    "准备超时时间": {
+      "type": "number",
+      "default": 30,
+      "min": 1
+    },
+    "战斗超时时间": {
+      "type": "number",
+      "default": 180,
+      "min": 1
+    },
+    "结算超时时间": {
+      "type": "number",
+      "default": 20,
+      "min": 1
+    },
+    "庭院入口模板": {
+      "type": "asset",
+      "default": "assets/templates/souls/courtyard-explore/mumu-1.png"
+    },
+    "挑战按钮模板": {
+      "type": "asset",
+      "default": "assets/templates/souls/souls-challenge.png"
+    },
+    "准备按钮模板": {
+      "type": "asset",
+      "default": "assets/templates/souls/souls-ready.png"
+    },
+    "御魂类型页面模板": {
+      "type": "asset",
+      "default": "assets/templates/souls/souls-type-title.png"
+    },
+    "御魂类型入口位置": {
+      "type": "rect",
+      "default": [
+        300,
+        400,
+        0,
+        0
+      ]
+    },
+    "御魂地图入口模板": {
+      "type": "asset",
+      "default": "assets/templates/souls/map-souls.png"
+    },
+    "结算页面模板": {
+      "type": "asset",
+      "default": "assets/templates/souls/souls-victory-continue.png"
+    },
+    "结界突破页面模板": {
+      "type": "asset",
+      "default": "assets/templates/realm/realm-title.png"
+    },
+    "悬赏拒绝按钮模板": {
+      "type": "asset",
+      "default": "assets/templates/shared/bounty-reject.png"
+    },
+    "宝箱页面模板": {
+      "type": "asset",
+      "default": "assets/templates/shared/treasure-title.png"
+    },
+    "宝箱关闭位置": {
+      "type": "rect",
+      "default": [
+        960,
+        1025,
+        0,
+        0
+      ]
+    },
+    "结界突破关闭位置": {
+      "type": "rect",
+      "default": [
+        1815,
+        210,
+        0,
+        0
+      ]
+    },
+    "启用结界突破": {
+      "type": "boolean",
+      "default": true
+    },
+    "结界突破阈值": {
+      "type": "integer",
+      "default": 30,
+      "min": 1
+    },
+    "结界通关识别区域": {
+      "type": "rect",
+      "default": [
+        1450,
+        0,
+        470,
+        180
+      ]
+    },
+    "结界突破入口位置": {
+      "type": "rect",
+      "default": [
+        450,
+        1000,
+        0,
+        0
+      ]
+    },
+    "结界目标点击位置列表": {
+      "type": "array",
+      "default": [
+        [
+          500,
+          275,
+          0,
+          0
+        ],
+        [
+          1000,
+          275,
+          0,
+          0
+        ],
+        [
+          1500,
+          275,
+          0,
+          0
+        ],
+        [
+          500,
+          475,
+          0,
+          0
+        ],
+        [
+          1000,
+          475,
+          0,
+          0
+        ],
+        [
+          1500,
+          475,
+          0,
+          0
+        ],
+        [
+          500,
+          675,
+          0,
+          0
+        ],
+        [
+          1000,
+          675,
+          0,
+          0
+        ],
+        [
+          1500,
+          675,
+          0,
+          0
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    },
+    "结界目标识别区域列表": {
+      "type": "array",
+      "default": [
+        [
+          220,
+          220,
+          500,
+          190
+        ],
+        [
+          720,
+          220,
+          500,
+          190
+        ],
+        [
+          1220,
+          220,
+          500,
+          190
+        ],
+        [
+          220,
+          420,
+          500,
+          190
+        ],
+        [
+          720,
+          420,
+          500,
+          190
+        ],
+        [
+          1220,
+          420,
+          500,
+          190
+        ],
+        [
+          220,
+          620,
+          500,
+          190
+        ],
+        [
+          720,
+          620,
+          500,
+          190
+        ],
+        [
+          1220,
+          620,
+          500,
+          190
+        ]
+      ],
+      "items": {
+        "type": "rect"
+      }
+    },
+    "结界完成文字列表": {
+      "type": "array",
+      "default": [
+        "已挑战",
+        "已击败",
+        "胜利",
+        "占领"
+      ],
+      "items": {
+        "type": "string",
+        "min_length": 1
+      }
+    },
+    "结界完成模板列表": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "asset",
+        "min_length": 1
+      }
+    }
+  },
+  "variables": {},
   "nodes": [
-    { "id": "root", "type": "root", "name": "吃鱼单人御魂", "children": ["main"] },
-    { "id": "main", "type": "sequence", "name": "恢复并循环御魂", "children": ["recover_entry", "battle_loop"] },
     {
-      "id": "recover_entry", "type": "task", "name": "统一恢复到御魂挑战页", "action": "workflow.run",
-      "params": { "workflow": "shared/recover_to_souls.json", "inputs": { "courtyard_template": { "ref": "blackboard.courtyard_template" }, "challenge_template": { "ref": "blackboard.challenge_template" }, "souls_type_template": { "ref": "blackboard.souls_type_template" }, "souls_type_entry_point": { "ref": "blackboard.souls_type_entry_point" }, "map_souls_template": { "ref": "blackboard.map_souls_template" }, "settlement_template": { "ref": "blackboard.settlement_template" }, "realm_template": { "ref": "blackboard.realm_template" }, "bounty_reject_template": { "ref": "blackboard.bounty_reject_template" }, "treasure_template": { "ref": "blackboard.treasure_template" }, "treasure_close_point": { "ref": "blackboard.treasure_close_point" }, "realm_close_point": { "ref": "blackboard.realm_close_point" }, "recovery_timeout": { "ref": "blackboard.recovery_timeout" } } }
+      "id": "root",
+      "type": "root",
+      "name": "吃鱼单人御魂",
+      "children": [
+        "main"
+      ]
     },
     {
-      "id": "battle_loop", "type": "sequence", "name": "按公开轮数循环战斗",
-      "children": ["realm_scheduler", "prepare_lineup", "await_victory", "settlement"],
-      "decorators": [{ "type": "repeat", "count": { "ref": "blackboard.rounds" } }, { "type": "timeout", "seconds": 1209000 }]
+      "id": "main",
+      "type": "sequence",
+      "name": "恢复并循环御魂",
+      "children": [
+        "recover_entry",
+        "battle_loop"
+      ]
     },
     {
-      "id": "realm_scheduler", "type": "task", "name": "回合前按配置检查结界券", "action": "workflow.run",
+      "id": "recover_entry",
+      "type": "task",
+      "name": "统一恢复到御魂挑战页",
+      "action": "workflow.run",
       "params": {
-        "workflow": "realm/shared/schedule_from_souls.json",
+        "workflow": "shared/recover_to_souls.json",
         "inputs": {
-          "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
-          "realm_threshold": { "ref": "blackboard.realm_threshold" },
-          "pass_roi": { "ref": "blackboard.realm_pass_roi" },
-          "entry_point": { "ref": "blackboard.realm_entry_point" },
-          "target_points": { "ref": "blackboard.realm_target_points" },
-          "target_rois": { "ref": "blackboard.realm_target_rois" },
-          "completed_texts": { "ref": "blackboard.realm_completed_texts" },
-          "completed_templates": { "ref": "blackboard.realm_completed_templates" },
-          "souls_courtyard_template": { "ref": "blackboard.courtyard_template" }
+          "庭院入口模板": {
+            "ref": "inputs.庭院入口模板"
+          },
+          "挑战按钮模板": {
+            "ref": "inputs.挑战按钮模板"
+          },
+          "御魂类型页面模板": {
+            "ref": "inputs.御魂类型页面模板"
+          },
+          "御魂类型入口位置": {
+            "ref": "inputs.御魂类型入口位置"
+          },
+          "御魂地图入口模板": {
+            "ref": "inputs.御魂地图入口模板"
+          },
+          "结算页面模板": {
+            "ref": "inputs.结算页面模板"
+          },
+          "结界突破页面模板": {
+            "ref": "inputs.结界突破页面模板"
+          },
+          "悬赏拒绝按钮模板": {
+            "ref": "inputs.悬赏拒绝按钮模板"
+          },
+          "宝箱页面模板": {
+            "ref": "inputs.宝箱页面模板"
+          },
+          "宝箱关闭位置": {
+            "ref": "inputs.宝箱关闭位置"
+          },
+          "结界突破关闭位置": {
+            "ref": "inputs.结界突破关闭位置"
+          },
+          "页面恢复超时时间": {
+            "ref": "inputs.页面恢复超时时间"
+          }
         }
       }
     },
-    { "id": "prepare_lineup", "type": "sequence", "name": "有限重试挑战并等待准备或胜利", "children": ["wait_ready_or_victory", "route_ready_or_victory"] },
     {
-      "id": "wait_ready_or_victory", "type": "task", "name": "挑战后确认准备或胜利状态", "action": "input.recover_state",
+      "id": "battle_loop",
+      "type": "sequence",
+      "name": "按配置轮数循环战斗",
+      "children": [
+        "prepare_lineup",
+        "await_victory",
+        "settlement"
+      ],
+      "decorators": [
+        {
+          "type": "repeat",
+          "count": {
+            "ref": "inputs.运行轮数"
+          }
+        },
+        {
+          "type": "timeout",
+          "seconds": 1209000
+        }
+      ]
+    },
+    {
+      "id": "realm_scheduler",
+      "type": "task",
+      "name": "仅在奖励页复核达到阈值后切换结界突破",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "realm/shared/schedule_from_souls.json",
+        "inputs": {
+          "进入结界突破": {
+            "ref": "nodes.stats_reward_layer_1.output.output.enqueue_reward.should_enter_realm"
+          },
+          "通关状态识别区域": {
+            "ref": "inputs.结界通关识别区域"
+          },
+          "入口点击位置": {
+            "ref": "inputs.结界突破入口位置"
+          },
+          "目标点击位置列表": {
+            "ref": "inputs.结界目标点击位置列表"
+          },
+          "目标识别区域列表": {
+            "ref": "inputs.结界目标识别区域列表"
+          },
+          "完成状态文字列表": {
+            "ref": "inputs.结界完成文字列表"
+          },
+          "完成状态模板列表": {
+            "ref": "inputs.结界完成模板列表"
+          },
+          "御魂庭院入口模板": {
+            "ref": "inputs.庭院入口模板"
+          },
+          "离开当前页面": true
+        }
+      }
+    },
+    {
+      "id": "prepare_lineup",
+      "type": "sequence",
+      "name": "有限重试挑战并等待准备或胜利",
+      "children": [
+        "wait_ready_or_victory",
+        "route_ready_or_victory"
+      ]
+    },
+    {
+      "id": "wait_ready_or_victory",
+      "type": "task",
+      "name": "挑战后确认准备或胜利状态",
+      "action": "input.recover_state",
       "params": {
         "states": [
-          { "name": "challenge", "template": { "ref": "blackboard.challenge_template" }, "roi": [1550, 750, 370, 330], "threshold": 0.88 },
-          { "name": "ready", "template": { "ref": "blackboard.ready_template" }, "roi": [1500, 700, 420, 380], "threshold": 0.88 },
-          { "name": "victory", "template": { "ref": "blackboard.settlement_template" }, "roi": [650, 900, 650, 180], "threshold": 0.86 }
+          {
+            "name": "challenge",
+            "template": {
+              "ref": "inputs.挑战按钮模板"
+            },
+            "roi": [
+              1550,
+              750,
+              370,
+              330
+            ],
+            "threshold": 0.88
+          },
+          {
+            "name": "ready",
+            "template": {
+              "ref": "inputs.准备按钮模板"
+            },
+            "roi": [
+              1500,
+              700,
+              420,
+              380
+            ],
+            "threshold": 0.88
+          },
+          {
+            "name": "victory",
+            "template": {
+              "ref": "inputs.结算页面模板"
+            },
+            "roi": [
+              650,
+              900,
+              650,
+              180
+            ],
+            "threshold": 0.86
+          }
         ],
-        "target_states": ["ready", "victory"],
+        "target_states": [
+          "ready",
+          "victory"
+        ],
         "overlay_states": [],
-        "transitions": [{ "from": "challenge", "type": "tap_match", "expected_states": ["ready", "victory"], "retry_if_unchanged_seconds": 3 }],
+        "transitions": [
+          {
+            "from": "challenge",
+            "type": "tap_match",
+            "expected_states": [
+              "ready",
+              "victory"
+            ],
+            "retry_if_unchanged_seconds": 3
+          }
+        ],
         "allow_ocr": false,
-        "timeout_seconds": { "ref": "blackboard.battle_timeout" },
-        "initial_state_timeout_seconds": { "ref": "blackboard.challenge_timeout" },
-        "confirm_timeout_seconds": { "ref": "blackboard.battle_timeout" },
+        "timeout_seconds": {
+          "ref": "inputs.战斗超时时间"
+        },
+        "initial_state_timeout_seconds": {
+          "ref": "inputs.挑战超时时间"
+        },
+        "confirm_timeout_seconds": {
+          "ref": "inputs.战斗超时时间"
+        },
         "max_return_attempts": 3,
         "max_overlay_clicks": 6,
         "max_transitions": 3,
@@ -86,32 +494,173 @@
         "post_action_delay": 0.35,
         "poll_interval_seconds": 0.1,
         "random_offset": 5,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       }
     },
-    { "id": "route_ready_or_victory", "type": "selector", "name": "按准备状态继续", "children": ["tap_ready_from_probe", "victory_before_ready"] },
     {
-      "id": "tap_ready_from_probe", "type": "task", "name": "点击刚识别的准备按钮", "action": "input.tap_match",
+      "id": "route_ready_or_victory",
+      "type": "selector",
+      "name": "按准备状态继续",
+      "children": [
+        "tap_ready_from_probe",
+        "victory_before_ready"
+      ]
+    },
+    {
+      "id": "tap_ready_from_probe",
+      "type": "task",
+      "name": "点击刚识别的准备按钮",
+      "action": "input.tap_match",
       "params": {
-        "match": { "ref": "nodes.wait_ready_or_victory.output.match" },
+        "match": {
+          "ref": "nodes.wait_ready_or_victory.output.match"
+        },
         "revalidate": true,
         "disappeared_states": [
-          { "name": "victory", "template": { "ref": "blackboard.settlement_template" }, "roi": [650, 900, 650, 180], "threshold": 0.86 },
-          { "name": "experience", "template": "assets/templates/shared/experience-complete.png", "roi": [300, 450, 1350, 450], "threshold": 0.88 }
+          {
+            "name": "victory",
+            "template": {
+              "ref": "inputs.结算页面模板"
+            },
+            "roi": [
+              650,
+              900,
+              650,
+              180
+            ],
+            "threshold": 0.86
+          },
+          {
+            "name": "experience",
+            "template": "assets/templates/shared/experience-complete.png",
+            "roi": [
+              300,
+              450,
+              1350,
+              450
+            ],
+            "threshold": 0.88
+          }
         ],
-        "disappeared_state_timeout_seconds": { "ref": "blackboard.battle_timeout" },
+        "disappeared_state_timeout_seconds": {
+          "ref": "inputs.战斗超时时间"
+        },
         "random_offset": 5,
-        "random_interval": [0.2, 0.6]
+        "random_interval": [
+          0.2,
+          0.6
+        ]
       },
-      "decorators": [{ "type": "condition", "expression": { "eq": [{ "ref": "nodes.wait_ready_or_victory.output.state" }, "ready"] } }]
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.wait_ready_or_victory.output.state"
+              },
+              "ready"
+            ]
+          }
+        }
+      ]
     },
     {
-      "id": "victory_before_ready", "type": "task", "name": "阵容已自动开战并完成", "action": "core.log", "params": { "message": "未出现准备按钮，已直接检测到胜利页" },
-      "decorators": [{ "type": "condition", "expression": { "eq": [{ "ref": "nodes.wait_ready_or_victory.output.state" }, "victory"] } }]
+      "id": "victory_before_ready",
+      "type": "task",
+      "name": "阵容已自动开战并完成",
+      "action": "core.log",
+      "params": {
+        "message": "未出现准备按钮，已直接检测到胜利页"
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.wait_ready_or_victory.output.state"
+              },
+              "victory"
+            ]
+          }
+        }
+      ]
     },
-    { "id": "await_victory", "type": "task", "name": "等待战斗胜利并继续", "action": "workflow.run", "params": { "workflow": "souls/shared/await_victory.json", "inputs": { "timeout_seconds": { "ref": "blackboard.battle_timeout" } } } },
-    { "id": "settlement", "type": "sequence", "name": "统计并由统一恢复层清理结算", "children": ["stats_reward_layer_1", "recover_after_rewards"] },
-    { "id": "stats_reward_layer_1", "type": "task", "name": "后台统计当前奖励层", "action": "workflow.run", "params": { "workflow": "souls/shared/reward_statistics.json", "inputs": { "category": "souls", "layer": 1 } } },
-    { "id": "recover_after_rewards", "type": "task", "name": "清理后确认回到御魂挑战页", "action": "workflow.run", "params": { "workflow": "shared/recover_to_souls.json", "inputs": { "courtyard_template": { "ref": "blackboard.courtyard_template" }, "bounty_reject_template": { "ref": "blackboard.bounty_reject_template" }, "treasure_template": { "ref": "blackboard.treasure_template" }, "treasure_close_point": { "ref": "blackboard.treasure_close_point" }, "realm_close_point": { "ref": "blackboard.realm_close_point" }, "recovery_timeout": { "ref": "blackboard.recovery_timeout" } } } }
+    {
+      "id": "await_victory",
+      "type": "task",
+      "name": "等待战斗胜利并继续",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "souls/shared/await_victory.json",
+        "inputs": {
+          "总超时时间": {
+            "ref": "inputs.战斗超时时间"
+          }
+        }
+      }
+    },
+    {
+      "id": "settlement",
+      "type": "sequence",
+      "name": "统计并由统一恢复层清理结算",
+      "children": [
+        "stats_reward_layer_1",
+        "recover_after_rewards",
+        "realm_scheduler"
+      ]
+    },
+    {
+      "id": "stats_reward_layer_1",
+      "type": "task",
+      "name": "统计奖励并追踪结界突破券",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "souls/shared/reward_statistics.json",
+        "inputs": {
+          "任务类别": "souls",
+          "奖励层级": 1,
+          "统计结界通关": {
+            "ref": "inputs.启用结界突破"
+          },
+          "结界突破阈值": {
+            "ref": "inputs.结界突破阈值"
+          }
+        }
+      }
+    },
+    {
+      "id": "recover_after_rewards",
+      "type": "task",
+      "name": "清理后确认回到御魂挑战页",
+      "action": "workflow.run",
+      "params": {
+        "workflow": "shared/recover_to_souls.json",
+        "inputs": {
+          "庭院入口模板": {
+            "ref": "inputs.庭院入口模板"
+          },
+          "悬赏拒绝按钮模板": {
+            "ref": "inputs.悬赏拒绝按钮模板"
+          },
+          "宝箱页面模板": {
+            "ref": "inputs.宝箱页面模板"
+          },
+          "宝箱关闭位置": {
+            "ref": "inputs.宝箱关闭位置"
+          },
+          "结界突破关闭位置": {
+            "ref": "inputs.结界突破关闭位置"
+          },
+          "页面恢复超时时间": {
+            "ref": "inputs.页面恢复超时时间"
+          }
+        }
+      }
+    }
   ]
 }

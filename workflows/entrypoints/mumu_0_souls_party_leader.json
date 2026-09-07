@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "mumu_0_souls_party_leader",
   "version": "5.4.0",
   "description": "MuMu-0 队长入口：恢复页面、创建私密协战房间、邀请队员，并按运行轮次执行组队御魂。",
@@ -12,44 +12,38 @@
     "timeout_seconds": 1209600,
     "max_steps": 2200
   },
-  "blackboard": {
-    "rounds": {
+  "inputs": {
+    "运行轮数": {
       "type": "integer",
-      "public": true,
       "default": 9999,
       "min": 1,
       "max": 9999
     },
-    "member_present_template": {
+    "队员离开宽限时间": {
+      "type": "number",
+      "default": 5,
+      "min": 0,
+      "max": 30
+    },
+    "队员已在场模板": {
       "type": "asset",
-      "public": true,
       "default": "assets/templates/souls/party/member-present.png",
       "description": "用于确认目标队友已经进入协战房间"
     },
-    "invite_target_template": {
+    "邀请目标模板": {
       "type": "asset",
-      "public": true,
       "default": "assets/templates/souls/party/member-invite-target.png",
       "description": "好友邀请列表中的目标队友名字模板"
     },
-    "member_join_timeout": {
+    "队员加入超时时间": {
       "type": "number",
-      "public": true,
       "default": 30,
       "min": 5,
       "max": 120,
       "description": "每次发送邀请后等待目标队友入房的秒数"
-    },
-    "enable_realm_raid": { "type": "boolean", "public": true, "default": false },
-    "realm_threshold": { "type": "integer", "public": true, "default": 30, "min": 1 },
-    "realm_pass_roi": { "type": "rect", "public": true, "default": [1450, 0, 470, 180] },
-    "realm_entry_point": { "type": "rect", "public": true, "default": [450, 1000, 0, 0] },
-    "realm_target_points": { "type": "array", "public": true, "default": [[500, 275, 0, 0], [1000, 275, 0, 0], [1500, 275, 0, 0], [500, 475, 0, 0], [1000, 475, 0, 0], [1500, 475, 0, 0], [500, 675, 0, 0], [1000, 675, 0, 0], [1500, 675, 0, 0]], "items": { "type": "rect" } }
-    ,
-    "realm_target_rois": { "type": "array", "public": true, "default": [[220, 220, 500, 190], [720, 220, 500, 190], [1220, 220, 500, 190], [220, 420, 500, 190], [720, 420, 500, 190], [1220, 420, 500, 190], [220, 620, 500, 190], [720, 620, 500, 190], [1220, 620, 500, 190]], "items": { "type": "rect" } },
-    "realm_completed_texts": { "type": "array", "public": true, "default": ["已挑战", "已击败", "胜利", "占领"], "items": { "type": "string", "min_length": 1 } },
-    "realm_completed_templates": { "type": "array", "public": true, "default": [], "items": { "type": "asset", "min_length": 1 } }
+    }
   },
+  "variables": {},
   "nodes": [
     {
       "id": "root",
@@ -65,7 +59,7 @@
       "name": "建队、邀请并按配置轮数执行",
       "children": [
         "ensure_party_room",
-        "ensure_member_invited",
+        "ensure_initial_member",
         "battle_plan",
         "final_recovery"
       ]
@@ -78,7 +72,7 @@
       "params": {
         "workflow": "shared/recover_to_souls.json",
         "inputs": {
-          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
+          "庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-0.png"
         }
       }
     },
@@ -138,7 +132,6 @@
       "name": "进入悲鸣并创建仅邀请队伍",
       "children": [
         "enter_souls_floor",
-        "realm_scheduler",
         "wait_party_button",
         "tap_party_button",
         "retry_create_dialog",
@@ -475,7 +468,7 @@
     {
       "id": "tap_private_permission",
       "type": "task",
-      "name": "选择不公开仅邀请",
+      "name": "选择仅邀请",
       "action": "input.tap",
       "params": {
         "x": 1148,
@@ -525,10 +518,10 @@
     {
       "id": "ensure_member_invited",
       "type": "selector",
-      "name": "确认目标队友已加入或发送邀请",
+      "name": "确认目标队友仍在房间或离队后重邀",
       "children": [
         "member_already_present",
-        "send_initial_invite"
+        "send_reinvite_after_departure"
       ],
       "decorators": [
         {
@@ -557,7 +550,7 @@
       "action": "vision.wait_template",
       "params": {
         "template": {
-          "ref": "blackboard.member_present_template"
+          "ref": "inputs.队员已在场模板"
         },
         "timeout_seconds": 2,
         "roi": [
@@ -572,9 +565,29 @@
       }
     },
     {
+      "id": "ensure_initial_member",
+      "type": "selector",
+      "name": "首次建队确认目标队友已加入",
+      "children": [
+        "initial_member_already_present",
+        "send_initial_invite"
+      ],
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 180,
+          "delay_seconds": 0.5
+        },
+        {
+          "type": "timeout",
+          "seconds": 7200
+        }
+      ]
+    },
+    {
       "id": "send_initial_invite",
       "type": "sequence",
-      "name": "邀请目标队友",
+      "name": "首次邀请目标队友",
       "children": [
         "tap_empty_member_slot",
         "wait_invite_target",
@@ -583,6 +596,159 @@
         "tap_invite_button",
         "wait_member_after_invite"
       ]
+    },
+    {
+      "id": "send_reinvite_after_departure",
+      "type": "sequence",
+      "name": "队友离队后等待并重新邀请",
+      "children": [
+        "wait_member_departure_window",
+        "tap_empty_member_slot_reinvite",
+        "wait_invite_target_reinvite",
+        "tap_invite_target_reinvite",
+        "wait_invite_button_reinvite",
+        "tap_invite_button_reinvite",
+        "wait_member_after_reinvite"
+      ]
+    },
+    {
+      "id": "initial_member_already_present",
+      "type": "sequence",
+      "name": "首次检查目标队友已在房间",
+      "children": [
+        "detect_initial_member_present"
+      ]
+    },
+    {
+      "id": "detect_initial_member_present",
+      "type": "task",
+      "name": "首次检测目标队友账号条",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {
+          "ref": "inputs.队员已在场模板"
+        },
+        "timeout_seconds": 2,
+        "roi": [
+          700,
+          100,
+          450,
+          180
+        ],
+        "threshold": 0.8,
+        "scale_search": false,
+        "present": true
+      }
+    },
+    {
+      "id": "tap_empty_member_slot_reinvite",
+      "type": "task",
+      "name": "重邀时打开好友邀请列表",
+      "action": "input.tap",
+      "params": {
+        "x": 970,
+        "y": 385,
+        "random_offset": 5,
+        "random_interval": [
+          0.2,
+          0.6
+        ]
+      }
+    },
+    {
+      "id": "wait_invite_target_reinvite",
+      "type": "task",
+      "name": "重邀时等待目标队友好友项",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {
+          "ref": "inputs.邀请目标模板"
+        },
+        "timeout_seconds": 30,
+        "roi": [
+          500,
+          220,
+          500,
+          230
+        ],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_invite_target_reinvite",
+      "type": "task",
+      "name": "重邀时选择目标队友",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_invite_target_reinvite.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.2,
+          0.5
+        ]
+      }
+    },
+    {
+      "id": "wait_invite_button_reinvite",
+      "type": "task",
+      "name": "重邀时等待邀请按钮",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/souls/party/invite-button.png",
+        "timeout_seconds": 10,
+        "roi": [
+          950,
+          760,
+          400,
+          220
+        ],
+        "threshold": 0.9,
+        "scale_search": false
+      }
+    },
+    {
+      "id": "tap_invite_button_reinvite",
+      "type": "task",
+      "name": "重邀时发送御魂悲鸣邀请",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_invite_button_reinvite.output.0"
+        },
+        "revalidate": true,
+        "random_offset": 4,
+        "random_interval": [
+          0.2,
+          0.6
+        ]
+      }
+    },
+    {
+      "id": "wait_member_after_reinvite",
+      "type": "task",
+      "name": "确认目标队友接受重邀并进入房间",
+      "action": "vision.wait_template",
+      "params": {
+        "template": {
+          "ref": "inputs.队员已在场模板"
+        },
+        "timeout_seconds": {
+          "ref": "inputs.队员加入超时时间"
+        },
+        "roi": [
+          700,
+          100,
+          450,
+          180
+        ],
+        "threshold": 0.8,
+        "scale_search": false,
+        "present": true
+      }
     },
     {
       "id": "tap_empty_member_slot",
@@ -606,7 +772,7 @@
       "action": "vision.wait_template",
       "params": {
         "template": {
-          "ref": "blackboard.invite_target_template"
+          "ref": "inputs.邀请目标模板"
         },
         "timeout_seconds": 30,
         "roi": [
@@ -678,10 +844,10 @@
       "action": "vision.wait_template",
       "params": {
         "template": {
-          "ref": "blackboard.member_present_template"
+          "ref": "inputs.队员已在场模板"
         },
         "timeout_seconds": {
-          "ref": "blackboard.member_join_timeout"
+          "ref": "inputs.队员加入超时时间"
         },
         "roi": [
           700,
@@ -696,18 +862,43 @@
     },
     {
       "id": "battle_plan",
-      "type": "selector",
-      "name": "按公开轮数执行并在末轮停止续邀",
-      "children": ["final_round", "automatic_round"],
+      "type": "sequence",
+      "name": "每轮确认队员在房间后执行战斗",
+      "children": [
+        "ensure_member_invited",
+        "round_selector"
+      ],
       "decorators": [
         {
           "type": "repeat",
-          "count": { "ref": "blackboard.rounds" }
+          "count": {
+            "ref": "inputs.运行轮数"
+          }
         },
         {
           "type": "timeout",
           "seconds": 1209000
         }
+      ]
+    },
+    {
+      "id": "wait_member_departure_window",
+      "type": "task",
+      "name": "等待队员完成奖励复核并决定是否离队",
+      "action": "core.sleep",
+      "params": {
+        "seconds": {
+          "ref": "inputs.队员离开宽限时间"
+        }
+      }
+    },
+    {
+      "id": "round_selector",
+      "type": "selector",
+      "name": "末轮停止续邀，其余轮保持自动续邀",
+      "children": [
+        "final_round",
+        "automatic_round"
       ]
     },
     {
@@ -718,16 +909,23 @@
       "params": {
         "workflow": "souls/party/leader_round.json",
         "inputs": {
-          "phase": "finish",
-          "member_present_template": {
-            "ref": "blackboard.member_present_template"
+          "执行阶段": "finish",
+          "队员已在场模板": {
+            "ref": "inputs.队员已在场模板"
           }
         }
       },
       "decorators": [
         {
           "type": "condition",
-          "expression": { "eq": [{ "ref": "runtime.repeat.final" }, true] }
+          "expression": {
+            "eq": [
+              {
+                "ref": "runtime.repeat.final"
+              },
+              true
+            ]
+          }
         }
       ]
     },
@@ -739,33 +937,25 @@
       "params": {
         "workflow": "souls/party/leader_round.json",
         "inputs": {
-          "phase": "setup_auto_invite",
-          "member_present_template": {
-            "ref": "blackboard.member_present_template"
+          "执行阶段": "setup_auto_invite",
+          "队员已在场模板": {
+            "ref": "inputs.队员已在场模板"
           }
         }
-      }
-    },
-    {
-      "id": "realm_scheduler",
-      "type": "task",
-      "name": "组队御魂启动前检查结界券",
-      "action": "workflow.run",
-      "params": {
-        "workflow": "realm/shared/schedule_from_souls.json",
-        "inputs": {
-          "enable_realm_raid": { "ref": "blackboard.enable_realm_raid" },
-          "realm_threshold": { "ref": "blackboard.realm_threshold" },
-          "pass_roi": { "ref": "blackboard.realm_pass_roi" },
-          "entry_point": { "ref": "blackboard.realm_entry_point" },
-          "target_points": { "ref": "blackboard.realm_target_points" },
-          "target_rois": { "ref": "blackboard.realm_target_rois" },
-          "completed_texts": { "ref": "blackboard.realm_completed_texts" },
-          "completed_templates": { "ref": "blackboard.realm_completed_templates" },
-          "leave_current_screen": false,
-          "souls_courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "runtime.repeat.final"
+              },
+              false
+            ]
+          }
         }
-      }
+      ]
     },
     {
       "id": "task_in_souls_1",
@@ -774,7 +964,7 @@
       "params": {
         "workflow": "shared/recover_to_souls.json",
         "inputs": {
-          "courtyard_template": "assets/templates/souls/courtyard-explore/mumu-0.png"
+          "庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-0.png"
         }
       },
       "name": "优先使用统一多状态恢复流程"
@@ -810,7 +1000,7 @@
       "y": 1248
     },
     "wait_courtyard_explore": {
-      "x": 1660,
+      "x": 1664,
       "y": 1248
     },
     "tap_courtyard_explore": {
@@ -855,11 +1045,11 @@
     },
     "wait_create_team": {
       "x": 4648,
-      "y": 832
+      "y": 1040
     },
     "tap_create_team": {
       "x": 4980,
-      "y": 832
+      "y": 1040
     },
     "detect_create_dialog_quick": {
       "x": 5312,
@@ -870,76 +1060,76 @@
       "y": 1248
     },
     "wait_create_confirm_after_retry": {
-      "x": 5976,
-      "y": 1248
+      "x": 5312,
+      "y": 1040
     },
     "retry_create_dialog": {
-      "x": 5810,
-      "y": 1040
+      "x": 4980,
+      "y": 832
     },
     "ensure_create_dialog_open": {
       "x": 5561,
       "y": 832
     },
     "wait_create_confirm": {
-      "x": 6308,
+      "x": 5644,
       "y": 832
     },
     "tap_private_permission": {
-      "x": 6640,
+      "x": 5976,
       "y": 832
     },
     "tap_create_confirm": {
-      "x": 6972,
+      "x": 6308,
       "y": 832
     },
     "wait_party_room_after_create": {
-      "x": 7304,
+      "x": 6640,
       "y": 832
     },
     "create_party_room": {
-      "x": 4306,
+      "x": 3974,
       "y": 624
     },
     "ensure_party_room": {
-      "x": 2153,
+      "x": 1987,
       "y": 416
     },
     "detect_member_present": {
-      "x": 7632,
-      "y": 832
+      "x": 9296,
+      "y": 1040
     },
     "member_already_present": {
-      "x": 7636,
-      "y": 624
-    },
-    "tap_empty_member_slot": {
-      "x": 7968,
-      "y": 832
-    },
-    "wait_invite_target": {
-      "x": 8320,
-      "y": 832
-    },
-    "tap_invite_target": {
-      "x": 8632,
-      "y": 832
-    },
-    "wait_invite_button": {
-      "x": 8964,
-      "y": 832
-    },
-    "tap_invite_button": {
       "x": 9296,
       "y": 832
     },
-    "send_initial_invite": {
+    "tap_empty_member_slot": {
+      "x": 7304,
+      "y": 832
+    },
+    "wait_invite_target": {
+      "x": 7636,
+      "y": 832
+    },
+    "tap_invite_target": {
+      "x": 7968,
+      "y": 832
+    },
+    "wait_invite_button": {
+      "x": 8300,
+      "y": 832
+    },
+    "tap_invite_button": {
       "x": 8632,
+      "y": 832
+    },
+    "send_initial_invite": {
+      "x": 8134,
       "y": 624
     },
     "ensure_member_invited": {
-      "x": 8134,
-      "y": 416
+      "x": 9960,
+      "y": 624
     },
     "single_final_round": {
       "x": 9624,
@@ -962,20 +1152,135 @@
       "y": 624
     },
     "battle_plan": {
-      "x": 9877,
+      "x": 11039,
       "y": 416
     },
     "main": {
-      "x": 6015,
+      "x": 7301,
       "y": 208
     },
     "root": {
-      "x": 6015,
+      "x": 7301,
       "y": 0
     },
     "task_in_souls_1": {
-      "x": 336,
+      "x": 332,
       "y": 1040
+    },
+    "detect_initial_member_present": {
+      "x": 6972,
+      "y": 832
+    },
+    "initial_member_already_present": {
+      "x": 6972,
+      "y": 624
+    },
+    "wait_member_after_invite": {
+      "x": 8964,
+      "y": 832
+    },
+    "ensure_initial_member": {
+      "x": 7553,
+      "y": 416
+    },
+    "wait_member_departure_window": {
+      "x": 9628,
+      "y": 1040
+    },
+    "tap_empty_member_slot_reinvite": {
+      "x": 9960,
+      "y": 1040
+    },
+    "wait_invite_target_reinvite": {
+      "x": 10292,
+      "y": 1040
+    },
+    "tap_invite_target_reinvite": {
+      "x": 10624,
+      "y": 1040
+    },
+    "wait_invite_button_reinvite": {
+      "x": 10956,
+      "y": 1040
+    },
+    "tap_invite_button_reinvite": {
+      "x": 11288,
+      "y": 1040
+    },
+    "wait_member_after_reinvite": {
+      "x": 11620,
+      "y": 1040
+    },
+    "send_reinvite_after_departure": {
+      "x": 10624,
+      "y": 832
+    },
+    "final_round": {
+      "x": 11952,
+      "y": 832
+    },
+    "automatic_round": {
+      "x": 12284,
+      "y": 832
+    },
+    "round_selector": {
+      "x": 12118,
+      "y": 624
+    },
+    "final_recovery": {
+      "x": 12616,
+      "y": 416
+    }
+  },
+  "_inputParams": {
+    "detect_member_present": [
+      "template"
+    ],
+    "detect_initial_member_present": [
+      "template"
+    ],
+    "wait_invite_target_reinvite": [
+      "template"
+    ],
+    "wait_member_after_reinvite": [
+      "template",
+      "timeout_seconds"
+    ],
+    "wait_invite_target": [
+      "template"
+    ],
+    "wait_member_after_invite": [
+      "template",
+      "timeout_seconds"
+    ],
+    "wait_member_departure_window": [
+      "seconds"
+    ]
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "队员已在场模板",
+      "scope": "inputs",
+      "x": 9072,
+      "y": 1120
+    },
+    "card_2": {
+      "name": "邀请目标模板",
+      "scope": "inputs",
+      "x": 10432,
+      "y": 1376
+    },
+    "card_3": {
+      "name": "队员加入超时时间",
+      "scope": "inputs",
+      "x": 11432,
+      "y": 1208
+    },
+    "card_4": {
+      "name": "队员离开宽限时间",
+      "scope": "inputs",
+      "x": 9408,
+      "y": 1120
     }
   }
 }

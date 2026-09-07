@@ -20,6 +20,7 @@
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'];
   const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
+  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', instance_parallel: '实例并行' };
   const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', task: '▣' };
   const RUN_LABEL = {
     running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
@@ -28,7 +29,7 @@
   const state = {
     raw: null,
     catalog: [],
-    refs: { blackboard: [], nodes: [] },
+    refs: { inputs: [], variables: [], nodes: [] },
     issues: [],
     workflows: [],
     docUri: '',
@@ -40,6 +41,7 @@
     selectedEdge: null,
     selectedRun: null,
     selectedVariable: '',
+    selectedVariableScope: 'inputs',
     zoom: 1,
     panX: 80,
     panY: 48,
@@ -64,6 +66,27 @@
     clipboardLayout: null,
     mouse: null,
   };
+
+  // 工作台统一接管 HTML 控件的 title，避免出现浏览器原生提示框。
+  function installCustomTooltips() {
+    const scan = () => {
+      document.querySelectorAll('[title]').forEach((element) => {
+        if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || element.tagName === 'IFRAME') return;
+        const label = element.getAttribute('title') && element.getAttribute('title').trim();
+        if (!label) return;
+        element.dataset.tooltip = label;
+        element.removeAttribute('title');
+        if (!element.getAttribute('aria-label') && /^(BUTTON|INPUT|SELECT)$/.test(element.tagName)) {
+          element.setAttribute('aria-label', label.replace(/\s+/g, ' '));
+        }
+      });
+    };
+    scan();
+    const observer = new MutationObserver(scan);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+  }
+  installCustomTooltips();
+
   // 双击检测（原生 dblclick 会被 mousedown 后的 render() 重建 DOM 破坏，改用两次按下计时）
   let lastClickTime = 0;
   let lastClickNode = '';
@@ -79,7 +102,7 @@
   const nodes = () => Array.isArray(state.raw && state.raw.nodes) ? state.raw.nodes : [];
   const nodeById = (id) => nodes().find((node) => node && node.id === id) || null;
   const catalogByName = (name) => state.catalog.find((item) => item.name === name) || null;
-  const workflowNodeVariables = (node) => subWorkflowRef(node) ? publicWorkflowVariables(subWorkflowRef(node)) : [];
+  const workflowNodeInputs = (node) => subWorkflowRef(node) ? workflowInputs(subWorkflowRef(node)) : [];
   const nodeHeight = (node) => BASE_H
     + nodeVariablePins(node).length * RUN_VARIABLE_H
     + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
@@ -113,44 +136,44 @@
   }
 
   function variableCardList() {
-    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
-      ? state.raw.blackboard
-      : {};
     return Object.entries(variableCards())
       .map(([id, value]) => ({
         id,
         name: value && typeof value.name === 'string' && value.name ? value.name : id,
+        scope: value && value.scope === 'variables' ? 'variables' : 'inputs',
         x: value && Number.isFinite(value.x) ? value.x : 0,
         y: value && Number.isFinite(value.y) ? value.y : 0,
       }))
-      .filter((card) => Object.prototype.hasOwnProperty.call(blackboard, card.name));
+      .filter((card) => Object.prototype.hasOwnProperty.call(state.raw[card.scope] || {}, card.name));
   }
 
-  function variableTypeOf(name) {
-    const definition = state.raw.blackboard && state.raw.blackboard[name];
+  function variableTypeOf(scope, name) {
+    const definition = state.raw[scope] && state.raw[scope][name];
     return definition && typeof definition === 'object' && definition.type ? definition.type : 'any';
   }
 
-  /** 节点卡片左侧的变量端点：公开参数，以及子工作流的公开输入。 */
+  /** 节点卡片左侧的变量端点：节点输入，以及子工作流的输入。 */
   function nodeVariablePins(node) {
     if (!node || node.type !== 'task') return [];
     const params = node.params && typeof node.params === 'object' && !Array.isArray(node.params) ? node.params : {};
     const pins = [];
     const spec = catalogByName(node.action);
-    const publicParams = publicParameterNames(node);
-    for (const param of publicParams) {
+    const inputParams = inputParameterNames(node);
+    for (const param of inputParams) {
       if (!spec || !spec.parameters || !spec.parameters[param]) continue;
       const value = params[param];
-      const variable = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.')
-        ? value.ref.slice('blackboard.'.length)
-        : '';
+      const ref = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' ? value.ref : '';
+      const scope = ref.startsWith('variables.') ? 'variables' : 'inputs';
+      const variable = ref.startsWith(`${scope}.`) ? ref.slice(scope.length + 1) : '';
       const definition = spec && spec.parameters ? spec.parameters[param] : null;
-      pins.push({ param, variable, type: variable ? variableTypeOf(variable) : definition && definition.type || 'any', label: param });
+      pins.push({ param, variable, scope, type: variable ? variableTypeOf(scope, variable) : definition && definition.type || 'any', label: param });
     }
-    for (const variable of workflowNodeVariables(node)) {
+    for (const variable of workflowNodeInputs(node)) {
       const input = params.inputs && typeof params.inputs === 'object' ? params.inputs[variable.name] : null;
-      const ref = input && typeof input === 'object' && typeof input.ref === 'string' && input.ref.startsWith('blackboard.') ? input.ref.slice('blackboard.'.length) : '';
-      pins.push({ param: `inputs.${variable.name}`, variable: ref, type: variable.definition.type || 'any', label: variable.name });
+      const binding = input && typeof input === 'object' && typeof input.ref === 'string' ? input.ref : '';
+      const scope = binding.startsWith('variables.') ? 'variables' : 'inputs';
+      const ref = binding.startsWith(`${scope}.`) ? binding.slice(scope.length + 1) : '';
+      pins.push({ param: `inputs.${variable.name}`, variable: ref, scope, type: variable.definition.type || 'any', label: variable.name });
     }
     return pins;
   }
@@ -166,51 +189,51 @@
     };
   }
 
-  function publicParameterMetadata() {
+  function inputParameterMetadata() {
     if (!state.raw || typeof state.raw !== 'object') return {};
-    if (!state.raw._publicParams || typeof state.raw._publicParams !== 'object' || Array.isArray(state.raw._publicParams)) state.raw._publicParams = {};
-    return state.raw._publicParams;
+    if (!state.raw._inputParams || typeof state.raw._inputParams !== 'object' || Array.isArray(state.raw._inputParams)) state.raw._inputParams = {};
+    return state.raw._inputParams;
   }
 
-  function publicParameterNames(node) {
-    const value = state.raw && state.raw._publicParams && state.raw._publicParams[node && node.id];
+  function inputParameterNames(node) {
+    const value = state.raw && state.raw._inputParams && state.raw._inputParams[node && node.id];
     if (Array.isArray(value)) return value.filter((name) => typeof name === 'string' && name);
     if (value && typeof value === 'object') return Object.keys(value).filter((name) => value[name] === true);
     return [];
   }
 
-  function isParameterPublic(node, name) {
-    return publicParameterNames(node).includes(name);
+  function isParameterInput(node, name) {
+    return inputParameterNames(node).includes(name);
   }
 
-  /** 将旧版“公开即自动绑定”数据迁移为公开元数据，并保留现有引用。 */
-  function syncLegacyPublicParameters() {
-    if (!state.raw || Object.prototype.hasOwnProperty.call(state.raw, '_publicParams')) return false;
-    const blackboard = state.raw.blackboard;
-    if (!blackboard || typeof blackboard !== 'object' || Array.isArray(blackboard)) return false;
+  /** 将旧版已有输入绑定迁移为编辑器输入端点元数据，并保留现有引用。 */
+  function syncLegacyInputParameters() {
+    if (!state.raw || Object.prototype.hasOwnProperty.call(state.raw, '_inputParams')) return false;
+    const inputs = state.raw.inputs;
+    if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return false;
     const metadata = {};
     let changed = false;
     for (const node of nodes()) {
       if (!node || node.type !== 'task' || !node.params || typeof node.params !== 'object' || Array.isArray(node.params)) continue;
       const names = Object.entries(node.params)
-        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.') && Object.prototype.hasOwnProperty.call(blackboard, value.ref.slice('blackboard.'.length)))
+        .filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('inputs.') && Object.prototype.hasOwnProperty.call(inputs, value.ref.slice('inputs.'.length)))
         .map(([name]) => name);
       if (names.length) { metadata[node.id] = names; changed = true; }
     }
     if (!changed) return false;
-    state.raw._publicParams = metadata;
+    state.raw._inputParams = metadata;
     return true;
   }
 
-  /** 将旧文档中已有的 blackboard 绑定迁移为可见的变量卡片。 */
+  /** 将旧文档中已有的 inputs 绑定迁移为可见的变量卡片。 */
   function syncLegacyVariableCards() {
     if (!state.raw || Object.prototype.hasOwnProperty.call(state.raw, '_variableCards')) return false;
-    const blackboard = state.raw.blackboard;
-    if (!blackboard || typeof blackboard !== 'object' || Array.isArray(blackboard)) return false;
+    const inputs = state.raw.inputs;
+    if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return false;
     const references = new Map();
     for (const node of nodes()) {
       nodeVariablePins(node).forEach((pin, index) => {
-        if (pin.variable && Object.prototype.hasOwnProperty.call(blackboard, pin.variable) && !references.has(pin.variable)) {
+        if (pin.variable && Object.prototype.hasOwnProperty.call(inputs, pin.variable) && !references.has(pin.variable)) {
           references.set(pin.variable, { node, index });
         }
       });
@@ -219,7 +242,7 @@
     const cards = variableCards();
     for (const [name, reference] of references) {
       const id = nextVariableCardId();
-      cards[id] = { name, ...variableCardPosition(reference.node, reference.index) };
+      cards[id] = { name, scope: 'inputs', ...variableCardPosition(reference.node, reference.index) };
     }
     return true;
   }
@@ -229,16 +252,16 @@
     return { x: pos.x + VARIABLE_PIN_X, y: pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2 };
   }
 
-  function variableCompatibleWithPin(variableName, node, param) {
+  function variableCompatibleWithPin(scope, variableName, node, param) {
     if (!node) return false;
     const spec = node.action ? catalogByName(node.action) : null;
     let definition = spec && spec.parameters ? spec.parameters[param] : undefined;
     if (!definition && typeof param === 'string' && param.startsWith('inputs.')) {
-      const publicVariable = workflowNodeVariables(node).find((item) => `inputs.${item.name}` === param);
-      definition = publicVariable && publicVariable.definition;
+      const workflowInput = workflowNodeInputs(node).find((item) => `inputs.${item.name}` === param);
+      definition = workflowInput && workflowInput.definition;
     }
     if (!definition) return true;
-    const variableDefinition = state.raw.blackboard && state.raw.blackboard[variableName];
+    const variableDefinition = state.raw[scope] && state.raw[scope][variableName];
     return compatibleRefType(definitionSchema(definition), definitionSchema(variableDefinition));
   }
 
@@ -256,10 +279,10 @@
     }) || null;
   }
 
-  function publicWorkflowVariables(reference) {
+  function workflowInputs(reference) {
     const descriptor = workflowDescriptor(reference);
-    return descriptor && Array.isArray(descriptor.variables)
-      ? descriptor.variables.filter((variable) => variable && variable.public !== false && variable.definition)
+    return descriptor && Array.isArray(descriptor.inputs)
+      ? descriptor.inputs.filter((variable) => variable && variable.definition)
       : [];
   }
 
@@ -271,7 +294,7 @@
       const totalWidth = node.runs.length * RUN_CARD_W + Math.max(0, node.runs.length - 1) * RUN_CARD_GAP_X;
       const startX = parent.x + NODE_W / 2 - totalWidth / 2;
       node.runs.forEach((run, index) => {
-        const variables = publicWorkflowVariables(run.workflow);
+        const variables = workflowInputs(run.workflow);
         cards.push({
           key: `${node.id}:${index}`,
           node,
@@ -320,7 +343,7 @@
 
   function currentInspectorSelection() {
     if (state.inspector === 'workflow') return { kind: 'workflow' };
-    if (state.inspector === 'variables') return { kind: 'variables', name: state.selectedVariable || '' };
+    if (state.inspector === 'variables') return { kind: 'variables', name: state.selectedVariable || '', scope: state.selectedVariableScope };
     if (state.selectedRun) return { kind: 'run', nodeId: state.selectedRun.nodeId, index: state.selectedRun.index };
     if (state.selectedEdge) return { kind: 'edge', parent: state.selectedEdge.parent, child: state.selectedEdge.child };
     if (state.selected.size === 1) return { kind: 'node', nodeId: [...state.selected][0] };
@@ -332,14 +355,22 @@
   }
 
   function postSidebarState() {
-    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
-      ? state.raw.blackboard
+    const inputs = state.raw && state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)
+      ? state.raw.inputs
       : {};
-    const variables = Object.entries(blackboard).map(([name, rawDefinition]) => {
+    const workflowInputs = Object.entries(inputs).map(([name, rawDefinition]) => {
       const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
-      return { name, type: definition.type || 'any', public: definition.public !== false };
+      return { name, type: definition.type || 'any', scope: 'inputs' };
     });
-    const selectedVariable = state.inspector === 'variables' && Object.prototype.hasOwnProperty.call(blackboard, state.selectedVariable)
+    const runtimeVariables = state.raw && state.raw.variables && typeof state.raw.variables === 'object' && !Array.isArray(state.raw.variables)
+      ? state.raw.variables
+      : {};
+    const variables = Object.entries(runtimeVariables).map(([name, rawDefinition]) => {
+      const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
+      return { name, type: definition.type || 'any', scope: 'variables' };
+    });
+    const selectedDefinitions = state.selectedVariableScope === 'variables' ? runtimeVariables : inputs;
+    const selectedVariable = state.inspector === 'variables' && Object.prototype.hasOwnProperty.call(selectedDefinitions, state.selectedVariable)
       ? state.selectedVariable
       : '';
     const sidebarNodes = nodes().map((node) => {
@@ -361,8 +392,9 @@
     });
     const selectedNode = state.inspector === 'node' && state.selected.size === 1 ? [...state.selected][0] : '';
     const payload = {
-      variables,
+      variables: [...workflowInputs, ...variables],
       selectedVariable,
+      selectedVariableScope: state.selectedVariableScope,
       nodes: sidebarNodes,
       root: String(state.raw.root || ''),
       selectedNode,
@@ -418,7 +450,7 @@
       const node = nodeById(state.selectedRun.nodeId);
       if (!node || !Array.isArray(node.runs) || !node.runs[state.selectedRun.index]) state.selectedRun = null;
     }
-    if (state.inspector === 'variables' && !Object.prototype.hasOwnProperty.call(state.raw.blackboard || {}, state.selectedVariable)) {
+    if (state.inspector === 'variables' && !Object.prototype.hasOwnProperty.call(state.raw[state.selectedVariableScope] || {}, state.selectedVariable)) {
       state.selectedVariable = '';
     }
     render();
@@ -758,14 +790,17 @@
 
   function renderVariableEdges(layer) {
     const cards = new Map(variableCardList().map((card) => [card.id, card]));
-    const byName = new Map();
-    for (const card of variableCardList()) if (!byName.has(card.name)) byName.set(card.name, card);
+    const byReference = new Map();
+    for (const card of variableCardList()) {
+      const ref = `${card.scope}.${card.name}`;
+      if (!byReference.has(ref)) byReference.set(ref, card);
+    }
     const links = state.raw && state.raw._variableLinks && typeof state.raw._variableLinks === 'object' ? state.raw._variableLinks : {};
     for (const node of nodes()) {
       const pos = position(node);
       nodeVariablePins(node).forEach((pin, index) => {
         if (!pin.variable) return;
-        const card = cards.get(links[`${node.id}:${pin.param}`]) || byName.get(pin.variable);
+        const card = cards.get(links[`${node.id}:${pin.param}`]) || byReference.get(`${pin.scope}.${pin.variable}`);
         if (!card) return;
         const x1 = card.x + VARIABLE_CARD_W;
         const y1 = card.y + VARIABLE_CARD_PORT_Y;
@@ -779,8 +814,9 @@
 
   function render() {
     if (!state.raw) return;
+    UI.closeDropdowns?.();
     ensureLayout();
-    const migratedPublic = syncLegacyPublicParameters();
+    const migratedPublic = syncLegacyInputParameters();
     const migratedCards = syncLegacyVariableCards();
     if (migratedPublic || migratedCards) setDirty(true);
     graph.innerHTML = '';
@@ -900,8 +936,8 @@
   function templatePreview(node) {
     if (!node || node.type !== 'task' || !['vision.match_template', 'vision.wait_template'].includes(node.action)) return null;
     let value = node.params && node.params.template;
-    if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.')) {
-      const definition = state.raw && state.raw.blackboard && state.raw.blackboard[value.ref.slice('blackboard.'.length)];
+    if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('inputs.')) {
+      const definition = state.raw && state.raw.inputs && state.raw.inputs[value.ref.slice('inputs.'.length)];
       value = definition && typeof definition === 'object' && Object.prototype.hasOwnProperty.call(definition, 'default')
         ? definition.default
         : '';
@@ -1041,7 +1077,7 @@
   function compactValue(value, max = 24) {
     let text;
     if (value === undefined) text = '未传值';
-    else if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') text = `← ${value.ref.replace(/^blackboard\./, '')}`;
+    else if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') text = `← ${value.ref.replace(/^inputs\./, '')}`;
     else if (typeof value === 'string') text = value;
     else {
       try { text = JSON.stringify(value); } catch { text = String(value); }
@@ -1113,11 +1149,11 @@
   }
 
   function renderVariableCard(layer, card) {
-    const definition = (state.raw.blackboard && state.raw.blackboard[card.name]) || {};
+    const definition = (state.raw[card.scope] && state.raw[card.scope][card.name]) || {};
     const type = definition.type || 'any';
-    const selected = state.inspector === 'variables' && state.selectedVariable === card.name;
+    const selected = state.inspector === 'variables' && state.selectedVariableScope === card.scope && state.selectedVariable === card.name;
     const targeted = state.variableConnect && state.variableConnect.direction === 'from-pin'
-      && state.variableConnect.hover && state.variableConnect.hover.card === card.name;
+      && state.variableConnect.hover && state.variableConnect.hover.card === card.name && state.variableConnect.hover.scope === card.scope;
     const group = svgEl('g', {
       class: `variable-card type-${type}${selected ? ' selected' : ''}${targeted ? ' connect-target' : ''}`,
       transform: `translate(${card.x},${card.y})`,
@@ -1131,16 +1167,17 @@
     svgEl('circle', { class: `variable-card-dot type-${type}`, cx: 15, cy: 18, r: 4.5 }, group);
     svgEl('text', { class: 'variable-card-name', x: 28, y: 21 }, group).textContent = compactValue(card.name, 9);
     svgEl('text', { class: 'variable-card-type', x: VARIABLE_CARD_W - 10, y: 20, 'text-anchor': 'end' }, group).textContent = String(type).toUpperCase();
-    svgEl('text', { class: 'variable-card-access', x: 12, y: 50 }, group).textContent = definition.public !== false ? 'PUBLIC' : 'PRIVATE';
+    svgEl('text', { class: 'variable-card-access', x: 12, y: 50 }, group).textContent = card.scope === 'inputs' ? 'INPUT' : 'STATE';
     svgEl('text', { class: 'variable-card-value', x: VARIABLE_CARD_W - 12, y: 50, 'text-anchor': 'end' }, group).textContent = variableValueSummary(definition);
     svgEl('circle', { class: `port port-variable-out type-${type}`, cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: PORT_R }, group);
     const port = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: 10, 'data-variable': card.name }, group);
-    port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.name, card.id));
+    port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.scope, card.name, card.id));
     body.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault(); event.stopPropagation();
       state.selected.clear(); state.selectedEdge = null; state.selectedRun = null;
       state.selectedVariable = card.name;
+      state.selectedVariableScope = card.scope;
       state.inspector = 'variables';
       const point = worldPoint(event);
       state.drag = { kind: 'variable-card', id: card.id, name: card.name, start: point, origin: { x: card.x, y: card.y }, before: snapshot(), moved: false };
@@ -1151,6 +1188,7 @@
       if (contextMenuSuppressedByPan()) return;
       state.selected.clear(); state.selectedEdge = null; state.selectedRun = null;
       state.selectedVariable = card.name;
+      state.selectedVariableScope = card.scope;
       state.inspector = 'variables';
       render();
       showMenu(event.clientX, event.clientY, [
@@ -1174,10 +1212,10 @@
   }
 
   /** 把变量卡片放到指定世界坐标；若附近有兼容端点则吸附到端点旁并建立绑定。 */
-  function placeVariableCard(name, point, options = {}) {
-    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) return;
-    if (!Object.prototype.hasOwnProperty.call(state.raw.blackboard, name)) { toast(`变量 ${name} 不存在`, true); return; }
-    const target = options.connect === false ? null : variablePinTargetAt(point, name);
+  function placeVariableCard(scope, name, point, options = {}) {
+    if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) return;
+    if (!Object.prototype.hasOwnProperty.call(state.raw[scope], name)) { toast(`${scope}.${name} 不存在`, true); return; }
+    const target = options.connect === false ? null : variablePinTargetAt(point, scope, name);
     mutate(() => {
       const cards = variableCards();
       const cardId = nextVariableCardId();
@@ -1186,14 +1224,14 @@
         const pos = position(node);
         const left = pos.x - VARIABLE_CARD_W - 56;
         const x = left >= 24 ? left : pos.x + NODE_W + 56;
-        cards[cardId] = { name, x: Math.round(x / 8) * 8, y: Math.max(24, Math.round((target.y - VARIABLE_CARD_PORT_Y) / 8) * 8) };
+        cards[cardId] = { name, scope, x: Math.round(x / 8) * 8, y: Math.max(24, Math.round((target.y - VARIABLE_CARD_PORT_Y) / 8) * 8) };
         variableLinks()[`${target.nodeId}:${target.param}`] = cardId;
         if (target.param.startsWith('inputs.')) {
           if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
-          node.params.inputs[target.param.slice('inputs.'.length)] = { ref: `blackboard.${name}` };
-        } else node.params[target.param] = { ref: `blackboard.${name}` };
+          node.params.inputs[target.param.slice('inputs.'.length)] = { ref: `${scope}.${name}` };
+        } else node.params[target.param] = { ref: `${scope}.${name}` };
       } else {
-        cards[cardId] = { name, x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
+        cards[cardId] = { name, scope, x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
       }
     });
     if (target) toast(`已连接 参数 ${target.param} ← 变量 ${name}`);
@@ -1201,14 +1239,15 @@
   }
 
   /** 编辑器命令入口：在鼠标处（或视野中心）创建变量卡片。 */
-  function addVariableCardCommand(name) {
-    const variableName = String(name ?? '').trim();
+  function addVariableCardCommand(value) {
+    const scope = value && value.scope === 'variables' ? 'variables' : 'inputs';
+    const variableName = String(value && value.name !== undefined ? value.name : value ?? '').trim();
     if (!variableName) return;
-    if (!state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, variableName)) { toast(`变量 ${variableName} 不存在`, true); return; }
+    if (!state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], variableName)) { toast(`${scope}.${variableName} 不存在`, true); return; }
     if (!wrap.clientWidth || !wrap.clientHeight) return;
     const rect = wrap.getBoundingClientRect();
     const point = state.mouse || { x: (rect.width / 2 - state.panX) / state.zoom, y: (rect.height / 2 - state.panY) / state.zoom };
-    placeVariableCard(variableName, point, { connect: false });
+    placeVariableCard(scope, variableName, point, { connect: false });
   }
 
   /** 若节点是子流程 task（workflow.run），返回子工作流引用，否则返回空字符串。 */
@@ -1344,7 +1383,7 @@
   }
 
   /** 变量连线拖拽中，光标附近类型兼容的节点端点（变量卡片 → 节点）。 */
-  function variablePinTargetAt(point, variableName) {
+  function variablePinTargetAt(point, scope, variableName) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
     const maxDistance = Math.max(PORT_R + 8, 32 / state.zoom);
     let best = null;
@@ -1354,7 +1393,7 @@
       if (!pins.length) continue;
       const pos = position(node);
       pins.forEach((pin, index) => {
-        if (!variableCompatibleWithPin(variableName, node, pin.param)) return;
+        if (!variableCompatibleWithPin(scope, variableName, node, pin.param)) return;
         const x = pos.x + VARIABLE_PIN_X;
         const y = pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2;
         const distance = Math.hypot(point.x - x, point.y - y);
@@ -1367,7 +1406,7 @@
       const pos = position(node);
       if (point.x < pos.x || point.x > pos.x + NODE_W || point.y < pos.y || point.y > pos.y + nodeHeight(node)) continue;
       const pins = nodeVariablePins(node);
-      const index = pins.findIndex((pin) => variableCompatibleWithPin(variableName, node, pin.param));
+      const index = pins.findIndex((pin) => variableCompatibleWithPin(scope, variableName, node, pin.param));
       if (index < 0) continue;
       return { nodeId: node.id, param: pins[index].param, x: pos.x + VARIABLE_PIN_X, y: pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2 };
     }
@@ -1382,18 +1421,18 @@
     let best = null;
     let bestDistance = maxDistance;
     for (const card of variableCardList()) {
-      if (!variableCompatibleWithPin(card.name, node, param)) continue;
+      if (!variableCompatibleWithPin(card.scope, card.name, node, param)) continue;
       const x = card.x + VARIABLE_CARD_W;
       const y = card.y + VARIABLE_CARD_PORT_Y;
       const distance = Math.hypot(point.x - x, point.y - y);
-      if (distance <= bestDistance) { best = { card: card.name, cardId: card.id, x, y }; bestDistance = distance; }
+      if (distance <= bestDistance) { best = { card: card.name, scope: card.scope, cardId: card.id, x, y }; bestDistance = distance; }
     }
     if (best) return best;
     // 落在卡片本体上时也视为连到该变量（允许重复连接当前变量，作为成功反馈）。
     for (const card of variableCardList()) {
-      if (!variableCompatibleWithPin(card.name, node, param)) continue;
+      if (!variableCompatibleWithPin(card.scope, card.name, node, param)) continue;
       if (point.x >= card.x && point.x <= card.x + VARIABLE_CARD_W && point.y >= card.y && point.y <= card.y + VARIABLE_CARD_H) {
-        return { card: card.name, cardId: card.id, x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
+        return { card: card.name, scope: card.scope, cardId: card.id, x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
       }
     }
     return null;
@@ -1403,15 +1442,15 @@
     if (!state.variableConnect || !event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
     const point = worldPoint(event);
     return state.variableConnect.direction === 'from-card'
-      ? variablePinTargetAt(point, state.variableConnect.variable)
+      ? variablePinTargetAt(point, state.variableConnect.scope, state.variableConnect.variable)
       : variableCardTargetAt(point, state.variableConnect.nodeId, state.variableConnect.param);
   }
 
-  function startVariableConnectionFromCard(event, name, cardId) {
+  function startVariableConnectionFromCard(event, scope, name, cardId) {
     if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
     const point = worldPoint(event);
-    state.variableConnect = { direction: 'from-card', variable: name, cardId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+    state.variableConnect = { direction: 'from-card', scope, variable: name, cardId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
     state.selectedEdge = null;
     render();
   }
@@ -1441,19 +1480,19 @@
     state.variableConnect = null;
     releaseConnectionPointer(connection.pointerId);
     if (!target) { render(); return; }
-    if (connection.direction === 'from-card') connectVariableToPin(connection.variable, target.nodeId, target.param, connection.cardId);
-    else connectVariableToPin(target.card, connection.nodeId, connection.param, target.cardId);
+    if (connection.direction === 'from-card') connectVariableToPin(connection.scope, connection.variable, target.nodeId, target.param, connection.cardId);
+    else connectVariableToPin(target.scope, target.card, connection.nodeId, connection.param, target.cardId);
   }
 
   /** 用变量绑定节点参数端点（等价于把该参数接到对应变量）。 */
-  function connectVariableToPin(variable, nodeId, param, cardId) {
+  function connectVariableToPin(scope, variable, nodeId, param, cardId) {
     const node = nodeById(nodeId);
-    if (!node || !state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, variable)) return;
+    if (!node || !state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], variable)) return;
     mutate(() => {
       if (param.startsWith('inputs.')) {
         if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
-        node.params.inputs[param.slice('inputs.'.length)] = { ref: `blackboard.${variable}` };
-      } else node.params[param] = { ref: `blackboard.${variable}` };
+        node.params.inputs[param.slice('inputs.'.length)] = { ref: `${scope}.${variable}` };
+      } else node.params[param] = { ref: `${scope}.${variable}` };
       if (cardId) variableLinks()[`${nodeId}:${param}`] = cardId;
     });
     toast(`参数 ${param} ← 变量 ${variable}`);
@@ -1464,7 +1503,7 @@
     if (!connection) return;
     let origin = null;
     if (connection.direction === 'from-card') {
-      const card = variableCardList().find((item) => item.id === connection.cardId) || variableCardList().find((item) => item.name === connection.variable);
+      const card = variableCardList().find((item) => item.id === connection.cardId) || variableCardList().find((item) => item.scope === connection.scope && item.name === connection.variable);
       if (card) origin = { x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
     } else {
       const node = nodeById(connection.nodeId);
@@ -1646,7 +1685,7 @@
 
   function localIssueCount() {
     if (!state.raw) return 1;
-    let count = state.raw.schema_version === 3 ? 0 : 1;
+    let count = state.raw.schema_version === 4 ? 0 : 1;
     const map = new Map(nodes().map((node) => [node.id, node]));
     const root = map.get(state.raw.root);
     if (!root || root.type !== 'root') count += 1;
@@ -1707,6 +1746,7 @@
   }
 
   function clearInspector(title) {
+    UI.closeDropdowns?.();
     $('inspector-title').textContent = title;
     const empty = $('inspector-empty');
     const body = $('inspector-body');
@@ -1743,53 +1783,56 @@
   }
 
   function selectInput(value, options, onChange, className = '') {
-    const select = el('select', className);
-    for (const option of options) {
-      const item = el('option', '', option.label === undefined ? String(option.value) : option.label);
-      item.value = String(option.value);
-      if (String(option.value) === String(value)) item.selected = true;
-      select.appendChild(item);
-    }
-    select.value = String(value);
-    select.addEventListener('change', () => onChange(select.value));
-    return select;
+    return UI.dropdown({ value, options, onChange, className });
   }
 
   function renderInstancePicker() {
-    const picker = $('instance-select');
-    picker.innerHTML = '';
+    const slot = $('instance-select');
+    slot.innerHTML = '';
     const instances = Array.isArray(state.instances) ? state.instances : [];
     if (!instances.length) {
-      const option = el('option', '', '未检测到运行实例');
-      option.value = '';
-      option.disabled = true;
-      picker.appendChild(option);
       state.instanceId = '';
-      picker.value = '';
-      picker.title = '请先启动 MuMu 或连接 Android 设备';
+      const dropdown = UI.dropdown({
+        value: '',
+        options: [{ value: '', label: '未检测到运行实例' }],
+        onChange: () => {},
+        className: 'instance-slot-control',
+      });
+      dropdown.title = '请先启动 MuMu 或连接 Android 设备';
+      slot.appendChild(dropdown);
       $('btn-run').title = '未检测到运行实例';
       return;
     }
-    for (const instance of instances) {
+    if (!instances.some((instance) => instance.id === state.instanceId)) state.instanceId = instances[0].id;
+    const options = instances.map((instance) => {
       const label = instance.displayName
         || (instance.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instance.id);
-      const option = el('option', '', label);
-      option.value = instance.id;
-      option.title = [instance.displayName, instance.id, instance.backend, instance.adbSerial].filter(Boolean).join(' · ');
-      picker.appendChild(option);
-    }
-    if (!instances.some((instance) => instance.id === state.instanceId)) state.instanceId = instances[0].id;
-    picker.value = state.instanceId;
+      return {
+        value: instance.id,
+        label,
+        title: [instance.displayName, instance.id, instance.backend, instance.adbSerial].filter(Boolean).join(' · '),
+      };
+    });
+    const dropdown = UI.dropdown({
+      value: state.instanceId,
+      options,
+      onChange: (value) => {
+        state.instanceId = value;
+        vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
+      },
+      className: 'instance-slot-control',
+    });
     const selected = instances.find((instance) => instance.id === state.instanceId);
-    picker.title = selected
+    dropdown.title = selected
       ? [selected.id, selected.displayName, selected.adbSerial].filter(Boolean).join(' · ')
       : '请先启动 MuMu 或连接 Android 设备';
+    slot.appendChild(dropdown);
     $('btn-run').title = `在 ${state.instanceId} 执行当前工作流`;
   }
 
   function renderWorkflowPicker() {
-    const picker = $('workflow-select');
-    picker.innerHTML = '';
+    const slot = $('workflow-select');
+    slot.innerHTML = '';
     const workflows = Array.isArray(state.workflows) ? state.workflows : [];
     const all = workflows.slice();
     if (state.docUri && !all.some((item) => item.uri === state.docUri)) {
@@ -1797,15 +1840,44 @@
       const current = state.documentName || '当前工作流';
       all.unshift({ uri: state.docUri, name: current, rel: '' });
     }
-    for (const item of all) {
-      const option = el('option', '', item.name);
-      option.value = item.uri;
-      if (item.rel) option.title = item.rel;
-      picker.appendChild(option);
-    }
-    picker.value = state.docUri || '';
-    picker.title = '切换工作流（无需重新打开）';
+    const dropdown = UI.dropdown({
+      value: state.docUri || '',
+      options: all.map((item) => ({ value: item.uri, label: item.name, title: item.rel || item.uri })),
+      onChange: (uri) => {
+        if (!uri || uri === state.docUri) return;
+        const switchTo = (saveText) => {
+          state.docUri = uri; // 乐观更新，切换失败由 init 纠正
+          vscode.postMessage({ type: 'switchWorkflow', uri, saveText });
+        };
+        if (state.dirty) {
+          const rect = slot.querySelector('.ui-dropdown-button')?.getBoundingClientRect();
+          showMenu(rect ? rect.left : 8, (rect ? rect.bottom : 40) + 4, [
+            { label: '保存并切换', run: () => switchTo(JSON.stringify(state.raw, null, 2) + '\n') },
+            { label: '放弃修改并切换', run: () => switchTo(undefined) },
+            'separator',
+            { label: '取消', run: () => slot.querySelector('.ui-dropdown')?.set(state.docUri) },
+          ]);
+        } else {
+          switchTo(undefined);
+        }
+      },
+      className: 'workflow-slot-control',
+    });
+    dropdown.title = '切换工作流（无需重新打开）';
+    slot.appendChild(dropdown);
   }
+
+  window.__topbar = {
+    setWorkflow(uri) {
+      state.docUri = String(uri || '');
+      renderWorkflowPicker();
+    },
+    setInstance(instanceId) {
+      state.instanceId = String(instanceId || '');
+      renderInstancePicker();
+      vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
+    },
+  };
 
   function navigateWorkflowTrail(index) {
     const send = (saveText) => vscode.postMessage({ type: 'navigateWorkflowTrail', index, saveText });
@@ -1847,8 +1919,38 @@
     return input;
   }
 
+  function sectionCollapseStates() {
+    if (!state.sectionCollapsed || typeof state.sectionCollapsed !== 'object') state.sectionCollapsed = {};
+    return state.sectionCollapsed;
+  }
+
+  function groupSections(root) {
+    for (const header of root.querySelectorAll('.section-header')) {
+      if (header.dataset.grouped === '1') continue;
+      header.dataset.grouped = '1';
+      const wrap = el('div', 'section-content');
+      let next = header.nextSibling;
+      while (next && !(next.classList && next.classList.contains('section-header'))) {
+        const item = next; next = next.nextSibling; wrap.appendChild(item);
+      }
+      header.after(wrap);
+      const key = header.textContent.trim();
+      if (sectionCollapseStates()[key]) { wrap.classList.add('collapsed'); header.classList.add('collapsed'); }
+      header.addEventListener('click', (event) => {
+        if (event.target.closest('select, button, input, label')) return;
+        const collapsed = wrap.classList.toggle('collapsed');
+        header.classList.toggle('collapsed', collapsed);
+        sectionCollapseStates()[key] = collapsed;
+      });
+    }
+  }
+
   function renderInspector() {
     if (!state.raw) return;
+    // 下拉列表使用 body 级浮层；详情面板切换或清空时必须先销毁，
+    // 否则宿主控件被重建后菜单仍会悬浮在旧位置。
+    UI.closeDropdowns?.();
+    queueMicrotask(() => groupSections($('inspector-body')));
     const selected = [...state.selected];
     const selectedNode = selected.length === 1 ? nodeById(selected[0]) : null;
     const open = state.inspector === 'workflow'
@@ -1858,7 +1960,14 @@
       || Boolean(selectedNode);
     $('inspector').classList.toggle('hidden', !open);
     $('editor-main').classList.toggle('inspector-open', open);
-    if (!open) return;
+    if (!open) {
+      $('inspector-title').textContent = '详细信息';
+      $('inspector-empty').textContent = '选择一个节点';
+      $('inspector-empty').classList.remove('hidden');
+      $('inspector-body').classList.add('hidden');
+      $('inspector-body').innerHTML = '';
+      return;
+    }
     if (state.inspector === 'workflow') { renderWorkflowInspector(); return; }
     if (state.inspector === 'variables') { renderVariablesInspector(); return; }
     if (state.selectedRun) { renderInstanceRunInspector(); return; }
@@ -1879,7 +1988,7 @@
     nameRow.appendChild(textInput(node.name || '', (value) => mutate(() => { if (value.trim()) node.name = value.trim(); else delete node.name; })));
     if (node.type !== 'root') {
       const typeRow = field(body, '类型');
-      typeRow.appendChild(selectInput(node.type, TYPES.filter((type) => type !== 'root').map((type) => ({ value: type, label: TYPE_LABEL[type] })), (value) => changeNodeType(node, value)));
+      typeRow.appendChild(selectInput(node.type, TYPES.filter((type) => type !== 'root').map((type) => ({ value: type, label: TYPE_NAMES[type] || TYPE_LABEL[type] })), (value) => changeNodeType(node, value)));
     }
     if (node.type === 'task') renderTaskInspector(body, node);
     else renderCompositeInspector(body, node);
@@ -1935,9 +2044,9 @@
   }
 
   function renderTaskInspector(body, node) {
-    section(body, 'Action');
+    section(body, '动作');
     const row = field(body, '实现');
-    row.appendChild(selectInput(node.action || '', state.catalog.map((item) => ({ value: item.name, label: item.name })), (value) => mutate(() => { node.action = value; node.params = {}; delete publicParameterMetadata()[node.id]; })));
+    row.appendChild(actionDropdown(node));
     const spec = catalogByName(node.action);
     if (spec && spec.description) body.appendChild(el('div', 'description', spec.description));
     section(body, '参数');
@@ -1950,7 +2059,7 @@
       if (node.action === 'workflow.run' && name === 'inputs') continue;
       renderParameter(body, node, name, definition);
     }
-    if (node.action === 'workflow.run') renderPublicWorkflowInputs(body, node.params, node.params.workflow);
+    if (node.action === 'workflow.run') renderPublicWorkflowInputs(body, node.params, node.params.workflow, true, `${node.id}:inputs:`);
   }
 
   function removeInstanceRun(node, index) {
@@ -1960,39 +2069,54 @@
     });
   }
 
-  function parentVariableRefs(definition) {
+  function parentVariableRefs(definition, allowRuntimeVariables = false) {
     const expected = definitionSchema(definition);
-    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
-      ? state.raw.blackboard
+    const inputs = state.raw && state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)
+      ? state.raw.inputs
       : {};
-    return Object.entries(blackboard)
+    const refs = Object.entries(inputs)
       .filter(([, parentDefinition]) => compatibleRefType(expected, definitionSchema(parentDefinition)))
-      .map(([name]) => `blackboard.${name}`);
+      .map(([name]) => `inputs.${name}`);
+    if (allowRuntimeVariables) {
+      const variables = state.raw && state.raw.variables && typeof state.raw.variables === 'object' && !Array.isArray(state.raw.variables)
+        ? state.raw.variables
+        : {};
+      refs.push(...Object.entries(variables)
+        .filter(([, parentDefinition]) => compatibleRefType(expected, definitionSchema(parentDefinition)))
+        .map(([name]) => `variables.${name}`));
+    }
+    return refs;
   }
 
-  function runInputLiteralControl(holder, name, definition) {
+  function runInputLiteralControl(holder, name, definition, key = '') {
     const value = holder.inputs[name];
     const set = (next) => mutate(() => { holder.inputs[name] = next; });
     if (Array.isArray(definition.enum) && definition.enum.length) {
-      return selectInput(JSON.stringify(value), definition.enum.map((item) => ({ value: JSON.stringify(item), label: String(item) })), (next) => set(JSON.parse(next)), 'full');
+      return selectInput(JSON.stringify(value), definition.enum.map((item) => ({ value: JSON.stringify(item), label: enumOption(item) })), (next) => set(JSON.parse(next)), 'full');
     }
     if (definition.type === 'boolean') return checkbox(!!value, set);
     if (definition.type === 'number' || definition.type === 'integer') {
       return textInput(value, (next) => set(definition.type === 'integer' ? parseInt(next || '0', 10) : parseFloat(next || '0')), { type: 'number', min: definition.min, max: definition.max, step: definition.type === 'integer' ? 1 : 'any' });
     }
-    if (['array', 'object', 'any', 'rect'].includes(definition.type)) {
-      const area = el('textarea', 'json-value'); area.value = JSON.stringify(value, null, 2);
-      area.addEventListener('change', () => { try { set(JSON.parse(area.value)); } catch { toast(`${name} 不是有效 JSON`, true); } });
-      return area;
+    if (['array', 'object', 'any'].includes(definition.type)) {
+      return complexValueControl(`run:${key}:${name}`, definition, value, set);
     }
+    if (definition.type === 'rect') return rectLiteralControl(value, set);
     return textInput(value ?? '', set);
   }
 
-  function renderPublicWorkflowInputs(body, holder, reference) {
+  function rectLiteralControl(value, set) {
+    const shell = el('div', 'rect-control');
+    const values = Array.isArray(value) && value.length === 4 ? value : [0, 0, 100, 100];
+    values.forEach((item, index) => shell.appendChild(textInput(item, (next) => { const updated = values.slice(); updated[index] = parseInt(next || '0', 10); set(updated); }, { type: 'number' })));
+    return shell;
+  }
+
+  function renderPublicWorkflowInputs(body, holder, reference, allowRuntimeVariables = true, keyPrefix = '') {
     if (!holder.inputs || typeof holder.inputs !== 'object' || Array.isArray(holder.inputs)) holder.inputs = {};
-    const variables = publicWorkflowVariables(reference);
-    section(body, '公开变量');
-    if (!variables.length) body.appendChild(el('div', 'empty-section', reference ? '该子工作流没有公开变量' : '请先选择子工作流'));
+    const variables = workflowInputs(reference);
+    section(body, '工作流输入');
+    if (!variables.length) body.appendChild(el('div', 'empty-section', reference ? '该子工作流没有输入' : '请先选择子工作流'));
     variables.forEach((variable) => {
       const definition = variable.definition || {};
       const block = el('div', 'run-variable-block');
@@ -2008,27 +2132,27 @@
       modeRow.appendChild(selectInput(mode, [
         { value: 'default', label: Object.prototype.hasOwnProperty.call(definition, 'default') ? '使用默认值' : '不传值' },
         { value: 'literal', label: '常量' },
-        { value: 'binding', label: '绑定父变量' },
+        { value: 'binding', label: allowRuntimeVariables ? '绑定父级引用' : '绑定父输入' },
       ], (next) => mutate(() => {
         if (next === 'default') delete holder.inputs[variable.name];
         else if (next === 'literal') holder.inputs[variable.name] = Object.prototype.hasOwnProperty.call(definition, 'default') ? clone(definition.default) : defaultValue(definition);
         else {
-          const refs = parentVariableRefs(definition);
+          const refs = parentVariableRefs(definition, allowRuntimeVariables);
           holder.inputs[variable.name] = { ref: refs[0] || '' };
         }
       })));
       if (mode === 'binding') {
-        const refs = parentVariableRefs(definition);
-        const bindingRow = field(block, '父变量');
-        bindingRow.appendChild(selectInput(current.ref || '', refs.length ? refs.map((ref) => ({ value: ref, label: ref.replace(/^blackboard\./, '') })) : [{ value: '', label: '没有兼容变量' }], (ref) => mutate(() => { holder.inputs[variable.name] = { ref }; })));
+        const refs = parentVariableRefs(definition, allowRuntimeVariables);
+        const bindingRow = field(block, allowRuntimeVariables ? '父级引用' : '父输入');
+        bindingRow.appendChild(selectInput(current.ref || '', refs.length ? refs.map((ref) => ({ value: ref, label: referenceLabel(ref) })) : [{ value: '', label: '没有兼容引用' }], (ref) => mutate(() => { holder.inputs[variable.name] = { ref }; })));
       } else if (mode === 'literal') {
-        field(block, '值').appendChild(runInputLiteralControl(holder, variable.name, definition));
+        field(block, '值').appendChild(runInputLiteralControl(holder, variable.name, definition, `${keyPrefix}${variable.name}`));
       }
       if (definition.description) block.appendChild(el('div', 'description', definition.description));
       body.appendChild(block);
     });
     const privateKeys = Object.keys(holder.inputs).filter((name) => !variables.some((variable) => variable.name === name));
-    if (privateKeys.length) body.appendChild(el('div', 'private-input-warning', `不可传变量：${privateKeys.join(', ')}`));
+    if (privateKeys.length) body.appendChild(el('div', 'private-input-warning', `未知输入：${privateKeys.join(', ')}`));
   }
 
   function renderInstanceRunInspector() {
@@ -2051,7 +2175,7 @@
       open.addEventListener('click', () => requestOpenWorkflowReference(run.workflow));
       body.appendChild(open);
     }
-    renderPublicWorkflowInputs(body, run, run.workflow);
+    renderPublicWorkflowInputs(body, run, run.workflow, false, `${selection.nodeId}:${selection.index}:inputs:`);
     const remove = el('button', 'danger full-command', '删除实例运行项');
     remove.addEventListener('click', () => removeInstanceRun(node, selection.index));
     body.appendChild(remove);
@@ -2215,12 +2339,21 @@
   function allRefs(node, definition, includePossible = false) {
     const expected = definition ? definitionSchema(definition) : undefined;
     const candidates = [];
-    const blackboard = state.raw && state.raw.blackboard && typeof state.raw.blackboard === 'object' && !Array.isArray(state.raw.blackboard)
-      ? state.raw.blackboard
+    const inputs = state.raw && state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)
+      ? state.raw.inputs
       : {};
-    for (const [name, rawDefinition] of Object.entries(blackboard)) {
+    for (const [name, rawDefinition] of Object.entries(inputs)) {
       const schema = definitionSchema(rawDefinition);
-      const ref = `blackboard.${name}`;
+      const ref = `inputs.${name}`;
+      candidates.push({ ref, schema });
+      appendNestedRefs(ref, schema, candidates);
+    }
+    const variables = state.raw && state.raw.variables && typeof state.raw.variables === 'object' && !Array.isArray(state.raw.variables)
+      ? state.raw.variables
+      : {};
+    for (const [name, rawDefinition] of Object.entries(variables)) {
+      const schema = definitionSchema(rawDefinition);
+      const ref = `variables.${name}`;
       candidates.push({ ref, schema });
       appendNestedRefs(ref, schema, candidates);
     }
@@ -2237,20 +2370,21 @@
 
   function referenceLabel(ref) {
     if (!ref) return '无可用引用';
-    if (ref.startsWith('blackboard.')) return `变量 · ${ref.slice('blackboard.'.length)}`;
+    if (ref.startsWith('inputs.')) return `输入 · ${ref.slice('inputs.'.length)}`;
+    if (ref.startsWith('variables.')) return `状态 · ${ref.slice('variables.'.length)}`;
     return ref;
   }
 
-  function setParameterPublic(node, name, definition, checked) {
-    const metadata = publicParameterMetadata();
-    const names = new Set(publicParameterNames(node));
+  function setParameterInput(node, name, definition, checked) {
+    const metadata = inputParameterMetadata();
+    const names = new Set(inputParameterNames(node));
     if (checked) names.add(name);
     else {
       names.delete(name);
       const value = node.params && node.params[name];
-      if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('blackboard.')) {
-        const variableName = value.ref.slice('blackboard.'.length);
-        const variableDefinition = state.raw.blackboard && state.raw.blackboard[variableName];
+      if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('inputs.')) {
+        const variableName = value.ref.slice('inputs.'.length);
+        const variableDefinition = state.raw.inputs && state.raw.inputs[variableName];
         node.params[name] = variableDefinition && Object.prototype.hasOwnProperty.call(variableDefinition, 'default')
           ? clone(variableDefinition.default)
           : definition.default !== undefined ? clone(definition.default) : defaultValue(definition);
@@ -2261,10 +2395,80 @@
     else delete metadata[node.id];
   }
 
+  const FIELD_LABELS = {
+    value: '值', message: '提示信息', fields: '字段列表', name: '名称', seconds: '时长（秒）',
+    match: '匹配配置', template: '模板', template_roi: '模板区域', done_texts: '完成文字',
+    done_roi: '完成区域', done_states: '完成状态', allow_ocr: '允许 OCR', timeout_seconds: '超时（秒）',
+    max_clicks: '最大点击次数', threshold: '匹配阈值', post_click_delay: '点击后延迟（秒）',
+    stable_seconds: '稳定时长（秒）', hold_ms: '按压时长（毫秒）', random_offset: '随机偏移（px）',
+    random_interval: '随机间隔（秒）', keycode: '按键代码', states: '状态列表', target_states: '目标状态',
+    overlay_states: '覆盖层状态', transitions: '状态转移', initial_state_timeout_seconds: '初始状态超时（秒）',
+    confirm_timeout_seconds: '确认超时（秒）', poll_interval_seconds: '轮询间隔（秒）',
+    post_action_delay: '动作后延迟（秒）', max_return_attempts: '最大返回次数', max_overlay_clicks: '覆盖层点击上限',
+    max_transitions: '最大转移次数', failure_frame_name: '失败现场图名', x1: '左', y1: '上', x2: '右', y2: '下',
+    duration_ms: '时长（毫秒）', x: '坐标 X', y: '坐标 Y', revalidate: '重新校验',
+    disappeared_states: '消失状态列表', disappeared_state_timeout_seconds: '消失超时（秒）', text: '文字',
+    target_rois: '目标区域列表', page_roi: '页面区域', completed_texts: '完成文字列表',
+    completed_templates: '完成模板列表', min_confidence: '最小置信度', target_limit: '目标数量上限',
+    roi: '识别区域', minimum_passes: '最少通过次数', key_texts: '关键文字', category: '类别', layer: '层级',
+    track_realm_pass: '结界通过检测', realm_threshold: '结界阈值', realm_pass_template: '结界通过模板',
+    realm_pass_threshold: '结界通过阈值', realm_popup_roi: '结界弹窗区域', realm_popup_timeout_seconds: '结界弹窗超时（秒）',
+    realm_popup_close_point: '结界弹窗关闭位置', max_results: '最大匹配数', scale_search: '多尺度搜索',
+    templates: '模板列表', texts: '文字列表', present: '存在性', allow_timeout: '允许超时', workflow: '子工作流',
+    inputs: '输入', workflows: '工作流列表', condition: '结束条件', conditions: '分支条件', expression: '表达式',
+    cases: '分支映射', max_iterations: '最大迭代次数', default_child: '默认子节点', children: '子节点',
+    wait_for: '完成条件', cancel_on_failure: '失败时取消', runs: '实例运行项', finish_mode: '结束模式',
+    from: '起始状态', type: '触发方式', expected_states: '预期状态', retry_if_unchanged_seconds: '无变化重试等待（秒）',
+    return_action: '返回键操作', required_texts: '校验文字', required_text_roi: '校验文字区域',
+    required_text_min_confidence: '校验文字置信度', text_roi: '文字区域',
+  };
+
+  const fieldLabel = (name) => FIELD_LABELS[name] || name;
+
+  const ENUM_LABELS = {
+    tap_match: '点击匹配项', tap_template: '点击模板', tap: '坐标点击', key: '按键',
+    all: '全部完成', any: '任一完成',
+  };
+  const enumLabel = (value) => (ENUM_LABELS[value] === undefined ? String(value) : ENUM_LABELS[value]);
+  const enumOption = (value) => (ENUM_LABELS[value] === undefined ? String(value) : `${ENUM_LABELS[value]}（${value}）`);
+
+  const ACTION_LABELS = {
+    'core.assert': '断言校验', 'core.capture': '截取画面', 'core.log': '输出日志',
+    'core.save_frame': '保存现场图', 'core.sleep': '等待',
+    'input.dismiss_template_until_text': '点模板关闭至文字出现', 'input.key': '发送按键',
+    'input.recover_state': '页面状态恢复', 'input.swipe': '滑动', 'input.tap': '坐标点击',
+    'input.tap_match': '点击匹配项', 'input.type_text': '输入文本',
+    'realm.detect_progress': '结界进度检测', 'realm.read_pass_count': '读取结界券数',
+    'stats.enqueue_reward': '奖励统计', 'variables.set': '设置变量',
+    'vision.detect_state': '识别页面状态', 'vision.match_template': '模板匹配', 'vision.ocr': '文字识别',
+    'vision.wait_any': '等待任一模板', 'vision.wait_any_text': '等待任一文字',
+    'vision.wait_template': '等待模板', 'vision.wait_text': '等待文字',
+    'workflow.run': '运行子工作流', 'workflow.select': '子流程选择器', 'workflow.sequence': '子流程序列',
+  };
+  const actionLabel = (name) => ACTION_LABELS[name] || name;
+
+  function actionDropdown(node) {
+    return UI.dropdown({
+      value: node.action || '',
+      options: state.catalog.map((spec) => ({
+        value: spec.name,
+        label: actionLabel(spec.name),
+        detail: ACTION_LABELS[spec.name] ? spec.name : '',
+        title: spec.description || spec.name,
+      })),
+      onChange: (value) => mutate(() => { node.action = value; node.params = {}; delete inputParameterMetadata()[node.id]; }),
+      searchable: true,
+      placeholder: '搜索动作…',
+      emptyText: '没有匹配的动作',
+    });
+  }
+
   function renderParameter(body, node, name, definition) {
     const block = el('div', 'parameter-block');
     const heading = el('div', 'parameter-heading');
-    heading.appendChild(el('span', '', `${name}${definition.required ? ' *' : ''}`));
+    const headingName = el('span', '', `${fieldLabel(name)}${definition.required ? ' *' : ''}`);
+    headingName.title = name;
+    heading.appendChild(headingName);
     const headingActions = el('div', 'parameter-heading-actions');
     const exists = Object.prototype.hasOwnProperty.call(node.params, name);
     if (!definition.required && definition.default === undefined) {
@@ -2272,12 +2476,12 @@
       const toggleLabel = el('label', 'parameter-enable'); toggleLabel.appendChild(enabled); toggleLabel.appendChild(el('span', '', '启用'));
       headingActions.appendChild(toggleLabel);
     }
-    const exposed = isParameterPublic(node, name);
-    const publicToggle = el('label', 'parameter-public');
-    publicToggle.title = exposed ? '显示节点输入端点；未连接变量时使用当前默认值' : '公开参数端点；不连接变量时保持当前默认值';
-    publicToggle.appendChild(checkbox(exposed, (checked) => mutate(() => setParameterPublic(node, name, definition, checked))));
-    publicToggle.appendChild(el('span', '', '公开'));
-    headingActions.appendChild(publicToggle);
+    const exposed = isParameterInput(node, name);
+    const inputToggle = el('label', 'parameter-input');
+    inputToggle.title = exposed ? '显示节点输入端点；未连接变量时使用当前默认值' : '启用输入端点；不连接变量时保持当前默认值';
+    inputToggle.appendChild(checkbox(exposed, (checked) => mutate(() => setParameterInput(node, name, definition, checked))));
+    inputToggle.appendChild(el('span', '', '输入'));
+    headingActions.appendChild(inputToggle);
     if (name === 'threshold' && ['vision.match_template', 'vision.wait_template'].includes(node.action)) {
       const check = el('button', 'parameter-check', '检查'); check.title = '获取当前画面并执行模板匹配';
       let pointerPending = false;
@@ -2303,7 +2507,7 @@
       node.params[name] = next === 'binding' ? { ref: allRefs(node, definition)[0] || '' } : defaultValue(definition);
       if (next !== 'binding') delete variableLinks()[`${node.id}:${name}`];
     }), 'value-mode');
-    block.appendChild(mode);
+    headingActions.insertBefore(mode, headingActions.firstChild);
     if (bound) {
       const refs = allRefs(node, definition);
       const ref = value.ref;
@@ -2313,12 +2517,12 @@
         label: referenceLabel(item),
       })), (next) => mutate(() => { node.params[name] = { ref: next }; delete variableLinks()[`${node.id}:${name}`]; }), 'full'));
     } else {
-      block.appendChild(literalControl(node, name, definition, value));
+      block.appendChild(literalControl(node, name, definition, value, headingActions));
     }
     body.appendChild(block);
   }
 
-  function literalControl(node, name, definition, value) {
+  function literalControl(node, name, definition, value, headingActions) {
     const workflowParameter = node.action === 'workflow.run' && name === 'workflow';
     const set = (next) => mutate(() => {
       const changed = node.params[name] !== next;
@@ -2326,7 +2530,7 @@
       if (workflowParameter && changed) node.params.inputs = {};
     });
     if (Array.isArray(definition.enum) && definition.enum.length) {
-      return selectInput(JSON.stringify(value), definition.enum.map((item) => ({ value: JSON.stringify(item), label: String(item) })), (next) => set(JSON.parse(next)), 'full');
+      return selectInput(JSON.stringify(value), definition.enum.map((item) => ({ value: JSON.stringify(item), label: enumOption(item) })), (next) => set(JSON.parse(next)), 'full');
     }
     if (definition.type === 'boolean') return checkbox(!!value, set);
     if (definition.type === 'number' || definition.type === 'integer') {
@@ -2340,9 +2544,7 @@
       return shell;
     }
     if (definition.type === 'array' || definition.type === 'object' || definition.type === 'any') {
-      const area = el('textarea', 'json-value'); area.value = JSON.stringify(value, null, 2);
-      area.addEventListener('change', () => { try { set(JSON.parse(area.value)); } catch { toast(`${name} 不是有效 JSON`, true); } });
-      return area;
+      return complexValueControl(`task:${node.id}:${name}`, definition, value, set, { node, key: name, headingActions });
     }
     const shell = el('div', 'inline-control');
     shell.appendChild(textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : workflowParameter ? '_folder/workflow.json' : '' }));
@@ -2353,6 +2555,428 @@
       const browse = el('button', '', '浏览'); browse.title = '浏览 workflows 中的脚本'; browse.addEventListener('click', () => openWorkflowBrowser(node.id, name, value)); shell.appendChild(browse);
     }
     return shell;
+  }
+
+  function paramJsonModes() {
+    if (!state.paramJsonModes || typeof state.paramJsonModes !== 'object' || Array.isArray(state.paramJsonModes)) state.paramJsonModes = {};
+    return state.paramJsonModes;
+  }
+
+  function cardExpansion(key, fallback = true) {
+    if (!state.cardExpansion || typeof state.cardExpansion !== 'object' || Array.isArray(state.cardExpansion)) state.cardExpansion = {};
+    if (!Object.prototype.hasOwnProperty.call(state.cardExpansion, key)) state.cardExpansion[key] = fallback;
+    return state.cardExpansion[key];
+  }
+
+  function jsonModeToggle(key) {
+    const jsonMode = !!paramJsonModes()[key];
+    const toggle = el('button', 'structured-mode-toggle', jsonMode ? '结构化' : 'JSON');
+    toggle.type = 'button';
+    toggle.dataset.tip = jsonMode ? '切换到结构化表单' : '切换到 JSON 文本编辑';
+    toggle.addEventListener('click', () => {
+      paramJsonModes()[key] = !jsonMode;
+      renderInspector();
+    });
+    return toggle;
+  }
+
+  function complexValueControl(key, definition, value, set, ctx = {}) {
+    const jsonMode = !!paramJsonModes()[key];
+    const shell = el('div', 'structured-shell');
+    if (ctx.headingActions instanceof Element) ctx.headingActions.prepend(jsonModeToggle(key));
+    else {
+      const toolbar = el('div', 'structured-toolbar');
+      toolbar.appendChild(jsonModeToggle(key));
+      shell.appendChild(toolbar);
+    }
+    if (jsonMode) {
+      const area = el('textarea', 'json-value'); area.value = JSON.stringify(value, null, 2);
+      area.addEventListener('change', () => { try { set(JSON.parse(area.value)); } catch { toast('不是有效 JSON', true); } });
+      shell.appendChild(area);
+      return shell;
+    }
+    const control = structuredControl(definition, value, set, ctx, key);
+    if (control) { shell.appendChild(control); return shell; }
+    const area = el('textarea', 'json-value'); area.value = JSON.stringify(value, null, 2);
+    area.addEventListener('change', () => { try { set(JSON.parse(area.value)); } catch { toast('不是有效 JSON', true); } });
+    shell.appendChild(area);
+    return shell;
+  }
+
+  function scalarDefinitionUsable(definition) {
+    if (!definition || typeof definition !== 'object') return false;
+    if (Array.isArray(definition.enum) && definition.enum.length) return true;
+    return ['string', 'number', 'integer', 'boolean', 'asset', 'path', 'rect'].includes(definition.type);
+  }
+
+  function isBindingValue(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+      && typeof value.ref === 'string' && Object.keys(value).length === 1;
+  }
+
+  function structuredControl(definition, value, onChange, ctx = {}, key = '') {
+    const def = definition && typeof definition === 'object' ? definition : {};
+    if (Array.isArray(def.enum) && def.enum.length) return null;
+    if (isBindingValue(value)) return bindingControl(def, value, onChange, ctx);
+    if (def.type === 'object' && def.properties && Object.keys(def.properties).length) {
+      return objectFieldsControl(def, value, onChange, ctx, key);
+    }
+    if (def.type === 'array') {
+      if (Array.isArray(def.prefixItems) && def.prefixItems.length) {
+        return tupleControl(def, value, onChange, ctx);
+      }
+      const itemDef = def.items && typeof def.items === 'object' && !Array.isArray(def.items) ? def.items : null;
+      if (!itemDef) return null;
+      if (itemDef.type === 'object' && itemDef.properties && Object.keys(itemDef.properties).length) {
+        return objectArrayControl(def, itemDef, value, onChange, ctx, key);
+      }
+      if (scalarDefinitionUsable(itemDef)) {
+        return scalarArrayControl(def, itemDef, value, onChange, ctx);
+      }
+      return null;
+    }
+    return null;
+  }
+
+  function objectFieldsControl(definition, value, onChange, ctx, key) {
+    const holder = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const wrap = el('div', 'structured-object');
+    for (const [name, child] of Object.entries(definition.properties)) {
+      const row = el('div', 'structured-field');
+      const caption = el('div', 'structured-field-caption');
+      const label = el('span', 'structured-field-label', `${fieldLabel(name)}${child && child.required ? ' *' : ''}`);
+      label.title = name;
+      if (child && child.description) label.title += ` — ${child.description}`;
+      caption.appendChild(label);
+      const refs = ctx.node ? allRefs(ctx.node, child, true) : [];
+      if (!isBindingValue(holder[name]) && refs.length) {
+        caption.appendChild(iconButton('field-binding-toggle', '绑定父级引用', '引用', () => onChange({ ...holder, [name]: { ref: refs[0] || '' } })));
+      }
+      row.appendChild(caption);
+      row.appendChild(nestedValueControl(child, holder[name], (next) => onChange({ ...holder, [name]: next }), ctx, `${key}.${name}`));
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  function bindingControl(definition, value, onChange, ctx) {
+    const shell = el('div', 'binding-control');
+    const refs = ctx.node ? allRefs(ctx.node, definition, true) : [];
+    const current = value.ref;
+    const options = refs.includes(current) ? refs : [current, ...refs];
+    shell.appendChild(selectInput(current, options.length ? options.map((item) => ({ value: item, label: referenceLabel(item) })) : [{ value: current, label: current || '没有可用引用' }], (next) => onChange({ ref: next }), 'full'));
+    shell.appendChild(iconButton('scalar-array-remove', '解除引用，改为常量', 'unlink', () => onChange(defaultValue(definition))));
+    return shell;
+  }
+
+  function nestedValueControl(definition, value, onChange, ctx, key) {
+    if (isBindingValue(value)) return bindingControl(definition || {}, value, onChange, ctx);
+    const structured = structuredControl(definition, value, onChange, ctx, key);
+    if (structured) return structured;
+    const scalar = scalarValueControl(definition, value, onChange, ctx);
+    if (scalar) return scalar;
+    const area = el('textarea', 'json-value compact-json'); area.value = JSON.stringify(value, null, 2);
+    area.addEventListener('change', () => { try { onChange(JSON.parse(area.value)); } catch { toast('不是有效 JSON', true); } });
+    return area;
+  }
+
+  function scalarValueControl(definition, value, onChange, ctx = {}) {
+    const def = definition || {};
+    if (Array.isArray(def.enum) && def.enum.length) {
+      return selectInput(JSON.stringify(value === undefined ? def.default : value), def.enum.map((item) => ({ value: JSON.stringify(item), label: enumOption(item) })), (next) => onChange(JSON.parse(next)), 'full');
+    }
+    if (def.type === 'boolean') return checkbox(!!value, onChange);
+    if (def.type === 'number' || def.type === 'integer') {
+      return textInput(value, (next) => onChange(def.type === 'integer' ? parseInt(next || '0', 10) : parseFloat(next || '0')), { type: 'number', min: def.min, max: def.max, step: def.type === 'integer' ? 1 : 'any' });
+    }
+    if (def.type === 'rect') {
+      const shell = el('div', 'rect-control');
+      const values = Array.isArray(value) && value.length === 4 ? value : [0, 0, 100, 100];
+      values.forEach((item, index) => shell.appendChild(textInput(item, (next) => { const updated = values.slice(); updated[index] = parseInt(next || '0', 10); onChange(updated); }, { type: 'number' })));
+      if (ctx.node) {
+        const pick = el('button', 'rect-pick'); pick.dataset.tip = '框选区域'; pick.appendChild(iconSvg('crop')); pick.addEventListener('click', () => requestRoi(ctx.node.id, ctx.key || '', 'rect', { applyValue: (rect) => onChange(rect) }));
+        shell.appendChild(pick);
+      }
+      return shell;
+    }
+    if (def.type === 'asset' || def.type === 'path') {
+      const shell = el('div', 'inline-control');
+      shell.appendChild(textInput(value, onChange, { placeholder: def.type === 'asset' ? 'assets/templates/...' : '' }));
+      if (def.type === 'asset') {
+        const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片';
+        browse.addEventListener('click', () => openAssetBrowser(ctx.node ? ctx.node.id : '', ctx.key || '', value, (assetPath) => onChange(assetPath)));
+        shell.appendChild(browse);
+        if (ctx.node) {
+          const pick = el('button', '', '截取'); pick.title = '从当前画面截取模板';
+          pick.addEventListener('click', () => requestRoi(ctx.node.id, ctx.key || '', 'asset', { applyValue: (assetPath) => onChange(assetPath) }));
+          shell.appendChild(pick);
+        }
+      }
+      return shell;
+    }
+    if (def.type === 'string') return textInput(value ?? '', onChange);
+    return null;
+  }
+
+  function tupleControl(definition, value, onChange, ctx) {
+    const list = Array.isArray(value) ? value : [];
+    const wrap = el('div', 'scalar-array');
+    definition.prefixItems.forEach((itemDef, index) => {
+      const row = el('div', 'scalar-array-row');
+      row.appendChild(nestedValueControl(itemDef, list[index], (next) => { const updated = list.slice(); updated[index] = next; onChange(updated); }, ctx, ''));
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  function scalarArrayControl(definition, itemDef, value, onChange, ctx) {
+    const list = Array.isArray(value) ? value : [];
+    const wrap = el('div', 'scalar-array');
+    list.forEach((item, index) => {
+      const row = el('div', 'scalar-array-row');
+      row.appendChild(nestedValueControl(itemDef, item, (next) => { const updated = list.slice(); updated[index] = next; onChange(updated); }, ctx, ''));
+      row.appendChild(iconButton('object-array-move', '上移', 'arrow-up', () => {
+        if (index === 0) return;
+        const updated = list.slice(); [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]]; onChange(updated);
+      }));
+      row.appendChild(iconButton('object-array-move', '下移', 'arrow-down', () => {
+        if (index >= list.length - 1) return;
+        const updated = list.slice(); [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]]; onChange(updated);
+      }));
+      row.appendChild(iconButton('scalar-array-remove', '删除该项', 'trash', () => {
+        if (definition.min_items !== undefined && list.length <= definition.min_items) { toast(`至少需要 ${definition.min_items} 项`, true); return; }
+        const updated = list.slice(); updated.splice(index, 1); onChange(updated);
+      }));
+      wrap.appendChild(row);
+    });
+    wrap.appendChild(addRowButton(`添加一项`, () => {
+      if (definition.max_items !== undefined && list.length >= definition.max_items) { toast(`最多 ${definition.max_items} 项`, true); return; }
+      onChange([...list, itemDefaultValue(itemDef)]);
+    }));
+    return wrap;
+  }
+
+  function itemDefaultValue(definition) {
+    if (definition && definition.default !== undefined) return clone(definition.default);
+    if (definition && definition.type === 'integer') return 0;
+    if (definition && definition.type === 'number') return 0;
+    if (definition && definition.type === 'boolean') return false;
+    return '';
+  }
+
+  function objectArrayControl(definition, itemDef, value, onChange, ctx, key) {
+    const list = Array.isArray(value) ? value : [];
+    const wrap = el('div', 'object-array');
+    list.forEach((item, index) => {
+      const holder = item && typeof item === 'object' && !Array.isArray(item) ? item : {};
+      const cardKey = `${key}[${index}]`;
+      const card = el('div', 'object-array-card');
+      const head = el('div', 'object-array-head');
+      let expanded = cardExpansion(cardKey, true);
+      const fold = el('button', `object-array-fold${expanded ? '' : ' folded'}`);
+      fold.type = 'button';
+      fold.dataset.tip = expanded ? '折叠' : '展开';
+      fold.setAttribute('aria-expanded', String(expanded));
+      fold.appendChild(iconSvg('chevron'));
+      head.appendChild(fold);
+      head.appendChild(el('span', 'object-array-title', `#${index + 1} ${objectArraySummary(itemDef, holder)}`));
+      const actions = el('div', 'object-array-actions');
+      actions.appendChild(iconButton('object-array-move', '上移', 'arrow-up', () => {
+        if (index === 0) return;
+        const updated = list.slice(); [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]]; onChange(updated);
+      }));
+      actions.appendChild(iconButton('object-array-move', '下移', 'arrow-down', () => {
+        if (index >= list.length - 1) return;
+        const updated = list.slice(); [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]]; onChange(updated);
+      }));
+      actions.appendChild(iconButton('object-array-remove', '删除该项', 'trash', () => {
+        if (definition.min_items !== undefined && list.length <= definition.min_items) { toast(`至少需要 ${definition.min_items} 项`, true); return; }
+        const updated = list.slice(); updated.splice(index, 1); onChange(updated);
+      }));
+      head.appendChild(actions);
+      let itemBody = null;
+      const renderCardBody = () => {
+        if (itemBody) return;
+        itemBody = el('div', 'object-array-body');
+        itemBody.appendChild(objectFieldsControl(itemDef, holder, (next) => { const updated = list.slice(); updated[index] = next; onChange(updated); }, ctx, cardKey));
+        card.appendChild(itemBody);
+      };
+      const toggleCard = () => {
+        expanded = !expanded;
+        state.cardExpansion[cardKey] = expanded;
+        fold.classList.toggle('folded', !expanded);
+        fold.dataset.tip = expanded ? '折叠' : '展开';
+        fold.setAttribute('aria-expanded', String(expanded));
+        if (expanded) renderCardBody();
+        else if (itemBody) { itemBody.remove(); itemBody = null; }
+      };
+      fold.addEventListener('click', (event) => { event.stopPropagation(); toggleCard(); });
+      head.addEventListener('click', (event) => {
+        if (event.target.closest('button')) return;
+        toggleCard();
+      });
+      card.appendChild(head);
+      if (expanded) renderCardBody();
+      wrap.appendChild(card);
+    });
+    wrap.appendChild(addRowButton('添加一项', () => {
+      if (definition.max_items !== undefined && list.length >= definition.max_items) { toast(`最多 ${definition.max_items} 项`, true); return; }
+      if (!state.cardExpansion || typeof state.cardExpansion !== 'object') state.cardExpansion = {};
+      state.cardExpansion[`${key}[${list.length}]`] = true;
+      const item = {};
+      for (const [name, child] of Object.entries(itemDef.properties)) {
+        if (child && child.required) item[name] = itemDefaultValue(child);
+      }
+      onChange([...list, item]);
+    }));
+    return wrap;
+  }
+
+  function objectArraySummary(itemDef, holder) {
+    const parts = [];
+    for (const name of Object.keys(itemDef.properties || {})) {
+      const value = holder[name];
+      if (value === undefined || value === null || value === '') continue;
+      const text = isBindingValue(value) ? `← ${referenceLabel(value.ref)}` : typeof value === 'object' ? JSON.stringify(value) : String(value);
+      parts.push(text);
+      if (parts.length >= 2) break;
+    }
+    return parts.length ? parts.join(' · ') : '（空）';
+  }
+
+  function iconButton(className, title, text, onClick) {
+    const button = el('button', className);
+    button.type = 'button';
+    button.dataset.tip = title;
+    if (ICON_SVG[text]) button.appendChild(iconSvg(text));
+    else button.textContent = text;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  const ICON_SVG = UI.ICON_SVG;
+  const iconSvg = (name) => UI.icon(name);
+
+  function addRowButton(label, onClick) {
+    const button = el('button', 'structured-add');
+    button.type = 'button';
+    button.appendChild(iconSvg('plus'));
+    button.appendChild(el('span', '', label));
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'];
+  const CONDITION_GROUP_OPERATORS = ['and', 'or'];
+  const CONDITION_UNARY_OPERATORS = ['not'];
+
+  function conditionControl(value, onChange, ctx = {}) {
+    const wrap = el('div', 'condition-control');
+    if (typeof value === 'boolean' || value === undefined || value === null) {
+      const current = !!value;
+      const row = el('div', 'scalar-array-row');
+      row.appendChild(selectInput(String(current), [{ value: 'true', label: '真' }, { value: 'false', label: '假' }], (next) => onChange(next === 'true'), 'full'));
+      row.appendChild(iconButton('scalar-array-remove', '改为条件表达式', 'ƒ', () => onChange({ eq: [1, 1] })));
+      wrap.appendChild(row);
+      const hint = el('div', 'field-hint', '当前是固定真假值；点 ƒ 可改为条件表达式。');
+      wrap.appendChild(hint);
+      return wrap;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      onChange({ eq: [1, 1] });
+      return wrap;
+    }
+    const operator = Object.keys(value)[0];
+    const operands = value[operator];
+    const head = el('div', 'condition-head');
+    head.appendChild(selectInput(operator, CONDITION_OPERATORS.map((item) => ({ value: item, label: conditionOperatorLabel(item) })), (next) => onChange(conditionOperatorDefault(next)), 'condition-operator'));
+    wrap.appendChild(head);
+    const applyOperands = (next) => onChange({ [operator]: next });
+    const replaceOperatorValue = (next) => onChange(next);
+    if (CONDITION_GROUP_OPERATORS.includes(operator)) {
+      const list = Array.isArray(operands) ? operands : [];
+      list.forEach((item, index) => {
+        const row = el('div', 'condition-nested-row');
+        row.appendChild(conditionControl(item, (next) => { const updated = list.slice(); updated[index] = next; replaceOperatorValue({ [operator]: updated }); }, ctx));
+        row.appendChild(iconButton('scalar-array-remove', '删除该条件', 'trash', () => {
+          const updated = list.slice(); updated.splice(index, 1); replaceOperatorValue({ [operator]: updated });
+        }));
+        wrap.appendChild(row);
+      });
+      wrap.appendChild(addRowButton('添加子条件', () => replaceOperatorValue({ [operator]: [...list, { eq: [1, 1] }] })));
+      return wrap;
+    }
+    if (CONDITION_UNARY_OPERATORS.includes(operator)) {
+      wrap.appendChild(conditionControl(operands, (next) => applyOperands(next), ctx));
+      return wrap;
+    }
+    if (operator === 'exists') {
+      wrap.appendChild(conditionOperandControl(operands, (next) => applyOperands(next), ctx, true));
+      return wrap;
+    }
+    const pair = Array.isArray(operands) ? operands : ['', ''];
+    const shell = el('div', 'condition-pair');
+    ['左值', '右值'].forEach((label, side) => {
+      const row = el('div', 'condition-pair-row');
+      row.appendChild(el('span', 'condition-pair-label', label));
+      row.appendChild(conditionOperandControl(pair[side], (next) => { const updated = pair.slice(); updated[side] = next; applyOperands(updated); }, ctx));
+      shell.appendChild(row);
+    });
+    wrap.appendChild(shell);
+    return wrap;
+  }
+
+  function conditionOperatorLabel(operator) {
+    return { exists: '存在引用 (exists)', eq: '等于 (eq)', ne: '不等于 (ne)', gt: '大于 (gt)', gte: '大于等于 (gte)', lt: '小于 (lt)', lte: '小于等于 (lte)', contains: '包含 (contains)', and: '且 (and)', or: '或 (or)', not: '非 (not)' }[operator] || operator;
+  }
+
+  function conditionOperatorDefault(operator) {
+    if (CONDITION_GROUP_OPERATORS.includes(operator)) return { [operator]: [{ eq: [1, 1] }] };
+    if (CONDITION_UNARY_OPERATORS.includes(operator)) return { [operator]: { eq: [1, 1] } };
+    if (operator === 'exists') return { exists: { ref: '' } };
+    return { [operator]: ['', ''] };
+  }
+
+  function conditionOperandControl(value, onChange, ctx = {}, referenceOnly = false) {
+    const bound = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string';
+    const mode = bound ? 'binding' : referenceOnly ? 'binding' : 'literal';
+    const wrap = el('div', 'condition-operand');
+    const refs = ctx.node ? allRefs(ctx.node, null, true) : [];
+    if (!referenceOnly) {
+      wrap.appendChild(selectInput(mode, [
+        { value: 'literal', label: '常量' },
+        { value: 'binding', label: '引用' },
+      ], (next) => onChange(next === 'binding' ? { ref: refs[0] || '' } : conditionLiteralDefault(value))));
+    }
+    if (mode === 'binding') {
+      const current = bound ? value.ref : '';
+      const options = refs.includes(current) || !current ? refs : [current, ...refs];
+      wrap.appendChild(selectInput(current, options.length ? options.map((item) => ({ value: item, label: referenceLabel(item) })) : [{ value: '', label: '没有可用引用' }], (next) => onChange({ ref: next }), 'full'));
+    } else {
+      wrap.appendChild(textInput(value, (next) => onChange(conditionParseLiteral(next)), { className: 'full' }));
+    }
+    return wrap;
+  }
+
+  function conditionLiteralDefault(previous) {
+    if (typeof previous === 'number') return 0;
+    if (typeof previous === 'boolean') return false;
+    return '';
+  }
+
+  function conditionParseLiteral(text) {
+    const trimmed = String(text).trim();
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (trimmed !== '' && Number.isFinite(Number(trimmed))) return Number(trimmed);
+    return trimmed;
+  }
+
+  function nodeChildrenOptions(node, current) {
+    const children = Array.isArray(node && node.children) ? node.children : [];
+    const options = children.map((childId) => ({ value: childId, label: childId }));
+    if (current && !children.includes(current)) options.unshift({ value: current, label: `${current}（已失效）` });
+    return options;
   }
 
   function renderCompositeInspector(body, node) {
@@ -2366,14 +2990,65 @@
     }
     if (node.type === 'repeat_until') {
       body.appendChild(el('div', 'description', '重复执行唯一子节点，直到条件成立。'));
-      const condition = field(body, '结束条件'); const area = el('textarea', 'json-value'); area.value = JSON.stringify(node.condition || { eq: [1, 1] }); area.addEventListener('change', () => { try { mutate(() => { node.condition = JSON.parse(area.value); }); } catch { toast('条件不是有效 JSON', true); } }); condition.appendChild(area);
+      const condition = field(body, '结束条件');
+      condition.classList.add('tall-control');
+      condition.appendChild(conditionControl(node.condition === undefined ? { eq: [1, 1] } : node.condition, (value) => mutate(() => { node.condition = value; }), { node }));
       const max = field(body, '最大次数'); max.appendChild(textInput(node.max_iterations || 100, (value) => mutate(() => { node.max_iterations = Math.max(1, parseInt(value || '100', 10)); }), { type: 'number', min: 1, step: 1 }));
     }
     if (node.type === 'branch') {
-      body.appendChild(el('div', 'description', '按 conditions 顺序选择第一个成立的分支。')); const area = el('textarea', 'json-value'); area.value = JSON.stringify(node.conditions || [], null, 2); area.addEventListener('change', () => { try { mutate(() => { node.conditions = JSON.parse(area.value); }); } catch { toast('conditions 不是有效 JSON', true); } }); body.appendChild(area);
+      body.appendChild(el('div', 'description', '按 conditions 顺序选择第一个成立的分支。'));
+      const conditions = Array.isArray(node.conditions) ? node.conditions : [];
+      const wrap = el('div', 'object-array');
+      conditions.forEach((item, index) => {
+        const card = el('div', 'object-array-card');
+        const head = el('div', 'object-array-head');
+        head.appendChild(el('span', 'object-array-title', `分支 ${index + 1}`));
+        const actions = el('div', 'object-array-actions');
+        actions.appendChild(iconButton('object-array-move', '上移', 'arrow-up', () => mutate(() => { const updated = node.conditions.slice(); [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]]; node.conditions = updated; })));
+        actions.appendChild(iconButton('object-array-move', '下移', 'arrow-down', () => mutate(() => { const updated = node.conditions.slice(); [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]]; node.conditions = updated; })));
+        actions.appendChild(iconButton('object-array-remove', '删除该分支', 'trash', () => mutate(() => { node.conditions.splice(index, 1); })));
+        head.appendChild(actions);
+        card.appendChild(head);
+        card.appendChild(conditionControl(item, (value) => mutate(() => { node.conditions[index] = value; }), { node }));
+        wrap.appendChild(card);
+      });
+      wrap.appendChild(addRowButton('添加分支', () => mutate(() => { node.conditions.push({ eq: [1, 1] }); })));
+      body.appendChild(wrap);
     }
     if (node.type === 'switch') {
-      body.appendChild(el('div', 'description', '按 expression 的值匹配 cases。')); const expression = field(body, '表达式'); const expr = el('textarea', 'json-value'); expr.value = JSON.stringify(node.expression ?? 0); expr.addEventListener('change', () => { try { mutate(() => { node.expression = JSON.parse(expr.value); }); } catch { toast('expression 不是有效 JSON', true); } }); expression.appendChild(expr); const cases = field(body, '分支映射'); const map = el('textarea', 'json-value'); map.value = JSON.stringify(node.cases || [], null, 2); map.addEventListener('change', () => { try { mutate(() => { node.cases = JSON.parse(map.value); }); } catch { toast('cases 不是有效 JSON', true); } }); cases.appendChild(map);
+      body.appendChild(el('div', 'description', '按 expression 的值匹配 cases。'));
+      const expression = field(body, '表达式');
+      expression.classList.add('tall-control');
+      expression.appendChild(conditionOperandControl(node.expression ?? 0, (value) => mutate(() => { node.expression = value; }), { node }));
+      const cases = Array.isArray(node.cases) ? node.cases : [];
+      const wrap = el('div', 'object-array');
+      cases.forEach((item, index) => {
+        const card = el('div', 'object-array-card');
+        const head = el('div', 'object-array-head');
+        head.appendChild(el('span', 'object-array-title', `分支 ${index + 1}`));
+        const actions = el('div', 'object-array-actions');
+        actions.appendChild(iconButton('object-array-move', '上移', 'arrow-up', () => mutate(() => { const updated = node.cases.slice(); [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]]; node.cases = updated; })));
+        actions.appendChild(iconButton('object-array-move', '下移', 'arrow-down', () => mutate(() => { const updated = node.cases.slice(); [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]]; node.cases = updated; })));
+        actions.appendChild(iconButton('object-array-remove', '删除该分支', 'trash', () => mutate(() => { node.cases.splice(index, 1); })));
+        head.appendChild(actions);
+        card.appendChild(head);
+        const whenRow = field(card, '匹配值');
+        whenRow.classList.add('tall-control');
+        whenRow.appendChild(textInput(item && item.value, (value) => mutate(() => { node.cases[index] = { ...node.cases[index], value: conditionParseLiteral(value) }; }), { className: 'full' }));
+        const childRow = field(card, '目标子节点');
+        childRow.classList.add('tall-control');
+        childRow.appendChild(selectInput(item && item.child || '', nodeChildrenOptions(node, item && item.child), (value) => mutate(() => { node.cases[index] = { ...node.cases[index], child: value }; }), 'full'));
+        wrap.appendChild(card);
+      });
+      wrap.appendChild(addRowButton('添加分支', () => mutate(() => {
+        if (!Array.isArray(node.cases)) node.cases = [];
+        node.cases.push({ value: 0, child: nodeChildrenOptions(node, '')[0] ? nodeChildrenOptions(node, '')[0].value : '' });
+      })));
+      body.appendChild(wrap);
+      if (nodeChildrenOptions(node, node.default_child).length) {
+        const defaultRow = field(body, '默认子节点');
+        defaultRow.appendChild(selectInput(node.default_child || '', [{ value: '', label: '未设置' }, ...nodeChildrenOptions(node, node.default_child)], (value) => mutate(() => { node.default_child = value || undefined; }), 'full'));
+      }
     }
     if (node.type === 'simple_parallel') {
       body.appendChild(el('div', 'description', '第 1 个子节点是主 Task，第 2 个是后台分支。'));
@@ -2410,7 +3085,7 @@
         instanceRow.appendChild(selectInput(run.instance || '', instanceOptions.length ? instanceOptions : [{ value: run.instance || '', label: run.instance || '未配置实例' }], (value) => mutate(() => { run.instance = value; })));
         const workflowRow = field(block, '工作流');
         workflowRow.appendChild(selectInput(run.workflow || '', workflowOptions.length ? [{ value: '', label: '选择工作流' }, ...workflowOptions] : [{ value: run.workflow || '', label: run.workflow || '输入路径' }], (value) => mutate(() => { run.workflow = value; run.inputs = {}; })));
-        const edit = el('button', 'full-command', `编辑公开变量（${publicWorkflowVariables(run.workflow).length}）`);
+        const edit = el('button', 'full-command', `编辑工作流输入（${workflowInputs(run.workflow).length}）`);
         edit.addEventListener('click', () => { state.selected.clear(); state.selectedEdge = null; state.selectedRun = { nodeId: node.id, index }; render(); });
         block.appendChild(edit); body.appendChild(block);
       });
@@ -2465,7 +3140,7 @@
     const block = el('div', 'decorator-block');
     const head = el('div', 'decorator-heading'); head.appendChild(el('span', '', decoratorLabel(decorator)));
     const remove = el('button', 'icon-button danger', '×'); remove.addEventListener('click', () => mutate(() => node.decorators.splice(index, 1))); head.appendChild(remove); block.appendChild(head);
-    if (decorator.type === 'condition') block.appendChild(conditionControl(node, decorator));
+    if (decorator.type === 'condition') block.appendChild(conditionDecoratorControl(node, decorator));
     else if (decorator.type === 'cooldown' || decorator.type === 'timeout') block.appendChild(textInput(decorator.seconds, (value) => mutate(() => { decorator.seconds = Math.max(0.001, parseFloat(value || '0')); }), { type: 'number', min: 0.001, step: 0.1 }));
     else if (decorator.type === 'retry') {
       const row = el('div', 'inline-control');
@@ -2482,7 +3157,7 @@
     body.appendChild(block);
   }
 
-  function conditionControl(node, decorator) {
+  function conditionDecoratorControl(node, decorator) {
     const shell = el('div', 'condition-control');
     const expression = decorator.expression;
     const op = expression && typeof expression === 'object' && !Array.isArray(expression) ? Object.keys(expression)[0] : 'literal';
@@ -2530,7 +3205,7 @@
     const body = clearInspector('工作流设置');
     section(body, '标识');
     field(body, 'ID').appendChild(textInput(state.raw.id || '', (value) => mutate(() => { state.raw.id = value.trim(); })));
-    field(body, '版本').appendChild(textInput(state.raw.version || '3.0.0', (value) => mutate(() => { state.raw.version = value.trim(); })));
+    field(body, '版本').appendChild(textInput(state.raw.version || '4.0.0', (value) => mutate(() => { state.raw.version = value.trim(); })));
     const descriptionRow = field(body, '描述', '用于说明脚本用途，并显示在子工作流选择器中');
     const description = el('textarea', 'workflow-description-input');
     description.value = typeof state.raw.description === 'string' ? state.raw.description : '';
@@ -2715,30 +3390,33 @@
     }
   }
 
-  function renderDefinitionOptions(body, name, definition) {
+  function renderDefinitionOptions(body, name, definition, options = {}) {
     field(body, '描述').appendChild(textInput(definition.description || '', (value) => mutate(() => {
       if (value.trim()) definition.description = value.trim(); else delete definition.description;
     }), { placeholder: '说明这个变量的用途' }));
     const hasDefault = Object.prototype.hasOwnProperty.call(definition, 'default');
     const defaultRow = field(body, '默认值');
     const defaultShell = el('div', 'definition-default');
-    const enabled = el('label', 'check-label'); enabled.appendChild(checkbox(hasDefault, (value) => mutate(() => {
-      if (value) definition.default = initialDefinitionValue(definition); else delete definition.default;
-    }))); enabled.appendChild(el('span', '', '启用')); defaultShell.appendChild(enabled);
+    if (!options.requireDefault) {
+      const enabled = el('label', 'check-label'); enabled.appendChild(checkbox(hasDefault, (value) => mutate(() => {
+        if (value) definition.default = initialDefinitionValue(definition); else delete definition.default;
+      }))); enabled.appendChild(el('span', '', '启用')); defaultShell.appendChild(enabled);
+    }
     if (hasDefault) defaultShell.appendChild(definitionValueControl(definition, definition.default, (value) => { definition.default = value; }, { key: name }));
     defaultRow.appendChild(defaultShell);
     renderDefinitionEnum(body, definition);
     renderDefinitionShape(body, definition);
   }
 
-  function nextVariableName() {
+  function nextVariableName(scope) {
     let index = 1;
-    while (state.raw.blackboard[`new_variable_${index}`]) index += 1;
-    return `new_variable_${index}`;
+    const prefix = scope === 'inputs' ? 'new_input' : 'new_state';
+    while ((state.raw.inputs && state.raw.inputs[`${prefix}_${index}`]) || (state.raw.variables && state.raw.variables[`${prefix}_${index}`])) index += 1;
+    return `${prefix}_${index}`;
   }
 
-  function variableReferenceCount(name) {
-    const prefix = `blackboard.${name}`;
+  function variableReferenceCount(scope, name) {
+    const prefix = `${scope}.${name}`;
     let count = 0;
     const visit = (value) => {
       if (Array.isArray(value)) { value.forEach(visit); return; }
@@ -2750,34 +3428,38 @@
     return count;
   }
 
-  function removeVariable(name) {
-    const references = variableReferenceCount(name);
+  function removeVariable(scope, name) {
+    const references = variableReferenceCount(scope, name);
     if (references) {
       toast(`变量 ${name} 正在被 ${references} 处引用，不能删除`, true);
       return;
     }
     mutate(() => {
-      const names = Object.keys(state.raw.blackboard);
+      const definitions = state.raw[scope];
+      const names = Object.keys(definitions);
       const index = names.indexOf(name);
-      delete state.raw.blackboard[name];
+      delete definitions[name];
       for (const [id, card] of Object.entries(variableCards())) {
         const cardName = card && typeof card.name === 'string' ? card.name : id;
-        if (cardName === name) delete variableCards()[id];
+        const cardScope = card && card.scope === 'variables' ? 'variables' : 'inputs';
+        if (cardScope === scope && cardName === name) delete variableCards()[id];
       }
       for (const [key, cardId] of Object.entries(variableLinks())) {
         if (!Object.prototype.hasOwnProperty.call(variableCards(), cardId)) delete variableLinks()[key];
       }
-      const remaining = Object.keys(state.raw.blackboard);
+      const remaining = Object.keys(definitions);
       state.selectedVariable = remaining[Math.min(Math.max(0, index), remaining.length - 1)] || '';
     });
   }
 
-  function addVariable() {
+  function addVariable(scope = 'inputs') {
     mutate(() => {
-      if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
-      const name = nextVariableName();
-      state.raw.blackboard[name] = { type: 'string', public: false };
+      if (scope !== 'variables') scope = 'inputs';
+      if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) state.raw[scope] = {};
+      const name = nextVariableName(scope);
+      state.raw[scope][name] = scope === 'variables' ? { type: 'string', default: '' } : { type: 'string' };
       state.selectedVariable = name;
+      state.selectedVariableScope = scope;
       state.inspector = 'variables';
       state.selected.clear();
       state.selectedEdge = null;
@@ -2787,50 +3469,56 @@
 
   function renderVariablesInspector() {
     const name = state.selectedVariable;
-    const body = clearInspector(name ? `变量 · ${name}` : '变量');
-    if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
-    const rawDefinition = name ? state.raw.blackboard[name] : null;
+    const scope = state.selectedVariableScope === 'variables' ? 'variables' : 'inputs';
+    const scopeLabel = scope === 'inputs' ? '工作流输入' : '运行变量';
+    const body = clearInspector(name ? `${scopeLabel} · ${name}` : scopeLabel);
+    if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) state.raw[scope] = {};
+    const rawDefinition = name ? state.raw[scope][name] : null;
     if (!rawDefinition) {
       body.appendChild(el('div', 'variable-inspector-empty', '从左侧变量列表选择一个变量'));
       return;
     }
     const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition)
       ? rawDefinition
-      : { type: 'any', public: false };
-    if (definition !== rawDefinition) state.raw.blackboard[name] = definition;
-    const remove = el('button', 'icon-button danger', '×'); remove.title = '删除变量'; remove.addEventListener('click', () => removeVariable(name));
-    section(body, '变量', remove);
+      : { type: 'any' };
+    if (scope === 'variables' && !Object.prototype.hasOwnProperty.call(definition, 'default')) definition.default = initialDefinitionValue(definition);
+    if (definition !== rawDefinition) state.raw[scope][name] = definition;
+    const remove = el('button', 'icon-button danger', '×'); remove.title = `删除${scopeLabel}`; remove.addEventListener('click', () => removeVariable(scope, name));
+    section(body, scopeLabel, remove);
     const details = el('div', 'variable-details');
-    field(details, '名称').appendChild(textInput(name, (value) => renameBlackboard(name, value.trim())));
+    details.appendChild(el('div', 'description', scope === 'inputs' ? '由调用方传入，流程运行期间只读。' : '仅属于本次运行，通过 variables.set 更新。'));
+    field(details, '名称').appendChild(textInput(name, (value) => renameVariable(scope, name, value.trim())));
     field(details, '类型').appendChild(selectInput(definition.type || 'string', DEFINITION_TYPES.map((value) => ({ value, label: value })), (value) => mutate(() => changeDefinitionType(definition, value))));
-    const flags = el('div', 'variable-flags');
-    const exposed = el('label', 'check-label'); exposed.appendChild(checkbox(definition.public !== false, (value) => mutate(() => { definition.public = value; }))); exposed.appendChild(el('span', '', '公开给父工作流')); flags.appendChild(exposed);
-    const required = el('label', 'check-label'); required.appendChild(checkbox(definition.required === true, (value) => mutate(() => { if (value) definition.required = true; else delete definition.required; }))); required.appendChild(el('span', '', '必填')); flags.appendChild(required);
-    details.appendChild(flags);
-    const references = variableReferenceCount(name);
+    if (scope === 'inputs') {
+      const flags = el('div', 'variable-flags');
+      const required = el('label', 'check-label'); required.appendChild(checkbox(definition.required === true, (value) => mutate(() => { if (value) definition.required = true; else delete definition.required; }))); required.appendChild(el('span', '', '必填')); flags.appendChild(required);
+      details.appendChild(flags);
+    }
+    const references = variableReferenceCount(scope, name);
     const usage = el('div', 'variable-usage', references ? `${references} 处节点引用` : '尚未被节点引用');
     details.appendChild(usage);
-    const options = el('div', 'variable-options'); renderDefinitionOptions(options, name, definition); details.appendChild(options);
+    const options = el('div', 'variable-options'); renderDefinitionOptions(options, name, definition, { requireDefault: scope === 'variables' }); details.appendChild(options);
     body.appendChild(details);
   }
 
-  function renameBlackboard(oldName, name) {
+  function renameVariable(scope, oldName, name) {
     if (!name || name === oldName) return;
-    if (state.raw.blackboard[name]) { toast('变量名称已存在', true); return; }
+    if ((state.raw.inputs && state.raw.inputs[name]) || (state.raw.variables && state.raw.variables[name])) { toast('名称已存在', true); return; }
     mutate(() => {
       const next = {};
-      for (const [key, value] of Object.entries(state.raw.blackboard)) next[key === oldName ? name : key] = value;
-      state.raw.blackboard = next;
+      for (const [key, value] of Object.entries(state.raw[scope])) next[key === oldName ? name : key] = value;
+      state.raw[scope] = next;
       for (const [id, card] of Object.entries(variableCards())) {
         const cardName = card && typeof card.name === 'string' ? card.name : id;
-        if (cardName === oldName && card && typeof card === 'object') card.name = name;
+        const cardScope = card && card.scope === 'variables' ? 'variables' : 'inputs';
+        if (cardScope === scope && cardName === oldName && card && typeof card === 'object') card.name = name;
       }
       const remap = (item) => {
         if (Array.isArray(item)) return item.forEach(remap);
         if (!item || typeof item !== 'object') return;
-        const prefix = `blackboard.${oldName}`;
+        const prefix = `${scope}.${oldName}`;
         if (typeof item.ref === 'string' && (item.ref === prefix || item.ref.startsWith(`${prefix}.`))) {
-          item.ref = `blackboard.${name}${item.ref.slice(prefix.length)}`;
+          item.ref = `${scope}.${name}${item.ref.slice(prefix.length)}`;
         }
         Object.values(item).forEach(remap);
       };
@@ -3022,9 +3710,9 @@
       ? node.params[name]
       : definition.default !== undefined ? clone(definition.default) : fallback;
     if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') {
-      const prefix = 'blackboard.';
+      const prefix = 'inputs.';
       if (value.ref.startsWith(prefix)) {
-        const entry = state.raw.blackboard && state.raw.blackboard[value.ref.slice(prefix.length)];
+        const entry = state.raw.inputs && state.raw.inputs[value.ref.slice(prefix.length)];
         if (entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'default')) value = entry.default;
         else if (entry !== undefined && (typeof entry !== 'object' || entry === null)) value = entry;
         else throw new Error(`${name} 引用没有可用的默认值`);
@@ -3474,7 +4162,8 @@
       if (width < 1 || height < 1) { toast('请选择有效区域', true); return; }
       const request = state.roi; const node = nodeById(request.nodeId);
       if (request.mode === 'rect') {
-        mutate(() => { node.params[request.key] = [x, y, width, height]; });
+        if (typeof request.applyValue === 'function') mutate(() => request.applyValue([x, y, width, height]));
+        else if (node) mutate(() => { node.params[request.key] = [x, y, width, height]; });
       } else {
         const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
         try {
@@ -3514,9 +4203,11 @@
 
   function normalizeRaw(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {
-      schema_version: 3, id: 'new_behavior_tree', version: '3.0.0', description: '', resolution: [1920, 1080], root: 'root', blackboard: {}, limits: { timeout_seconds: 300, max_steps: 1000 },
+      schema_version: 4, id: 'new_behavior_tree', version: '4.0.0', description: '', resolution: [1920, 1080], root: 'root', inputs: {}, variables: {}, limits: { timeout_seconds: 300, max_steps: 1000 },
       nodes: [{ id: 'root', type: 'root', children: ['main'] }, { id: 'main', type: 'sequence', children: ['task_1'] }, { id: 'task_1', type: 'task', action: 'core.capture', params: {} }],
     };
+    if (!raw.inputs || typeof raw.inputs !== 'object' || Array.isArray(raw.inputs)) raw.inputs = {};
+    if (!raw.variables || typeof raw.variables !== 'object' || Array.isArray(raw.variables)) raw.variables = {};
     if (!raw._layout || typeof raw._layout !== 'object') raw._layout = {};
     return raw;
   }
@@ -3537,31 +4228,6 @@
       } else {
         goBack(undefined);
       }
-    });
-    $('workflow-select').addEventListener('change', () => {
-      const picker = $('workflow-select');
-      const uri = picker.value;
-      if (!uri || uri === state.docUri) return;
-      const switchTo = (saveText) => {
-        state.docUri = uri; // 乐观更新，切换失败由 init 纠正
-        vscode.postMessage({ type: 'switchWorkflow', uri, saveText });
-      };
-      if (state.dirty) {
-        const rect = picker.getBoundingClientRect();
-        showMenu(rect.left, rect.bottom + 4, [
-          { label: '保存并切换', run: () => switchTo(JSON.stringify(state.raw, null, 2) + '\n') },
-          { label: '放弃修改并切换', run: () => switchTo(undefined) },
-          'separator',
-          { label: '取消', run: () => { picker.value = state.docUri; } },
-        ]);
-      } else {
-        switchTo(undefined);
-      }
-    });
-    $('instance-select').addEventListener('change', () => {
-      state.instanceId = $('instance-select').value;
-      renderInstancePicker();
-      vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
     });
     $('btn-run').addEventListener('click', () => vscode.postMessage({
       type: 'runWorkflow',
@@ -3640,17 +4306,20 @@
     else if (command === 'exportImage') exportFullCanvasImage();
     else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }
     else if (command === 'variables') {
-      if (!state.raw.blackboard || typeof state.raw.blackboard !== 'object' || Array.isArray(state.raw.blackboard)) state.raw.blackboard = {};
-      if (!state.raw.blackboard[state.selectedVariable]) state.selectedVariable = Object.keys(state.raw.blackboard)[0] || '';
+      const scope = state.raw.inputs && Object.keys(state.raw.inputs).length ? 'inputs' : 'variables';
+      state.selectedVariableScope = scope;
+      if (!state.raw[scope][state.selectedVariable]) state.selectedVariable = Object.keys(state.raw[scope])[0] || '';
       state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
     }
     else if (command === 'selectVariable') {
-      const name = String(value ?? '');
-      if (!state.raw.blackboard || !Object.prototype.hasOwnProperty.call(state.raw.blackboard, name)) return;
+      const scope = value && value.scope === 'variables' ? 'variables' : 'inputs';
+      const name = String(value && value.name !== undefined ? value.name : value ?? '');
+      if (!state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], name)) return;
       state.selectedVariable = name;
+      state.selectedVariableScope = scope;
       state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
     }
-    else if (command === 'addVariable') addVariable();
+    else if (command === 'addVariable') addVariable(value === 'variables' ? 'variables' : 'inputs');
     else if (command === 'addVariableCard') addVariableCardCommand(value);
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {
@@ -3673,6 +4342,7 @@
       else if (selection.kind === 'variables') {
         state.inspector = 'variables';
         state.selectedVariable = String(selection.name || '');
+        state.selectedVariableScope = selection.scope === 'variables' ? 'variables' : 'inputs';
       } else if (selection.kind === 'run') {
         state.inspector = 'node';
         state.selectedRun = { nodeId: String(selection.nodeId || ''), index: Number(selection.index || 0) };
@@ -3746,9 +4416,18 @@
     hideVariableDropGhost();
     if (!variableDragAccepted(event)) return;
     event.preventDefault();
-    const name = event.dataTransfer.getData(VARIABLE_DRAG_MIME);
+    const payload = event.dataTransfer.getData(VARIABLE_DRAG_MIME);
+    let name = payload;
+    let scope = 'inputs';
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && typeof parsed === 'object') {
+        name = String(parsed.name || '');
+        scope = parsed.scope === 'variables' ? 'variables' : 'inputs';
+      }
+    } catch { /* Older drag payloads contain only the input name. */ }
     if (!name) return;
-    placeVariableCard(name, worldPoint(event));
+    placeVariableCard(scope, name, worldPoint(event));
   });
   wrap.addEventListener('pointerdown', hideVariableDropGhost);
   window.addEventListener('keydown', (event) => {
@@ -3793,7 +4472,7 @@
       const sameDocument = Boolean(message.document && message.document.uri && message.document.uri === state.docUri);
       state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
       state.assetsBaseUri = typeof message.assetsBaseUri === 'string' ? message.assetsBaseUri.replace(/\/?$/, '/') : '';
-      state.refs = message.refs || { blackboard: [], nodes: [] }; state.issues = message.issues || [];
+      state.refs = message.refs || { inputs: [], variables: [], nodes: [] }; state.issues = message.issues || [];
       state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item) => item && typeof item.uri === 'string') : [];
       state.docUri = message.document.uri || '';
       state.documentName = message.document.name || '';
@@ -3822,7 +4501,8 @@
     else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) {
       const request = state.roi;
       const browser = request.returnToAssetBrowser ? state.assetBrowser : null;
-      if (browser && typeof browser.applyValue === 'function') mutate(() => browser.applyValue(message.path));
+      if (typeof request.applyValue === 'function') mutate(() => request.applyValue(message.path));
+      else if (browser && typeof browser.applyValue === 'function') mutate(() => browser.applyValue(message.path));
       else {
         const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; });
       }

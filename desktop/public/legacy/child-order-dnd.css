@@ -1,0 +1,15 @@
+.child-row[draggable="true"] { position: relative; cursor: grab; }
+.child-row[draggable="true"]:active { cursor: grabbing; }
+.child-row.dragging { opacity: .42; }
+.child-row.drop-before::before,
+.child-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.child-row.drop-before::before { top: -1px; }
+.child-row.drop-after::after { bottom: -1px; }

@@ -9,12 +9,13 @@
   <link rel="stylesheet" href="../fonts/harmonyos-sans-sc/Semibold.css">
   <link rel="stylesheet" href="../fonts/harmonyos-sans-sc/Bold.css">
   <link rel="stylesheet" href="./workflow-editor.css">
+  <link rel="stylesheet" href="./ui.css">
+  <link rel="stylesheet" href="./child-order-dnd.css">
   <style>
     #topbar { display: none !important; }
     main { height: calc(100% - 30px); }
     #external-banner { top: 38px; }
-    #inspector { background: #242424; }
-    #inspector-title { background: #2a2a2a; }
+    #inspector, #inspector-title { background: var(--panel); }
     .desktop-details-mode #inspector-title { display: none !important; }
     .desktop-details-mode #workflow-breadcrumb { display: none !important; }
   </style>
@@ -22,11 +23,11 @@
 <body>
   <header id="topbar">
     <button id="btn-back" class="icon-button hidden" title="返回上一级">←</button>
-    <select id="workflow-select" aria-label="切换工作流"></select>
+    <span id="workflow-select" class="topbar-slot workflow-slot"></span>
     <span id="dirty-badge" class="badge hidden">未保存</span>
     <span id="issue-badge" class="badge"></span>
     <span class="spacer"></span>
-    <select id="instance-select" aria-label="运行实例"></select>
+    <span id="instance-select" class="topbar-slot instance-slot"></span>
     <button id="btn-run" class="primary">运行</button>
     <button id="btn-stop" class="icon-button">停止</button>
     <button id="btn-save" class="primary">保存</button>
@@ -52,6 +53,8 @@
   </main>
   <div id="toast" class="hidden"></div>
   <script src="./bridge.js"></script>
+  <script src="./ui.js"></script>
   <script src="./workflow-editor.js"></script>
+  <script src="./child-order-dnd.js"></script>
 </body>
 </html>

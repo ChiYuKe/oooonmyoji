@@ -1,0 +1,89 @@
+/* ===== 编辑器 UI 库（ui.js 配套样式）：图标、tooltip、自绘下拉 ===== */
+
+.svg-icon { display: inline-flex; align-items: center; line-height: 0; }
+.svg-icon svg { display: block; }
+
+/* 自绘 tooltip：固定定位最上层，边缘避让，支持多行 */
+.ui-tooltip {
+  position: fixed;
+  z-index: 9999;
+  width: max-content;
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  background: #111;
+  color: #ddd;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .45);
+}
+.ui-tooltip.hidden { display: none; }
+
+/* 自绘下拉 */
+.ui-dropdown { position: relative; min-width: 0; }
+.ui-dropdown-button {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  width: 100%; min-height: 24px; height: 24px; padding: 2px 6px; font-size: 11px;
+  background: #161616; border: 1px solid #0e0e0e; color: #e3e3e3; border-radius: 2px; text-align: left;
+}
+.ui-dropdown-button:hover, .ui-dropdown.open .ui-dropdown-button { border-color: #6e6e6e; }
+.ui-dropdown-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-dropdown-detail { flex: 0 0 auto; font-size: 9px; color: #8a8a8a; }
+.ui-dropdown-list {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 80;
+  display: flex; flex-direction: column;
+  background: #1f1f1f; border: 1px solid #3a3a3a; border-radius: 3px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
+}
+.ui-dropdown-search {
+  height: 26px; min-height: 26px; padding: 3px 8px; font-size: 11px;
+  background: #161616; color: #e3e3e3; border: 0; border-bottom: 1px solid #333; border-radius: 3px 3px 0 0;
+}
+.ui-dropdown-search:focus { border-color: transparent; border-bottom-color: var(--accent, #3694d4); }
+.ui-dropdown-items { max-height: 236px; overflow: auto; overflow-x: hidden; }
+.ui-dropdown-item {
+  display: flex; flex-direction: column; gap: 1px; align-items: stretch;
+  min-height: 0; height: auto; padding: 4px 8px;
+  background: transparent; border: 0; border-radius: 0;
+  color: #d9d9d9; text-align: left;
+}
+.ui-dropdown-item:hover { background: #2f2f2f; color: #fff; }
+.ui-dropdown-item.selected { background: #2b5674; color: #fff; }
+.ui-dropdown-item-label { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-dropdown-item-detail { font-size: 10px; color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-dropdown-item:hover .ui-dropdown-item-detail { color: #aaa; }
+.ui-dropdown-item.selected .ui-dropdown-item-detail { color: #cfe0ee; }
+.ui-dropdown-empty { padding: 8px; color: #8a8a8a; font-size: 11px; }
+
+/* 分区头内嵌下拉的尺寸约束 */
+.section-header .ui-dropdown { max-width: 140px; }
+.section-header .ui-dropdown-button { max-width: 140px; min-height: 24px; height: 24px; text-transform: none; font-weight: 400; }
+
+/* 下拉向上弹出 */
+.ui-dropdown.open-up .ui-dropdown-list { top: auto; bottom: calc(100% + 2px); }
+
+/* 细滚动条 */
+.ui-dropdown-items::-webkit-scrollbar { width: 8px; height: 8px; }
+.ui-dropdown-items::-webkit-scrollbar-track { background: transparent; }
+.ui-dropdown-items::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
+.ui-dropdown-items::-webkit-scrollbar-thumb:hover { background: #4d4d4d; }
+.ui-dropdown-items { scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
+
+/* 列表挂载到 body 后使用 fixed 定位（避免被祖先 overflow 裁剪） */
+.ui-dropdown-list.ui-dropdown-fixed { position: fixed; }
+.ui-dropdown-list.ui-dropdown-fixed.open-up { top: auto; }
+
+/* 下拉按钮统一 chevron 指示 */
+.ui-dropdown-button::after {
+  content: '';
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  align-self: center;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M4.2 6.2L8 10l3.8-3.8z' fill='%23a8a8a8'/></svg>") center / contain no-repeat;
+  transition: transform .12s ease;
+}
+.ui-dropdown.open .ui-dropdown-button::after { transform: rotate(180deg); }

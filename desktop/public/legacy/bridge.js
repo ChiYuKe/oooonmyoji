@@ -35,17 +35,9 @@
       const buttonId = buttonByCommand[command];
       if (buttonId) document.getElementById(buttonId)?.click();
       else if (command === 'switchWorkflow') {
-        const select = document.getElementById('workflow-select');
-        if (select) {
-          select.value = String(payload.value || '');
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+        window.__topbar?.setWorkflow(String(payload.value || ''));
       } else if (command === 'selectInstance') {
-        const select = document.getElementById('instance-select');
-        if (select) {
-          select.value = String(payload.value || '');
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+        window.__topbar?.setInstance(String(payload.value || ''));
       }
       return;
     }

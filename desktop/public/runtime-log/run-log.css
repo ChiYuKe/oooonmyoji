@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --bg: #1b1b1b;
+  --bg: #242424;
   --panel: #242424;
   --panel-2: #2c2c2c;
   --border: #3b3b3b;
@@ -77,6 +77,61 @@ button:hover { background: #393939; }
 .auto-scroll input { width: 14px; height: 14px; margin: 0; accent-color: var(--focus); }
 .icon-button { width: 28px; min-width: 28px; padding: 0; font-size: 14px; }
 .icon-button.danger { color: #f08c93; }
+
+/* ---------- 运行日志 tooltip：替换 Chromium 的原生 title 浮窗 ---------- */
+[data-tooltip] { position: relative; }
+[data-tooltip]::before,
+[data-tooltip]::after {
+  position: absolute;
+  z-index: 3000;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+}
+[data-tooltip]::before {
+  content: '';
+  top: calc(100% + 2px);
+  left: 50%;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-bottom-color: #4a535b;
+  transform: translate(-50%, -2px);
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  top: calc(100% + 9px);
+  left: 50%;
+  min-width: max-content;
+  max-width: 280px;
+  padding: 6px 9px;
+  border: 1px solid #4a535b;
+  border-radius: 5px;
+  background: #202327;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .42);
+  color: #e4e9ec;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: pre-line;
+  transform: translate(-50%, -3px);
+}
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::before,
+[data-tooltip]:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+}
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before { transform: translate(-50%, 0); }
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after { transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) {
+  [data-tooltip]::before, [data-tooltip]::after { transition: none; }
+}
 
 .source-tabs {
   height: 30px;

@@ -23,6 +23,27 @@
   } catch { /* 独立打开或受限环境下忽略 */ }
 
   const $ = (id) => document.getElementById(id);
+
+  // 工作台统一接管 HTML 控件的 title，避免出现浏览器原生提示框。
+  function installCustomTooltips() {
+    const scan = () => {
+      document.querySelectorAll('[title]').forEach((element) => {
+        if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || element.tagName === 'IFRAME') return;
+        const label = element.getAttribute('title') && element.getAttribute('title').trim();
+        if (!label) return;
+        element.dataset.tooltip = label;
+        element.removeAttribute('title');
+        if (!element.getAttribute('aria-label') && /^(BUTTON|INPUT|SELECT)$/.test(element.tagName)) {
+          element.setAttribute('aria-label', label.replace(/\s+/g, ' '));
+        }
+      });
+    };
+    scan();
+    const observer = new MutationObserver(scan);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+  }
+  installCustomTooltips();
+
   /** 时间线最多渲染的行数：超出时只显示最新的这一数量，统计数据仍按全部行计算。 */
   const MAX_VISIBLE_ROWS = 300;
   const statusText = {

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UI 库组件展示 · Onmyoji Studio</title>
+  <link rel="stylesheet" href="../fonts/harmonyos-sans-sc/Regular.css">
+  <link rel="stylesheet" href="../fonts/harmonyos-sans-sc/Semibold.css">
+  <link rel="stylesheet" href="../fonts/harmonyos-sans-sc/Bold.css">
+  <link rel="stylesheet" href="./ui.css?v=1">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1b1b1b;
+      --panel: #242424;
+      --panel-2: #2c2c2c;
+      --border: #3b3b3b;
+      --fg: #d2d2d2;
+      --muted: #929292;
+      --accent: #3694d4;
+      font-family: "HarmonyOS Sans SC", "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); padding: 28px 36px 80px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 28px; }
+    h2 { font-size: 14px; margin: 34px 0 4px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+    .desc { color: var(--muted); font-size: 12px; margin: 6px 0 14px; line-height: 1.6; }
+    .demo-row { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+    .demo-cell { display: flex; flex-direction: column; gap: 8px; }
+    .demo-caption { color: var(--muted); font-size: 11px; }
+    .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; max-width: 640px; }
+    .icon-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--fg); }
+    .icon-cell .svg-icon { transform: scale(1.4); }
+    .icon-cell span { font-size: 10px; color: var(--muted); }
+    pre {
+      margin: 10px 0 0; padding: 10px 12px; max-width: 640px;
+      background: #161616; border: 1px solid #2c2c2c; border-radius: 4px;
+      font-family: Consolas, monospace; font-size: 11px; line-height: 1.6;
+      color: #9cdcfe; overflow: auto; user-select: text;
+    }
+    pre .k { color: #c586c0; }
+    pre .s { color: #ce9178; }
+    .hover-tip-demo { display: inline-flex; align-items: center; justify-content: center; min-width: 96px; min-height: 32px; border: 1px dashed var(--border); border-radius: 4px; color: var(--muted); font-size: 11px; }
+    .spacer-block { height: 260px; }
+  </style>
+</head>
+<body>
+  <!-- 维护约定：ui.js/ui.css 新增或修改组件时，必须同步更新本页对应展示区 -->
+  <h1>UI 库组件展示</h1>
+  <div class="subtitle">desktop/public/legacy/ui.js + ui.css · 编辑器内通过全局 <code>UI</code> 对象使用 · 本页为纯静态预览</div>
+
+  <h2>下拉 dropdown</h2>
+  <div class="desc">核心组件。深灰弹层、中文条目、空间不足自动向上翻转并压缩高度、列表挂载 body 不被任何祖先裁剪、面板滚动自动收起。<code>searchable</code> 开启顶部搜索框，<code>detail</code> 为条目第二行灰色副文本。</div>
+  <div class="demo-row">
+    <div class="demo-cell">
+      <div id="dd-basic"></div>
+      <div class="demo-caption">基础用法</div>
+      <pre>UI.dropdown({
+  <span class="k">value</span>: <span class="s">'fixed'</span>,
+  <span class="k">options</span>: [
+    { <span class="k">value</span>: <span class="s">'fixed'</span>, <span class="k">label</span>: <span class="s">'固定值'</span> },
+    { <span class="k">value</span>: <span class="s">'binding'</span>, <span class="k">label</span>: <span class="s">'引用'</span> },
+  ],
+  <span class="k">onChange</span>: (v) =&gt; {},
+});</pre>
+    </div>
+    <div class="demo-cell">
+      <div id="dd-detail"></div>
+      <div class="demo-caption">detail 副文本（如动作中文名 + 英文 id）</div>
+      <pre>UI.dropdown({
+  <span class="k">value</span>: <span class="s">'input.recover_state'</span>,
+  <span class="k">options</span>: [
+    { <span class="k">value</span>: <span class="s">'input.recover_state'</span>, <span class="k">label</span>: <span class="s">'页面状态恢复'</span>,
+      <span class="k">detail</span>: <span class="s">'input.recover_state'</span> },
+    { <span class="k">value</span>: <span class="s">'vision.match_template'</span>, <span class="k">label</span>: <span class="s">'模板匹配'</span>,
+      <span class="k">detail</span>: <span class="s">'vision.match_template'</span> },
+    { <span class="k">value</span>: <span class="s">'core.sleep'</span>, <span class="k">label</span>: <span class="s">'等待'</span>,
+      <span class="k">detail</span>: <span class="s">'core.sleep'</span> },
+  ],
+  <span class="k">onChange</span>: (v) =&gt; {},
+});</pre>
+    </div>
+    <div class="demo-cell">
+      <div id="dd-search"></div>
+      <div class="demo-caption">searchable：顶部搜索框（中英文均可过滤）</div>
+      <pre>UI.dropdown({
+  <span class="k">value</span>: <span class="s">'mumu-0'</span>,
+  <span class="k">options</span>: [
+    { <span class="k">value</span>: <span class="s">'mumu-0'</span>, <span class="k">label</span>: <span class="s">'MuMu 0'</span> },
+    { <span class="k">value</span>: <span class="s">'mumu-1'</span>, <span class="k">label</span>: <span class="s">'MuMu 1'</span> },
+  ],
+  <span class="k">searchable</span>: true,
+  <span class="k">placeholder</span>: <span class="s">'搜索实例…'</span>,
+  <span class="k">onChange</span>: (v) =&gt; {},
+});</pre>
+    </div>
+  </div>
+
+  <h2>图标 icon</h2>
+  <div class="desc">13px 线性 SVG，<code>currentColor</code> 跟随文字颜色，可在任意背景上使用。新增图标请加入 <code>UI.ICON_SVG</code>。</div>
+  <div class="icon-grid" id="icon-grid"></div>
+  <pre>UI.icon(<span class="s">'trash'</span>)   <span style="color:#555">// 返回 span.svg-icon</span>
+UI.ICON_SVG[<span class="s">'plus'</span>]  <span style="color:#555">// 原始 SVG 字符串</span></pre>
+
+  <h2>图标按钮 iconButton</h2>
+  <div class="desc">小方形操作按钮，悬停显示自绘 tooltip（<code>tip</code> 参数），传入 <code>ICON_SVG</code> 中的名字自动渲染图标，否则渲染文本。</div>
+  <div class="demo-row">
+    <div class="demo-cell">
+      <div class="demo-row" style="gap:6px" id="icon-buttons"></div>
+      <div class="demo-caption">图标变体（悬停查看 tooltip）</div>
+      <pre>UI.iconButton(<span class="s">'my-btn'</span>, <span class="s">'删除该项'</span>, <span class="s">'trash'</span>, onClick);</pre>
+    </div>
+    <div class="demo-cell">
+      <div class="demo-row" style="gap:6px" id="text-buttons"></div>
+      <div class="demo-caption">文本变体</div>
+      <pre>UI.iconButton(<span class="s">'my-btn'</span>, <span class="s">'截取'</span>, <span class="s">'截取'</span>, onClick);</pre>
+    </div>
+  </div>
+
+  <h2>tooltip（自绘）</h2>
+  <div class="desc">固定定位、恒在最上层、自动避开屏幕边缘、支持多行。任何元素设置 <code>data-tip</code> 即生效（<code>UI.setTip</code>），页面加载时 <code>initTooltips</code> 自动初始化。</div>
+  <div class="demo-row">
+    <span class="hover-tip-demo" data-tip="我是自绘 tooltip">悬停我</span>
+    <span class="hover-tip-demo" data-tip="支持比较长的描述文本，超过容器宽度会自动换行并避开屏幕边缘">长文本 tooltip</span>
+    <pre>UI.setTip(el, <span class="s">'提示文本'</span>);
+<span style="color:#555">// 或 el.dataset.tip = '提示文本'</span></pre>
+  </div>
+
+  <h2>closeDropdowns</h2>
+  <div class="desc">关闭所有已打开的下拉并清理弹层。面板重建、窗口失焦时由编辑器自动调用；也可以在自定义场景手动调用。</div>
+  <div class="demo-row">
+    <div class="demo-cell">
+      <div class="demo-row" style="gap:6px">
+        <div id="dd-close-demo"></div>
+        <button id="btn-close-all" style="align-self: center; padding: 5px 12px; background: #2c2c2c; border: 1px solid var(--border); border-radius: 3px; color: var(--fg); font-size: 11px;">关闭所有下拉</button>
+      </div>
+      <pre>UI.closeDropdowns();</pre>
+    </div>
+  </div>
+
+  <div class="spacer-block"></div>
+
+  <script src="./ui.js"></script>
+  <script>
+    (() => {
+      'use strict';
+
+      // 基础下拉
+      document.getElementById('dd-basic').appendChild(UI.dropdown({
+        value: 'fixed',
+        options: [
+          { value: 'fixed', label: '固定值' },
+          { value: 'binding', label: '引用' },
+        ],
+        onChange: (value) => console.log('[demo] 基础下拉:', value),
+      }));
+
+      // detail 副文本
+      document.getElementById('dd-detail').appendChild(UI.dropdown({
+        value: 'input.recover_state',
+        options: [
+          { value: 'input.recover_state', label: '页面状态恢复', detail: 'input.recover_state', title: '从已识别页面执行有限且逐步确认的恢复动作。' },
+          { value: 'vision.match_template', label: '模板匹配', detail: 'vision.match_template' },
+          { value: 'core.sleep', label: '等待', detail: 'core.sleep' },
+        ],
+        onChange: (value) => console.log('[demo] detail 下拉:', value),
+      }));
+
+      // 可搜索
+      document.getElementById('dd-search').appendChild(UI.dropdown({
+        value: 'mumu-0',
+        options: [
+          { value: 'mumu-0', label: 'MuMu 0' },
+          { value: 'mumu-1', label: 'MuMu 1' },
+          { value: 'wsa-0', label: 'WSA 0' },
+        ],
+        searchable: true,
+        placeholder: '搜索实例…',
+        onChange: (value) => console.log('[demo] 搜索下拉:', value),
+      }));
+
+      // 图标网格
+      const grid = document.getElementById('icon-grid');
+      for (const name of Object.keys(UI.ICON_SVG)) {
+        const cell = document.createElement('div');
+        cell.className = 'icon-cell';
+        cell.appendChild(UI.icon(name));
+        const label = document.createElement('span');
+        label.textContent = name;
+        cell.appendChild(label);
+        grid.appendChild(cell);
+      }
+
+      // 图标按钮
+      const iconButtons = document.getElementById('icon-buttons');
+      for (const [icon, tip] of [['trash', '删除该项'], ['plus', '添加'], ['arrow-up', '上移'], ['arrow-down', '下移'], ['unlink', '解除引用'], ['crop', '框选区域']]) {
+        iconButtons.appendChild(UI.iconButton('demo-icon-btn', tip, icon, () => console.log('[demo] 图标按钮:', tip)));
+      }
+      const textButtons = document.getElementById('text-buttons');
+      for (const [text, tip] of [['浏览', '浏览 assets 中的图片'], ['截取', '从当前画面截取模板'], ['框选', '框选识别区域']]) {
+        textButtons.appendChild(UI.iconButton('demo-icon-btn', tip, text, () => console.log('[demo] 文本按钮:', tip)));
+      }
+
+      // 关闭演示
+      document.getElementById('dd-close-demo').appendChild(UI.dropdown({
+        value: 'a',
+        options: [{ value: 'a', label: '选项 A' }, { value: 'b', label: '选项 B' }],
+        onChange: () => {},
+      }));
+      document.getElementById('btn-close-all').addEventListener('click', () => UI.closeDropdowns());
+    })();
+  </script>
+</body>
+</html>

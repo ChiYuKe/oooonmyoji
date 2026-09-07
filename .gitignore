@@ -11,8 +11,10 @@ config/runtime-*.json
 
 # Local VS Code settings and packaged extension artifacts
 .vscode/
+# Local coding-agent plans and scratch
+.zcode/
 # Local toolchain downloads (portable Node.js etc.)
-tools/
+/tools/
 *.vsix
 
 # VS Code extension

@@ -55,6 +55,7 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 - **组队御魂**：按配置启动 `mumu-0` 队长和 `mumu-1` 队员。
 - **停止**：协作取消当前运行。
 - **运行日志**：分别查看队长、队员步骤和奖励统计。
+- **脚本概览**：桌面端在“工作流编辑器”旁提供全部工作流卡片；每张卡片可单独配置输入参数，按勾选顺序建立队列、调整先后并连续执行，某项失败或手动停止时不再启动剩余项。
 - 工作流编辑器标题栏的播放按钮可运行当前 JSON 工作流。
 
 插件默认使用项目的 `.venv/Scripts/python.exe` 和 `config/config.json`，无需 BAT
@@ -71,13 +72,13 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999
 ```
 
-组队前让吃鱼检查结界突破券；达到 30 张时先清结界，清完后由扫地工重复邀请并恢复御魂：
+吃鱼默认在御魂奖励页追踪结界突破券；首次掉落会点击券并读取“已拥有”，之后按奖励累计，到 30 张时再次点击复核。确认达到 30 张后先清结界，清完后由扫地工重复邀请并恢复御魂：
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999 --enable-member-realm-raid --realm-threshold 30
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999 --realm-threshold 30
 ```
 
-该开关只传给队员实例（默认 `mumu-1`），队长实例不会执行结界突破。未指定开关时保持原有组队行为。
+结界调度只传给队员实例（默认 `mumu-1`），队长实例不会执行结界突破。临时关闭时使用 `--disable-member-realm-raid`。
 
 `run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
 `config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
@@ -201,6 +202,32 @@ python -m venv .venv
 `roi.json`；JSON 同时保存原图坐标与 `1920×1080` 参考坐标，`capture_rect` 与
 `regions` 分开记录。默认输出目录为 `artifacts/roi-editor/`。
 
+## 画面测试工具
+
+桌面端顶部“工具”菜单中的“模拟器画面测试工具”会打开一个独立窗口，以实时
+画面测试识别与点击参数，适合在调整模板、ROI 和坐标时反复验证。窗口左侧是
+模拟器实时画面（可暂停、调整刷新间隔），右侧是测试面板：
+
+- **模板匹配测试**：选择模板（从 `assets/templates/` 下拉或浏览项目文件）后
+  自动对当前画面匹配（阈值、结果数、缩放搜索均可调），命中结果以绿色框显示
+  置信度，并列出命中的图片/参考坐标。
+- **测试 ROI 区域**：在“ROI 框选”模式下拖动鼠标框选区域，工具同时给出图片
+  坐标与 `1920×1080` 参考坐标及中心点；勾选“匹配限 ROI”后，模板匹配会限制
+  在该区域内，验证 ROI 是否覆盖目标。
+- **测试点击位置**：切换到“点击测试”模式后单击画面选择位置，可设置按住时长
+  并发送一次真实点击，验证坐标是否落在目标按钮上。
+- “保存画面”可以把带匹配框、ROI 和点击标记的当前画面导出为 PNG。
+
+画面比例与参考分辨率不一致时参考坐标不可用，匹配和点击仍按实际画面坐标
+工作。画面由桌面端拉起的一个长驻 Python 流服务
+（`src/oooonmyoji/tools/vision_stream.py`）经本地 IPC 推送；命令行直接调用它
+可按相同协议调试：
+
+```powershell
+.\.venv\Scripts\python.exe -m src.oooonmyoji.tools.vision_stream `
+  --config .\config\config.json --instance mumu-0 --max-frame-width 640
+```
+
 ## Python 调用
 
 ```python
@@ -224,23 +251,24 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 
 ## 工作流和 Action 开发
 
-工作流是 Behavior Tree v3（`schema_version: 3`）。`children` 表示有序父子关系，
+工作流是 Behavior Tree v4（`schema_version: 4`）。`children` 表示有序父子关系，
 执行结果由 `Selector`、`Sequence` 与 `Simple Parallel` 组合节点解释，不再使用
-成功/失败跳转边。完整契约见 [docs/workflow-schema-v3.md](docs/workflow-schema-v3.md)。
+成功/失败跳转边。完整契约见 [docs/workflow-schema-v4.md](docs/workflow-schema-v4.md)。
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "id": "my_workflow",
   "version": "3.0.0",
   "description": "查找目标并点击",
   "resolution": [1920, 1080],
   "root": "root",
-  "blackboard": { "template": { "type": "asset", "default": "assets/templates/x.png" } },
+  "inputs": { "模板": { "type": "asset", "default": "assets/templates/x.png" } },
+  "variables": {},
   "nodes": [
     { "id": "root", "type": "root", "children": ["main"] },
     { "id": "main", "type": "sequence", "children": ["find", "tap"] },
-    { "id": "find", "type": "task", "action": "vision.match_template", "params": { "template": { "ref": "blackboard.template" } } },
+    { "id": "find", "type": "task", "action": "vision.match_template", "params": { "template": { "ref": "inputs.模板" } } },
     { "id": "tap", "type": "task", "action": "input.tap_match", "params": { "match": { "ref": "nodes.find.output.0" } } }
   ]
 }
@@ -250,7 +278,8 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 - `Selector` 遇到成功即停止，`Sequence` 遇到失败即停止；`Simple Parallel` 的
   第一个子节点必须是主 Task，第二个是后台分支。
 - 条件、冷却、超时、重试、重复、只执行一次都作为 `decorators` 挂在节点或子树上。
-- 参数绑定使用 `{"ref": "blackboard.<键>"}` 或
+- 只读参数绑定使用 `{"ref": "inputs.<键>"}`，运行变量使用
+  `{"ref": "variables.<键>"}`，节点结果使用
   `{"ref": "nodes.<节点id>.output.<字段>"}`。
 - 顶层可选字段 `description` 用于说明工作流用途，并显示在子工作流选择器中。
 - 每次运行使用启动时读取的不可变文件哈希快照；修改 JSON 只影响下一次运行。

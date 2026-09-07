@@ -23,6 +23,39 @@
     "roi": {
       "type": "rect",
       "description": "后台材料模板匹配和数量 OCR 区域；不填时处理整张截图"
+    },
+    "track_realm_pass": {
+      "type": "boolean",
+      "default": false,
+      "description": "同步检测结界突破券，并按首次基准加后续奖励累计进行阈值复核"
+    },
+    "realm_threshold": {
+      "type": "integer",
+      "default": 30,
+      "min": 1
+    },
+    "realm_pass_template": {
+      "type": "asset",
+      "default": "assets/templates/rewards/realm-raid-pass.png"
+    },
+    "realm_pass_threshold": {
+      "type": "number",
+      "default": 0.88,
+      "min": 0,
+      "max": 1
+    },
+    "realm_popup_roi": {
+      "type": "rect",
+      "default": [300, 150, 1320, 650]
+    },
+    "realm_popup_timeout_seconds": {
+      "type": "number",
+      "default": 3,
+      "min": 0
+    },
+    "realm_popup_close_point": {
+      "type": "rect",
+      "default": [1700, 850, 0, 0]
     }
   },
   "outputs": {
@@ -32,9 +65,19 @@
       "screenshot": { "type": "string" },
       "battle_index": { "type": "integer" },
       "layer": { "type": "integer" },
-      "error": { "type": "string" }
+      "error": { "type": "string" },
+      "realm_pass_detected": { "type": "boolean" },
+      "realm_pass_quantity": { "type": "integer" },
+      "realm_pass_match": { "type": "object" },
+      "realm_pass_first_detection": { "type": "boolean" },
+      "realm_pass_confirmation_required": { "type": "boolean" },
+      "realm_pass_confirmed": { "type": "boolean" },
+      "realm_pass_owned": { "type": "integer" },
+      "realm_pass_estimated_owned": { "type": "integer" },
+      "realm_pass_confirmation_text": { "type": "string" },
+      "should_enter_realm": { "type": "boolean" }
     },
-    "required": ["accepted", "screenshot", "battle_index", "layer", "error"],
+    "required": ["accepted", "screenshot", "battle_index", "layer", "error", "realm_pass_detected", "realm_pass_quantity", "realm_pass_match", "realm_pass_first_detection", "realm_pass_confirmation_required", "realm_pass_confirmed", "realm_pass_owned", "realm_pass_estimated_owned", "realm_pass_confirmation_text", "should_enter_realm"],
     "additionalProperties": false
   },
   "effects": { "side_effect": true, "retry": "unsafe" }

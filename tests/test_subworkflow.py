@@ -38,6 +38,7 @@ def _write_workflow(
     nodes: list[dict[str, object]],
     edges: list[dict[str, object]] | None = None,
     inputs: dict[str, object] | None = None,
+    variables: dict[str, object] | None = None,
     limits: dict[str, object] | None = None,
 ) -> None:
     del edges
@@ -60,15 +61,15 @@ def _write_workflow(
             *tasks,
         ]
     payload: dict[str, object] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "id": workflow_id,
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": inputs or {},
+        "variables": variables or {},
         "nodes": [{"id": "root", "type": "root", "children": [root_child]}, *tree_nodes],
     }
-    if inputs is not None:
-        payload["blackboard"] = inputs
     if limits is not None:
         payload["limits"] = limits
     (path / "workflows" / f"{workflow_id}.json").write_text(
@@ -164,14 +165,14 @@ def test_subworkflow_missing_input_fails_call(tmp_path: Path, monkeypatch: pytes
     assert step["output"]["error_category"] == "config"
 
 
-def test_subworkflow_cannot_override_private_child_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_subworkflow_cannot_override_child_runtime_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = load_config(_write_config(tmp_path))
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     _write_workflow(
         tmp_path,
         "private_child",
         [{"id": "capture", "action": "core.capture"}],
-        inputs={"secret": {"type": "string", "public": False, "default": "internal"}},
+        variables={"secret": {"type": "string", "default": "internal"}},
     )
     _write_workflow(tmp_path, "parent_private_input", [
         {
@@ -187,7 +188,7 @@ def test_subworkflow_cannot_override_private_child_variable(tmp_path: Path, monk
     step = _step(record, "exec_sub")
     assert step is not None and step["status"] == "failed"
     assert step["error_category"] == "config"
-    assert "private or unknown: secret" in str(step["error"])
+    assert "not declared: secret" in str(step["error"])
 
 
 def test_subworkflow_action_failure_is_reported_to_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -226,11 +227,13 @@ def test_selector_recovery_reclassifies_failed_subworkflow_descendants(
         {"id": "reject", "action": "core.assert", "params": {"value": False, "message": "child rejected"}},
     ])
     parent = {
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "parent_fallback",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["choose"]},
             {"id": "choose", "type": "selector", "children": ["exec_sub", "fallback"]},

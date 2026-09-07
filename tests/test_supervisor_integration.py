@@ -21,11 +21,13 @@ def _write_config(path: Path, *, serial: str = "not-connected") -> Path:
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
     (path / "workflows" / "simple.json").write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "simple",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["capture"]},
             {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
@@ -106,7 +108,7 @@ def test_concurrent_submission_reserves_instance_once(monkeypatch: pytest.Monkey
     supervisor._stopping = False
     supervisor.event_queue = queue.Queue()
     workflow = WorkflowSpec(
-        3, "simple", "1.0.0", "", (1, 1), "root", 10, 10, {},
+        4, "simple", "1.0.0", "", (1, 1), "root", 10, 10, {}, {}, {},
         (WorkflowNode("root", "root", children=("task",)), WorkflowNode("task", "task", action="core.log")),
         Path("simple.json"), "hash", {},
     )
@@ -165,7 +167,7 @@ def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Pat
     monkeypatch.setattr(supervisor, "check_workers", lambda: None)
     monkeypatch.setattr(supervisor, "_queue_workflow_run", queue_run)
     monkeypatch.setattr(supervisor, "load_workflow", lambda _reference: WorkflowSpec(
-        3,
+        4,
         "all-accounts",
         "1.0.0",
         "",
@@ -173,6 +175,8 @@ def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Pat
         "root",
         10,
         100,
+        {},
+        {},
         {},
         (),
         tmp_path / "all-accounts.json",
@@ -185,7 +189,7 @@ def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Pat
         runs=tuple(InstanceParallelRun(item.id, f"{item.id}.json") for item in instances),
     )
     workflow = WorkflowSpec(
-        3,
+        4,
         "all-accounts",
         "1.0.0",
         "",
@@ -193,6 +197,8 @@ def test_instance_parallel_queues_each_instance_and_persists_group(tmp_path: Pat
         "root",
         10,
         100,
+        {},
+        {},
         {},
         (WorkflowNode("root", "root", children=("run_all",)), node),
         tmp_path / "all-accounts.json",
@@ -223,7 +229,7 @@ def test_instance_parallel_timeout_persists_failed_group_and_cancels_pending(
     monkeypatch.setattr(supervisor, "cancel", cancelled.append)
 
     workflow = WorkflowSpec(
-        3,
+        4,
         "parallel",
         "1.0.0",
         "",
@@ -231,6 +237,8 @@ def test_instance_parallel_timeout_persists_failed_group_and_cancels_pending(
         "root",
         1,
         10,
+        {},
+        {},
         {},
         (WorkflowNode("root", "root"),),
         tmp_path / "parallel.json",
@@ -327,11 +335,13 @@ def test_supervisor_runs_two_real_adb_instances(tmp_path: Path) -> None:
     (tmp_path / "workflows").mkdir()
     (tmp_path / "plugins" / "actions").mkdir(parents=True)
     (tmp_path / "workflows" / "simple.json").write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "simple",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["capture"]},
             {"id": "capture", "type": "task", "action": "core.capture", "params": {}},

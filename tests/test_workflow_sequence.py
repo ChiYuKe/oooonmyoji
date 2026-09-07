@@ -44,7 +44,8 @@ def _write(path: Path, workflow_id: str, children: list[str]) -> None:
         "last": {"id": "last", "type": "task", "action": "core.capture", "params": {}},
     }
     payload = {
-        "schema_version": 3, "id": workflow_id, "version": "3.0.0", "resolution": [1920, 1080], "root": "root",
+        "schema_version": 4, "id": workflow_id, "version": "3.0.0", "resolution": [1920, 1080], "root": "root",
+        "inputs": {}, "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["sequence"]},
             {"id": "sequence", "type": "sequence", "children": children},

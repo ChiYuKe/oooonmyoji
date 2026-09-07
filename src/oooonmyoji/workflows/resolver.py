@@ -1,4 +1,4 @@
-"""Structured blackboard and Behavior Tree node-output references."""
+"""Structured workflow input, variable, runtime, and node-output references."""
 
 from __future__ import annotations
 
@@ -15,15 +15,26 @@ def is_binding(value: Any) -> bool:
 
 
 class ReferenceResolver:
-    def __init__(self, blackboard: dict[str, Any], outputs: dict[str, Any], runtime: dict[str, Any] | None = None) -> None:
-        self.blackboard = blackboard
+    def __init__(
+        self,
+        inputs: dict[str, Any],
+        outputs: dict[str, Any],
+        runtime: dict[str, Any] | None = None,
+        *,
+        variables: dict[str, Any] | None = None,
+    ) -> None:
+        self.inputs = inputs
+        self.variables = variables or {}
         self.outputs = outputs
         self.runtime = runtime or {}
 
     def reference(self, value: str, *, default: Any = _NO_DEFAULT) -> Any:
         parts = value.split(".")
-        if len(parts) >= 2 and parts[0] == "blackboard" and all(parts[1:]):
-            current: Any = self.blackboard
+        if len(parts) >= 2 and parts[0] == "inputs" and all(parts[1:]):
+            current: Any = self.inputs
+            path = parts[1:]
+        elif len(parts) >= 2 and parts[0] == "variables" and all(parts[1:]):
+            current = self.variables
             path = parts[1:]
         elif len(parts) >= 2 and parts[0] == "runtime" and all(parts[1:]):
             current = self.runtime

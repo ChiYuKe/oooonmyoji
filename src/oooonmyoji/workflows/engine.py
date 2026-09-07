@@ -1,4 +1,4 @@
-"""Deterministic Behavior Tree v3 runtime."""
+"""Deterministic Behavior Tree v4 runtime."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import queue
 import threading
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -75,7 +76,8 @@ class WorkflowEngine:
         self.workflow = workflow
         self.registry = registry
         self.context = context
-        self.blackboard = inputs
+        self.inputs = inputs
+        self.variables = deepcopy(workflow.variable_defaults)
         self.on_step = on_step
         self.on_step_start = on_step_start
         self.cancel_event = cancel_event
@@ -142,7 +144,7 @@ class WorkflowEngine:
         stack = self._repeat_stack()
         runtime = {"repeat": dict(stack[-1])} if stack else {}
         with self._lock:
-            return ReferenceResolver(self.blackboard, dict(self.outputs), runtime)
+            return ReferenceResolver(self.inputs, dict(self.outputs), runtime, variables=dict(self.variables))
 
     def _run_node(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         self._ensure_running(deadline, branch_cancel)
@@ -421,8 +423,8 @@ class WorkflowEngine:
         if result.status == ActionStatus.SUCCEEDED:
             with self._lock:
                 self.outputs[node.id] = output
-                if node.action == "core.assign" and isinstance(arguments.get("name"), str) and arguments["name"]:
-                    self.blackboard[arguments["name"]] = arguments.get("value")
+                if node.action == "variables.set" and isinstance(arguments.get("name"), str) and arguments["name"]:
+                    self.variables[arguments["name"]] = arguments.get("value")
             return _Outcome(ActionStatus.SUCCEEDED, output=output)
         if result.status == ActionStatus.CANCELLED:
             return _Outcome(

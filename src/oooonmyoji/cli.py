@@ -523,7 +523,7 @@ def command_serve(args: argparse.Namespace) -> int:
             member_instance = str(request["member_instance"])
             try:
                 rounds = _party_rounds(request.get("rounds", 9999))
-                enable_member_realm_raid = request.get("enable_member_realm_raid", False)
+                enable_member_realm_raid = request.get("enable_member_realm_raid", True)
                 if not isinstance(enable_member_realm_raid, bool):
                     raise ConfigError("enable_member_realm_raid must be a boolean")
                 realm_threshold = _realm_threshold(request.get("realm_threshold", 30))
@@ -634,8 +634,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_party_souls.add_argument(
         "--enable-member-realm-raid",
+        dest="enable_member_realm_raid",
         action="store_true",
-        help="吃鱼在监听组队邀请前检查突破券，达到阈值时先清结界突破",
+        default=True,
+        help="启用吃鱼的奖励券追踪和结界突破调度（默认启用）",
+    )
+    run_party_souls.add_argument(
+        "--disable-member-realm-raid",
+        dest="enable_member_realm_raid",
+        action="store_false",
+        help="本次运行关闭吃鱼的结界突破调度",
     )
     run_party_souls.add_argument(
         "--realm-threshold",

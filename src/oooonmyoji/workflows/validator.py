@@ -1,4 +1,4 @@
-"""Schema, reference, and structural validation for Behavior Tree v3 files."""
+"""Schema, reference, and structural validation for Behavior Tree v4 files."""
 
 from __future__ import annotations
 
@@ -40,9 +40,9 @@ _BINDING_SCHEMA: dict[str, Any] = {
 WORKFLOW_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
-    "required": ["schema_version", "id", "version", "resolution", "root", "nodes"],
+    "required": ["schema_version", "id", "version", "resolution", "root", "inputs", "variables", "nodes"],
     "properties": {
-        "schema_version": {"const": 3},
+        "schema_version": {"const": 4},
         "id": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},
         "description": {"type": "string"},
@@ -56,7 +56,8 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
             "maxItems": 2,
         },
         "root": {"type": "string", "minLength": 1},
-        "blackboard": {"type": "object"},
+        "inputs": {"type": "object"},
+        "variables": {"type": "object"},
         "retry_safe": {"type": "boolean"},
         "limits": {
             "type": "object",
@@ -335,7 +336,7 @@ def _ref_schema(
     value: str,
     *,
     node_ids: set[str],
-    blackboard_schema: dict[str, Any],
+    reference_schema: dict[str, Any],
     output_schemas: dict[str, dict[str, Any] | None],
     available_node_ids: set[str],
     path: str,
@@ -344,11 +345,11 @@ def _ref_schema(
     runtime_schema = RUNTIME_REFERENCE_SCHEMAS.get(value)
     if runtime_schema is not None:
         return runtime_schema
-    if len(parts) >= 2 and parts[0] == "blackboard" and all(parts[1:]):
-        resolved = _schema_at_path(blackboard_schema, parts[1:])
+    if len(parts) >= 2 and parts[0] in {"inputs", "variables"} and all(parts[1:]):
+        resolved = _schema_at_path(reference_schema, parts)
         if resolved is not None:
             return resolved
-        raise ConfigError(f"{path} references an unknown blackboard key: {value}")
+        raise ConfigError(f"{path} references an unknown {parts[0]} key: {value}")
     if len(parts) >= 4 and parts[0] == "nodes" and parts[2] == "output" and parts[1] in node_ids and all(parts[3:]):
         if parts[1] not in available_node_ids:
             raise ConfigError(f"{path} references a node output unavailable at this execution point: {value}")
@@ -382,7 +383,7 @@ def _validate_value(
     value: Any,
     *,
     node_ids: set[str],
-    blackboard_schema: dict[str, Any],
+    reference_schema: dict[str, Any],
     output_schemas: dict[str, dict[str, Any] | None],
     available_node_ids: set[str],
     possibly_available_node_ids: set[str],
@@ -397,7 +398,7 @@ def _validate_value(
             actual = _ref_schema(
                 value["ref"],
                 node_ids=node_ids,
-                blackboard_schema=blackboard_schema,
+                reference_schema=reference_schema,
                 output_schemas=output_schemas,
                 available_node_ids=available_node_ids,
                 path=path,
@@ -413,24 +414,24 @@ def _validate_value(
                 if not isinstance(operands, list) or not operands:
                     raise ConfigError(f"{path}.{operator} must be a non-empty array")
                 for index, operand in enumerate(operands):
-                    _validate_value(operand, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.{operator}[{index}]", condition=True)
+                    _validate_value(operand, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.{operator}[{index}]", condition=True)
             elif operator == "not":
-                _validate_value(operands, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.not", condition=True)
+                _validate_value(operands, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.not", condition=True)
             elif operator == "exists":
                 if not is_binding(operands):
                     raise ConfigError(f"{path}.exists must contain a structured reference")
-                _validate_value(operands, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=possibly_available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.exists")
+                _validate_value(operands, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=possibly_available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.exists")
             else:
                 if not isinstance(operands, list) or len(operands) != 2:
                     raise ConfigError(f"{path}.{operator} must contain two operands")
                 for index, operand in enumerate(operands):
-                    _validate_value(operand, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.{operator}[{index}]")
+                    _validate_value(operand, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.{operator}[{index}]")
             return
         for key, child in value.items():
-            _validate_value(child, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.{key}", expected_schema=_schema_child(expected_schema, key))
+            _validate_value(child, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.{key}", expected_schema=_schema_child(expected_schema, key))
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            _validate_value(child, node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}[{index}]", expected_schema=_schema_child(expected_schema, index))
+            _validate_value(child, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}[{index}]", expected_schema=_schema_child(expected_schema, index))
     elif condition and not isinstance(value, bool):
         raise ConfigError(f"{path} must be a boolean or condition object")
 
@@ -462,7 +463,7 @@ def _parse_decorators(
     *,
     node_index: int,
     node_ids: set[str],
-    blackboard_schema: dict[str, Any],
+    reference_schema: dict[str, Any],
     output_schemas: dict[str, dict[str, Any] | None],
     available_node_ids: set[str],
     possibly_available_node_ids: set[str],
@@ -491,7 +492,7 @@ def _parse_decorators(
                 raise ConfigError(f"nodes[{node_index}] contains duplicate {kind} decorators")
             seen_singletons.add(kind)
         if kind == "condition":
-            _validate_value(item["expression"], node_ids=node_ids, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.expression", condition=True)
+            _validate_value(item["expression"], node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.expression", condition=True)
             parsed.append(BehaviorDecorator(type=kind, expression=item["expression"]))
         elif kind in {"cooldown", "timeout"}:
             parsed.append(BehaviorDecorator(type=kind, seconds=float(item["seconds"])))
@@ -503,7 +504,7 @@ def _parse_decorators(
             _validate_value(
                 item["count"],
                 node_ids=node_ids,
-                blackboard_schema=blackboard_schema,
+                reference_schema=reference_schema,
                 output_schemas=output_schemas,
                 available_node_ids=available_node_ids,
                 possibly_available_node_ids=possibly_available_node_ids,
@@ -519,29 +520,29 @@ def _parse_decorators(
 def _validate_instance_parallel_inputs(
     value: Any,
     *,
-    blackboard_schema: dict[str, Any],
+    reference_schema: dict[str, Any],
     path: str,
 ) -> None:
-    """Only orchestration blackboard bindings may cross an instance boundary."""
+    """Only orchestration input bindings may cross an instance boundary."""
 
     if isinstance(value, dict):
         if "ref" in value:
-            if not is_binding(value) or not str(value["ref"]).startswith("blackboard."):
-                raise ConfigError(f"{path} may only reference blackboard.*")
+            if not is_binding(value) or not str(value["ref"]).startswith("inputs."):
+                raise ConfigError(f"{path} may only reference inputs.*")
             _ref_schema(
                 str(value["ref"]),
                 node_ids=set(),
-                blackboard_schema=blackboard_schema,
+                reference_schema=reference_schema,
                 output_schemas={},
                 available_node_ids=set(),
                 path=path,
             )
             return
         for key, child in value.items():
-            _validate_instance_parallel_inputs(child, blackboard_schema=blackboard_schema, path=f"{path}.{key}")
+            _validate_instance_parallel_inputs(child, reference_schema=reference_schema, path=f"{path}.{key}")
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            _validate_instance_parallel_inputs(child, blackboard_schema=blackboard_schema, path=f"{path}[{index}]")
+            _validate_instance_parallel_inputs(child, reference_schema=reference_schema, path=f"{path}[{index}]")
 
 
 def _validate_instance_workflow_reference(workflow_dir: Path, reference: str, path: str) -> None:
@@ -551,24 +552,18 @@ def _validate_instance_workflow_reference(workflow_dir: Path, reference: str, pa
         raise ConfigError(f"{path} does not resolve to a workflow: {reference}") from exc
 
 
-def _validate_public_child_inputs(workflow_dir: Path, reference: str, inputs: dict[str, Any], path: str) -> None:
+def _validate_child_inputs(workflow_dir: Path, reference: str, inputs: dict[str, Any], path: str) -> None:
     child_path = resolve_workflow_path(workflow_dir, reference)
     try:
         child_raw = json.loads(child_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ConfigError(f"{path} cannot read child workflow: {reference}") from exc
-    blackboard = child_raw.get("blackboard", {}) if isinstance(child_raw, dict) else {}
-    if not isinstance(blackboard, dict):
-        blackboard = {}
-    public = {
-        name
-        for name, definition in blackboard.items()
-        if isinstance(definition, dict)
-        and definition.get("public", True) is not False
-    }
-    hidden = sorted(set(inputs) - public)
-    if hidden:
-        raise ConfigError(f"{path} passes private or unknown child inputs: {', '.join(hidden)}")
+    child_inputs = child_raw.get("inputs", {}) if isinstance(child_raw, dict) else {}
+    if not isinstance(child_inputs, dict):
+        child_inputs = {}
+    undeclared = sorted(set(inputs) - set(child_inputs))
+    if undeclared:
+        raise ConfigError(f"{path} passes undeclared child inputs: {', '.join(undeclared)}")
 
 
 def validate_workflow(
@@ -581,12 +576,35 @@ def validate_workflow(
 ) -> WorkflowSpec:
     _validate_json_schema(raw, WORKFLOW_SCHEMA, f"workflow {path}")
 
-    blackboard_raw = raw.get("blackboard", {})
-    assert isinstance(blackboard_raw, dict)
-    for name, definition in blackboard_raw.items():
-        if isinstance(definition, dict) and "public" in definition and not isinstance(definition["public"], bool):
-            raise ConfigError(f"blackboard.{name}.public must be a boolean")
-    blackboard_schema = compile_parameters({name: ParameterDefinition.parse(name, value) for name, value in blackboard_raw.items()})
+    inputs_raw = raw.get("inputs", {})
+    variables_raw = raw.get("variables", {})
+    assert isinstance(inputs_raw, dict) and isinstance(variables_raw, dict)
+    for scope, definitions in (("inputs", inputs_raw), ("variables", variables_raw)):
+        for name, definition in definitions.items():
+            if isinstance(definition, dict) and "public" in definition:
+                raise ConfigError(f"{scope}.{name}.public was removed in schema v4")
+    overlap = sorted(set(inputs_raw) & set(variables_raw))
+    if overlap:
+        raise ConfigError(f"workflow inputs and variables overlap: {', '.join(overlap)}")
+    input_definitions = {
+        name: ParameterDefinition.parse(name, value)
+        for name, value in inputs_raw.items()
+    }
+    variable_definitions = {
+        name: ParameterDefinition.parse(name, value)
+        for name, value in variables_raw.items()
+    }
+    missing_defaults = sorted(name for name, definition in variable_definitions.items() if not definition.has_default)
+    if missing_defaults:
+        raise ConfigError(f"workflow variables require defaults: {', '.join(missing_defaults)}")
+    input_schema = compile_parameters(input_definitions)
+    variable_schema = compile_parameters(variable_definitions)
+    reference_schema = {
+        "type": "object",
+        "properties": {"inputs": input_schema, "variables": variable_schema},
+        "additionalProperties": False,
+    }
+    variable_defaults = apply_parameter_defaults(variable_definitions, {})
 
     nodes_raw = raw["nodes"]
     assert isinstance(nodes_raw, list)
@@ -624,7 +642,11 @@ def validate_workflow(
             params = item.get("params", {})
             assert isinstance(params, dict)
             spec = action_specs[item["id"]]
-            _validate_value(params, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"nodes[{index}].params", expected_schema=spec.input_schema)
+            _validate_value(params, node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"nodes[{index}].params", expected_schema=spec.input_schema)
+            if item.get("action") == "variables.set":
+                variable_name = params.get("name")
+                if not isinstance(variable_name, str) or variable_name not in variable_definitions:
+                    raise ConfigError(f"nodes[{index}].params.name must name a declared workflow variable")
             normalized = apply_parameter_defaults(spec.definition.parameters, params)
             _validate_json_schema(normalized, _binding_aware_parameter_schema(spec.input_schema), f"nodes[{index}].params")
             action = str(item["action"])
@@ -656,8 +678,8 @@ def validate_workflow(
                 run_inputs = run_value.get("inputs", {})
                 if not isinstance(run_inputs, dict):
                     raise ConfigError(f"nodes[{index}].runs[{run_index}].inputs must be an object")
-                _validate_instance_parallel_inputs(run_inputs, blackboard_schema=blackboard_schema, path=f"nodes[{index}].runs[{run_index}].inputs")
-                _validate_public_child_inputs(
+                _validate_instance_parallel_inputs(run_inputs, reference_schema=reference_schema, path=f"nodes[{index}].runs[{run_index}].inputs")
+                _validate_child_inputs(
                     base_workflow_dir,
                     workflow_value,
                     run_inputs,
@@ -688,7 +710,7 @@ def validate_workflow(
             node_map_for_repeat = {str(node["id"]): node for node in nodes_raw}
             body_outputs = _possible_output_node_ids_in_subtree(str(children_raw[0]), node_map_for_repeat)
             repeat_condition_outputs = possibly_available_node_ids | body_outputs
-            _validate_value(item["condition"], node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=repeat_condition_outputs, possibly_available_node_ids=repeat_condition_outputs, path=f"nodes[{index}].condition", condition=True)
+            _validate_value(item["condition"], node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=repeat_condition_outputs, possibly_available_node_ids=repeat_condition_outputs, path=f"nodes[{index}].condition", condition=True)
             max_iterations = item.get("max_iterations", 100)
             if isinstance(max_iterations, bool) or not isinstance(max_iterations, int) or max_iterations < 1:
                 raise ConfigError(f"nodes[{index}].max_iterations must be a positive integer")
@@ -699,7 +721,7 @@ def validate_workflow(
             if not isinstance(conditions, list) or len(conditions) != len(children_raw):
                 raise ConfigError(f"nodes[{index}].conditions must match branch children")
             for condition_index, condition_value in enumerate(conditions):
-                _validate_value(condition_value, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"nodes[{index}].conditions[{condition_index}]", condition=True)
+                _validate_value(condition_value, node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"nodes[{index}].conditions[{condition_index}]", condition=True)
         elif node_type == "switch":
             if "expression" not in item:
                 raise ConfigError(f"nodes[{index}] switch requires expression")
@@ -731,7 +753,7 @@ def validate_workflow(
         invalid_fields = (set(item) & node_fields) - allowed_fields
         if invalid_fields:
             raise ConfigError(f"nodes[{index}] fields {sorted(invalid_fields)} are not valid for {node_type}")
-        decorators = _parse_decorators(decorators_raw, node_index=index, node_ids=node_id_set, blackboard_schema=blackboard_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids)
+        decorators = _parse_decorators(decorators_raw, node_index=index, node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids)
         if node_type == "root" and decorators:
             raise ConfigError(f"nodes[{index}] root cannot have decorators")
         retry = next((decorator for decorator in decorators if decorator.type == "retry"), None)
@@ -834,7 +856,7 @@ def validate_workflow(
     limits = raw.get("limits", {})
     assert isinstance(limits, dict)
     return WorkflowSpec(
-        schema_version=3,
+        schema_version=4,
         workflow_id=str(raw["id"]),
         version=str(raw["version"]),
         description=str(raw.get("description", "")),
@@ -842,7 +864,9 @@ def validate_workflow(
         root=root.id,
         timeout_seconds=float(limits.get("timeout_seconds", 300.0)),
         max_steps=int(limits.get("max_steps", 1000)),
-        blackboard_schema=blackboard_schema,
+        input_schema=input_schema,
+        variable_schema=variable_schema,
+        variable_defaults=variable_defaults,
         nodes=tuple(parsed),
         path=path,
         file_hash="",

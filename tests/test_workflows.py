@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from src.oooonmyoji.actions import Action, ActionRegistry, ActionResult, ActionSpec, ActionStatus
+from src.oooonmyoji.actions.builtin import AssignAction
 from src.oooonmyoji.actions.manifest import ActionDefinition, ParameterDefinition
 from src.oooonmyoji.exceptions import CancelledError, ConfigError
 from src.oooonmyoji.workflows.compiler import compile_workflow
@@ -173,11 +174,13 @@ def task(node_id: str, action: str, params: dict[str, Any] | None = None, decora
 
 def tree(body: list[dict[str, Any]], root_child: str, **extra: Any) -> dict[str, Any]:
     value: dict[str, Any] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "test",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [{"id": "root", "type": "root", "children": [root_child]}, *body],
     }
     value.update(extra)
@@ -193,7 +196,7 @@ def test_validator_and_compiler_enforce_tree_invariants() -> None:
     raw = tree([task("a", "test.echo")], "a", description="用于测试工作流描述", _layout={"a": {"x": 1, "y": 2}})
     parsed = validate(raw, actions)
     compiled = compile_workflow(parsed, actions)
-    assert parsed.schema_version == 3
+    assert parsed.schema_version == 4
     assert parsed.description == "用于测试工作流描述"
     assert parsed.root == "root"
     assert compiled.parent_map == {"a": "root"}
@@ -230,6 +233,19 @@ def test_validator_and_compiler_enforce_tree_invariants() -> None:
         validate(cycle, actions)
 
 
+def test_all_workflow_scripts_have_catalog_descriptions() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    workflow_files = sorted((project_root / "workflows").rglob("*.json"))
+
+    missing = []
+    for workflow_path in workflow_files:
+        raw = json.loads(workflow_path.read_text(encoding="utf-8"))
+        if not isinstance(raw.get("description"), str) or not raw["description"].strip():
+            missing.append(workflow_path.relative_to(project_root).as_posix())
+
+    assert missing == []
+
+
 def test_validator_enforces_simple_parallel_shape_and_decorators() -> None:
     actions = registry(action_spec(EchoAction()))
     valid = tree([
@@ -261,13 +277,13 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
             "id": "run_all",
             "type": "instance_parallel",
             "runs": [
-                {"instance": "mumu-0", "workflow": "entrypoints/mumu_0_souls_party_leader.json", "inputs": {"rounds": {"ref": "blackboard.rounds"}}},
+                {"instance": "mumu-0", "workflow": "entrypoints/mumu_0_souls_party_leader.json", "inputs": {"运行轮数": {"ref": "inputs.运行轮数"}}},
                 {"instance": "mumu-1", "workflow": "entrypoints/mumu_1_souls_loop.json", "inputs": {}},
             ],
             "wait_for": "all",
             "cancel_on_failure": True,
         },
-    ], "run_all", blackboard={"rounds": {"type": "integer", "default": 1}})
+    ], "run_all", inputs={"运行轮数": {"type": "integer", "default": 1}})
     parsed = validate(valid, actions)
     assert parsed.node_map["run_all"].runs[0].instance == "mumu-0"
     assert parsed.node_map["run_all"].wait_for == "all"
@@ -286,7 +302,7 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
             {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json", "inputs": {"value": {"ref": "nodes.some.output.value"}}},
         ]},
     ], "run_all")
-    with pytest.raises(ConfigError, match="only reference blackboard"):
+    with pytest.raises(ConfigError, match="only reference inputs"):
         validate(output_binding, actions)
 
 
@@ -328,7 +344,7 @@ def test_validator_accepts_do_once_reset_on_failure_flag() -> None:
     assert decorator.reset_on_failure is True
 
 
-def test_bindings_are_typed_and_use_blackboard_and_nodes_namespaces() -> None:
+def test_bindings_are_typed_and_use_inputs_and_nodes_namespaces() -> None:
     count = ParameterDefinition.parse("count", {"type": "integer", "required": True})
     typed = ActionSpec(definition(
         "test.typed",
@@ -344,17 +360,17 @@ def test_bindings_are_typed_and_use_blackboard_and_nodes_namespaces() -> None:
         {"id": "seq", "type": "sequence", "children": ["producer", "typed"]},
         task("producer", "test.echo", {"value": 1}),
         task("typed", "test.typed", {"count": {"ref": "nodes.producer.output.value"}}),
-    ], "seq", blackboard={"count": {"type": "integer"}})
+    ], "seq", inputs={"count": {"type": "integer"}})
     validate(valid, actions)
 
     bad_namespace = clone_tree(valid)
-    bad_namespace["nodes"][-1]["params"]["count"] = {"ref": "inputs.count"}
+    bad_namespace["nodes"][-1]["params"]["count"] = {"ref": "legacy.count"}
     with pytest.raises(ConfigError, match="invalid structured reference"):
         validate(bad_namespace, actions)
 
     bad_type = clone_tree(valid)
-    bad_type["blackboard"] = {"name": {"type": "string"}}
-    bad_type["nodes"][-1]["params"]["count"] = {"ref": "blackboard.name"}
+    bad_type["inputs"] = {"name": {"type": "string"}}
+    bad_type["nodes"][-1]["params"]["count"] = {"ref": "inputs.name"}
     with pytest.raises(ConfigError, match="incompatible"):
         validate(bad_type, actions)
 
@@ -413,11 +429,11 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     actions = registry(action_spec(EchoAction()), action_spec(FailAction()), action_spec(retry_action))
     raw = tree([
         {"id": "seq", "type": "sequence", "children": ["first", "selector"]},
-        task("first", "test.echo", {"value": {"ref": "blackboard.value"}}),
+        task("first", "test.echo", {"value": {"ref": "inputs.value"}}),
         {"id": "selector", "type": "selector", "children": ["blocked", "retry"]},
-        task("blocked", "test.echo", decorators=[{"type": "condition", "expression": {"eq": [{"ref": "blackboard.enabled"}, True]}}]),
+        task("blocked", "test.echo", decorators=[{"type": "condition", "expression": {"eq": [{"ref": "inputs.enabled"}, True]}}]),
         task("retry", "test.retry", decorators=[{"type": "retry", "attempts": 2}]),
-    ], "seq", blackboard={"value": {"type": "any"}, "enabled": {"type": "boolean"}})
+    ], "seq", inputs={"value": {"type": "any"}, "enabled": {"type": "boolean"}})
     started: list[dict[str, Any]] = []
     result = WorkflowEngine(
         validate(raw, actions),
@@ -433,7 +449,25 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     assert retry_action.calls == 2
     assert next(item for item in result.step_history if item["step_id"] == "blocked")["decorator"] == "condition"
     assert next(item for item in result.step_history if item["step_id"] == "retry")["attempts"] == 2
-    assert not ReferenceResolver({}, {}).condition({"exists": {"ref": "blackboard.missing"}})
+    assert not ReferenceResolver({}, {}).condition({"exists": {"ref": "inputs.missing"}})
+
+
+def test_engine_keeps_inputs_read_only_and_updates_declared_variables() -> None:
+    actions = registry(action_spec(AssignAction()), action_spec(EchoAction()))
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["set_state", "read_state"]},
+        task("set_state", "variables.set", {"name": "counter", "value": 7}),
+        task("read_state", "test.echo", {"value": {"ref": "variables.counter"}}),
+    ], "seq", inputs={"rounds": {"type": "integer", "default": 1}}, variables={
+        "counter": {"type": "integer", "default": 0},
+    })
+    caller_inputs = {"rounds": 3}
+
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), caller_inputs).run()
+
+    assert result.status == ActionStatus.SUCCEEDED
+    assert result.output["read_state"] == {"value": 7}
+    assert caller_inputs == {"rounds": 3}
 
 
 def test_engine_do_once_runs_action_only_once_across_repeat_iterations() -> None:
@@ -457,7 +491,7 @@ def test_engine_do_once_runs_action_only_once_across_repeat_iterations() -> None
     assert all(item["decorator"] == "do_once" for item in once_events[1:])
 
 
-def test_engine_repeat_count_can_bind_to_blackboard_integer() -> None:
+def test_engine_repeat_count_can_bind_to_inputs_integer() -> None:
     echo_action = CountingAction()
     echo_action.name = "test.echo"
     actions = registry(action_spec(echo_action))
@@ -465,10 +499,10 @@ def test_engine_repeat_count_can_bind_to_blackboard_integer() -> None:
         task(
             "repeatable",
             "test.echo",
-            decorators=[{"type": "repeat", "count": {"ref": "blackboard.rounds"}}],
+            decorators=[{"type": "repeat", "count": {"ref": "inputs.rounds"}}],
         ),
     ], "repeatable")
-    raw["blackboard"] = {
+    raw["inputs"] = {
         "rounds": {"type": "integer", "default": 1, "min": 1},
     }
     result = WorkflowEngine(validate(raw, actions), actions, Context(), {"rounds": 3}).run()
@@ -493,7 +527,7 @@ def test_engine_repeat_runtime_context_selects_the_final_iteration() -> None:
         {
             "id": "loop",
             "type": "selector",
-            "decorators": [{"type": "repeat", "count": {"ref": "blackboard.rounds"}}],
+            "decorators": [{"type": "repeat", "count": {"ref": "inputs.rounds"}}],
             "children": ["final", "ordinary"],
         },
         task(
@@ -504,7 +538,7 @@ def test_engine_repeat_runtime_context_selects_the_final_iteration() -> None:
         ),
         task("ordinary", "test.record", params={"value": {"ref": "runtime.repeat.index"}}),
     ], "loop")
-    raw["blackboard"] = {"rounds": {"type": "integer", "default": 1, "min": 1}}
+    raw["inputs"] = {"rounds": {"type": "integer", "default": 1, "min": 1}}
 
     result = WorkflowEngine(validate(raw, actions), actions, Context(), {"rounds": 3}).run()
 
@@ -659,7 +693,7 @@ def test_simple_parallel_abort_and_wait_modes_use_isolated_cancellation() -> Non
     assert not cooperative.cancelled
 
 
-def test_workflow_loader_hash_paths_and_blackboard_defaults(tmp_path: Path) -> None:
+def test_workflow_loader_hash_paths_and_inputs_defaults(tmp_path: Path) -> None:
     workflow_dir = tmp_path / "workflows"; workflow_dir.mkdir()
     asset = tmp_path / "assets" / "inside.png"; asset.parent.mkdir(); asset.write_bytes(b"placeholder")
     template_param = ParameterDefinition.parse("template", {"type": "string", "required": True})
@@ -672,9 +706,9 @@ def test_workflow_loader_hash_paths_and_blackboard_defaults(tmp_path: Path) -> N
     actions = registry(action_spec(EchoAction()), template_spec)
     raw = tree([
         {"id": "seq", "type": "sequence", "children": ["match", "echo"]},
-        task("match", "vision.match_template", {"template": {"ref": "blackboard.template"}}),
-        task("echo", "test.echo", {"value": {"ref": "blackboard.options.enabled"}}),
-    ], "seq", blackboard={
+        task("match", "vision.match_template", {"template": {"ref": "inputs.template"}}),
+        task("echo", "test.echo", {"value": {"ref": "inputs.options.enabled"}}),
+    ], "seq", inputs={
         "template": {"type": "asset", "required": True},
         "options": {"type": "object", "default": {}, "properties": {"enabled": {"type": "boolean", "default": True}}},
     })
@@ -696,9 +730,9 @@ def test_workflow_loader_applies_required_top_level_default_before_validation(tm
     workflow_dir.mkdir()
     (tmp_path / "plugins" / "actions").mkdir(parents=True)
     raw = tree(
-        [task("echo", "test.echo", {"value": {"ref": "blackboard.rounds"}})],
+        [task("echo", "test.echo", {"value": {"ref": "inputs.rounds"}})],
         "echo",
-        blackboard={"rounds": {"type": "integer", "required": True, "default": 30}},
+        inputs={"rounds": {"type": "integer", "required": True, "default": 30}},
     )
     (workflow_dir / "defaults.json").write_text(json.dumps(raw), encoding="utf-8")
     actions = registry(action_spec(EchoAction()))
@@ -709,50 +743,49 @@ def test_workflow_loader_applies_required_top_level_default_before_validation(tm
     assert normalized == {"rounds": 30}
 
 
-def test_workflow_loader_only_accepts_public_child_inputs(tmp_path: Path) -> None:
+def test_workflow_loader_only_accepts_declared_child_inputs(tmp_path: Path) -> None:
     workflow_dir = tmp_path / "workflows"
     workflow_dir.mkdir()
     raw = tree(
-        [task("echo", "test.echo", {"value": {"ref": "blackboard.public_value"}})],
+        [task("echo", "test.echo", {"value": {"ref": "inputs.public_value"}})],
         "echo",
-        blackboard={
-            "public_value": {"type": "string", "public": True, "required": True},
-            "private_value": {"type": "string", "public": False, "default": "internal"},
+        inputs={
+            "public_value": {"type": "string", "required": True},
             "legacy_value": {"type": "integer", "default": 1},
         },
+        variables={"private_value": {"type": "string", "default": "internal"}},
     )
     (workflow_dir / "child.json").write_text(json.dumps(raw), encoding="utf-8")
     loader = WorkflowLoader(workflow_dir, registry(action_spec(EchoAction())), project_root=tmp_path)
     child = loader.load("child")
 
-    assert child.public_inputs == ("public_value", "legacy_value")
+    assert child.input_names == ("public_value", "legacy_value")
     assert loader.normalize_inputs(
         child,
         {"public_value": "from-parent", "legacy_value": 2},
-        public_only=True,
+        declared_only=True,
     ) == {
         "public_value": "from-parent",
-        "private_value": "internal",
         "legacy_value": 2,
     }
-    with pytest.raises(ConfigError, match="private or unknown: private_value"):
+    with pytest.raises(ConfigError, match="not declared: private_value"):
         loader.normalize_inputs(
             child,
             {"public_value": "from-parent", "private_value": "override"},
-            public_only=True,
+            declared_only=True,
         )
 
 
-def test_instance_parallel_rejects_private_child_inputs(tmp_path: Path) -> None:
+def test_instance_parallel_rejects_runtime_variables_as_child_inputs(tmp_path: Path) -> None:
     workflow_dir = tmp_path / "workflows"
     workflow_dir.mkdir()
     child = tree(
         [task("echo", "test.echo")],
         "echo",
-        blackboard={
-            "rounds": {"type": "integer", "public": True, "default": 1},
-            "secret": {"type": "string", "public": False, "default": "internal"},
+        inputs={
+            "rounds": {"type": "integer", "default": 1},
         },
+        variables={"secret": {"type": "string", "default": "internal"}},
     )
     (workflow_dir / "child.json").write_text(json.dumps(child), encoding="utf-8")
     parent = tree([
@@ -763,7 +796,7 @@ def test_instance_parallel_rejects_private_child_inputs(tmp_path: Path) -> None:
         },
     ], "parallel")
 
-    with pytest.raises(ConfigError, match="private or unknown child inputs: secret"):
+    with pytest.raises(ConfigError, match="undeclared child inputs: secret"):
         validate_workflow(
             parent,
             workflow_dir / "parent.json",
@@ -825,7 +858,7 @@ def test_party_member_setup_phase_accepts_return_to_lobby() -> None:
     nodes = {node["id"]: node for node in raw["nodes"]}
     lobby_phase_condition = {
         "type": "condition",
-        "expression": {"ne": [{"ref": "blackboard.phase"}, "finish"]},
+        "expression": {"ne": [{"ref": "inputs.执行阶段"}, "finish"]},
     }
 
     for node_id in ("wait_lobby_direct", "wait_lobby_after_one", "wait_lobby_after_two"):
@@ -846,7 +879,7 @@ def test_party_entrypoints_recover_to_souls_after_the_final_round() -> None:
         assert main_children.index("final_recovery") > main_children.index("battle_plan")
         final_recovery = nodes["final_recovery"]
         assert final_recovery["params"]["workflow"] == "shared/recover_to_souls.json"
-        assert final_recovery["params"]["inputs"]["courtyard_template"].endswith(courtyard_name)
+        assert final_recovery["params"]["inputs"]["庭院入口模板"].endswith(courtyard_name)
 
 
 def test_party_leader_member_detection_tolerates_live_nameplate_effects() -> None:
@@ -871,6 +904,39 @@ def test_party_leader_member_detection_tolerates_live_nameplate_effects() -> Non
     assert round_nodes["wait_member_present"]["params"]["threshold"] == 0.8
 
 
+def test_party_leader_allows_member_to_leave_before_starting_next_round() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    leader_entry = json.loads(
+        (project_root / "workflows/entrypoints/mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
+    )
+    nodes = {node["id"]: node for node in leader_entry["nodes"]}
+
+    assert leader_entry["inputs"]["队员离开宽限时间"]["default"] == 5
+    assert nodes["battle_plan"]["children"][:2] == ["ensure_member_invited", "round_selector"]
+    assert nodes["send_initial_invite"]["children"][0] == "tap_empty_member_slot"
+    assert nodes["send_reinvite_after_departure"]["children"][0] == "wait_member_departure_window"
+    assert nodes["wait_member_departure_window"]["params"]["seconds"] == {
+        "ref": "inputs.队员离开宽限时间"
+    }
+
+
+def test_realm_entry_can_confirm_leaving_a_party_room() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    realm_entry = json.loads(
+        (project_root / "workflows/realm/shared/enter_realm.json").read_text(encoding="utf-8")
+    )
+    recover = next(node for node in realm_entry["nodes"] if node["id"] == "recover")
+    states = {state["name"]: state for state in recover["params"]["states"]}
+    transitions = {transition["from"]: transition for transition in recover["params"]["transitions"]}
+
+    assert states["party_exit_confirm"]["template"] == {"ref": "inputs.退出队伍确认模板"}
+    assert states["party_browser"]["template"] == {"ref": "inputs.组队界面模板"}
+    assert "party_exit_confirm" in transitions["party_room"]["expected_states"]
+    assert transitions["party_exit_confirm"]["type"] == "tap_template"
+    assert transitions["party_exit_confirm"]["return_action"] is True
+    assert transitions["party_browser"]["keycode"] == "KEYCODE_BACK"
+
+
 def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
     project_root = Path(__file__).resolve().parents[1]
     member = json.loads((project_root / "workflows/souls/party/member_round.json").read_text(encoding="utf-8"))
@@ -891,12 +957,12 @@ def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
     shared = json.loads((project_root / "workflows/shared/recover_to_souls.json").read_text(encoding="utf-8"))
     recover = next(node for node in shared["nodes"] if node["id"] == "recover")
     courtyard = next(state for state in recover["params"]["states"] if state["name"] == "courtyard")
-    assert courtyard["template"] == {"ref": "blackboard.courtyard_template"}
+    assert courtyard["template"] == {"ref": "inputs.庭院入口模板"}
     assert courtyard["roi"] == [0, 0, 1920, 500]
     assert courtyard["threshold"] <= 0.65
 
     bounty = next(state for state in recover["params"]["states"] if state["name"] == "bounty_popup")
-    assert bounty["template"] == {"ref": "blackboard.bounty_reject_template"}
+    assert bounty["template"] == {"ref": "inputs.悬赏拒绝按钮模板"}
     assert "bounty_popup" in recover["params"]["overlay_states"]
     transition = next(item for item in recover["params"]["transitions"] if item["from"] == "bounty_popup")
     assert transition["type"] == "tap_match"
@@ -907,25 +973,25 @@ def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
     )
     assert "party_browser" in party_room_transition["expected_states"]
     continue_prompt = next(state for state in recover["params"]["states"] if state["name"] == "continue_prompt")
-    assert continue_prompt["template"] == {"ref": "blackboard.continue_prompt_template"}
+    assert continue_prompt["template"] == {"ref": "inputs.继续邀请提示模板"}
     continue_transition = next(
         item for item in recover["params"]["transitions"] if item["from"] == "continue_prompt"
     )
     assert continue_transition["type"] == "tap_template"
-    assert continue_transition["template"] == {"ref": "blackboard.continue_cancel_template"}
+    assert continue_transition["template"] == {"ref": "inputs.继续邀请取消按钮模板"}
     party_exit_transition = next(
         item for item in recover["params"]["transitions"] if item["from"] == "party_exit_confirm"
     )
     assert "party_browser" in party_exit_transition["expected_states"]
     assert party_exit_transition["type"] == "tap_template"
-    assert party_exit_transition["template"] == {"ref": "blackboard.party_exit_button_template"}
+    assert party_exit_transition["template"] == {"ref": "inputs.退出队伍按钮模板"}
     souls_type = next(state for state in recover["params"]["states"] if state["name"] == "souls_type")
-    assert souls_type["template"] == {"ref": "blackboard.souls_type_template"}
+    assert souls_type["template"] == {"ref": "inputs.御魂类型页面模板"}
     souls_type_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "souls_type")
     assert souls_type_transition["type"] == "tap"
-    assert souls_type_transition["x"] == {"ref": "blackboard.souls_type_entry_point.0"}
+    assert souls_type_transition["x"] == {"ref": "inputs.御魂类型入口位置.0"}
     treasure = next(state for state in recover["params"]["states"] if state["name"] == "treasure_popup")
-    assert treasure["template"] == {"ref": "blackboard.treasure_template"}
+    assert treasure["template"] == {"ref": "inputs.宝箱页面模板"}
     treasure_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "treasure_popup")
     assert treasure_transition["type"] == "tap"
-    assert treasure_transition["x"] == {"ref": "blackboard.treasure_close_point.0"}
+    assert treasure_transition["x"] == {"ref": "inputs.宝箱关闭位置.0"}

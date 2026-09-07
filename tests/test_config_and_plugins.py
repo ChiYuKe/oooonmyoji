@@ -23,11 +23,13 @@ def _write_config(path: Path, *, tasks: list[dict] | None = None) -> Path:
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
     (path / "workflows" / "simple.json").write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "simple",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["capture"]},
             {"id": "capture", "type": "task", "action": "core.capture", "params": {}},

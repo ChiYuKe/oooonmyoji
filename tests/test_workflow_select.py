@@ -39,11 +39,13 @@ def _write_tree(path: Path, workflow_id: str, selector_children: list[str]) -> N
     ]
     used = {"root", "selector", *selector_children}
     payload = {
-        "schema_version": 3,
+        "schema_version": 4,
         "id": workflow_id,
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [node for node in nodes if node["id"] in used],
     }
     (path / "workflows" / f"{workflow_id}.json").write_text(json.dumps(payload), encoding="utf-8")

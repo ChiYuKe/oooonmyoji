@@ -80,29 +80,29 @@ class WorkflowLoader:
             from jsonschema import Draft202012Validator
         except ImportError as exc:
             raise ConfigError("jsonschema is required for workflow validation", cause=exc) from exc
-        error = next(iter(Draft202012Validator(workflow.blackboard_schema).iter_errors(inputs)), None)
+        error = next(iter(Draft202012Validator(workflow.input_schema).iter_errors(inputs)), None)
         if error is not None:
             location = ".".join(str(item) for item in error.absolute_path)
-            raise ConfigError(f"workflow {workflow.workflow_id} blackboard{('.' + location) if location else ''}: {error.message}")
+            raise ConfigError(f"workflow {workflow.workflow_id} inputs{('.' + location) if location else ''}: {error.message}")
 
-    def validate_public_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> None:
-        """Reject values passed to variables that the child workflow keeps private."""
+    def validate_declared_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> None:
+        """Reject values that are not declared as child workflow inputs."""
 
-        private = sorted(set(inputs) - set(workflow.public_inputs))
-        if private:
-            names = ", ".join(private)
-            raise ConfigError(f"workflow {workflow.workflow_id} inputs are private or unknown: {names}")
+        undeclared = sorted(set(inputs) - set(workflow.input_names))
+        if undeclared:
+            names = ", ".join(undeclared)
+            raise ConfigError(f"workflow {workflow.workflow_id} inputs are not declared: {names}")
 
     def normalize_inputs(
         self,
         workflow: WorkflowSpec,
         inputs: dict[str, Any],
         *,
-        public_only: bool = False,
+        declared_only: bool = False,
     ) -> dict[str, Any]:
         """Apply JSON Schema defaults, then validate the normalized input object."""
-        if public_only:
-            self.validate_public_inputs(workflow, inputs)
+        if declared_only:
+            self.validate_declared_inputs(workflow, inputs)
         normalized = deepcopy(inputs)
 
         def apply(value: Any, schema: Any) -> None:
@@ -119,7 +119,7 @@ class WorkflowLoader:
                 for item in value:
                     apply(item, schema["items"])
 
-        apply(normalized, workflow.blackboard_schema)
+        apply(normalized, workflow.input_schema)
         self.validate_inputs(workflow, normalized)
         return normalized
 
@@ -142,7 +142,7 @@ class WorkflowLoader:
             if not (isinstance(template, dict) and is_binding(template)):
                 continue
             ref = template.get("ref")
-            if not isinstance(ref, str) or not ref.startswith("blackboard."):
+            if not isinstance(ref, str) or not ref.startswith("inputs."):
                 continue
             resolved = resolver.reference(ref, default=missing)
             if resolved is missing:

@@ -77,7 +77,9 @@ class WorkflowSpec:
     root: str
     timeout_seconds: float
     max_steps: int
-    blackboard_schema: dict[str, Any]
+    input_schema: dict[str, Any]
+    variable_schema: dict[str, Any]
+    variable_defaults: dict[str, Any]
     nodes: tuple[WorkflowNode, ...]
     path: Path
     file_hash: str
@@ -102,17 +104,13 @@ class WorkflowSpec:
         return dict(self._node_index)
 
     @property
-    def public_inputs(self) -> tuple[str, ...]:
-        """Inputs exposed to parent workflows; omitted ``public`` keeps v3 compatibility."""
+    def input_names(self) -> tuple[str, ...]:
+        """Inputs declared by this workflow."""
 
-        blackboard = self.raw.get("blackboard", {})
-        if not isinstance(blackboard, dict):
+        inputs = self.raw.get("inputs", {})
+        if not isinstance(inputs, dict):
             return ()
-        return tuple(
-            name
-            for name, definition in blackboard.items()
-            if isinstance(definition, dict) and definition.get("public", True) is not False
-        )
+        return tuple(inputs)
 
 
 __all__ = [

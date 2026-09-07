@@ -61,6 +61,11 @@ class TaskContextImpl:
         self._reward_lock = threading.Lock()
         self._reward_capture_index = 0
         self._reward_battle_index = 0
+        self._realm_pass_tracker = {
+            "initialized": False,
+            "confirmed_owned": 0,
+            "awarded_since_confirmation": 0,
+        }
         self._deadline: float | None = None
 
     @property
@@ -212,6 +217,54 @@ class TaskContextImpl:
             "battle_index": battle_index,
             "layer": layer,
         }
+
+    def observe_realm_pass_reward(self, quantity: int, *, threshold: int) -> dict[str, Any]:
+        """Record a reward drop and decide whether the owned count needs confirmation."""
+
+        if quantity < 1:
+            raise ValueError("realm pass reward quantity must be positive")
+        if threshold < 1:
+            raise ValueError("realm pass threshold must be positive")
+        with self._reward_lock:
+            tracker = self._realm_pass_tracker
+            if not tracker["initialized"]:
+                return {
+                    "estimated_owned": 0,
+                    "needs_confirmation": True,
+                    "first_detection": True,
+                }
+            tracker["awarded_since_confirmation"] += quantity
+            estimated = tracker["confirmed_owned"] + tracker["awarded_since_confirmation"]
+            return {
+                "estimated_owned": estimated,
+                "needs_confirmation": estimated >= threshold,
+                "first_detection": False,
+            }
+
+    def confirm_realm_pass_count(self, owned: int, *, threshold: int) -> dict[str, Any]:
+        """Anchor reward-based counting to an in-game 'owned' value."""
+
+        if owned < 0:
+            raise ValueError("owned realm pass count must be non-negative")
+        if threshold < 1:
+            raise ValueError("realm pass threshold must be positive")
+        with self._reward_lock:
+            should_enter = owned >= threshold
+            if should_enter:
+                # The raid consumes the stock. The next post-raid drop must
+                # establish a fresh baseline instead of inheriting 30.
+                self._realm_pass_tracker = {
+                    "initialized": False,
+                    "confirmed_owned": 0,
+                    "awarded_since_confirmation": 0,
+                }
+            else:
+                self._realm_pass_tracker = {
+                    "initialized": True,
+                    "confirmed_owned": owned,
+                    "awarded_since_confirmation": 0,
+                }
+            return {"estimated_owned": owned, "should_enter": should_enter}
 
     def tap(self, x: int, y: int, *, hold_ms: int = 0) -> None:
         self.check_cancelled()

@@ -517,7 +517,7 @@ class Supervisor:
                     raise ValueError(f"inputs for instance_parallel run {run.instance} must resolve to an object")
                 child_workflow = self.load_workflow(run.workflow)
                 child_inputs.append(
-                    self._workflow_loader.normalize_inputs(child_workflow, resolved_inputs, public_only=True)
+                    self._workflow_loader.normalize_inputs(child_workflow, resolved_inputs, declared_only=True)
                     if self._workflow_loader is not None
                     else resolved_inputs
                 )

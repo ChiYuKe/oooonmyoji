@@ -182,17 +182,27 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
     workflow = json.loads((root / "workflows/realm/shared/realm_raid_loop.json").read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in workflow["nodes"]}
 
-    assert workflow["blackboard"]["settlement_template"]["default"] == "assets/templates/souls/souls-victory-continue.png"
+    assert workflow["inputs"]["结算页面模板"]["default"] == "assets/templates/souls/souls-victory-continue.png"
+    assert workflow["variables"] == {"是否有可挑战次数": {"type": "boolean", "default": True}}
+    assert {
+        node["params"]["name"]
+        for node in workflow["nodes"]
+        if node.get("action") == "variables.set"
+    } == {"是否有可挑战次数"}
 
     page = nodes["challenge_page"]["children"]
     assert page[:8] == [f"target_{index}" for index in range(1, 9)]
     assert page[-2:] == ["target_9_reset", "target_9_final"]
     reset = nodes["target_9_reset_run"]["children"]
-    assert [node_id for node_id in reset if node_id.startswith("exit_9")] == [
-        "exit_9", "exit_9b", "exit_9c", "exit_9d"
+    assert [node_id for node_id in reset if node_id.startswith("request_exit_9")] == [
+        "request_exit_9", "request_exit_9b", "request_exit_9c", "request_exit_9d"
     ]
     for node_id in ["exit_9", "exit_9b", "exit_9c", "exit_9d"]:
         assert nodes[node_id]["params"]["keycode"] == "KEYCODE_ESCAPE"
+    for suffix in ["9", "9b", "9c", "9d"]:
+        request = nodes[f"request_exit_{suffix}"]
+        assert request["children"] == [f"exit_{suffix}", f"wait_exit_confirm_{suffix}"]
+        assert request["decorators"] == [{"type": "retry", "attempts": 3, "delay_seconds": 0.5}]
     assert [node_id for node_id in reset if node_id.startswith("confirm_exit_9")] == [
         "confirm_exit_9", "confirm_exit_9b", "confirm_exit_9c", "confirm_exit_9d"
     ]
@@ -208,7 +218,7 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
             f"fight_{index}",
         ]
         assert nodes[f"tap_{index}"]["decorators"][0]["expression"] == {
-            "eq": [{"ref": "blackboard.passes_available"}, True]
+            "eq": [{"ref": "variables.是否有可挑战次数"}, True]
         }
         assert run["decorators"][0]["expression"] == {
             "eq": [{"ref": f"nodes.detect_progress.output.selected.{index - 1}"}, True]
@@ -233,36 +243,36 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
         wait = nodes[f"wait_continue_after_exit_{suffix}"]
         tap = nodes[f"tap_retry_after_exit_{suffix}"]
         assert wait["action"] == "vision.wait_template"
-        assert wait["params"]["template"] == {"ref": "blackboard.settlement_template"}
-        assert wait["params"]["roi"] == {"ref": "blackboard.settlement_roi"}
+        assert wait["params"]["template"] == {"ref": "inputs.结算页面模板"}
+        assert wait["params"]["roi"] == {"ref": "inputs.结算识别区域"}
         assert tap["action"] == "input.tap"
-        assert tap["params"]["x"] == {"ref": "blackboard.retry_point.0"}
+        assert tap["params"]["x"] == {"ref": "inputs.再次挑战点击位置.0"}
     assert nodes["target_9_final_run"]["children"][:4] == [
         "attack_9_final", "prepare_battle_9_final", "wait_battle_9_final", "wait_victory_9_final"
     ]
     for suffix, tap_id in [("9a", "tap_9"), ("9b", "tap_retry_after_exit_9"), ("9c", "tap_retry_after_exit_9b"), ("9d", "tap_retry_after_exit_9c")]:
         assert nodes[tap_id]["decorators"][0]["expression"] == {
-            "eq": [{"ref": "blackboard.passes_available"}, True]
+            "eq": [{"ref": "variables.是否有可挑战次数"}, True]
         }
     for node_id in ["wait_victory_1", "wait_victory_8", "wait_victory_9_final"]:
         wait_node = nodes[node_id]
         assert wait_node["action"] == "vision.wait_template"
-        assert wait_node["params"]["template"] == {"ref": "blackboard.settlement_template"}
-        assert wait_node["params"]["roi"] == {"ref": "blackboard.settlement_roi"}
+        assert wait_node["params"]["template"] == {"ref": "inputs.结算页面模板"}
+        assert wait_node["params"]["roi"] == {"ref": "inputs.结算识别区域"}
     for index in range(1, 9):
         settle = nodes[f"settle_{index}"]
         assert settle["action"] == "input.dismiss_template_until_text"
         assert settle["params"]["match"] == {"ref": f"nodes.wait_victory_{index}.output.0"}
-        assert settle["params"]["done_texts"] == {"ref": "blackboard.page_texts"}
+        assert settle["params"]["done_texts"] == {"ref": "inputs.页面识别文字列表"}
     assert nodes["settle_9"]["params"]["match"] == {"ref": "nodes.wait_victory_9_final.output.0"}
     assert nodes["target_9_final_skip"]["decorators"][0]["expression"] == {
         "eq": [{"ref": "nodes.detect_progress.output.selected.8"}, False]
     }
-    assert workflow["blackboard"]["target_limit"]["default"] == 9
-    assert nodes["detect_progress"]["params"]["target_limit"] == {"ref": "blackboard.target_limit"}
+    assert workflow["inputs"]["目标数量上限"]["default"] == 9
+    assert nodes["detect_progress"]["params"]["target_limit"] == {"ref": "inputs.目标数量上限"}
     assert nodes["raid_until_empty"]["condition"] == {
         "or": [
             {"eq": [{"ref": "nodes.read_passes_after_page.output.mode"}, "skip"]},
-            {"lt": [{"ref": "blackboard.target_limit"}, 9]},
+            {"lt": [{"ref": "inputs.目标数量上限"}, 9]},
         ]
     }

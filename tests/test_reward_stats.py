@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -289,6 +290,83 @@ def test_enqueue_reward_action_is_non_fatal_when_queue_is_unavailable() -> None:
     assert result.output["error"] == "queue unavailable"
 
 
+def test_reward_action_confirms_first_realm_pass_then_rechecks_at_threshold() -> None:
+    class Match:
+        reference_x = 400.0
+        reference_y = 260.0
+        reference_width = 112.0
+        reference_height = 111.0
+
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "x": 400, "y": 260, "width": 112, "height": 111,
+                "confidence": 0.99, "reference": [400, 260, 112, 111], "center": [456, 315],
+            }
+
+    class Context:
+        def __init__(self) -> None:
+            self.initialized = False
+            self.confirmed = 0
+            self.awarded = 0
+            self.owned_values = iter([24, 30])
+            self.current_owned = 0
+            self.taps: list[tuple[int, int]] = []
+
+        def enqueue_reward_statistics(self, **_arguments: object) -> dict[str, object]:
+            return {"accepted": True, "screenshot": "reward.png", "battle_index": 1, "layer": 1}
+
+        def find_template(self, *_args: object, **_kwargs: object) -> list[Match]:
+            return [Match()]
+
+        def ocr_current(self, **_kwargs: object) -> list[object]:
+            return []
+
+        def observe_realm_pass_reward(self, quantity: int, *, threshold: int) -> dict[str, object]:
+            if not self.initialized:
+                return {"estimated_owned": 0, "needs_confirmation": True, "first_detection": True}
+            self.awarded += quantity
+            estimate = self.confirmed + self.awarded
+            return {"estimated_owned": estimate, "needs_confirmation": estimate >= threshold, "first_detection": False}
+
+        def confirm_realm_pass_count(self, owned: int, *, threshold: int) -> dict[str, object]:
+            self.initialized = owned < threshold
+            self.confirmed = owned if self.initialized else 0
+            self.awarded = 0
+            return {"estimated_owned": owned, "should_enter": owned >= threshold}
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+            if len(self.taps) % 2 == 1:
+                self.current_owned = next(self.owned_values)
+            else:
+                self.current_owned = 0
+
+        def ocr(self, **_kwargs: object) -> list[object]:
+            text = f"已拥有 {self.current_owned}" if self.current_owned else "奖励"
+            return [SimpleNamespace(text=text, x=0, y=0)]
+
+        def check_cancelled(self) -> None:
+            return None
+
+        def log(self, _message: str, **_fields: object) -> None:
+            return None
+
+    context = Context()
+    action = EnqueueRewardStatsAction()
+    arguments = {"category": "souls", "layer": 1, "track_realm_pass": True, "realm_threshold": 30}
+
+    first = action.execute(context, arguments).output
+    assert first["realm_pass_owned"] == 24
+    assert first["should_enter_realm"] is False
+    for _ in range(5):
+        result = action.execute(context, arguments).output
+        assert result["realm_pass_confirmation_required"] is False
+    final = action.execute(context, arguments).output
+    assert final["realm_pass_owned"] == 30
+    assert final["should_enter_realm"] is True
+    assert len(context.taps) == 4
+
+
 def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
     project_root = Path(__file__).resolve().parents[1]
     workflow = json.loads((project_root / "workflows" / "entrypoints" / "mumu_1_souls_loop.json").read_text(encoding="utf-8"))
@@ -297,7 +375,6 @@ def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
     assert nodes["main"]["children"] == ["recover_entry", "battle_loop"]
     assert nodes["recover_entry"]["params"]["workflow"] == "shared/recover_to_souls.json"
     assert nodes["battle_loop"]["children"] == [
-        "realm_scheduler",
         "prepare_lineup",
         "await_victory",
         "settlement",
@@ -309,13 +386,20 @@ def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
     assert nodes["tap_ready_from_probe"]["params"]["revalidate"] is True
     assert nodes["await_victory"]["params"] == {
         "workflow": "souls/shared/await_victory.json",
-        "inputs": {"timeout_seconds": {"ref": "blackboard.battle_timeout"}},
+        "inputs": {"总超时时间": {"ref": "inputs.战斗超时时间"}},
     }
     assert nodes["settlement"]["children"] == [
         "stats_reward_layer_1",
         "recover_after_rewards",
+        "realm_scheduler",
     ]
     assert nodes["stats_reward_layer_1"]["params"]["workflow"] == "souls/shared/reward_statistics.json"
+    assert nodes["stats_reward_layer_1"]["params"]["inputs"]["统计结界通关"] == {
+        "ref": "inputs.启用结界突破"
+    }
+    assert nodes["realm_scheduler"]["params"]["inputs"]["进入结界突破"] == {
+        "ref": "nodes.stats_reward_layer_1.output.output.enqueue_reward.should_enter_realm"
+    }
     assert nodes["recover_after_rewards"]["params"]["workflow"] == "shared/recover_to_souls.json"
     stats_nodes = {node["id"]: node for node in stats_workflow["nodes"]}
     assert stats_nodes["enqueue_reward"]["params"]["roi"] == [320, 200, 1280, 640]
@@ -332,6 +416,22 @@ def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
     assert victory_nodes["tap_victory"]["params"]["revalidate"] is True
 
 
+def test_party_leader_and_member_both_collect_reward_statistics() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    party_workflows = (
+        project_root / "workflows" / "souls" / "party" / "leader_round.json",
+        project_root / "workflows" / "souls" / "party" / "member_round.json",
+    )
+
+    for workflow_path in party_workflows:
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        nodes = {node["id"]: node for node in workflow["nodes"]}
+        round_children = nodes["round"]["children"]
+        assert round_children.index("stats_reward_layer_1") == round_children.index("await_victory") + 1
+        assert round_children.index("settle_to_round_destination") == round_children.index("stats_reward_layer_1") + 1
+        assert nodes["stats_reward_layer_1"]["params"]["workflow"] == "souls/shared/reward_statistics.json"
+
+
 def test_courtyard_explore_templates_are_scoped_by_instance() -> None:
     project_root = Path(__file__).resolve().parents[1]
     workflow_paths = {
@@ -341,7 +441,7 @@ def test_courtyard_explore_templates_are_scoped_by_instance() -> None:
 
     for instance_id, workflow_path in workflow_paths.items():
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        template = workflow["blackboard"]["courtyard_template"]["default"] if instance_id == "mumu-1" else (
+        template = workflow["inputs"]["庭院入口模板"]["default"] if instance_id == "mumu-1" else (
             f"assets/templates/souls/courtyard-explore/{instance_id}.png"
         )
         assert template == f"assets/templates/souls/courtyard-explore/{instance_id}.png"
@@ -369,40 +469,40 @@ def test_courtyard_explore_templates_are_scoped_by_instance() -> None:
     ]
 
 
-def test_party_teammate_templates_flow_through_public_workflow_variables() -> None:
+def test_party_teammate_templates_flow_through_workflow_inputs() -> None:
     project_root = Path(__file__).resolve().parents[1]
     workflows = project_root / "workflows"
     parallel = json.loads((workflows / "entrypoints" / "three_mumu_souls_parallel.json").read_text(encoding="utf-8"))
     leader = json.loads((workflows / "entrypoints" / "mumu_0_souls_party_leader.json").read_text(encoding="utf-8"))
     leader_round = json.loads((workflows / "souls" / "party" / "leader_round.json").read_text(encoding="utf-8"))
 
-    template_names = ("member_present_template", "invite_target_template")
+    template_names = ("队员已在场模板", "邀请目标模板")
     for name in template_names:
-        assert parallel["blackboard"][name]["public"] is True
-        assert leader["blackboard"][name]["public"] is True
+        assert name in parallel["inputs"]
+        assert name in leader["inputs"]
 
     parallel_node = next(node for node in parallel["nodes"] if node["type"] == "instance_parallel")
     leader_run = next(run for run in parallel_node["runs"] if run["workflow"] == "entrypoints/mumu_0_souls_party_leader.json")
     for name in template_names:
-        assert leader_run["inputs"][name] == {"ref": f"blackboard.{name}"}
+        assert leader_run["inputs"][name] == {"ref": f"inputs.{name}"}
 
     leader_nodes = {node["id"]: node for node in leader["nodes"]}
-    assert leader_nodes["detect_member_present"]["params"]["template"] == {"ref": "blackboard.member_present_template"}
-    assert leader_nodes["wait_invite_target"]["params"]["template"] == {"ref": "blackboard.invite_target_template"}
+    assert leader_nodes["detect_member_present"]["params"]["template"] == {"ref": "inputs.队员已在场模板"}
+    assert leader_nodes["wait_invite_target"]["params"]["template"] == {"ref": "inputs.邀请目标模板"}
     round_calls = [
         node for node in leader["nodes"]
         if node.get("action") == "workflow.run" and node.get("params", {}).get("workflow") == "souls/party/leader_round.json"
     ]
     assert len(round_calls) == 2
-    assert {node["params"]["inputs"]["phase"] for node in round_calls} == {"finish", "setup_auto_invite"}
+    assert {node["params"]["inputs"]["执行阶段"] for node in round_calls} == {"finish", "setup_auto_invite"}
     assert all(
-        node["params"]["inputs"]["member_present_template"] == {"ref": "blackboard.member_present_template"}
+        node["params"]["inputs"]["队员已在场模板"] == {"ref": "inputs.队员已在场模板"}
         for node in round_calls
     )
 
-    assert leader_round["blackboard"]["member_present_template"]["public"] is True
+    assert "队员已在场模板" in leader_round["inputs"]
     round_nodes = {node["id"]: node for node in leader_round["nodes"]}
-    assert round_nodes["wait_member_present"]["params"]["template"] == {"ref": "blackboard.member_present_template"}
+    assert round_nodes["wait_member_present"]["params"]["template"] == {"ref": "inputs.队员已在场模板"}
 
 
 def test_party_leader_retries_swallowed_create_team_click() -> None:
@@ -443,18 +543,28 @@ def test_party_leader_reinvites_until_member_returns_from_realm() -> None:
     nodes = {node["id"]: node for node in workflow["nodes"]}
 
     assert workflow["limits"]["max_steps"] >= 180 * 9
+    assert nodes["main"]["children"] == ["ensure_party_room", "ensure_initial_member", "battle_plan", "final_recovery"]
+    assert nodes["battle_plan"]["type"] == "sequence"
+    assert nodes["battle_plan"]["children"] == ["ensure_member_invited", "round_selector"]
+    assert nodes["send_initial_invite"]["children"][0] == "tap_empty_member_slot"
+    assert nodes["send_reinvite_after_departure"]["children"][0] == "wait_member_departure_window"
+    assert nodes["round_selector"]["children"] == ["final_round", "automatic_round"]
     assert nodes["ensure_member_invited"]["children"] == [
         "member_already_present",
-        "send_initial_invite",
+        "send_reinvite_after_departure",
     ]
     assert nodes["ensure_member_invited"]["decorators"] == [
         {"type": "retry", "attempts": 180, "delay_seconds": 0.5},
         {"type": "timeout", "seconds": 7200},
     ]
     assert nodes["send_initial_invite"]["children"][-1] == "wait_member_after_invite"
+    assert nodes["ensure_initial_member"]["children"] == [
+        "initial_member_already_present",
+        "send_initial_invite",
+    ]
     wait = nodes["wait_member_after_invite"]["params"]
-    assert wait["template"] == {"ref": "blackboard.member_present_template"}
-    assert wait["timeout_seconds"] == {"ref": "blackboard.member_join_timeout"}
+    assert wait["template"] == {"ref": "inputs.队员已在场模板"}
+    assert wait["timeout_seconds"] == {"ref": "inputs.队员加入超时时间"}
     assert nodes["tap_invite_target"]["params"]["revalidate"] is True
     assert nodes["tap_invite_button"]["params"]["revalidate"] is True
 
@@ -499,14 +609,14 @@ def test_party_rounds_prepare_unlocked_lineups() -> None:
             "souls/shared/prepare_lineup.json"
         )
         assert nodes["prepare_unlocked_lineup"]["params"]["inputs"] == {
-            "timeout_seconds": 10
+            "总超时时间": 10
         }
         assert nodes["await_victory"]["action"] == "workflow.run"
         assert nodes["await_victory"]["params"]["workflow"] == (
             "souls/shared/await_victory.json"
         )
         assert nodes["await_victory"]["params"]["inputs"] == {
-            "timeout_seconds": 240
+            "总超时时间": 240
         }
         assert nodes["lineup_already_locked"]["decorators"] == [{
             "type": "condition",
@@ -523,24 +633,41 @@ def test_shared_battle_workflows_expose_timeout_inputs() -> None:
         (project_root / "workflows" / "souls" / "shared" / "await_victory.json").read_text(encoding="utf-8")
     )
 
-    assert prepare["blackboard"]["timeout_seconds"]["default"] == 10
+    assert prepare["inputs"]["总超时时间"]["default"] == 10
     prepare_nodes = {node["id"]: node for node in prepare["nodes"]}
     assert prepare_nodes["prepare"]["children"] == ["wait_ready", "tap_ready"]
     assert prepare_nodes["wait_ready"]["params"]["timeout_seconds"] == {
-        "ref": "blackboard.timeout_seconds"
+        "ref": "inputs.总超时时间"
     }
     assert prepare_nodes["tap_ready"]["params"]["match"] == {
         "ref": "nodes.wait_ready.output.0"
     }
 
-    assert victory["blackboard"]["timeout_seconds"]["default"] == 240
+    assert victory["inputs"]["总超时时间"]["default"] == 240
     victory_nodes = {node["id"]: node for node in victory["nodes"]}
-    assert victory_nodes["await"]["children"] == ["wait_victory", "tap_victory"]
+    assert victory_nodes["await"]["children"] == [
+        "wait_victory",
+        "tap_victory",
+        "pause_for_daruma",
+        "tap_daruma_advance",
+        "wait_reward",
+        "settle_reward_animation",
+    ]
     assert victory_nodes["wait_victory"]["params"]["timeout_seconds"] == {
-        "ref": "blackboard.timeout_seconds"
+        "ref": "inputs.总超时时间"
     }
     assert victory_nodes["tap_victory"]["params"]["match"] == {
         "ref": "nodes.wait_victory.output.0"
+    }
+    assert victory_nodes["wait_reward"]["action"] == "vision.wait_any"
+    assert victory_nodes["wait_reward"]["params"]["roi"] == [320, 200, 1280, 640]
+    assert victory_nodes["wait_reward"]["params"]["threshold"] == 0.88
+    assert "assets/templates/rewards/realm-raid-pass.png" in victory_nodes["wait_reward"]["params"]["templates"]
+    assert victory_nodes["pause_for_daruma"]["params"]["seconds"] == 0.4
+    assert victory_nodes["tap_daruma_advance"]["params"]["x"] == {"ref": "inputs.奖励页点击横坐标"}
+    assert victory_nodes["tap_daruma_advance"]["params"]["y"] == {"ref": "inputs.奖励页点击纵坐标"}
+    assert victory_nodes["settle_reward_animation"]["params"]["seconds"] == {
+        "ref": "inputs.奖励页前进等待时间"
     }
 
 
@@ -556,35 +683,46 @@ def test_party_rounds_use_one_parameterized_idempotent_plan() -> None:
     member_nodes = {node["id"]: node for node in member["nodes"]}
 
     assert leader["limits"]["timeout_seconds"] == 1209600
-    assert leader["blackboard"]["rounds"]["default"] == 9999
-    assert leader["blackboard"]["rounds"]["min"] == 1
-    assert leader["blackboard"]["rounds"]["max"] == 9999
+    assert leader["inputs"]["运行轮数"]["default"] == 9999
+    assert leader["inputs"]["运行轮数"]["min"] == 1
+    assert leader["inputs"]["运行轮数"]["max"] == 9999
     assert leader_nodes["automatic_round"]["params"]["inputs"] == {
-        "phase": "setup_auto_invite",
-        "member_present_template": {"ref": "blackboard.member_present_template"},
+        "执行阶段": "setup_auto_invite",
+        "队员已在场模板": {"ref": "inputs.队员已在场模板"},
     }
     assert leader_nodes["final_round"]["params"]["inputs"] == {
-        "phase": "finish",
-        "member_present_template": {"ref": "blackboard.member_present_template"},
+        "执行阶段": "finish",
+        "队员已在场模板": {"ref": "inputs.队员已在场模板"},
     }
     assert leader_nodes["final_round"]["decorators"] == [
         {"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, True]}}
     ]
-    assert {"type": "repeat", "count": {"ref": "blackboard.rounds"}} in leader_nodes["battle_plan"]["decorators"]
+    assert leader_nodes["automatic_round"]["decorators"] == [
+        {"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, False]}}
+    ]
+    assert {"type": "repeat", "count": {"ref": "inputs.运行轮数"}} in leader_nodes["battle_plan"]["decorators"]
     assert {"type": "timeout", "seconds": 1209000} in leader_nodes[
         "battle_plan"
     ]["decorators"]
 
     assert member["limits"]["timeout_seconds"] == 1209600
-    assert member["blackboard"]["rounds"]["default"] == 9999
-    assert member["blackboard"]["rounds"]["min"] == 1
-    assert member["blackboard"]["rounds"]["max"] == 9999
-    assert member_nodes["automatic_round"]["params"]["inputs"] == {"phase": "setup_auto_ready"}
-    assert member_nodes["final_round"]["params"]["inputs"] == {"phase": "finish"}
+    assert member["inputs"]["运行轮数"]["default"] == 9999
+    assert member["inputs"]["运行轮数"]["min"] == 1
+    assert member["inputs"]["运行轮数"]["max"] == 9999
+    automatic_inputs = member_nodes["automatic_round"]["params"]["inputs"]
+    final_inputs = member_nodes["final_round"]["params"]["inputs"]
+    assert automatic_inputs["执行阶段"] == "setup_auto_ready"
+    assert final_inputs["执行阶段"] == "finish"
+    for inputs in (automatic_inputs, final_inputs):
+        assert inputs["启用结界突破"] == {"ref": "inputs.启用结界突破"}
+        assert inputs["结界突破阈值"] == {"ref": "inputs.结界突破阈值"}
     assert member_nodes["final_round"]["decorators"] == [
         {"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, True]}}
     ]
-    assert {"type": "repeat", "count": {"ref": "blackboard.rounds"}} in member_nodes["battle_plan"]["decorators"]
+    assert member_nodes["automatic_round"]["decorators"] == [
+        {"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, False]}}
+    ]
+    assert {"type": "repeat", "count": {"ref": "inputs.运行轮数"}} in member_nodes["battle_plan"]["decorators"]
     assert {"type": "timeout", "seconds": 1209000} in member_nodes[
         "battle_plan"
     ]["decorators"]
@@ -606,6 +744,11 @@ def test_party_rounds_use_one_parameterized_idempotent_plan() -> None:
         "auto_ready_already_active", "configure_auto_ready"
     ]
     assert member_round_nodes["auto_ready_already_active"]["params"]["timeout_seconds"] == 1
+    assert member_round_nodes["settle_to_round_destination"]["children"][0] == "recover_final_round"
+    assert member_round_nodes["recover_final_round"]["params"] == {
+        "workflow": "shared/recover_to_souls.json",
+        "inputs": {"庭院入口模板": "assets/templates/souls/courtyard-explore/mumu-1.png"},
+    }
 
 
 def test_party_auto_invite_templates_and_timed_click_are_native_and_fast() -> None:
@@ -619,7 +762,7 @@ def test_party_auto_invite_templates_and_timed_click_are_native_and_fast() -> No
     leader_nodes = {node["id"]: node for node in leader["nodes"]}
     member_nodes = {node["id"]: node for node in member["nodes"]}
 
-    assert leader["blackboard"]["phase"]["enum"] == [
+    assert leader["inputs"]["执行阶段"]["enum"] == [
         "finish",
         "setup_auto_invite",
         "auto_invite",
@@ -632,7 +775,7 @@ def test_party_auto_invite_templates_and_timed_click_are_native_and_fast() -> No
     }
     assert "wait_lobby_after_one" in leader_nodes["wait_destination_after_one"]["children"]
 
-    assert member["blackboard"]["phase"]["enum"] == [
+    assert member["inputs"]["执行阶段"]["enum"] == [
         "finish",
         "setup_auto_ready",
         "auto_ready",

@@ -73,7 +73,7 @@ def test_cli_defaults_party_souls_to_9999_rounds() -> None:
     args = build_parser().parse_args(["run-party-souls"])
 
     assert args.rounds == 9999
-    assert args.enable_member_realm_raid is False
+    assert args.enable_member_realm_raid is True
     assert args.realm_threshold == 30
 
 
@@ -85,6 +85,12 @@ def test_cli_rejects_non_positive_realm_threshold(threshold: int) -> None:
             "--realm-threshold",
             str(threshold),
         ])
+
+
+def test_cli_can_explicitly_disable_member_realm_raid() -> None:
+    args = build_parser().parse_args(["run-party-souls", "--disable-member-realm-raid"])
+
+    assert args.enable_member_realm_raid is False
 
 
 def test_party_command_forwards_separate_event_files(monkeypatch, tmp_path: Path) -> None:
@@ -138,11 +144,13 @@ def test_direct_workflow_loads_without_a_config_task(tmp_path: Path) -> None:
     (workflow_dir / "direct.json").write_text(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "id": "direct",
                 "version": "3.0.0",
                 "resolution": [1920, 1080],
                 "root": "root",
+                "inputs": {},
+                "variables": {},
                 "nodes": [
                     {"id": "root", "type": "root", "children": ["capture"]},
                     {"id": "capture", "type": "task", "action": "core.capture", "params": {}},

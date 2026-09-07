@@ -84,3 +84,24 @@ def test_task_context_enqueues_reward_screens_with_battle_and_layer_ids(tmp_path
     assert [request["layer"] for request in requests] == [1, 2, 1]
     assert requests[0]["roi"] == [50, 100, 200, 150]
     assert all(Path(str(request["screenshot"])).is_file() for request in requests)
+
+
+def test_realm_pass_tracker_anchors_then_accumulates_until_confirmation(tmp_path: Path) -> None:
+    context = TaskContextImpl(
+        device=FakeDevice(),
+        mapper=CoordinateMapper(1920, 1080, 960, 540),
+        template_matcher=TemplateMatcher(),
+        ocr_engine=None,
+        artifact_dir=tmp_path / "run",
+        template_root=tmp_path,
+        logger=EventLogger(tmp_path / "logs"),
+    )
+
+    first = context.observe_realm_pass_reward(2, threshold=30)
+    assert first == {"estimated_owned": 0, "needs_confirmation": True, "first_detection": True}
+    assert context.confirm_realm_pass_count(24, threshold=30)["should_enter"] is False
+    assert context.observe_realm_pass_reward(2, threshold=30)["estimated_owned"] == 26
+    reached = context.observe_realm_pass_reward(4, threshold=30)
+    assert reached == {"estimated_owned": 30, "needs_confirmation": True, "first_detection": False}
+    assert context.confirm_realm_pass_count(30, threshold=30)["should_enter"] is True
+    assert context.observe_realm_pass_reward(1, threshold=30)["first_detection"] is True

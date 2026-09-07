@@ -41,11 +41,13 @@ def _write_config(
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
     (path / "workflows" / "wf.json").write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["cap"]},
             {"id": "cap", "type": "task", "action": "core.capture", "params": {}},
@@ -209,11 +211,13 @@ def test_run_record_checkpoints_are_batched(tmp_path: Path, monkeypatch: pytest.
     workflow_path = tmp_path / "workflows" / "wf.json"
     task_ids = [f"log-{index}" for index in range(30)]
     workflow_path.write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["batch"]},
             {"id": "batch", "type": "sequence", "children": task_ids},
@@ -258,11 +262,13 @@ def test_recovered_selector_branch_does_not_save_failure_frames(
 ) -> None:
     config_path = _write_config(tmp_path)
     (tmp_path / "workflows" / "wf.json").write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["choice"]},
             {"id": "choice", "type": "selector", "children": ["attempt", "fallback"]},
@@ -296,11 +302,13 @@ def test_failed_run_saves_one_final_failure_frame(
 ) -> None:
     config_path = _write_config(tmp_path)
     (tmp_path / "workflows" / "wf.json").write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
         "resolution": [1920, 1080],
         "root": "root",
+        "inputs": {},
+        "variables": {},
         "nodes": [
             {"id": "root", "type": "root", "children": ["main"]},
             {"id": "main", "type": "sequence", "children": ["capture", "reject"]},

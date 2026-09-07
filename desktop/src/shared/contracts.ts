@@ -1,6 +1,5 @@
 export interface ParameterInfo {
   type: string;
-  public?: boolean;
   required?: boolean;
   default?: unknown;
   description?: string;
@@ -22,9 +21,8 @@ export interface WorkflowDescriptor {
   rel: string;
   id?: string;
   description?: string;
-  variables?: Array<{
+  inputs?: Array<{
     name: string;
-    public: boolean;
     definition: ParameterInfo;
   }>;
 }
@@ -79,7 +77,8 @@ export interface WorkflowEditorInit {
   workflowTrail?: Array<{ uri: string; name: string }>;
   catalog: ActionSpec[];
   refs: {
-    blackboard: string[];
+    inputs: string[];
+    variables: string[];
     nodes: string[];
   };
   issues: ValidationIssue[];
@@ -153,7 +152,21 @@ export interface RunWorkflowRequest {
   uri: string;
   instanceId: string;
   text: string;
+  inputs?: Record<string, unknown>;
 }
+
+/** 模拟器画面测试工具：后端推流事件（JSON 行协议透传，附带 type 字段）。 */
+export type VisionStreamEvent = {
+  type: string;
+  [key: string]: unknown;
+};
+
+/** 模拟器画面测试工具：发给后端流服务的一条命令。 */
+export type VisionCommand = {
+  type: string;
+  id?: number;
+  [key: string]: unknown;
+};
 
 export interface RuntimeDebugSettings {
   enabled: boolean;
@@ -238,6 +251,15 @@ export interface OnmyojiDesktopApi {
   saveCanvas(request: SaveCanvasRequest): Promise<string | undefined>;
   captureRoi(request: RoiCaptureRequest): Promise<RoiCaptureResult>;
   checkTemplate(request: TemplateCheckRequest): Promise<TemplateCheckResult>;
+  /** 打开（或聚焦）独立的模拟器画面测试工具窗口。 */
+  openVisionTest(instanceId: string): Promise<void>;
+  /** 工具窗口页面内调用：开始画面推流并订阅事件。 */
+  visionStart(): Promise<void>;
+  /** 工具窗口页面内调用：向推流服务发送一条命令。 */
+  visionCommand(command: VisionCommand): Promise<void>;
+  /** 工具窗口页面内调用：停止画面推流。 */
+  visionStop(): Promise<void>;
+  onVisionEvent(listener: (event: VisionStreamEvent) => void): () => void;
   onRuntimeOutput(listener: (event: RuntimeOutputEvent) => void): () => void;
   onRuntimeState(listener: (event: RuntimeStateEvent) => void): () => void;
   onRunEvent(listener: (event: Record<string, unknown>) => void): () => void;

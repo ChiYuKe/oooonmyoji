@@ -9,6 +9,8 @@ import type {
   SaveCanvasRequest,
   SaveTemplateRequest,
   TemplateCheckRequest,
+  VisionCommand,
+  VisionStreamEvent,
 } from '../shared/contracts';
 
 const api: OnmyojiDesktopApi = {
@@ -36,6 +38,10 @@ const api: OnmyojiDesktopApi = {
   saveCanvas: (request: SaveCanvasRequest) => ipcRenderer.invoke('project:save-canvas', request),
   captureRoi: (request: RoiCaptureRequest) => ipcRenderer.invoke('runtime:capture-roi', request),
   checkTemplate: (request: TemplateCheckRequest) => ipcRenderer.invoke('runtime:check-template', request),
+  openVisionTest: (instanceId: string) => ipcRenderer.invoke('tools:open-vision-test', instanceId),
+  visionStart: () => ipcRenderer.invoke('vision:start'),
+  visionCommand: (command: VisionCommand) => ipcRenderer.invoke('vision:command', command),
+  visionStop: () => ipcRenderer.invoke('vision:stop'),
   onRuntimeOutput: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: RuntimeOutputEvent): void => listener(value);
     ipcRenderer.on('runtime:output', wrapped);
@@ -50,6 +56,11 @@ const api: OnmyojiDesktopApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, value: Record<string, unknown>): void => listener(value);
     ipcRenderer.on('runtime:run-event', wrapped);
     return () => ipcRenderer.removeListener('runtime:run-event', wrapped);
+  },
+  onVisionEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: VisionStreamEvent): void => listener(value);
+    ipcRenderer.on('vision:event', wrapped);
+    return () => ipcRenderer.removeListener('vision:event', wrapped);
   },
   onWindowMaximized: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, maximized: boolean): void => listener(maximized);

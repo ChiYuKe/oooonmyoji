@@ -1,4 +1,4 @@
-/** Behavior Tree v3 parsing, semantic validation, schema, and references. */
+/** Behavior Tree v4 parsing, semantic validation, schema, and references. */
 import Ajv2020 from 'ajv/dist/2020';
 import {
   ActionCatalog,
@@ -64,8 +64,10 @@ export interface WorkflowInfo {
   root?: string;
   resolution?: number[];
   limits?: Record<string, unknown>;
-  blackboard: Record<string, ParameterInfo>;
-  blackboardProps: string[];
+  inputs: Record<string, ParameterInfo>;
+  inputProps: string[];
+  variables: Record<string, ParameterInfo>;
+  variableProps: string[];
   nodes: NodeInfo[];
   nodeIds: string[];
   rawNodes: unknown[];
@@ -98,8 +100,10 @@ function parsedDecorator(raw: unknown): DecoratorInfo | undefined {
 export function parseWorkflow(raw: unknown): WorkflowInfo {
   const info: WorkflowInfo = {
     raw: null,
-    blackboard: {},
-    blackboardProps: [],
+    inputs: {},
+    inputProps: [],
+    variables: {},
+    variableProps: [],
     nodes: [],
     nodeIds: [],
     rawNodes: [],
@@ -112,15 +116,25 @@ export function parseWorkflow(raw: unknown): WorkflowInfo {
   if (typeof raw.root === 'string') info.root = raw.root;
   if (Array.isArray(raw.resolution)) info.resolution = raw.resolution as number[];
   if (isObject(raw.limits)) info.limits = raw.limits;
-  if (isObject(raw.blackboard)) {
-    for (const [key, value] of Object.entries(raw.blackboard)) {
+  if (isObject(raw.inputs)) {
+    for (const [key, value] of Object.entries(raw.inputs)) {
       try {
-        info.blackboard[key] = parseParameterDefinition(value, `blackboard.${key}`);
+        info.inputs[key] = parseParameterDefinition(value, `inputs.${key}`);
       } catch {
-        info.blackboard[key] = { type: isObject(value) ? String(value.type ?? '') : '' };
+        info.inputs[key] = { type: isObject(value) ? String(value.type ?? '') : '' };
       }
     }
-    info.blackboardProps = Object.keys(info.blackboard);
+    info.inputProps = Object.keys(info.inputs);
+  }
+  if (isObject(raw.variables)) {
+    for (const [key, value] of Object.entries(raw.variables)) {
+      try {
+        info.variables[key] = parseParameterDefinition(value, `variables.${key}`);
+      } catch {
+        info.variables[key] = { type: isObject(value) ? String(value.type ?? '') : '' };
+      }
+    }
+    info.variableProps = Object.keys(info.variables);
   }
   if (Array.isArray(raw.nodes)) {
     info.rawNodes = raw.nodes;
@@ -327,11 +341,18 @@ function resolveRefSchema(
   availableNodeIds?: Set<string>,
 ): Record<string, unknown> | undefined {
   const parts = ref.split('.');
-  if (parts.length >= 2 && parts[0] === 'blackboard' && parts.slice(1).every(Boolean)) {
-    const parameter = context.info.blackboard[parts[1]];
+  const runtimeSchemas: Record<string, Record<string, unknown>> = {
+    'runtime.repeat.index': { type: 'integer' },
+    'runtime.repeat.count': { type: 'integer' },
+    'runtime.repeat.final': { type: 'boolean' },
+  };
+  if (runtimeSchemas[ref]) return runtimeSchemas[ref];
+  if (parts.length >= 2 && (parts[0] === 'inputs' || parts[0] === 'variables') && parts.slice(1).every(Boolean)) {
+    const parameters = parts[0] === 'inputs' ? context.info.inputs : context.info.variables;
+    const parameter = parameters[parts[1]];
     const resolved = parameter ? schemaAtPath(parameterToSchema(parameter), parts.slice(2)) : undefined;
     if (resolved) return resolved;
-    issues.push({ path, message: `绑定引用了未声明的工作流变量：${ref}`, severity: 'error', code: 'unknown-ref' });
+    issues.push({ path, message: `绑定引用了未声明的${parts[0] === 'inputs' ? '输入' : '运行变量'}：${ref}`, severity: 'error', code: 'unknown-ref' });
     return undefined;
   }
   if (parts.length >= 4 && parts[0] === 'nodes' && parts[2] === 'output' && context.nodeIds.has(parts[1]) && parts.slice(3).every(Boolean)) {
@@ -465,7 +486,13 @@ function validateDecorator(
   if ((type === 'cooldown' || type === 'timeout') && (typeof item.seconds !== 'number' || item.seconds <= 0)) issues.push(issue([...path, 'seconds'], 'seconds 必须大于 0', 'invalid-decorator'));
   if (type === 'retry' && (!Number.isInteger(item.attempts) || Number(item.attempts) < 1)) issues.push(issue([...path, 'attempts'], 'attempts 必须是正整数', 'invalid-decorator'));
   if (type === 'retry' && item.delay_seconds !== undefined && (typeof item.delay_seconds !== 'number' || item.delay_seconds < 0)) issues.push(issue([...path, 'delay_seconds'], 'delay_seconds 不能小于 0', 'invalid-decorator'));
-  if (type === 'repeat' && (!Number.isInteger(item.count) || Number(item.count) < 1)) issues.push(issue([...path, 'count'], 'count 必须是正整数', 'invalid-decorator'));
+  if (type === 'repeat') {
+    if (isObject(item.count) && typeof item.count.ref === 'string') {
+      validateBindings(item.count, context, [...path, 'count'], issues, false, { type: 'integer' }, availableNodeIds);
+    } else if (!Number.isInteger(item.count) || Number(item.count) < 1) {
+      issues.push(issue([...path, 'count'], 'count 必须是正整数或整数引用', 'invalid-decorator'));
+    }
+  }
   if (type === 'do_once' && item.reset_on_failure !== undefined && typeof item.reset_on_failure !== 'boolean') issues.push(issue([...path, 'reset_on_failure'], 'reset_on_failure 必须是布尔值', 'invalid-decorator'));
 }
 
@@ -476,8 +503,8 @@ function validateInstanceParallelInputs(value: unknown, path: (string | number)[
   }
   if (!isObject(value)) return;
   if ('ref' in value) {
-    if (Object.keys(value).length !== 1 || typeof value.ref !== 'string' || !value.ref.startsWith('blackboard.')) {
-      issues.push(issue(path, '实例并行 inputs 只能绑定父工作流变量', 'invalid-instance-binding'));
+    if (Object.keys(value).length !== 1 || typeof value.ref !== 'string' || !value.ref.startsWith('inputs.')) {
+      issues.push(issue(path, '实例并行 inputs 只能绑定父工作流 inputs', 'invalid-instance-binding'));
     }
     return;
   }
@@ -489,23 +516,37 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
   const info = parseWorkflow(raw);
   if (!info.raw) return [issue([], '工作流必须是一个 JSON 对象', 'not-object')];
   const root = info.raw;
-  if (root.schema_version !== 3) issues.push(issue(['schema_version'], '仅支持 schema_version 3', 'schema-version'));
+  if (root.schema_version !== 4) issues.push(issue(['schema_version'], '仅支持 schema_version 4', 'schema-version'));
   if (typeof root.id !== 'string' || !root.id) issues.push(issue(['id'], '缺少 id', 'missing-id'));
   if (typeof root.version !== 'string' || !root.version) issues.push(issue(['version'], '缺少 version', 'missing-version'));
   if (root.description !== undefined && typeof root.description !== 'string') issues.push(issue(['description'], 'description 必须是字符串', 'invalid-description'));
   if (typeof root.root !== 'string' || !root.root) issues.push(issue(['root'], '缺少 root', 'missing-root'));
   if (!Array.isArray(root.resolution) || root.resolution.length !== 2 || !root.resolution.every((value) => Number.isInteger(value) && Number(value) > 0)) issues.push(issue(['resolution'], 'resolution 必须包含两个正整数', 'invalid-resolution'));
   if (!Array.isArray(root.nodes) || root.nodes.length < 2) issues.push(issue(['nodes'], 'Behavior Tree 至少需要 Root 和一个子节点', 'invalid-nodes'));
-  if (root.blackboard !== undefined && !isObject(root.blackboard)) {
-    issues.push(issue(['blackboard'], '工作流变量必须是定义对象', 'invalid-blackboard'));
-  } else if (isObject(root.blackboard)) {
-    for (const [name, definition] of Object.entries(root.blackboard)) {
-      if (isObject(definition) && definition.public !== undefined && typeof definition.public !== 'boolean') {
-        issues.push(issue(['blackboard', name, 'public'], 'public 必须是布尔值', 'invalid-variable-visibility'));
-      }
-      try { parseParameterDefinition(definition, `blackboard.${name}`); }
-      catch (error) { issues.push(issue(['blackboard', name], (error as Error).message, 'invalid-blackboard-definition')); }
+  if (!isObject(root.inputs)) {
+    issues.push(issue(['inputs'], '工作流 inputs 必须是定义对象', 'invalid-inputs'));
+  } else {
+    for (const [name, definition] of Object.entries(root.inputs)) {
+      if (isObject(definition) && 'public' in definition) issues.push(issue(['inputs', name, 'public'], 'schema v4 已移除 public', 'removed-public-field'));
+      try { parseParameterDefinition(definition, `inputs.${name}`); }
+      catch (error) { issues.push(issue(['inputs', name], (error as Error).message, 'invalid-inputs-definition')); }
     }
+  }
+  if (!isObject(root.variables)) {
+    issues.push(issue(['variables'], '工作流 variables 必须是定义对象', 'invalid-variables'));
+  } else {
+    for (const [name, definition] of Object.entries(root.variables)) {
+      try {
+        if (isObject(definition) && 'public' in definition) issues.push(issue(['variables', name, 'public'], 'schema v4 已移除 public', 'removed-public-field'));
+        const parsed = parseParameterDefinition(definition, `variables.${name}`);
+        if (parsed.default === undefined) issues.push(issue(['variables', name], '运行变量必须声明 default', 'missing-variable-default'));
+      } catch (error) {
+        issues.push(issue(['variables', name], (error as Error).message, 'invalid-variable-definition'));
+      }
+    }
+  }
+  for (const name of info.inputProps) {
+    if (info.variableProps.includes(name)) issues.push(issue(['variables', name], 'inputs 与 variables 不能重名', 'duplicate-binding-name'));
   }
 
   const ids = new Set(info.nodeIds);
@@ -544,6 +585,9 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
           if (!isObject(params)) issues.push(issue([...path, 'params'], 'params 必须是对象', 'invalid-params'));
           else {
             validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema, availableNodeIds);
+            if (rawNode.action === 'variables.set' && (typeof params.name !== 'string' || !info.variableProps.includes(params.name))) {
+              issues.push(issue([...path, 'params', 'name'], 'name 必须是已声明的运行变量', 'unknown-variable'));
+            }
             const validate = workflowAjv.compile(bindingAwareParameterSchema(spec.inputSchema));
             const normalized = applyParameterDefaults(spec.parameters, params);
             if (!validate(normalized)) {
@@ -639,15 +683,16 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
 export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog): Record<string, unknown> {
   return {
     type: 'object',
-    required: ['schema_version', 'id', 'version', 'resolution', 'root', 'nodes'],
+    required: ['schema_version', 'id', 'version', 'resolution', 'root', 'inputs', 'variables', 'nodes'],
     properties: {
-      schema_version: { const: 3 },
+      schema_version: { const: 4 },
       id: { type: 'string', minLength: 1 },
       version: { type: 'string', minLength: 1 },
       description: { type: 'string', description: '工作流用途说明，会显示在子工作流选择器中' },
       resolution: { type: 'array', prefixItems: [{ type: 'integer', minimum: 1 }, { type: 'integer', minimum: 1 }], minItems: 2, maxItems: 2 },
       root: { type: 'string', enum: info.nodeIds },
-      blackboard: { type: 'object' },
+      inputs: { type: 'object' },
+      variables: { type: 'object' },
       retry_safe: { type: 'boolean' },
       limits: { type: 'object', properties: { timeout_seconds: { type: 'number', exclusiveMinimum: 0 }, max_steps: { type: 'integer', minimum: 1 } }, additionalProperties: false },
       nodes: {
@@ -718,13 +763,20 @@ export function collectRefSuggestions(
   catalog: ActionCatalog,
   targetNodeId?: string,
   expectedSchema?: Record<string, unknown>,
-): { blackboard: string[]; nodes: string[] } {
-  const blackboardCandidates: RefCandidate[] = [];
-  for (const name of info.blackboardProps) {
-    const prefix = `blackboard.${name}`;
-    const schema = parameterToSchema(info.blackboard[name]);
-    blackboardCandidates.push({ ref: prefix, schema });
-    nestedRefCandidates(prefix, schema, blackboardCandidates);
+): { inputs: string[]; variables: string[]; nodes: string[] } {
+  const inputCandidates: RefCandidate[] = [];
+  for (const name of info.inputProps) {
+    const prefix = `inputs.${name}`;
+    const schema = parameterToSchema(info.inputs[name]);
+    inputCandidates.push({ ref: prefix, schema });
+    nestedRefCandidates(prefix, schema, inputCandidates);
+  }
+  const variableCandidates: RefCandidate[] = [];
+  for (const name of info.variableProps) {
+    const prefix = `variables.${name}`;
+    const schema = parameterToSchema(info.variables[name]);
+    variableCandidates.push({ ref: prefix, schema });
+    nestedRefCandidates(prefix, schema, variableCandidates);
   }
   const nodeCandidates: RefCandidate[] = [];
   const available = targetNodeId ? availableOutputNodeIds(info, targetNodeId) : undefined;
@@ -735,7 +787,8 @@ export function collectRefSuggestions(
   }
   const compatible = (candidate: RefCandidate): boolean => bindingTypesCompatible(expectedSchema, candidate.schema);
   return {
-    blackboard: blackboardCandidates.filter(compatible).map((candidate) => candidate.ref),
+    inputs: inputCandidates.filter(compatible).map((candidate) => candidate.ref),
+    variables: variableCandidates.filter(compatible).map((candidate) => candidate.ref),
     nodes: nodeCandidates.filter(compatible).map((candidate) => candidate.ref),
   };
 }
@@ -746,9 +799,8 @@ export interface WorkflowFileDescriptor {
   rel: string;
   id?: string;
   description?: string;
-  variables?: Array<{
+  inputs?: Array<{
     name: string;
-    public: boolean;
     definition: ParameterInfo;
   }>;
 }

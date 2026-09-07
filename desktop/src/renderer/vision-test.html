@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
+  <title>模拟器画面测试工具</title>
+  <link rel="stylesheet" href="./fonts/harmonyos-sans-sc/Regular.css">
+  <link rel="stylesheet" href="./fonts/harmonyos-sans-sc/Semibold.css">
+  <link rel="stylesheet" href="./fonts/harmonyos-sans-sc/Bold.css">
+</head>
+<body>
+  <div id="app" class="vision-app">
+    <div class="custom-titlebar">
+      <img class="titlebar-icon" src="./assets/onmyoji-icon.png" alt="阴阳师" draggable="false" />
+      <span class="vision-title-text">模拟器画面测试工具</span>
+      <span id="vision-instance-label" class="vision-instance-label"></span>
+      <span class="vision-connection">
+        <span id="vision-connection-dot" class="vision-dot"></span>
+        <span id="vision-connection-text">未连接</span>
+      </span>
+      <div class="titlebar-spacer"></div>
+      <div class="window-controls" aria-label="窗口控制">
+        <button id="vision-minimize" class="window-control" title="最小化" aria-label="最小化"><i data-lucide="minus"></i></button>
+        <button id="vision-maximize" class="window-control" title="最大化" aria-label="最大化"><i data-lucide="square"></i></button>
+        <button id="vision-close" class="window-control close" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+    </div>
+
+    <div class="vision-layout">
+      <header class="vision-toolbar" aria-label="测试工具栏">
+        <div class="vision-mode" role="group" aria-label="框选模式">
+          <button id="vision-mode-roi" class="vision-mode-btn active" type="button">ROI 框选</button>
+          <button id="vision-mode-tap" class="vision-mode-btn" type="button">点击测试</button>
+        </div>
+        <span class="vision-sep"></span>
+        <button id="vision-live-toggle" class="vision-command" type="button" title="暂停 / 恢复实时捕获"><i data-lucide="pause"></i><span>实时捕获</span></button>
+        <label class="vision-inline">刷新
+          <select id="vision-interval" aria-label="刷新间隔">
+            <option value="100">100 ms</option>
+            <option value="150">150 ms</option>
+            <option value="200" selected>200 ms</option>
+            <option value="300">300 ms</option>
+            <option value="500">500 ms</option>
+            <option value="800">800 ms</option>
+            <option value="1200">1200 ms</option>
+          </select>
+        </label>
+        <span class="vision-sep"></span>
+        <button id="vision-match-once" class="vision-command primary" type="button" title="对当前画面匹配一次"><i data-lucide="scan"></i><span>匹配一次</span></button>
+        <label class="vision-inline check"><input id="vision-auto-match" type="checkbox" checked>自动匹配</label>
+        <label class="vision-inline check"><input id="vision-roi-only" type="checkbox" title="只在框选的 ROI 内搜索模板">匹配限 ROI</label>
+        <span class="vision-sep"></span>
+        <button id="vision-save" class="vision-command" type="button" title="把带标注的当前画面导出为 PNG"><i data-lucide="image-down"></i><span>保存画面</span></button>
+        <span class="vision-spacer"></span>
+        <span id="vision-frame-meta" class="vision-meta">—</span>
+      </header>
+
+      <div class="vision-body">
+        <section id="vision-stage" class="vision-stage">
+          <canvas id="vision-canvas"></canvas>
+          <div id="vision-stage-mask" class="vision-stage-mask">
+            <div class="vision-spinner"></div>
+            <span id="vision-mask-text">正在连接模拟器…</span>
+          </div>
+        </section>
+
+        <aside class="vision-side">
+          <section class="vision-card">
+            <h3>模板匹配</h3>
+            <div class="vision-row">
+              <input id="vision-template-input" list="vision-template-options" type="text" spellcheck="false" placeholder="assets/templates/…" aria-label="模板路径">
+              <datalist id="vision-template-options"></datalist>
+              <button id="vision-template-browse" class="vision-btn" type="button" title="从项目里选择模板图片">浏览…</button>
+            </div>
+            <div class="vision-template-preview">
+              <img id="vision-template-image" alt="模板预览" hidden>
+              <span id="vision-template-empty">未选择模板</span>
+            </div>
+            <div class="vision-row vision-controls-row">
+              <label>阈值 <input id="vision-threshold" type="number" min="0.5" max="1" step="0.01" value="0.85"></label>
+              <label>结果数 <input id="vision-max-results" type="number" min="1" max="100" step="1" value="20"></label>
+            </div>
+            <label class="vision-inline check"><input id="vision-scale-search" type="checkbox">缩放搜索（0.9–1.1）</label>
+            <label class="vision-inline check" title="只在下方 ROI 框选的区域内搜索模板">
+              <input id="vision-roi-only-card" type="checkbox">匹配限 ROI（配合 ROI 框选）
+            </label>
+          </section>
+
+          <section class="vision-card grow">
+            <div class="vision-card-head">
+              <h3>匹配结果</h3>
+              <button id="vision-clear-matches" class="vision-btn small" type="button">清空</button>
+            </div>
+            <ul id="vision-match-list" class="vision-match-list"></ul>
+            <div id="vision-match-empty" class="vision-muted">还没有匹配结果</div>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>测试 ROI 区域</h3>
+              <button id="vision-clear-roi" class="vision-btn small" type="button">清除 ROI</button>
+            </div>
+            <pre id="vision-roi-info" class="vision-pre">未框选区域</pre>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>测试点击位置</h3>
+              <button id="vision-tap-send" class="vision-btn danger" type="button" title="在所选位置向模拟器发送一次真实点击">真实点击</button>
+            </div>
+            <pre id="vision-tap-info" class="vision-pre">未选择位置（点击测试模式下单击画面）</pre>
+            <div class="vision-row">
+              <label>按住(ms) <input id="vision-hold" type="number" min="0" max="2000" step="10" value="50"></label>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="vision-statusbar">
+        <span id="vision-status">准备连接…</span>
+        <span class="vision-status-spacer"></span>
+        <span id="vision-hint">ROI 框选：拖动画面框选测试区域；点击测试：单击画面选择位置，可发送真实点击</span>
+      </footer>
+    </div>
+
+    <div id="vision-toast" class="app-toast hidden"></div>
+
+    <div id="vision-template-browser" class="vision-browser hidden">
+      <div class="vision-browser-backdrop" data-vision-browser-close></div>
+      <div class="vision-browser-panel" role="dialog" aria-modal="true" aria-label="选择模板">
+        <header class="vision-browser-head">
+          <span class="vision-browser-title">选择模板</span>
+          <span class="vision-browser-subtitle">assets/templates 按文件夹分类</span>
+          <span class="vision-browser-spacer"></span>
+          <button id="vision-browser-close" class="vision-btn small" type="button" title="关闭" aria-label="关闭">关闭</button>
+        </header>
+        <div id="vision-browser-groups" class="vision-browser-groups"></div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./vision-test.ts"></script>
+</body>
+</html>

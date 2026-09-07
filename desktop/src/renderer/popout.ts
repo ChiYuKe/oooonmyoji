@@ -10,6 +10,26 @@ import { createIcons, Minus, Square, X } from 'lucide';
 document.body.classList.add('dockview-popout-host');
 createIcons({ icons: { Minus, Square, X } });
 
+const htmlNamespace = 'http://www.w3.org/1999/xhtml';
+const installCustomTooltips = (): void => {
+  const scan = (): void => {
+    document.querySelectorAll<HTMLElement>('[title]').forEach((element) => {
+      if (element.namespaceURI !== htmlNamespace || element.tagName === 'IFRAME') return;
+      const label = element.getAttribute('title')?.trim();
+      if (!label) return;
+      element.dataset.tooltip = label;
+      element.removeAttribute('title');
+      if (!element.getAttribute('aria-label') && element.tagName === 'BUTTON') {
+        element.setAttribute('aria-label', label.replace(/\s+/g, ' '));
+      }
+    });
+  };
+  scan();
+  const observer = new MutationObserver(scan);
+  observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+};
+installCustomTooltips();
+
 const popoutApi = window.onmyoji;
 document.querySelector('#popout-minimize')?.addEventListener('click', () => void popoutApi.minimizeWindow());
 document.querySelector('#popout-maximize')?.addEventListener('click', () => void popoutApi.toggleMaximizeWindow());

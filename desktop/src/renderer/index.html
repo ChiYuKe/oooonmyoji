@@ -34,13 +34,14 @@
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">窗口</button>
           <div class="titlebar-dropdown" role="menu">
             <button type="button" role="menuitemcheckbox" data-workbench-panel="workflow" aria-checked="true" disabled title="固定根模块"><span>工作流编辑器</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="overview" aria-checked="true"><span>概览</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="referenceViewer" aria-checked="false"><span>引用查看器</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitemcheckbox" data-dock-panel="structure" aria-checked="true"><span>结构</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-dock-panel="palette" aria-checked="true"><span>节点</span><span class="menu-check">✓</span></button>
-            <button type="button" role="menuitemcheckbox" data-dock-panel="variables" aria-checked="true"><span>变量</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-dock-panel="variables" aria-checked="true"><span>输入与状态</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-dock-panel="editor" aria-checked="true"><span>工作流画布</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-dock-panel="details" aria-checked="true"><span>详细信息</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="runtime" aria-checked="true"><span>运行日志</span><span class="menu-check">✓</span></button>
@@ -61,6 +62,8 @@
             <button type="button" role="menuitem" data-editor-command="exportImage"><span>导出画布图片</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-editor-command="workflowSettings"><span>工作流设置</span></button>
+            <div class="menu-separator" role="separator"></div>
+            <button type="button" role="menuitem" data-app-command="visionTest"><span>模拟器画面测试工具</span></button>
           </div>
         </div>
         <div class="menu-root">
@@ -81,32 +84,85 @@
     <main class="workbench-frame-shell">
       <div id="workbench-frame" class="workbench-frame" aria-label="顶层模块工作区"></div>
       <div id="workbench-module-store" class="workbench-module-store">
+        <section id="module-overview" class="dock-module overview-module" aria-label="脚本执行概览">
+          <header class="overview-toolbar">
+            <div class="overview-title">
+              <i data-lucide="workflow"></i>
+              <div><strong>脚本概览</strong><span>勾选脚本并按队列顺序执行</span></div>
+            </div>
+            <label class="overview-search">
+              <i data-lucide="search"></i>
+              <input id="overview-search" type="search" placeholder="搜索脚本名称或路径" aria-label="搜索脚本">
+            </label>
+            <label class="overview-instance-field">
+              <span>运行实例</span>
+              <select id="overview-instance-select" aria-label="概览运行实例"></select>
+            </label>
+            <button id="overview-refresh" class="overview-command secondary" type="button" title="刷新脚本列表"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+            <button id="overview-run" class="overview-command primary" type="button"><i data-lucide="play"></i><span>运行所选</span></button>
+            <button id="overview-stop" class="overview-command danger" type="button" disabled><i data-lucide="square"></i><span>停止队列</span></button>
+          </header>
+          <div class="overview-layout">
+            <section class="overview-library" aria-label="全部脚本">
+              <div class="overview-section-header">
+                <div><strong>全部脚本</strong><span id="overview-workflow-count">0 个</span></div>
+                <div class="overview-selection-actions">
+                  <button id="overview-select-all" type="button">全选</button>
+                  <button id="overview-clear" type="button">清空</button>
+                </div>
+              </div>
+              <div id="overview-workflow-grid" class="overview-workflow-grid"></div>
+              <div id="overview-empty" class="overview-empty hidden">没有匹配的脚本</div>
+            </section>
+            <aside class="overview-queue-panel" aria-label="执行顺序">
+              <div class="overview-section-header">
+                <div><strong>执行顺序</strong><span id="overview-selected-count">未选择脚本</span></div>
+              </div>
+              <div id="overview-queue" class="overview-queue"></div>
+              <div id="overview-queue-empty" class="overview-empty">勾选左侧卡片以建立执行队列</div>
+              <div class="overview-queue-summary">
+                <span id="overview-queue-status">等待选择</span>
+                <strong id="overview-queue-progress">0 / 0</strong>
+              </div>
+            </aside>
+          </div>
+        </section>
         <section id="module-workbench" class="workbench-module">
           <div class="tool-strip" aria-label="画布工具">
             <div class="tool-group">
-              <button class="icon-button" data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i></button>
-              <button class="icon-button" data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i></button>
-              <button class="icon-button" data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i></button>
-              <button class="icon-button" data-editor-command="addParallel" title="添加并行节点"><i data-lucide="columns-3"></i></button>
-              <button class="icon-button" data-editor-command="addGenericParallel" title="添加通用并发节点"><i data-lucide="split"></i></button>
-              <button class="icon-button" data-editor-command="addRepeatUntil" title="添加循环节点"><i data-lucide="repeat-2"></i></button>
-              <button class="icon-button" data-editor-command="addBranch" title="添加条件分支"><i data-lucide="git-fork"></i></button>
-              <button class="icon-button" data-editor-command="addSwitch" title="添加值分支"><i data-lucide="route"></i></button>
-              <button class="icon-button" data-editor-command="addInstanceParallel" title="添加多实例节点"><i data-lucide="monitor-up"></i></button>
+              <button class="tool-command" data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i><span class="tool-command-label">任务</span></button>
+              <button class="tool-command" data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i><span class="tool-command-label">顺序</span></button>
+              <button class="tool-command" data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i><span class="tool-command-label">选择</span></button>
+              <button class="tool-command" data-editor-command="addParallel" title="添加并行节点"><i data-lucide="columns-3"></i><span class="tool-command-label">并行</span></button>
+              <button class="tool-command" data-editor-command="addGenericParallel" title="添加通用并发节点"><i data-lucide="split"></i><span class="tool-command-label">并发</span></button>
+              <button class="tool-command" data-editor-command="addRepeatUntil" title="添加循环节点"><i data-lucide="repeat-2"></i><span class="tool-command-label">循环</span></button>
+              <button class="tool-command" data-editor-command="addBranch" title="添加条件分支"><i data-lucide="git-fork"></i><span class="tool-command-label">条件</span></button>
+              <button class="tool-command" data-editor-command="addSwitch" title="添加值分支"><i data-lucide="route"></i><span class="tool-command-label">分支</span></button>
+              <button class="tool-command" data-editor-command="addInstanceParallel" title="添加多实例节点"><i data-lucide="monitor-up"></i><span class="tool-command-label">多实例</span></button>
             </div>
             <span class="tool-divider"></span>
             <div class="tool-group">
-              <button class="icon-button" data-editor-command="autoLayout" title="自动排列"><i data-lucide="wand-sparkles"></i></button>
-              <button class="icon-button" data-editor-command="fitView" title="适应画布"><i data-lucide="maximize"></i></button>
-              <button class="icon-button" data-editor-command="exportImage" title="导出画布图片"><i data-lucide="image-down"></i></button>
-              <button class="icon-button" data-editor-command="workflowSettings" title="工作流设置"><i data-lucide="settings-2"></i></button>
+              <button class="tool-command" data-editor-command="autoLayout" title="自动排列"><i data-lucide="wand-sparkles"></i><span class="tool-command-label">排列</span></button>
+              <button class="tool-command" data-editor-command="fitView" title="适应画布"><i data-lucide="maximize"></i><span class="tool-command-label">适应</span></button>
+              <button class="tool-command" data-editor-command="exportImage" title="导出画布图片"><i data-lucide="image-down"></i><span class="tool-command-label">导出</span></button>
+              <button class="tool-command" data-editor-command="workflowSettings" title="工作流设置"><i data-lucide="settings-2"></i><span class="tool-command-label">设置</span></button>
             </div>
             <span class="tool-divider"></span>
-            <select id="instance-select" class="instance-select" aria-label="运行实例"></select>
-            <button id="run-button" class="command-button run-command" title="运行当前工作流"><i data-lucide="play"></i><span>运行</span></button>
-            <button id="stop-button" class="icon-button" title="停止工作流" disabled><i data-lucide="square"></i></button>
-            <button id="save-button" class="command-button" title="保存工作流"><i data-lucide="save"></i><span>保存</span></button>
-            <button id="more-button" class="icon-button" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis"></i></button>
+            <div id="instance-picker" class="instance-picker">
+              <button id="instance-select" class="instance-select" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="运行实例">
+                <i class="instance-select-icon" data-lucide="monitor-up"></i>
+                <span id="instance-select-label" class="instance-select-label">未检测到运行实例</span>
+                <span class="instance-picker-chevron" aria-hidden="true"></span>
+              </button>
+              <div id="instance-menu" class="instance-menu" role="listbox" hidden></div>
+            </div>
+            <span class="tool-divider"></span>
+            <div class="tool-group">
+              <button id="run-button" class="tool-command run-command" title="运行当前工作流"><i data-lucide="play"></i><span class="tool-command-label">运行</span></button>
+              <button id="stop-button" class="tool-command" title="停止工作流" disabled><i data-lucide="square"></i><span class="tool-command-label">停止</span></button>
+              <button id="save-button" class="tool-command" title="保存工作流"><i data-lucide="save"></i><span class="tool-command-label">保存</span></button>
+              <button id="more-button" class="tool-command" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis"></i><span class="tool-command-label">更多</span></button>
+            </div>
             <div id="document-path" class="document-path"></div>
           </div>
 
@@ -227,8 +283,9 @@
 
         <section id="module-variables" class="dock-module variables-module">
           <div class="module-command-strip">
-            <span class="module-context">工作流变量</span>
-            <button id="add-variable-button" class="panel-action" title="添加变量"><i data-lucide="plus"></i></button>
+            <span class="module-context">输入与状态</span>
+            <button id="add-input-button" class="panel-action" title="添加工作流输入"><i data-lucide="plus"></i></button>
+            <button id="add-variable-button" class="panel-action" title="添加运行变量"><i data-lucide="circle-plus"></i></button>
           </div>
           <div id="variables-view" class="panel-content variables-content"></div>
         </section>
@@ -249,6 +306,24 @@
           <iframe id="runtime-log-frame" title="结构化运行日志" src="./runtime-log/index.html"></iframe>
         </section>
 
+    </div>
+    <div id="overview-config-modal" class="overview-config-modal hidden" role="presentation" aria-hidden="true">
+      <section class="overview-config-dialog" role="dialog" aria-modal="true" aria-labelledby="overview-config-title">
+        <header class="overview-config-header">
+          <div>
+            <strong id="overview-config-title">脚本配置</strong>
+            <span id="overview-config-path"></span>
+          </div>
+          <button id="overview-config-close" type="button" aria-label="关闭配置"><i data-lucide="x"></i></button>
+        </header>
+        <div id="overview-config-fields" class="overview-config-fields"></div>
+        <footer class="overview-config-footer">
+          <button id="overview-config-defaults" class="overview-config-button secondary" type="button">恢复默认</button>
+          <span>配置仅用于从概览队列启动此脚本</span>
+          <button id="overview-config-cancel" class="overview-config-button secondary" type="button">取消</button>
+          <button id="overview-config-save" class="overview-config-button primary" type="button">保存配置</button>
+        </footer>
+      </section>
     </div>
     <div id="app-toast" class="app-toast hidden"></div>
   </div>

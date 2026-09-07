@@ -4,6 +4,7 @@ import {
   themeVisualStudio,
   type DockviewApi,
   type DockviewDidDropEvent,
+  type DroptargetOverlayModel,
   type GroupPanelPartInitParameters,
   type IDockviewGroupPanel,
   type IGroupHeaderProps,
@@ -21,7 +22,7 @@ import { createElement, ExternalLink } from 'lucide';
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'editor' | 'details' | 'runtime' | 'contentBrowser';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime';
-export type WorkbenchPanelId = 'workflow' | 'settings' | 'referenceViewer' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -69,8 +70,10 @@ export interface SharedPanelDockBridge {
   dispose(): void;
 }
 
-const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v8';
-const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v7';
+// 详细信息恢复为工作流内部的整高停靠列，旧布局层级不再兼容，
+// 因此通过版本号让这次结构调整使用新的默认布局。
+const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v10';
+const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v10';
 const SHARED_PANEL_SURFACE_KEYS: Record<SharedDockPanelId, string> = {
   contentBrowser: 'onmyoji-studio.content-browser-dock-surface',
   runtime: 'onmyoji-studio.runtime-dock-surface',
@@ -106,9 +109,9 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
   details: {
     title: '详细信息',
     moduleElementId: 'module-details',
-    reference: 'editor',
+    // 不相对某一个局部面板拆分，而是在工作流内部网格的最右侧建立整高列。
     direction: 'right',
-    initialWidth: 300,
+    initialWidth: 320,
     minimumWidth: 280,
     minimumHeight: 260,
   },
@@ -152,7 +155,7 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
   },
 };
 
-const DEFAULT_PANEL_ORDER: DockPanelId[] = ['editor', 'structure', 'palette', 'variables', 'details', 'runtime', 'contentBrowser'];
+const DEFAULT_PANEL_ORDER: DockPanelId[] = ['editor', 'structure', 'palette', 'variables', 'runtime', 'contentBrowser', 'details'];
 
 const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition> = {
   workflow: {
@@ -160,6 +163,15 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     moduleElementId: 'module-workbench',
     minimumWidth: 480,
     minimumHeight: 360,
+  },
+  overview: {
+    title: '概览',
+    moduleElementId: 'module-overview',
+    reference: 'workflow',
+    direction: 'within',
+    minimumWidth: 480,
+    minimumHeight: 360,
+    inactive: true,
   },
   settings: {
     title: '设置',
@@ -193,13 +205,35 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
   },
 };
 
-const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow'];
+const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow', 'overview'];
 
 // Dropping over panel content means "join this tab group" everywhere. Layout
 // splits are created by the application defaults, not by ambiguous edge zones.
 const MERGE_ONLY_DROP_POSITION_RESOLVER: PositionResolver = {
   resolve: ({ zones }) => zones.has('center') ? { position: 'center' } : null,
 };
+
+// A tab is one merge target. Dockview still uses the cursor's left/right half
+// internally to decide the insertion order, but a half-width preview makes it
+// look as though the tab itself can be split into two panes.
+const WHOLE_TAB_DROP_OVERLAY_MODEL: DroptargetOverlayModel = {
+  size: { value: 100, type: 'percentage' },
+  activationSize: { value: 50, type: 'percentage' },
+  smallWidthBoundary: 0,
+  smallHeightBoundary: 0,
+};
+
+// Remove the source tab from its old slot for the duration of a drag. The
+// drag ghost remains visible under the pointer and the real tab returns only
+// when the drop (or cancellation) completes.
+const ONMYOJI_DOCKVIEW_THEME = {
+  ...themeVisualStudio,
+  tabAnimation: 'smooth' as const,
+};
+
+function resolveDropOverlayModel(location: string): DroptargetOverlayModel | undefined {
+  return location === 'tab' ? WHOLE_TAB_DROP_OVERLAY_MODEL : undefined;
+}
 
 function readPersistedLayout(key: string): string | null {
   const stored = window.onmyoji.readLayout(key);
@@ -446,6 +480,109 @@ function registerOutsidePopoutGesture(
   };
 }
 
+/**
+ * Vacate the source presentation while a panel is being dragged. A single-tab
+ * group is hidden so neighbouring groups occupy its space; in a multi-tab
+ * group another tab is activated so the dragged panel's content is no longer
+ * left behind. Cancellation restores the original presentation.
+ */
+function registerDraggedSourceGroupVacancy(
+  api: DockviewApi,
+  onTemporaryLayoutChange: (active: boolean) => void,
+): { dispose(): void } {
+  let sourceGroup: DockviewGroupPanel | undefined;
+  let sourcePanelId: string | undefined;
+  let sourceWasVisible = false;
+  let sourceWasActive = false;
+  let dragGeneration = 0;
+  let finishTimer: number | undefined;
+  let removeEndListeners: (() => void) | undefined;
+
+  const finish = (): void => {
+    dragGeneration += 1;
+    if (finishTimer !== undefined) {
+      window.clearTimeout(finishTimer);
+      finishTimer = undefined;
+    }
+    removeEndListeners?.();
+    removeEndListeners = undefined;
+
+    const group = sourceGroup;
+    const panelId = sourcePanelId;
+    sourceGroup = undefined;
+    sourcePanelId = undefined;
+    if (!group || !panelId) return;
+
+    const currentPanel = api.getPanel(panelId);
+    const groupStillExists = api.groups.some((candidate) => candidate === group);
+    if (groupStillExists && currentPanel?.group === group) {
+      if (sourceWasVisible && !group.api.isVisible) group.api.setVisible(true);
+      if (sourceWasActive) currentPanel.api.setActive();
+    }
+    sourceWasVisible = false;
+    sourceWasActive = false;
+    onTemporaryLayoutChange(false);
+  };
+
+  const finishAfterDockview = (): void => {
+    if (finishTimer !== undefined) return;
+    finishTimer = window.setTimeout(finish, 0);
+  };
+
+  const dragDisposable = api.onWillDragPanel((event) => {
+    finish();
+    const group = event.panel.group;
+    const location = group.api.location.type;
+    const canHideWholeGroup = group.panels.length === 1 && location !== 'popout' && location !== 'edge';
+    const replacementPanel = group.panels.length > 1 && group.activePanel === event.panel
+      ? group.panels.find((panel) => panel !== event.panel)
+      : undefined;
+    if (!canHideWholeGroup && !replacementPanel) return;
+
+    const panelId = event.panel.api.id;
+    const replacementPanelId = replacementPanel?.api.id;
+    const generation = ++dragGeneration;
+    const ownerDocument = group.api.getWindow().document;
+    const eventTarget = event.nativeEvent.target;
+    const usesHtml5Drag = 'dataTransfer' in event.nativeEvent;
+    const endEvents = usesHtml5Drag ? ['dragend'] : ['pointerup', 'pointercancel'];
+    const listener = (): void => finishAfterDockview();
+    for (const eventName of endEvents) {
+      ownerDocument.addEventListener(eventName, listener, true);
+      if (eventTarget instanceof EventTarget) eventTarget.addEventListener(eventName, listener, true);
+    }
+    removeEndListeners = () => {
+      for (const eventName of endEvents) {
+        ownerDocument.removeEventListener(eventName, listener, true);
+        if (eventTarget instanceof EventTarget) eventTarget.removeEventListener(eventName, listener, true);
+      }
+    };
+
+    group.api.getWindow().requestAnimationFrame(() => {
+      if (generation !== dragGeneration || api.getPanel(panelId)?.group !== group) return;
+      sourceGroup = group;
+      sourcePanelId = panelId;
+      sourceWasVisible = group.api.isVisible;
+      sourceWasActive = group.activePanel === event.panel;
+      if (canHideWholeGroup && !sourceWasVisible) return;
+      onTemporaryLayoutChange(true);
+      if (canHideWholeGroup) {
+        group.api.setVisible(false);
+      } else if (replacementPanelId) {
+        const currentReplacement = api.getPanel(replacementPanelId);
+        if (currentReplacement?.group === group) currentReplacement.api.setActive();
+      }
+    });
+  });
+
+  return {
+    dispose: () => {
+      dragDisposable.dispose();
+      finish();
+    },
+  };
+}
+
 export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFailure?: () => void): DockingController {
   const container = document.querySelector<HTMLElement>('#dock-workspace')!;
   const moduleStore = document.querySelector<HTMLElement>('#dock-module-store')!;
@@ -455,19 +592,23 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
   }
 
   const api = createDockview(container, {
-    theme: themeVisualStudio,
+    theme: ONMYOJI_DOCKVIEW_THEME,
     className: 'onmyoji-dockview onmyoji-inner-dockview',
     defaultRenderer: 'always',
     popoutUrl: '/popout.html',
     floatingGroupDragHandle: 'titlebar',
     dndStrategy: 'auto',
     dndEdges: false,
+    // 关闭 dockview 的 tab 溢出下拉（组头部右侧的“∨ 数量”角标）。
+    disableTabsOverflowList: true,
     dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
+    dropOverlayModel: ({ location }) => resolveDropOverlayModel(location),
     createRightHeaderActionComponent: () => new PopoutHeaderAction(),
     createComponent: () => new ExistingModuleRenderer(modules, moduleStore),
   });
 
   let suspendPersistence = true;
+  let temporaryDragLayout = false;
 
   const addPanel = (panelId: DockPanelId): void => {
     if (api.getPanel(panelId)) return;
@@ -484,14 +625,16 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
       minimumWidth: definition.minimumWidth,
       minimumHeight: definition.minimumHeight,
       inactive: definition.inactive,
-      position: reference && definition.direction
-        ? { referencePanel: reference, direction: definition.direction }
+      position: definition.direction
+        ? reference
+          ? { referencePanel: reference, direction: definition.direction }
+          : { direction: definition.direction }
         : undefined,
     });
   };
 
   const saveLayout = (): void => {
-    if (suspendPersistence) return;
+    if (suspendPersistence || temporaryDragLayout) return;
     persistLayout(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
     onLayoutChange?.();
   };
@@ -505,7 +648,7 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     window.requestAnimationFrame(() => {
       api.getPanel('structure')?.api.group.api.setSize({ width: 260 });
       api.getPanel('variables')?.api.group.api.setSize({ width: 260, height: 400 });
-      api.getPanel('details')?.api.group.api.setSize({ width: 300 });
+      api.getPanel('details')?.api.group.api.setSize({ width: 320 });
       api.getPanel('runtime')?.api.group.api.setSize({ height: 260 });
     });
   };
@@ -556,6 +699,10 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
 
   const popoutFailureDisposable = api.onDidOpenPopoutWindowFail(() => onPopoutFailure?.());
   const outsidePopoutDisposable = registerOutsidePopoutGesture(api, container, onPopoutFailure);
+  const sourceGroupVacancyDisposable = registerDraggedSourceGroupVacancy(api, (active) => {
+    temporaryDragLayout = active;
+    if (!active) saveLayout();
+  });
 
   return {
     dockviewApi: api,
@@ -571,6 +718,7 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     resetLayout,
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
+      sourceGroupVacancyDisposable.dispose();
       saveLayout();
       layoutDisposable.dispose();
       panelDisposable.dispose();
@@ -615,20 +763,24 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   }
 
   const api = createDockview(container, {
-    theme: themeVisualStudio,
+    theme: ONMYOJI_DOCKVIEW_THEME,
     className: 'onmyoji-dockview onmyoji-workbench-dockview',
     defaultRenderer: 'always',
     popoutUrl: '/popout.html',
     floatingGroupDragHandle: 'titlebar',
     dndStrategy: 'auto',
     dndEdges: false,
+    // 关闭 dockview 的 tab 溢出下拉（组头部右侧的“∨ 数量”角标）。
+    disableTabsOverflowList: true,
     dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
+    dropOverlayModel: ({ location }) => resolveDropOverlayModel(location),
     createRightHeaderActionComponent: () => new PopoutHeaderAction((group) => !groupContainsWorkflow(group)),
     createTabComponent: ({ name }) => name === 'fixed-workbench' ? new FixedWorkbenchTab() : undefined,
     createComponent: () => new ExistingModuleRenderer(modules, moduleStore),
   });
 
   let suspendPersistence = true;
+  let temporaryDragLayout = false;
 
   const addPanel = (panelId: WorkbenchPanelId): void => {
     if (api.getPanel(panelId)) return;
@@ -645,6 +797,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
       initialHeight: definition.initialHeight,
       minimumWidth: definition.minimumWidth,
       minimumHeight: definition.minimumHeight,
+      inactive: definition.inactive,
       position: reference && definition.direction
         ? { referencePanel: reference, direction: definition.direction }
         : undefined,
@@ -652,7 +805,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   };
 
   const saveLayout = (): void => {
-    if (suspendPersistence) return;
+    if (suspendPersistence || temporaryDragLayout) return;
     persistLayout(WORKBENCH_LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
     onLayoutChange?.();
   };
@@ -677,7 +830,10 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     }
   }
   if (!restored) resetLayout();
-  else if (!api.getPanel('workflow')) addPanel('workflow');
+  else {
+    if (!api.getPanel('workflow')) addPanel('workflow');
+    if (!api.getPanel('overview')) addPanel('overview');
+  }
   suspendPersistence = false;
 
   // 若持久化布局把设置面板恢复为浮动/弹出状态，先关闭它，
@@ -737,6 +893,10 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     if (item instanceof DockviewGroupPanel) return !groupContainsWorkflow(item);
     return item.api.id !== 'workflow';
   });
+  const sourceGroupVacancyDisposable = registerDraggedSourceGroupVacancy(api, (active) => {
+    temporaryDragLayout = active;
+    if (!active) saveLayout();
+  });
 
   return {
     dockviewApi: api,
@@ -753,6 +913,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     resetLayout,
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
+      sourceGroupVacancyDisposable.dispose();
       saveLayout();
       layoutDisposable.dispose();
       panelDisposable.dispose();

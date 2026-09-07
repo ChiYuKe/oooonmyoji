@@ -17,6 +17,7 @@ export default defineConfig({
       input: {
         index: path.resolve(import.meta.dirname, 'src/renderer/index.html'),
         popout: path.resolve(import.meta.dirname, 'src/renderer/popout.html'),
+        'vision-test': path.resolve(import.meta.dirname, 'src/renderer/vision-test.html'),
       },
     },
   },

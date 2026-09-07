@@ -1,10 +1,13 @@
 import {
   ArrowLeft,
   Box,
+  Braces,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CircleHelp,
   CircleDot,
+  CirclePlus,
   Columns3,
   Copy,
   Ellipsis,
@@ -16,6 +19,8 @@ import {
   FolderOpen,
   FoldVertical,
   GitBranch,
+  GitFork,
+  Hash,
   Image,
   ImageDown,
   LayoutGrid,
@@ -29,10 +34,18 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Repeat2,
+  Route,
   Save,
   Search,
   Settings2,
+  Sigma,
+  SlidersHorizontal,
+  Scan,
   Square,
+  Split,
+  ToggleLeft,
+  Type,
   UnfoldVertical,
   WandSparkles,
   Waypoints,
@@ -48,6 +61,7 @@ import type {
   ReferenceGraph,
   ReferenceItem,
   ReferenceNode,
+  ParameterInfo,
   RuntimeInstance,
   RuntimeOutputEvent,
   RuntimeStateEvent,
@@ -78,7 +92,7 @@ interface SidebarNode {
 interface SidebarVariable {
   name: string;
   type: string;
-  public: boolean;
+  scope: 'inputs' | 'variables';
 }
 
 interface EditorEnvelope {
@@ -108,10 +122,12 @@ interface InspectorSelection {
   parent?: string;
   child?: string;
   name?: string;
+  scope?: 'inputs' | 'variables';
 }
 
 type ContentBrowserView = 'grid' | 'list';
 type ContentBrowserItemKind = 'folder' | 'workflow' | 'asset';
+type OverviewItemStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
 
 interface ContentBrowserItem {
   kind: ContentBrowserItemKind;
@@ -119,6 +135,21 @@ interface ContentBrowserItem {
   name: string;
   workflow?: WorkflowDescriptor;
   asset?: AssetImage;
+}
+
+interface OverviewRunState {
+  items: Array<{ rel: string; status: OverviewItemStatus }>;
+  index: number;
+  instanceId: string;
+  active: boolean;
+  cancelling: boolean;
+  message: string;
+}
+
+interface OverviewConfigReader {
+  name: string;
+  read: () => unknown;
+  focus: () => void;
 }
 
 const api = window.onmyoji;
@@ -129,6 +160,7 @@ const desktopIcons = {
   ChevronRight,
   ChevronUp,
   CircleDot,
+  CirclePlus,
   Columns3,
   Copy,
   Ellipsis,
@@ -140,6 +172,7 @@ const desktopIcons = {
   FolderOpen,
   FoldVertical,
   GitBranch,
+  GitFork,
   Image,
   ImageDown,
   LayoutGrid,
@@ -153,19 +186,48 @@ const desktopIcons = {
   Play,
   Plus,
   RefreshCw,
+  Repeat2,
+  Route,
   Save,
   Search,
   Settings2,
+  SlidersHorizontal,
   Square,
+  Split,
   UnfoldVertical,
   WandSparkles,
   Waypoints,
   Workflow,
   X,
 };
+
+/** 将浏览器原生 title 提示迁移为工作台统一的自定义 tooltip。 */
+function installCustomTooltips(): void {
+  const htmlNamespace = 'http://www.w3.org/1999/xhtml';
+  const scan = (): void => {
+    document.querySelectorAll<HTMLElement>('[title]').forEach((element) => {
+      if (element.namespaceURI !== htmlNamespace || element.tagName === 'IFRAME') return;
+      const label = element.getAttribute('title')?.trim();
+      if (!label) return;
+      element.dataset.tooltip = label;
+      element.removeAttribute('title');
+      if (!element.getAttribute('aria-label') && /^(BUTTON|INPUT|SELECT)$/.test(element.tagName)) {
+        element.setAttribute('aria-label', label.replace(/\s+/g, ' '));
+      }
+    });
+  };
+
+  scan();
+  const observer = new MutationObserver(scan);
+  observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+}
+
 const editorFrame = document.querySelector<HTMLIFrameElement>('#editor-frame')!;
 const detailsFrame = document.querySelector<HTMLIFrameElement>('#details-frame')!;
-const instanceSelect = document.querySelector<HTMLSelectElement>('#instance-select')!;
+const instancePicker = document.querySelector<HTMLDivElement>('#instance-picker')!;
+const instanceSelect = document.querySelector<HTMLButtonElement>('#instance-select')!;
+const instanceSelectLabel = document.querySelector<HTMLElement>('#instance-select-label')!;
+const instanceMenu = document.querySelector<HTMLDivElement>('#instance-menu')!;
 const structureView = document.querySelector<HTMLElement>('#structure-view')!;
 const variablesView = document.querySelector<HTMLElement>('#variables-view')!;
 const loadingMask = document.querySelector<HTMLElement>('#loading-mask')!;
@@ -179,11 +241,20 @@ const settingsAutoRefresh = document.querySelector<HTMLInputElement>('#settings-
 const settingsDefaultWorkflow = document.querySelector<HTMLInputElement>('#settings-default-workflow')!;
 const settingsDebugEnabled = document.querySelector<HTMLInputElement>('#settings-debug-enabled')!;
 const settingsDebugAnnotate = document.querySelector<HTMLInputElement>('#settings-debug-annotate')!;
+const overviewSearch = document.querySelector<HTMLInputElement>('#overview-search')!;
+const overviewInstanceSelect = document.querySelector<HTMLSelectElement>('#overview-instance-select')!;
+const overviewWorkflowGrid = document.querySelector<HTMLElement>('#overview-workflow-grid')!;
+const overviewQueueElement = document.querySelector<HTMLElement>('#overview-queue')!;
+const overviewRunButton = document.querySelector<HTMLButtonElement>('#overview-run')!;
+const overviewStopButton = document.querySelector<HTMLButtonElement>('#overview-stop')!;
+const overviewConfigModal = document.querySelector<HTMLElement>('#overview-config-modal')!;
+const overviewConfigFields = document.querySelector<HTMLElement>('#overview-config-fields')!;
 
 let bootstrap: BootstrapData | undefined;
 let currentUri = '';
 let currentText = '';
 let selectedInstance = '';
+let runtimeInstances: RuntimeInstance[] = [];
 let backStack: string[] = [];
 let editorReady = false;
 let currentEditorInit: WorkflowEditorInit | undefined;
@@ -192,6 +263,7 @@ let sidebarNodes: SidebarNode[] = [];
 let sidebarVariables: SidebarVariable[] = [];
 let selectedNode = '';
 let selectedVariable = '';
+let selectedVariableScope: 'inputs' | 'variables' = 'inputs';
 /** 结构树手动收起的分支节点 ID：重渲染（如切换选中节点）时保持折叠状态。 */
 let collapsedTreeNodes = new Set<string>();
 let toastTimer: number | undefined;
@@ -212,6 +284,127 @@ let runtimeProcessResult: { code: number | null; signal: string | null; stopped:
 let autoRefreshInstances = true;
 let loadDefaultWorkflowOnStart = true;
 let moreMenu: { menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
+let overviewSelection: string[] = [];
+let overviewQuery = '';
+let overviewRun: OverviewRunState | undefined;
+let runtimeBusy = false;
+let overviewConfigurations: Record<string, Record<string, unknown>> = {};
+let overviewConfigWorkflow: WorkflowDescriptor | undefined;
+let overviewConfigReaders: OverviewConfigReader[] = [];
+let visionTestOpening = false;
+
+const OVERVIEW_SELECTION_KEY = 'onmyoji-studio.overview-selection.v1';
+const OVERVIEW_CONFIG_KEY = 'onmyoji-studio.overview-inputs.v1';
+const OVERVIEW_INPUT_LABELS: Record<string, string> = {
+  attack_point: '攻击点击位置',
+  attack_points: '攻击目标位置列表',
+  battle_roi: '战斗识别区域',
+  battle_texts: '战斗页面识别文字',
+  battle_timeout: '战斗超时时间',
+  bounty_reject_template: '悬赏拒绝按钮模板',
+  buff_auto_disabled_template: '自动加成关闭提示模板',
+  cancel_button_template: '取消按钮模板',
+  category: '任务类别',
+  challenge_template: '挑战按钮模板',
+  challenge_timeout: '挑战超时时间',
+  completed_templates: '完成状态模板列表',
+  completed_texts: '完成状态文字列表',
+  confirm_timeout: '确认超时时间',
+  continue_cancel_template: '继续邀请取消按钮模板',
+  continue_prompt_template: '继续邀请提示模板',
+  courtyard_template: '庭院入口模板',
+  enable_realm_raid: '启用结界突破',
+  entry_point: '入口点击位置',
+  exit_confirm_point: '退出确认点击位置',
+  exit_confirm_roi: '退出确认识别区域',
+  exit_confirm_texts: '退出确认文字列表',
+  experience_template: '经验结算模板',
+  invite_popup_template: '邀请弹窗模板',
+  invite_target_template: '邀请目标模板',
+  layer: '奖励层级',
+  leave_current_screen: '离开当前页面',
+  map_realm_template: '结界突破地图入口模板',
+  map_souls_template: '御魂地图入口模板',
+  max_return_attempts: '最大返回尝试次数',
+  max_settlement_clicks: '最大结算点击次数',
+  member_departure_grace_seconds: '队员离开宽限时间',
+  member_join_timeout: '队员加入超时时间',
+  member_present_template: '队员已在场模板',
+  minimum_passes: '最少通关次数',
+  page_roi: '页面识别区域',
+  page_texts: '页面识别文字列表',
+  party_browser_template: '组队界面模板',
+  party_exit_button_template: '退出队伍按钮模板',
+  party_exit_confirm_template: '退出队伍确认模板',
+  party_room_template: '组队房间模板',
+  pass_roi: '通关状态识别区域',
+  passes_available: '是否有可挑战次数',
+  phase: '执行阶段',
+  prepare_point: '准备按钮点击位置',
+  prepare_timeout: '准备超时时间',
+  ready_template: '准备按钮模板',
+  realm_close_point: '结界突破关闭位置',
+  realm_completed_templates: '结界完成模板列表',
+  realm_completed_texts: '结界完成文字列表',
+  realm_entry_point: '结界突破入口位置',
+  realm_pass_roi: '结界通关识别区域',
+  realm_pass_template: '结界通关模板',
+  realm_popup_close_point: '结界弹窗关闭位置',
+  realm_popup_roi: '结界弹窗识别区域',
+  realm_target_points: '结界目标点击位置列表',
+  realm_target_rois: '结界目标识别区域列表',
+  realm_template: '结界突破页面模板',
+  realm_threshold: '结界突破阈值',
+  recovery_timeout: '页面恢复超时时间',
+  resume_souls: '恢复御魂任务',
+  retry_confirm_checkbox_point: '再次挑战复选框位置',
+  retry_confirm_point: '再次挑战确认位置',
+  retry_confirm_roi: '再次挑战确认区域',
+  retry_confirm_texts: '再次挑战确认文字列表',
+  retry_point: '再次挑战点击位置',
+  reward_advance_delay_seconds: '奖励页前进等待时间',
+  reward_advance_x: '奖励页点击横坐标',
+  reward_advance_y: '奖励页点击纵坐标',
+  rounds: '运行轮数',
+  settlement_roi: '结算识别区域',
+  settlement_template: '结算页面模板',
+  settlement_timeout: '结算超时时间',
+  should_enter_realm: '进入结界突破',
+  souls_courtyard_template: '御魂庭院入口模板',
+  souls_type_entry_point: '御魂类型入口位置',
+  souls_type_template: '御魂类型页面模板',
+  target_limit: '目标数量上限',
+  target_points: '目标点击位置列表',
+  target_rois: '目标识别区域列表',
+  target_states: '目标状态列表',
+  timeout_seconds: '总超时时间',
+  track_realm_pass: '统计结界通关',
+  treasure_close_point: '宝箱关闭位置',
+  treasure_template: '宝箱页面模板',
+  victory_texts: '胜利页面识别文字',
+};
+const OVERVIEW_INPUT_WORDS: Record<string, string> = {
+  attack: '攻击', target: '目标', battle: '战斗', bounty: '悬赏', buff: '加成', auto: '自动',
+  cancel: '取消', category: '类别', challenge: '挑战', completed: '完成', confirm: '确认', continue: '继续',
+  courtyard: '庭院', enable: '启用', entry: '入口', exit: '退出', experience: '经验', invite: '邀请',
+  layer: '层级', leave: '离开', map: '地图', max: '最大', member: '队员', minimum: '最少', page: '页面',
+  party: '队伍', pass: '通关', passes: '次数', phase: '阶段', prepare: '准备', ready: '就绪', realm: '结界',
+  recovery: '恢复', resume: '恢复', retry: '重试', reward: '奖励', rounds: '轮数', settlement: '结算',
+  should: '是否', souls: '御魂', timeout: '超时', track: '统计', treasure: '宝箱', victory: '胜利',
+  point: '点击位置', points: '位置列表', roi: '识别区域', rois: '区域列表', template: '模板', templates: '模板列表',
+  text: '文字', texts: '文字列表', seconds: '秒', limit: '上限', threshold: '阈值', available: '可用',
+  current: '当前', screen: '页面', return: '返回', attempts: '尝试次数', clicks: '点击次数', join: '加入',
+  departure: '离开', grace: '宽限', popup: '弹窗', close: '关闭', checkbox: '复选框', advance: '前进',
+  delay: '等待', x: '横坐标', y: '纵坐标', type: '类型', states: '状态列表', browser: '界面', room: '房间',
+};
+
+function overviewInputDisplayName(name: string): string {
+  const exact = OVERVIEW_INPUT_LABELS[name];
+  if (exact) return exact;
+  const words = name.split('_').map((word) => OVERVIEW_INPUT_WORDS[word] ?? word);
+  const translated = words.join('');
+  return translated === name.replaceAll('_', '') ? name : translated;
+}
 
 function postToEditor(payload: Record<string, unknown>): void {
   postToFrame(editorFrame, payload);
@@ -322,30 +515,895 @@ function renderWorkflowSelect(workflows: WorkflowDescriptor[]): void {
   document.querySelector<HTMLElement>('#workflow-count')!.textContent = `${workflows.length} 个工作流`;
 }
 
-function renderInstances(instances: RuntimeInstance[], requested = selectedInstance): void {
-  const options = instances.map((instance) => {
+function overviewWorkflowName(workflow: WorkflowDescriptor): string {
+  return workflow.id || workflow.name.replace(/\.json$/i, '');
+}
+
+function overviewWorkflowKind(workflow: WorkflowDescriptor): string {
+  const rel = workflow.rel.replace(/\\/g, '/').toLowerCase();
+  if (rel.includes('/entrypoints/')) return '入口脚本';
+  if (rel.includes('/examples/')) return '示例';
+  if (rel.includes('/shared/')) return '共享流程';
+  return '工作流';
+}
+
+function overviewWorkflowRank(workflow: WorkflowDescriptor): number {
+  const kind = overviewWorkflowKind(workflow);
+  return kind === '入口脚本' ? 0 : kind === '工作流' ? 1 : kind === '共享流程' ? 2 : 3;
+}
+
+function sortedOverviewWorkflows(): WorkflowDescriptor[] {
+  return [...(bootstrap?.workflows ?? [])].sort((left, right) => (
+    overviewWorkflowRank(left) - overviewWorkflowRank(right)
+    || overviewWorkflowName(left).localeCompare(overviewWorkflowName(right), 'zh-CN')
+    || left.rel.localeCompare(right.rel, 'zh-CN')
+  ));
+}
+
+function filteredOverviewWorkflows(): WorkflowDescriptor[] {
+  const query = overviewQuery.trim().toLocaleLowerCase('zh-CN');
+  if (!query) return sortedOverviewWorkflows();
+  return sortedOverviewWorkflows().filter((workflow) => (
+    `${overviewWorkflowName(workflow)} ${workflow.name} ${workflow.rel} ${workflow.description ?? ''}`
+      .toLocaleLowerCase('zh-CN')
+      .includes(query)
+  ));
+}
+
+function persistOverviewSelection(): void {
+  window.localStorage.setItem(OVERVIEW_SELECTION_KEY, JSON.stringify(overviewSelection));
+}
+
+function reconcileOverviewSelection(loadPersisted = false): void {
+  const available = new Set((bootstrap?.workflows ?? []).map((workflow) => workflow.rel));
+  let candidates = overviewSelection;
+  if (loadPersisted) {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(OVERVIEW_SELECTION_KEY) || '[]') as unknown;
+      candidates = Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      candidates = [];
+    }
+  }
+  overviewSelection = [...new Set(candidates.filter((rel) => available.has(rel)))];
+  persistOverviewSelection();
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneOverviewValue(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value)) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function persistOverviewConfigurations(): void {
+  window.localStorage.setItem(OVERVIEW_CONFIG_KEY, JSON.stringify(overviewConfigurations));
+}
+
+function reconcileOverviewConfigurations(loadPersisted = false): void {
+  let candidates: Record<string, Record<string, unknown>> = overviewConfigurations;
+  if (loadPersisted) {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(OVERVIEW_CONFIG_KEY) || '{}') as unknown;
+      candidates = isPlainObject(parsed)
+        ? Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, Record<string, unknown>] => isPlainObject(entry[1])))
+        : {};
+    } catch {
+      candidates = {};
+    }
+  }
+  const next: Record<string, Record<string, unknown>> = {};
+  for (const workflow of bootstrap?.workflows ?? []) {
+    const stored = candidates[workflow.rel];
+    if (!stored) continue;
+    const allowed = new Set((workflow.inputs ?? []).map((input) => input.name));
+    const values: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(stored)) {
+      const migratedName = OVERVIEW_INPUT_LABELS[name] ?? name;
+      if (!allowed.has(migratedName)) continue;
+      if (name === migratedName || !Object.prototype.hasOwnProperty.call(values, migratedName)) {
+        values[migratedName] = value;
+      }
+    }
+    if (Object.keys(values).length > 0) next[workflow.rel] = values;
+  }
+  overviewConfigurations = next;
+  persistOverviewConfigurations();
+}
+
+function overviewConfiguredInputs(workflow: WorkflowDescriptor): Record<string, unknown> | undefined {
+  const stored = overviewConfigurations[workflow.rel];
+  if (!stored) return undefined;
+  const values: Record<string, unknown> = {};
+  for (const input of workflow.inputs ?? []) {
+    if (Object.prototype.hasOwnProperty.call(stored, input.name)) {
+      values[input.name] = cloneOverviewValue(stored[input.name]);
+    }
+  }
+  return Object.keys(values).length > 0 ? values : undefined;
+}
+
+function overviewParameterTypeLabel(definition: ParameterInfo): string {
+  if (definition.enum?.length) return '选项';
+  if (definition.type === 'boolean') return '开关';
+  if (definition.type === 'integer') return '整数';
+  if (definition.type === 'number') return '数字';
+  if (definition.type === 'asset') return '图片资源';
+  if (definition.type === 'rect') return '坐标 / 区域';
+  if (definition.type === 'array') return '列表';
+  if (definition.type === 'object') return '对象';
+  return '文本';
+}
+
+function overviewInputInitialValue(name: string, definition: ParameterInfo, stored: Record<string, unknown>): unknown {
+  if (Object.prototype.hasOwnProperty.call(stored, name)) return cloneOverviewValue(stored[name]);
+  if (Object.prototype.hasOwnProperty.call(definition, 'default')) return cloneOverviewValue(definition.default);
+  if (definition.enum?.length) return cloneOverviewValue(definition.enum[0]);
+  if (definition.type === 'boolean') return false;
+  if (definition.type === 'rect') return [0, 0, 0, 0];
+  if (definition.type === 'array') return [];
+  if (definition.type === 'object') return {};
+  return undefined;
+}
+
+function overviewConfigHint(definition: ParameterInfo): string {
+  const parts: string[] = [];
+  if (definition.min !== undefined || definition.max !== undefined) {
+    parts.push(`范围 ${definition.min ?? '不限'} – ${definition.max ?? '不限'}`);
+  }
+  if (definition.minItems !== undefined || definition.maxItems !== undefined) {
+    parts.push(`条目 ${definition.minItems ?? '不限'} – ${definition.maxItems ?? '不限'}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(definition, 'default')) {
+    const raw = JSON.stringify(definition.default);
+    parts.push(`默认 ${raw === undefined ? '未设置' : raw}`);
+  }
+  return parts.join(' · ');
+}
+
+function createOverviewConfigControl(
+  name: string,
+  definition: ParameterInfo,
+  value: unknown,
+): { element: HTMLElement; reader: OverviewConfigReader } {
+  const invalid = (message: string): never => { throw new Error(`${overviewInputDisplayName(name)}：${message}`); };
+  if (definition.enum?.length) {
+    const select = document.createElement('select');
+    select.className = 'overview-config-control';
+    const selectedIndex = definition.enum.findIndex((item) => JSON.stringify(item) === JSON.stringify(value));
+    definition.enum.forEach((optionValue, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = typeof optionValue === 'string' ? optionValue : JSON.stringify(optionValue);
+      select.appendChild(option);
+    });
+    select.value = String(selectedIndex >= 0 ? selectedIndex : 0);
+    return {
+      element: select,
+      reader: {
+        name,
+        read: () => cloneOverviewValue(definition.enum?.[Number(select.value)]),
+        focus: () => select.focus(),
+      },
+    };
+  }
+  if (definition.type === 'boolean') {
+    const label = document.createElement('label');
+    label.className = 'overview-config-switch';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = value === true;
+    const track = document.createElement('span');
+    const text = document.createElement('em');
+    text.textContent = checkbox.checked ? '开启' : '关闭';
+    checkbox.addEventListener('change', () => { text.textContent = checkbox.checked ? '开启' : '关闭'; });
+    label.append(checkbox, track, text);
+    return { element: label, reader: { name, read: () => checkbox.checked, focus: () => checkbox.focus() } };
+  }
+  if (definition.type === 'integer' || definition.type === 'number') {
+    const input = document.createElement('input');
+    input.className = 'overview-config-control';
+    input.type = 'number';
+    input.step = definition.type === 'integer' ? '1' : 'any';
+    if (definition.min !== undefined) input.min = String(definition.min);
+    if (definition.max !== undefined) input.max = String(definition.max);
+    input.value = typeof value === 'number' ? String(value) : '';
+    return {
+      element: input,
+      reader: {
+        name,
+        read: () => {
+          if (!input.value.trim()) return definition.required ? invalid('不能为空') : undefined;
+          const parsed = Number(input.value);
+          if (!Number.isFinite(parsed)) return invalid('请输入有效数字');
+          if (definition.type === 'integer' && !Number.isInteger(parsed)) return invalid('请输入整数');
+          if (definition.min !== undefined && parsed < definition.min) return invalid(`不能小于 ${definition.min}`);
+          if (definition.max !== undefined && parsed > definition.max) return invalid(`不能大于 ${definition.max}`);
+          return parsed;
+        },
+        focus: () => input.focus(),
+      },
+    };
+  }
+  if (definition.type === 'rect') {
+    const rect = Array.isArray(value) ? value : [0, 0, 0, 0];
+    const labels = ['X', 'Y', '宽', '高'];
+    const wrap = document.createElement('div');
+    wrap.className = 'overview-config-rect';
+    const controls = labels.map((labelText, index) => {
+      const label = document.createElement('label');
+      const text = document.createElement('span');
+      text.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '1';
+      input.value = typeof rect[index] === 'number' ? String(rect[index]) : '0';
+      label.append(text, input);
+      wrap.appendChild(label);
+      return input;
+    });
+    return {
+      element: wrap,
+      reader: {
+        name,
+        read: () => controls.map((input) => {
+          const parsed = Number(input.value);
+          if (!Number.isFinite(parsed)) return invalid('四个坐标都必须是数字');
+          return parsed;
+        }),
+        focus: () => controls[0].focus(),
+      },
+    };
+  }
+  if (definition.type === 'array' || definition.type === 'object') {
+    const textarea = document.createElement('textarea');
+    textarea.className = 'overview-config-control overview-config-json';
+    textarea.spellcheck = false;
+    textarea.value = value === undefined ? '' : JSON.stringify(value, null, 2);
+    textarea.placeholder = definition.type === 'array' ? '[]' : '{}';
+    return {
+      element: textarea,
+      reader: {
+        name,
+        read: () => {
+          if (!textarea.value.trim()) return definition.required ? invalid('不能为空') : undefined;
+          let parsed: unknown;
+          try { parsed = JSON.parse(textarea.value); } catch { return invalid('格式不正确，请使用有效的 JSON'); }
+          if (definition.type === 'array' && !Array.isArray(parsed)) return invalid('请输入列表，例如 [1, 2, 3]');
+          if (definition.type === 'object' && !isPlainObject(parsed)) return invalid('请输入对象，例如 {"名称": "值"}');
+          if (Array.isArray(parsed) && definition.minItems !== undefined && parsed.length < definition.minItems) return invalid(`至少需要 ${definition.minItems} 项`);
+          if (Array.isArray(parsed) && definition.maxItems !== undefined && parsed.length > definition.maxItems) return invalid(`最多允许 ${definition.maxItems} 项`);
+          return parsed;
+        },
+        focus: () => textarea.focus(),
+      },
+    };
+  }
+  const input = document.createElement('input');
+  input.className = 'overview-config-control';
+  input.type = 'text';
+  input.value = value === undefined ? '' : String(value);
+  input.placeholder = definition.type === 'asset' ? 'assets/templates/…' : '';
+  return {
+    element: input,
+    reader: {
+      name,
+      read: () => {
+        const text = input.value.trim();
+        if (!text && definition.required) return invalid('不能为空');
+        if (!text) return undefined;
+        if (definition.minLength !== undefined && text.length < definition.minLength) return invalid(`至少需要 ${definition.minLength} 个字符`);
+        if (definition.maxLength !== undefined && text.length > definition.maxLength) return invalid(`最多允许 ${definition.maxLength} 个字符`);
+        return text;
+      },
+      focus: () => input.focus(),
+    },
+  };
+}
+
+function renderOverviewConfigFields(workflow: WorkflowDescriptor): void {
+  overviewConfigReaders = [];
+  const stored = overviewConfigurations[workflow.rel] ?? {};
+  const fields = (workflow.inputs ?? []).map(({ name, definition }) => {
+    const field = document.createElement('section');
+    field.className = 'overview-config-field';
+    const heading = document.createElement('div');
+    heading.className = 'overview-config-field-heading';
+    const label = document.createElement('label');
+    const displayName = document.createElement('span');
+    displayName.textContent = overviewInputDisplayName(name);
+    const parameterName = document.createElement('code');
+    parameterName.textContent = name;
+    label.append(displayName);
+    if (displayName.textContent !== name) label.append(parameterName);
+    const badges = document.createElement('span');
+    badges.textContent = `${overviewParameterTypeLabel(definition)} · ${definition.required ? '必填' : '可选'}`;
+    heading.append(label, badges);
+    const { element, reader } = createOverviewConfigControl(name, definition, overviewInputInitialValue(name, definition, stored));
+    label.addEventListener('click', () => reader.focus());
+    overviewConfigReaders.push(reader);
+    const description = document.createElement('p');
+    description.textContent = definition.description || '此参数暂无说明。';
+    const hintText = overviewConfigHint(definition);
+    field.append(heading, element, description);
+    if (hintText) {
+      const hint = document.createElement('small');
+      hint.textContent = hintText;
+      field.appendChild(hint);
+    }
+    return field;
+  });
+  if (fields.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'overview-config-empty';
+    empty.innerHTML = '<i data-lucide="sliders-horizontal"></i><strong>没有可配置参数</strong><span>这个脚本可以直接加入队列运行。</span>';
+    fields.push(empty);
+  }
+  overviewConfigFields.replaceChildren(...fields);
+  createIcons({ icons: desktopIcons, root: overviewConfigModal });
+}
+
+function openOverviewConfiguration(workflow: WorkflowDescriptor): void {
+  overviewConfigWorkflow = workflow;
+  document.querySelector<HTMLElement>('#overview-config-title')!.textContent = `${overviewWorkflowName(workflow)} · 配置`;
+  document.querySelector<HTMLElement>('#overview-config-path')!.textContent = workflow.rel;
+  renderOverviewConfigFields(workflow);
+  overviewConfigModal.classList.remove('hidden');
+  overviewConfigModal.setAttribute('aria-hidden', 'false');
+  window.setTimeout(() => overviewConfigReaders[0]?.focus(), 0);
+}
+
+function closeOverviewConfiguration(): void {
+  overviewConfigModal.classList.add('hidden');
+  overviewConfigModal.setAttribute('aria-hidden', 'true');
+  overviewConfigWorkflow = undefined;
+  overviewConfigReaders = [];
+}
+
+function saveOverviewConfiguration(): void {
+  const workflow = overviewConfigWorkflow;
+  if (!workflow) return;
+  const values: Record<string, unknown> = {};
+  try {
+    for (const reader of overviewConfigReaders) {
+      let value: unknown;
+      try {
+        value = reader.read();
+      } catch (error) {
+        reader.focus();
+        throw error;
+      }
+      if (value !== undefined) values[reader.name] = value;
+    }
+  } catch (error) {
+    showToast(errorMessage(error), true);
+    return;
+  }
+  if (Object.keys(values).length > 0) overviewConfigurations[workflow.rel] = values;
+  else delete overviewConfigurations[workflow.rel];
+  persistOverviewConfigurations();
+  closeOverviewConfiguration();
+  renderOverview();
+  showToast(`${overviewWorkflowName(workflow)} 的配置已保存`);
+}
+
+function restoreOverviewConfigurationDefaults(): void {
+  const workflow = overviewConfigWorkflow;
+  if (!workflow) return;
+  delete overviewConfigurations[workflow.rel];
+  persistOverviewConfigurations();
+  closeOverviewConfiguration();
+  renderOverview();
+  showToast(`${overviewWorkflowName(workflow)} 已恢复默认配置`);
+}
+
+function overviewStatusLabel(status?: OverviewItemStatus, selected = false): string {
+  if (status === 'queued') return '等待执行';
+  if (status === 'running') return '运行中';
+  if (status === 'succeeded') return '已完成';
+  if (status === 'failed') return '失败';
+  if (status === 'cancelled') return '已停止';
+  if (status === 'skipped') return '已跳过';
+  return selected ? '已选择' : '未选择';
+}
+
+function overviewRunItem(rel: string): { rel: string; status: OverviewItemStatus } | undefined {
+  return overviewRun?.items.find((item) => item.rel === rel);
+}
+
+function resetOverviewRunResult(): void {
+  if (!overviewRun?.active) overviewRun = undefined;
+}
+
+function updateOverviewSelection(rel: string, checked: boolean): void {
+  if (overviewRun?.active) return;
+  if (checked && !overviewSelection.includes(rel)) overviewSelection.push(rel);
+  if (!checked) overviewSelection = overviewSelection.filter((item) => item !== rel);
+  resetOverviewRunResult();
+  persistOverviewSelection();
+  renderOverview();
+}
+
+function moveOverviewSelection(index: number, offset: number): void {
+  if (overviewRun?.active) return;
+  const target = index + offset;
+  if (index < 0 || target < 0 || index >= overviewSelection.length || target >= overviewSelection.length) return;
+  [overviewSelection[index], overviewSelection[target]] = [overviewSelection[target], overviewSelection[index]];
+  resetOverviewRunResult();
+  persistOverviewSelection();
+  renderOverview();
+}
+
+function openOverviewWorkflow(workflow: WorkflowDescriptor): void {
+  workbenchFrame?.show('workflow');
+  desktopControl('switchWorkflow', workflow.uri);
+}
+
+function renderOverviewInstances(): void {
+  const options = runtimeInstances.map((instance) => {
     const option = document.createElement('option');
     option.value = instance.id;
-    // 选中态高亮和行间距由内部行元素承担：Chromium 会把 option 自身的 margin/border 强制清零
-    const row = document.createElement('span');
-    row.className = 'select-row';
-    row.textContent = instance.displayName
-      || (instance.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instance.id);
-    option.appendChild(row);
-    option.title = [instance.displayName, instance.id, instance.backend, instance.adbSerial].filter(Boolean).join(' · ');
+    option.textContent = instanceLabel(instance);
     return option;
   });
   if (options.length === 0) {
     const option = document.createElement('option');
     option.value = '';
-    option.disabled = true;
-    option.textContent = '未检测到运行实例';
+    option.textContent = '未检测到实例';
     options.push(option);
   }
-  instanceSelect.replaceChildren(...options);
+  overviewInstanceSelect.replaceChildren(...options);
+  overviewInstanceSelect.value = selectedInstance;
+  overviewInstanceSelect.disabled = runtimeInstances.length === 0 || Boolean(overviewRun?.active);
+}
+
+function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
+  const rel = workflow.rel;
+  const selectedIndex = overviewSelection.indexOf(rel);
+  const selected = selectedIndex >= 0;
+  const runItem = overviewRunItem(rel);
+  const status = runItem?.status;
+  const locked = Boolean(overviewRun?.active);
+  const card = document.createElement('article');
+  card.className = ['overview-card', selected ? 'selected' : '', status ?? ''].filter(Boolean).join(' ');
+  card.tabIndex = locked ? -1 : 0;
+  card.setAttribute('role', 'checkbox');
+  card.setAttribute('aria-checked', String(selected));
+  card.dataset.workflowRel = rel;
+
+  const header = document.createElement('div');
+  header.className = 'overview-card-header';
+  const checkbox = document.createElement('input');
+  checkbox.className = 'overview-card-check';
+  checkbox.type = 'checkbox';
+  checkbox.checked = selected;
+  checkbox.disabled = locked;
+  checkbox.setAttribute('aria-label', `选择 ${overviewWorkflowName(workflow)}`);
+  checkbox.addEventListener('change', () => updateOverviewSelection(rel, checkbox.checked));
+  const title = document.createElement('div');
+  title.className = 'overview-card-title';
+  const strong = document.createElement('strong');
+  strong.textContent = overviewWorkflowName(workflow);
+  strong.title = overviewWorkflowName(workflow);
+  const path = document.createElement('span');
+  path.textContent = rel.replace(/^workflows\//i, '');
+  path.title = rel;
+  title.append(strong, path);
+  header.append(checkbox, title);
+  if (selected) {
+    const badge = document.createElement('span');
+    badge.className = 'overview-order-badge';
+    badge.textContent = String(selectedIndex + 1);
+    badge.setAttribute('aria-label', `执行顺序 ${selectedIndex + 1}`);
+    header.appendChild(badge);
+  }
+
+  const description = document.createElement('div');
+  description.className = 'overview-card-description';
+  description.textContent = workflow.description || '暂无说明，双击或点“编辑”查看工作流。';
+
+  const footer = document.createElement('div');
+  footer.className = 'overview-card-footer';
+  const kind = document.createElement('span');
+  kind.className = 'overview-card-tag';
+  kind.textContent = overviewWorkflowKind(workflow);
+  const inputs = document.createElement('span');
+  inputs.className = 'overview-card-tag';
+  inputs.textContent = `${workflow.inputs?.length ?? 0} 个输入`;
+  const configure = document.createElement('button');
+  const configured = Boolean(overviewConfiguredInputs(workflow));
+  configure.className = `overview-card-config${configured ? ' configured' : ''}`;
+  configure.type = 'button';
+  configure.textContent = configured ? '已配置' : '配置';
+  configure.disabled = locked;
+  configure.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openOverviewConfiguration(workflow);
+  });
+  const open = document.createElement('button');
+  open.className = 'overview-card-open';
+  open.type = 'button';
+  open.textContent = '编辑';
+  open.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openOverviewWorkflow(workflow);
+  });
+  const state = document.createElement('span');
+  state.className = 'overview-card-status';
+  state.textContent = overviewStatusLabel(status, selected);
+  footer.append(kind, inputs, configure, open, state);
+  card.append(header, description, footer);
+
+  card.addEventListener('click', (event) => {
+    if (locked || (event.target as Element).closest('button, input')) return;
+    updateOverviewSelection(rel, !selected);
+  });
+  card.addEventListener('dblclick', (event) => {
+    if ((event.target as Element).closest('button, input')) return;
+    openOverviewWorkflow(workflow);
+  });
+  card.addEventListener('keydown', (event) => {
+    if (locked || event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    updateOverviewSelection(rel, !selected);
+  });
+  return card;
+}
+
+function renderOverviewQueueRow(rel: string, index: number): HTMLElement {
+  const workflow = bootstrap?.workflows.find((item) => item.rel === rel);
+  const runItem = overviewRunItem(rel);
+  const status = runItem?.status;
+  const current = Boolean(overviewRun?.active && overviewRun.index === index);
+  const locked = Boolean(overviewRun?.active);
+  const row = document.createElement('div');
+  row.className = ['overview-queue-row', current ? 'current' : '', status ?? ''].filter(Boolean).join(' ');
+  const order = document.createElement('span');
+  order.className = 'overview-queue-index';
+  order.textContent = String(index + 1);
+  const main = document.createElement('div');
+  main.className = 'overview-queue-main';
+  const name = document.createElement('strong');
+  name.textContent = workflow ? overviewWorkflowName(workflow) : rel;
+  const meta = document.createElement('span');
+  meta.textContent = `${overviewStatusLabel(status, true)} · ${rel.replace(/^workflows\//i, '')}`;
+  main.append(name, meta);
+  const actions = document.createElement('div');
+  actions.className = 'overview-queue-actions';
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.title = '向前移动';
+  up.innerHTML = '<i data-lucide="chevron-up"></i>';
+  up.disabled = locked || index === 0;
+  up.addEventListener('click', () => moveOverviewSelection(index, -1));
+  const down = document.createElement('button');
+  down.type = 'button';
+  down.title = '向后移动';
+  down.innerHTML = '<i data-lucide="chevron-down"></i>';
+  down.disabled = locked || index === overviewSelection.length - 1;
+  down.addEventListener('click', () => moveOverviewSelection(index, 1));
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.title = '移出队列';
+  remove.innerHTML = '<i data-lucide="x"></i>';
+  remove.disabled = locked;
+  remove.addEventListener('click', () => updateOverviewSelection(rel, false));
+  actions.append(up, down, remove);
+  row.append(order, main, actions);
+  if (workflow) row.addEventListener('dblclick', () => openOverviewWorkflow(workflow));
+  return row;
+}
+
+function renderOverview(): void {
+  renderOverviewInstances();
+  const workflows = filteredOverviewWorkflows();
+  overviewWorkflowGrid.replaceChildren(...workflows.map(renderOverviewCard));
+  overviewQueueElement.replaceChildren(...overviewSelection.map(renderOverviewQueueRow));
+  document.querySelector<HTMLElement>('#overview-empty')!.classList.toggle('hidden', workflows.length > 0);
+  document.querySelector<HTMLElement>('#overview-queue-empty')!.classList.toggle('hidden', overviewSelection.length > 0);
+  document.querySelector<HTMLElement>('#overview-workflow-count')!.textContent = overviewQuery
+    ? `${workflows.length} / ${bootstrap?.workflows.length ?? 0} 个`
+    : `${workflows.length} 个`;
+  document.querySelector<HTMLElement>('#overview-selected-count')!.textContent = overviewSelection.length > 0
+    ? `已选择 ${overviewSelection.length} 个`
+    : '未选择脚本';
+  const finished = overviewRun?.items.filter((item) => item.status === 'succeeded').length ?? 0;
+  document.querySelector<HTMLElement>('#overview-queue-progress')!.textContent = `${finished} / ${overviewRun?.items.length ?? overviewSelection.length}`;
+  document.querySelector<HTMLElement>('#overview-queue-status')!.textContent = overviewRun?.message
+    ?? (overviewSelection.length > 0 ? '可以开始运行' : '等待选择');
+  const active = Boolean(overviewRun?.active);
+  overviewRunButton.disabled = active || runtimeBusy || overviewSelection.length === 0 || runtimeInstances.length === 0;
+  overviewStopButton.disabled = !active && !runtimeBusy;
+  overviewStopButton.querySelector('span')!.textContent = overviewRun?.active && overviewRun.cancelling ? '停止中…' : '停止队列';
+  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = runtimeBusy || active;
+  document.querySelector<HTMLButtonElement>('#stop-button')!.disabled = !runtimeBusy && !active;
+  document.querySelector<HTMLButtonElement>('#overview-select-all')!.disabled = active || sortedOverviewWorkflows().length === 0;
+  document.querySelector<HTMLButtonElement>('#overview-clear')!.disabled = active || overviewSelection.length === 0;
+  document.querySelector<HTMLButtonElement>('#overview-refresh')!.disabled = active;
+  createIcons({ icons: desktopIcons, root: document.querySelector<HTMLElement>('#module-overview')! });
+}
+
+function skipRemainingOverviewItems(state: OverviewRunState): void {
+  for (let index = state.index + 1; index < state.items.length; index += 1) {
+    if (state.items[index].status === 'queued') state.items[index].status = 'skipped';
+  }
+}
+
+async function requestRuntimeStop(): Promise<void> {
+  try {
+    await api.stopWorkflow();
+  } catch (error) {
+    showToast(`停止失败：${errorMessage(error)}`, true);
+  }
+}
+
+async function runNextOverviewWorkflow(): Promise<void> {
+  const state = overviewRun;
+  if (!state?.active || state.cancelling) return;
+  if (state.index >= state.items.length) {
+    state.active = false;
+    state.message = `执行完成，共 ${state.items.length} 个脚本`;
+    renderOverview();
+    showToast(state.message);
+    return;
+  }
+  const item = state.items[state.index];
+  const workflow = bootstrap?.workflows.find((candidate) => candidate.rel === item.rel);
+  if (!workflow) {
+    item.status = 'failed';
+    skipRemainingOverviewItems(state);
+    state.active = false;
+    state.message = `脚本不存在：${item.rel}`;
+    renderOverview();
+    showToast(state.message, true);
+    return;
+  }
+  item.status = 'running';
+  state.message = `正在启动 ${state.index + 1}/${state.items.length}：${overviewWorkflowName(workflow)}`;
+  renderOverview();
+  try {
+    const init = await api.getWorkflowInit(workflow.uri, state.instanceId, false);
+    if (!state.active || state.cancelling) return;
+    const text = workflow.uri === currentUri ? currentText : init.document.text;
+    await api.runWorkflow({
+      uri: workflow.uri,
+      instanceId: state.instanceId,
+      text,
+      inputs: overviewConfiguredInputs(workflow),
+    });
+    if (!state.active || state.cancelling) {
+      await requestRuntimeStop();
+      return;
+    }
+    if (workflow.uri === currentUri) setDirty(false);
+    if (sharedPanelDockBridge) sharedPanelDockBridge.show('runtime');
+    else docking?.showPanel('runtime');
+  } catch (error) {
+    item.status = 'failed';
+    skipRemainingOverviewItems(state);
+    state.active = false;
+    state.message = `${overviewWorkflowName(workflow)} 启动失败`;
+    renderOverview();
+    showToast(`${state.message}：${errorMessage(error)}`, true);
+  }
+}
+
+function handleOverviewRuntimeState(event: RuntimeStateEvent): void {
+  const state = overviewRun;
+  if (!state?.active) return;
+  const item = state.items[state.index];
+  if (!item) return;
+  const workflow = bootstrap?.workflows.find((candidate) => candidate.rel === item.rel);
+  const name = workflow ? overviewWorkflowName(workflow) : item.rel;
+  if (event.state === 'running') {
+    item.status = 'running';
+    state.message = state.cancelling
+      ? `正在停止：${name}`
+      : `正在运行 ${state.index + 1}/${state.items.length}：${name}`;
+    if (state.cancelling) void requestRuntimeStop();
+  } else if (event.state === 'stopping') {
+    state.message = `正在停止：${name}`;
+  } else if (event.state === 'succeeded') {
+    item.status = 'succeeded';
+    if (state.cancelling) {
+      skipRemainingOverviewItems(state);
+      state.active = false;
+      state.cancelling = false;
+      state.message = '队列已停止';
+    } else {
+      state.index += 1;
+      if (state.index >= state.items.length) {
+        state.active = false;
+        state.message = `执行完成，共 ${state.items.length} 个脚本`;
+        showToast(state.message);
+      } else {
+        state.message = `准备执行 ${state.index + 1}/${state.items.length}`;
+        window.setTimeout(() => void runNextOverviewWorkflow(), 0);
+      }
+    }
+  } else if (event.state === 'failed') {
+    item.status = 'failed';
+    skipRemainingOverviewItems(state);
+    state.active = false;
+    state.cancelling = false;
+    state.message = `${name} 执行失败，队列已停止`;
+    showToast(state.message, true);
+  } else if (event.state === 'idle') {
+    item.status = 'cancelled';
+    skipRemainingOverviewItems(state);
+    state.active = false;
+    state.cancelling = false;
+    state.message = '队列已停止';
+  }
+  renderOverview();
+}
+
+async function startOverviewQueue(): Promise<void> {
+  if (overviewRun?.active) return;
+  if (runtimeBusy) {
+    showToast('已有工作流正在运行，请先停止', true);
+    return;
+  }
+  if (overviewSelection.length === 0) {
+    showToast('请先勾选要执行的脚本', true);
+    return;
+  }
+  if (!selectedInstance || !runtimeInstances.some((instance) => instance.id === selectedInstance)) {
+    showToast('未检测到可运行实例', true);
+    return;
+  }
+  overviewRun = {
+    items: overviewSelection.map((rel) => ({ rel, status: 'queued' })),
+    index: 0,
+    instanceId: selectedInstance,
+    active: true,
+    cancelling: false,
+    message: `准备执行 1/${overviewSelection.length}`,
+  };
+  renderOverview();
+  await runNextOverviewWorkflow();
+}
+
+async function stopOverviewQueue(): Promise<void> {
+  const state = overviewRun;
+  if (!state?.active || state.cancelling) return;
+  state.cancelling = true;
+  state.message = '正在停止队列';
+  renderOverview();
+  await requestRuntimeStop();
+  if (!runtimeBusy && state.active) {
+    const item = state.items[state.index];
+    if (item?.status === 'running') item.status = 'cancelled';
+    skipRemainingOverviewItems(state);
+    state.active = false;
+    state.cancelling = false;
+    state.message = '队列已停止';
+    renderOverview();
+  }
+}
+
+async function refreshOverviewCatalog(): Promise<void> {
+  const refreshButton = document.querySelector<HTMLButtonElement>('#overview-refresh')!;
+  refreshButton.disabled = true;
+  refreshButton.classList.add('refreshing');
+  try {
+    const data = await api.bootstrap();
+    if (bootstrap) {
+      bootstrap.workflows = data.workflows;
+      bootstrap.catalog = data.catalog;
+      bootstrap.instances = data.instances;
+    } else {
+      bootstrap = data;
+    }
+    reconcileOverviewSelection();
+    reconcileOverviewConfigurations();
+    renderWorkflowSelect(data.workflows);
+    renderInstances(data.instances, selectedInstance);
+    renderContentBrowser();
+    renderOverview();
+  } catch (error) {
+    showToast(errorMessage(error), true);
+  } finally {
+    refreshButton.disabled = false;
+    refreshButton.classList.remove('refreshing');
+  }
+}
+
+function instanceLabel(instance: RuntimeInstance): string {
+  return instance.displayName
+    || (instance.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instance.id);
+}
+
+function closeInstancePicker(restoreFocus = false): void {
+  if (instanceMenu.hidden) return;
+  instanceMenu.hidden = true;
+  instancePicker.classList.remove('open');
+  instanceSelect.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) instanceSelect.focus();
+}
+
+function positionInstanceMenu(): void {
+  const triggerRect = instanceSelect.getBoundingClientRect();
+  const menuWidth = Math.max(triggerRect.width, instanceMenu.offsetWidth, 92);
+  const left = Math.min(
+    Math.max(8, triggerRect.left),
+    Math.max(8, window.innerWidth - menuWidth - 8),
+  );
+  instanceMenu.style.left = `${Math.round(left)}px`;
+  instanceMenu.style.top = `${Math.round(triggerRect.bottom + 4)}px`;
+  instanceMenu.style.minWidth = `${Math.round(triggerRect.width)}px`;
+}
+
+function updateInstancePicker(): void {
+  const selected = runtimeInstances.find((instance) => instance.id === selectedInstance);
+  instanceSelectLabel.textContent = selected ? instanceLabel(selected) : '未检测到运行实例';
+  instanceSelect.disabled = runtimeInstances.length === 0;
+  instanceSelect.setAttribute('aria-label', selected ? `运行实例：${instanceLabel(selected)}` : '运行实例');
+  instanceMenu.querySelectorAll<HTMLButtonElement>('[data-instance-id]').forEach((option) => {
+    const isSelected = option.dataset.instanceId === selectedInstance;
+    option.classList.toggle('selected', isSelected);
+    option.setAttribute('aria-selected', String(isSelected));
+  });
+}
+
+function selectRuntimeInstance(instanceId: string, notify = true): void {
+  if (!runtimeInstances.some((instance) => instance.id === instanceId)) return;
+  selectedInstance = instanceId;
+  updateInstancePicker();
+  renderOverviewInstances();
+  closeInstancePicker();
+  if (notify) desktopControl('selectInstance', selectedInstance);
+}
+
+function toggleInstancePicker(): void {
+  if (instanceSelect.disabled) return;
+  if (!instanceMenu.hidden) {
+    closeInstancePicker();
+    return;
+  }
+  // Keep the popup outside the toolbar's layout and stacking context. Dockview
+  // reparents the workbench module while tabs change; a menu inside that module
+  // can otherwise invalidate the toolbar paint layer when it receives focus.
+  if (instanceMenu.parentElement !== document.body) document.body.appendChild(instanceMenu);
+  instanceMenu.hidden = false;
+  instancePicker.classList.add('open');
+  instanceSelect.setAttribute('aria-expanded', 'true');
+  positionInstanceMenu();
+  instanceMenu.querySelector<HTMLButtonElement>(`[data-instance-id="${CSS.escape(selectedInstance)}"]`)?.focus();
+}
+
+function renderInstances(instances: RuntimeInstance[], requested = selectedInstance): void {
+  runtimeInstances = instances;
+  const options = instances.map((instance) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'instance-option';
+    option.dataset.instanceId = instance.id;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', 'false');
+    const label = document.createElement('span');
+    label.className = 'instance-option-label';
+    label.textContent = instanceLabel(instance);
+    const check = document.createElement('span');
+    check.className = 'instance-option-check';
+    check.textContent = '✓';
+    check.setAttribute('aria-hidden', 'true');
+    option.append(label, check);
+    option.addEventListener('click', () => selectRuntimeInstance(instance.id));
+    return option;
+  });
   const ids = new Set(instances.map((instance) => instance.id));
   selectedInstance = ids.has(requested) ? requested : instances[0]?.id ?? '';
-  instanceSelect.value = selectedInstance;
+  instanceMenu.replaceChildren(...options);
+  closeInstancePicker();
+  updateInstancePicker();
+  renderOverviewInstances();
   document.querySelector<HTMLElement>('#instance-count')!.textContent = instances.length > 0
     ? `${instances.length} 个实例`
     : '未检测到实例';
@@ -514,7 +1572,7 @@ function renderContentBrowser(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-content-view]').forEach((button) => {
     button.classList.toggle('active', button.dataset.contentView === contentBrowserView);
   });
-  createIcons({ icons: desktopIcons });
+  createIcons({ icons: desktopIcons, root: document.querySelector<HTMLElement>('#module-content-browser')! });
 }
 
 async function refreshContentBrowser(): Promise<void> {
@@ -530,8 +1588,11 @@ async function refreshContentBrowser(): Promise<void> {
     } else {
       bootstrap = data;
     }
+    reconcileOverviewSelection();
+    reconcileOverviewConfigurations();
     renderWorkflowSelect(data.workflows);
     renderContentBrowser();
+    renderOverview();
   } catch (error) {
     showToast(errorMessage(error), true);
   } finally {
@@ -1020,6 +2081,21 @@ const treeNodeGlyphs: Record<string, { icon: IconComponent; className: string }>
 };
 const treeNodeFallbackGlyph = { icon: CircleDot, className: 'type-default' };
 
+/** 工作流变量类型 → 图标；颜色由类型 class 统一控制。 */
+const variableTypeGlyphs: Record<string, { icon: IconComponent; className: string }> = {
+  string: { icon: Type, className: 'type-string' },
+  number: { icon: Sigma, className: 'type-number' },
+  integer: { icon: Hash, className: 'type-integer' },
+  boolean: { icon: ToggleLeft, className: 'type-boolean' },
+  rect: { icon: Scan, className: 'type-rect' },
+  asset: { icon: Image, className: 'type-asset' },
+  path: { icon: Folder, className: 'type-path' },
+  array: { icon: List, className: 'type-array' },
+  object: { icon: Braces, className: 'type-object' },
+  any: { icon: CircleHelp, className: 'type-any' },
+};
+const variableTypeFallbackGlyph = { icon: CircleHelp, className: 'type-any' };
+
 /** 内联创建 Lucide SVG，供动态树行使用（data-lucide + createIcons 无法覆盖局部更新）。 */
 function createTreeIcon(icon: IconComponent, className: string): SVGSVGElement {
   return createElement(icon, { width: '14', height: '14', 'aria-hidden': 'true', class: className }) as SVGSVGElement;
@@ -1157,17 +2233,17 @@ function syncTreeSelection(previousNode: string): void {
 }
 
 /** 仅更新变量列表选中行，避免整体重建导致滚动跳动。 */
-function syncVariableSelection(previousVariable: string): void {
-  if (previousVariable === selectedVariable) return;
-  const previousRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-name="${CSS.escape(previousVariable)}"]`);
+function syncVariableSelection(previousVariable: string, previousScope: 'inputs' | 'variables'): void {
+  if (previousVariable === selectedVariable && previousScope === selectedVariableScope) return;
+  const previousRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-scope="${previousScope}"][data-variable-name="${CSS.escape(previousVariable)}"]`);
   if (previousRow) previousRow.classList.remove('selected');
-  const nextRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-name="${CSS.escape(selectedVariable)}"]`);
+  const nextRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-scope="${selectedVariableScope}"][data-variable-name="${CSS.escape(selectedVariable)}"]`);
   nextRow?.classList.add('selected');
 }
 
-/** 变量列表内容指纹：名称、类型、public 标记有变化时需要重建列表。 */
+/** 输入与状态列表内容指纹。 */
 function variableSignature(): string {
-  return sidebarVariables.map((variable) => `${variable.name}\u0001${variable.type}\u0001${variable.public ? 1 : 0}`).join('\u0004');
+  return sidebarVariables.map((variable) => `${variable.scope}\u0001${variable.name}\u0001${variable.type}`).join('\u0004');
 }
 
 function renderVariables(): void {
@@ -1175,31 +2251,49 @@ function renderVariables(): void {
   if (sidebarVariables.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-panel';
-    empty.textContent = '此工作流还没有变量';
+    empty.textContent = '此工作流还没有输入或运行变量';
     variablesView.appendChild(empty);
     return;
   }
-  for (const variable of sidebarVariables) {
+  for (const scope of ['inputs', 'variables'] as const) {
+    const heading = document.createElement('div');
+    heading.className = 'variable-group-heading';
+    heading.textContent = scope === 'inputs' ? '工作流输入' : '运行变量';
+    variablesView.appendChild(heading);
+    const scoped = sidebarVariables.filter((variable) => variable.scope === scope);
+    if (scoped.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'variable-group-empty';
+      empty.textContent = scope === 'inputs' ? '无调用参数' : '无可变状态';
+      variablesView.appendChild(empty);
+    }
+    for (const variable of scoped) {
     const row = document.createElement('button');
-    row.className = `variable-row${variable.name === selectedVariable ? ' selected' : ''}`;
-    row.title = `${variable.public ? '公开变量，可由父工作流传值' : '内部变量'}\n拖到画布可创建变量卡片`;
+    row.className = `variable-row scope-${scope}${variable.name === selectedVariable && scope === selectedVariableScope ? ' selected' : ''}`;
+    row.title = `${overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${scope === 'inputs' ? '调用方传入，只读' : '流程内状态，可更新'}\n拖到画布可创建引用卡片`;
     row.dataset.variableName = variable.name;
+    row.dataset.variableScope = scope;
     row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
-    row.querySelector<HTMLElement>('.variable-name')!.textContent = variable.name;
+    const variableGlyph = variableTypeGlyphs[variable.type.toLowerCase()] ?? variableTypeFallbackGlyph;
+    const icon = row.querySelector<HTMLElement>('.variable-icon')!;
+    icon.classList.add(variableGlyph.className);
+    icon.appendChild(createTreeIcon(variableGlyph.icon, 'variable-icon-svg'));
+    row.querySelector<HTMLElement>('.variable-name')!.textContent = overviewInputDisplayName(variable.name);
     const flags = row.querySelector<HTMLElement>('.variable-flags')!;
-    flags.innerHTML = `<span>${variable.type}</span>${variable.public ? '<span class="variable-public">PUBLIC</span>' : ''}`;
+    flags.innerHTML = `<span>${variable.type}</span><span class="variable-scope">${scope === 'inputs' ? 'INPUT' : 'STATE'}</span>`;
     row.draggable = true;
     row.addEventListener('dragstart', (event) => {
       const transfer = event.dataTransfer;
       if (!transfer) return;
-      transfer.setData('application/x-onmyoji-variable', variable.name);
+      transfer.setData('application/x-onmyoji-variable', JSON.stringify({ name: variable.name, scope }));
       transfer.effectAllowed = 'copy';
     });
     row.addEventListener('click', () => {
       docking?.showPanel('details');
-      editorCommand('selectVariable', variable.name);
+      editorCommand('selectVariable', { name: variable.name, scope });
     });
     variablesView.appendChild(row);
+    }
   }
 }
 
@@ -1216,7 +2310,7 @@ function renderSidebar(): void {
   }
   structureView.scrollTop = keepScroll;
   renderVariables();
-  createIcons({ icons: desktopIcons });
+  createIcons({ icons: desktopIcons, root: structureView });
 }
 
 async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> {
@@ -1237,6 +2331,8 @@ async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> 
     }
     renderWorkflowSelect(init.workflows);
     renderInstances(init.instances, init.selectedInstance);
+    reconcileOverviewSelection();
+    renderOverview();
     renderContentBrowser();
     document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(init.document.uri);
     setDirty(false);
@@ -1254,6 +2350,7 @@ async function refreshInstances(): Promise<void> {
   try {
     const instances = await api.listInstances();
     renderInstances(instances, selectedInstance);
+    renderOverview();
     postToEditors({ type: 'runtimeInstances', instances, selectedInstance });
   } catch {
     // Device discovery is best effort while the user edits offline.
@@ -1292,9 +2389,11 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       const previousVariableSignature = variableSignature();
       const previousSelectedNode = selectedNode;
       const previousSelectedVariable = selectedVariable;
+      const previousSelectedVariableScope = selectedVariableScope;
       sidebarVariables = Array.isArray(message.variables) ? message.variables as SidebarVariable[] : [];
       sidebarNodes = Array.isArray(message.nodes) ? message.nodes as SidebarNode[] : [];
       selectedVariable = typeof message.selectedVariable === 'string' ? message.selectedVariable : '';
+      selectedVariableScope = message.selectedVariableScope === 'variables' ? 'variables' : 'inputs';
       selectedNode = typeof message.selectedNode === 'string' ? message.selectedNode : '';
       const treeUnchanged = sidebarNodes.length > 0 && treeSignature() === previousTreeSignature;
       const variablesUnchanged = variableSignature() === previousVariableSignature;
@@ -1302,17 +2401,18 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         // 结构与变量都没变（如仅在画布上切换选中节点）：只更新选中行，不重建树，
         // 展开状态、折叠状态与滚动位置都原样保留。
         syncTreeSelection(previousSelectedNode);
-        syncVariableSelection(previousSelectedVariable);
+        syncVariableSelection(previousSelectedVariable, previousSelectedVariableScope);
       } else if (treeUnchanged) {
         // 结构没变但变量列表变了：仅重建变量列表。
         renderVariables();
-        createIcons({ icons: desktopIcons });
       } else {
         renderSidebar();
       }
       const selection = message.inspectorSelection as unknown as InspectorSelection | undefined;
       if (selection && selection.kind !== 'none') {
         docking?.showPanel('details');
+        postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
+      } else if (selection?.kind === 'none') {
         postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
       }
       return;
@@ -1391,8 +2491,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       return;
     }
     if (type === 'selectInstance') {
-      selectedInstance = String(message.instanceId ?? selectedInstance);
-      instanceSelect.value = selectedInstance;
+      selectRuntimeInstance(String(message.instanceId ?? selectedInstance), false);
       postToEditors({ type: 'instanceSelected', instanceId: selectedInstance });
       return;
     }
@@ -1444,6 +2543,8 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       const uri = await api.createWorkflow();
       if (uri) {
         bootstrap!.workflows = (await api.bootstrap()).workflows;
+        reconcileOverviewSelection();
+        renderOverview();
         backStack = [];
         await loadWorkflow(uri);
       }
@@ -1492,6 +2593,7 @@ function appendOutput(event: RuntimeOutputEvent): void {
 }
 
 function updateRuntimeState(event: RuntimeStateEvent): void {
+  runtimeBusy = event.state === 'running' || event.state === 'stopping';
   if (event.state === 'running') {
     const workflow = String(event.workflow || currentUri).replace(/\\/g, '/').split('/').pop() || '工作流';
     runtimeLogDescriptor = {
@@ -1513,9 +2615,10 @@ function updateRuntimeState(event: RuntimeStateEvent): void {
     };
     postToRuntimeLog({ type: 'processFinished', ...runtimeProcessResult });
   }
-  const running = event.state === 'running' || event.state === 'stopping';
-  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = running;
-  document.querySelector<HTMLButtonElement>('#stop-button')!.disabled = !running;
+  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = runtimeBusy || Boolean(overviewRun?.active);
+  document.querySelector<HTMLButtonElement>('#stop-button')!.disabled = !runtimeBusy && !overviewRun?.active;
+  handleOverviewRuntimeState(event);
+  renderOverview();
   setStatus(event.label);
 }
 
@@ -1527,7 +2630,7 @@ function updateMaximizedState(maximized: boolean): void {
   button.classList.toggle('maximized', maximized);
   button.innerHTML = `<i data-lucide="${maximized ? 'copy' : 'square'}"></i>`;
   menuButton.firstElementChild!.textContent = maximized ? '还原' : '最大化';
-  createIcons({ icons: desktopIcons });
+  createIcons({ icons: desktopIcons, root: button });
 }
 
 function closeMoreMenu(): void {
@@ -1662,6 +2765,23 @@ function openSettingsPanel(): void {
   window.setTimeout(() => workbenchFrame?.popout('settings'), 0);
 }
 
+/** 打开独立窗口的模拟器画面测试工具（实时画面 / 模板匹配 / ROI / 点击位置测试）。 */
+async function openVisionTest(): Promise<void> {
+  if (visionTestOpening) return;
+  if (!selectedInstance) {
+    showToast('未检测到运行实例，请先启动 MuMu 模拟器', true);
+    return;
+  }
+  visionTestOpening = true;
+  try {
+    await api.openVisionTest(selectedInstance);
+  } catch (error) {
+    showToast(`打开画面测试工具失败：${errorMessage(error)}`, true);
+  } finally {
+    visionTestOpening = false;
+  }
+}
+
 function readSettings(): void {
   autoRefreshInstances = window.localStorage.getItem('onmyoji-studio.settings.auto-refresh') !== 'false';
   loadDefaultWorkflowOnStart = window.localStorage.getItem('onmyoji-studio.settings.default-workflow') !== 'false';
@@ -1681,7 +2801,11 @@ function bindUi(): void {
   document.querySelectorAll<HTMLElement>('[data-editor-command]').forEach((button) => {
     button.addEventListener('click', () => {
       const command = button.dataset.editorCommand ?? '';
-      if (command === 'workflowSettings') docking?.showPanel('details');
+      if (command === 'workflowSettings') {
+        docking?.showPanel('details');
+        // 工作流设置属于详细信息面板自己的 inspector 状态，不能只发给画布 iframe。
+        postToFrame(detailsFrame, { type: 'editorCommand', command });
+      }
       editorCommand(command);
     });
   });
@@ -1691,6 +2815,7 @@ function bindUi(): void {
   document.querySelectorAll<HTMLElement>('[data-app-command]').forEach((button) => {
     button.addEventListener('click', () => {
       if (button.dataset.appCommand === 'settings') openSettingsPanel();
+      if (button.dataset.appCommand === 'visionTest') void openVisionTest();
     });
   });
   settingsContentView.addEventListener('change', () => {
@@ -1744,7 +2869,11 @@ function bindUi(): void {
           const relative = relativeToProject(displayFileUri(currentUri));
           if (relative) openReferenceViewer(relative, document);
         }
-      } else if (panelId !== 'workflow') toggleSharedPanel(panelId);
+      } else if (panelId === 'contentBrowser' || panelId === 'runtime') {
+        toggleSharedPanel(panelId);
+      } else if (panelId !== 'workflow') {
+        workbenchFrame?.toggle(panelId);
+      }
     });
   });
   document.querySelectorAll<HTMLButtonElement>('[data-dock-command]').forEach((button) => {
@@ -1794,10 +2923,14 @@ function bindUi(): void {
   });
   document.querySelector('#structure-expand-all')!.addEventListener('click', () => setAllTreeBranches(true));
   document.querySelector('#structure-collapse-all')!.addEventListener('click', () => setAllTreeBranches(false));
-  document.querySelector('#add-variable-button')!.addEventListener('click', () => editorCommand('addVariable'));
+  document.querySelector('#add-input-button')!.addEventListener('click', () => editorCommand('addVariable', 'inputs'));
+  document.querySelector('#add-variable-button')!.addEventListener('click', () => editorCommand('addVariable', 'variables'));
   document.querySelector('#new-workflow-button')!.addEventListener('click', () => void handleEditorMessage({ type: 'newWorkflow' }, editorFrame));
   document.querySelector('#run-button')!.addEventListener('click', () => desktopControl('run'));
-  document.querySelector('#stop-button')!.addEventListener('click', () => desktopControl('stop'));
+  document.querySelector('#stop-button')!.addEventListener('click', () => {
+    if (overviewRun?.active) void stopOverviewQueue();
+    else desktopControl('stop');
+  });
   document.querySelector('#save-button')!.addEventListener('click', () => desktopControl('save'));
   document.querySelector<HTMLButtonElement>('#more-button')!.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -1808,7 +2941,56 @@ function bindUi(): void {
   document.querySelector('#window-minimize')!.addEventListener('click', () => void api.minimizeWindow());
   document.querySelector('#window-maximize')!.addEventListener('click', async () => updateMaximizedState(await api.toggleMaximizeWindow()));
   document.querySelector('#window-close')!.addEventListener('click', () => void api.closeWindow());
-  instanceSelect.addEventListener('change', () => desktopControl('selectInstance', instanceSelect.value));
+  instanceSelect.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleInstancePicker();
+  });
+  instanceSelect.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeInstancePicker(true);
+    } else if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleInstancePicker();
+    }
+  });
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target as Node;
+    if (!instancePicker.contains(target) && !instanceMenu.contains(target)) closeInstancePicker();
+  }, true);
+  window.addEventListener('resize', () => closeInstancePicker());
+  window.addEventListener('scroll', () => closeInstancePicker(), true);
+  overviewSearch.addEventListener('input', () => {
+    overviewQuery = overviewSearch.value;
+    renderOverview();
+  });
+  overviewInstanceSelect.addEventListener('change', () => selectRuntimeInstance(overviewInstanceSelect.value));
+  document.querySelector('#overview-select-all')!.addEventListener('click', () => {
+    if (overviewRun?.active) return;
+    overviewSelection = sortedOverviewWorkflows().map((workflow) => workflow.rel);
+    resetOverviewRunResult();
+    persistOverviewSelection();
+    renderOverview();
+  });
+  document.querySelector('#overview-clear')!.addEventListener('click', () => {
+    if (overviewRun?.active) return;
+    overviewSelection = [];
+    resetOverviewRunResult();
+    persistOverviewSelection();
+    renderOverview();
+  });
+  document.querySelector('#overview-refresh')!.addEventListener('click', () => void refreshOverviewCatalog());
+  overviewRunButton.addEventListener('click', () => void startOverviewQueue());
+  overviewStopButton.addEventListener('click', () => {
+    if (overviewRun?.active) void stopOverviewQueue();
+    else void requestRuntimeStop();
+  });
+  document.querySelector('#overview-config-close')!.addEventListener('click', closeOverviewConfiguration);
+  document.querySelector('#overview-config-cancel')!.addEventListener('click', closeOverviewConfiguration);
+  document.querySelector('#overview-config-defaults')!.addEventListener('click', restoreOverviewConfigurationDefaults);
+  document.querySelector('#overview-config-save')!.addEventListener('click', saveOverviewConfiguration);
+  overviewConfigModal.addEventListener('pointerdown', (event) => {
+    if (event.target === overviewConfigModal) closeOverviewConfiguration();
+  });
   document.querySelector('#content-browser-up')!.addEventListener('click', () => navigateContentBrowser(contentParent(contentBrowserFolder)));
   document.querySelector('#content-browser-refresh')!.addEventListener('click', () => void refreshContentBrowser());
   contentBrowserSearch.addEventListener('input', () => {
@@ -1826,14 +3008,19 @@ function bindUi(): void {
   document.addEventListener('click', closeTitlebarMenus);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      if (!overviewConfigModal.classList.contains('hidden')) closeOverviewConfiguration();
       closeTitlebarMenus();
+      closeInstancePicker(true);
     }
     if (event.shiftKey && event.key === 'F6') {
       event.preventDefault();
       popoutActivePanel();
     }
   });
-  window.addEventListener('blur', closeTitlebarMenus);
+  window.addEventListener('blur', () => {
+    closeTitlebarMenus();
+    closeInstancePicker();
+  });
 }
 
 window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
@@ -1874,6 +3061,7 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
 
 async function start(): Promise<void> {
   const showPopoutFailure = (): void => showToast('无法打开独立模块窗口', true);
+  installCustomTooltips();
   workbenchFrame = createWorkbenchFrame(updateDockMenuState, showPopoutFailure);
   docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure);
   sharedPanelDockBridge = connectSharedPanelDocking(docking, workbenchFrame, updateDockMenuState);
@@ -1898,6 +3086,9 @@ async function start(): Promise<void> {
     contentBrowserView = window.localStorage.getItem('onmyoji-studio.content-browser-view') === 'list' ? 'list' : 'grid';
     renderWorkflowSelect(bootstrap.workflows);
     renderInstances(bootstrap.instances);
+    reconcileOverviewSelection(true);
+    reconcileOverviewConfigurations(true);
+    renderOverview();
     renderSidebar();
     renderContentBrowser();
     document.querySelector<HTMLElement>('#settings-project-root')!.textContent = bootstrap.projectRoot;

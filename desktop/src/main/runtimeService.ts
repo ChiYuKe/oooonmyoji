@@ -30,6 +30,7 @@ function readJsonObject(file: string): Record<string, unknown> {
 export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private activeProcess: ChildProcess | undefined;
   private stopRequested = false;
+  private stopGeneration = 0;
   private watchTimer: NodeJS.Timeout | undefined;
   private watchedFiles = new Map<string, number>();
 
@@ -139,6 +140,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
   async runWorkflow(request: RunWorkflowRequest): Promise<void> {
     if (this.activeProcess && this.activeProcess.exitCode === null) throw new Error('已有工作流正在运行，请先停止');
+    const launchStopGeneration = this.stopGeneration;
     const workflowPath = this.project.resolveWorkflowPath(request.uri);
     const workflowReference = this.project.workflowReference(request.uri);
     await fs.promises.writeFile(workflowPath, request.text.endsWith('\n') ? request.text : `${request.text}\n`, 'utf8');
@@ -170,6 +172,21 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     await fs.promises.mkdir(runDirectory, { recursive: true });
     const stamp = Date.now();
     const eventsFile = path.join(runDirectory, `desktop-events-${stamp}.jsonl`);
+    const configuredInputs = request.inputs && typeof request.inputs === 'object' && !Array.isArray(request.inputs)
+      ? request.inputs
+      : undefined;
+    const inputsFile = configuredInputs && Object.keys(configuredInputs).length > 0
+      ? path.join(runDirectory, `desktop-inputs-${stamp}.json`)
+      : undefined;
+    if (inputsFile) {
+      await fs.promises.writeFile(inputsFile, `${JSON.stringify(configuredInputs, null, 2)}\n`, 'utf8');
+    }
+    if (launchStopGeneration !== this.stopGeneration) {
+      if (inputsFile) await fs.promises.rm(inputsFile, { force: true }).catch(() => undefined);
+      this.emitOutput('system', '工作流启动已取消\n');
+      this.emitState({ state: 'idle', label: '已停止', workflow: request.uri, instance: request.instanceId });
+      return;
+    }
     this.startWatching(runs.length > 0
       ? runs.map((item) => path.join(runDirectory, `desktop-events-${stamp}-${item.instance}.jsonl`))
       : [eventsFile]);
@@ -180,6 +197,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
       '--instance', instance,
       '--events-file', eventsFile,
     ];
+    if (inputsFile) args.push('--inputs', inputsFile);
     const child = spawn(this.pythonPath, args, {
       cwd: this.project.projectRoot,
       env: pythonUtf8Environment(process.env),
@@ -205,14 +223,19 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     child.stdout?.on('data', (chunk: Buffer | string) => this.emitOutput('stdout', String(chunk)));
     child.stderr?.on('data', (chunk: Buffer | string) => this.emitOutput('stderr', String(chunk)));
     let launchFailed = false;
+    const cleanupInputsFile = (): void => {
+      if (inputsFile) void fs.promises.rm(inputsFile, { force: true }).catch(() => undefined);
+    };
     child.once('error', (error) => {
       launchFailed = true;
+      cleanupInputsFile();
       this.emitOutput('stderr', `启动失败：${error.message}\n`);
       this.finishWatching();
       if (this.activeProcess === child) this.activeProcess = undefined;
       this.emitState({ state: 'failed', label: '启动失败', workflow: request.uri, instance, exitCode: -1 });
     });
     child.once('close', (code) => {
+      cleanupInputsFile();
       if (launchFailed) return;
       const stopped = this.stopRequested;
       this.emitOutput('system', `进程结束：${stopped ? '已停止' : `退出代码 ${code ?? '未知'}`}\n`);
@@ -230,6 +253,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   }
 
   async stopWorkflow(): Promise<void> {
+    this.stopGeneration += 1;
     const child = this.activeProcess;
     if (!child || child.exitCode !== null) return;
     this.stopRequested = true;
@@ -242,7 +266,10 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
           child.kill();
           resolve();
         });
-        killer.once('close', () => resolve());
+        killer.once('close', (code) => {
+          if (code !== 0 && child.exitCode === null) child.kill();
+          resolve();
+        });
       });
     } else {
       child.kill('SIGTERM');

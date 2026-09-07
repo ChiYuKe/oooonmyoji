@@ -40,14 +40,15 @@ function encodeResourcePath(relativePath: string): string {
 
 function workflowTemplate(id: string): Record<string, unknown> {
   return {
-    schema_version: 3,
+    schema_version: 4,
     id,
-    version: '3.0.0',
+    version: '4.0.0',
     description: '',
     resolution: [1920, 1080],
     root: 'root',
     limits: { timeout_seconds: 300, max_steps: 1000 },
-    blackboard: {},
+    inputs: {},
+    variables: {},
     nodes: [
       { id: 'root', type: 'root', children: ['capture'] },
       { id: 'capture', type: 'task', action: 'core.capture', params: {} },
@@ -127,15 +128,14 @@ export class ProjectService {
     const descriptors = await Promise.all(files.slice(0, 500).map(async (file): Promise<WorkflowDescriptor> => {
       let id = '';
       let description = '';
-      let variables: WorkflowDescriptor['variables'] = [];
+      let inputs: WorkflowDescriptor['inputs'] = [];
       try {
         const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as unknown;
         const parsed = parseWorkflow(raw);
         id = parsed.id ?? '';
         description = parsed.description?.trim() ?? '';
-        variables = Object.entries(parsed.blackboard).map(([name, definition]) => ({
+        inputs = Object.entries(parsed.inputs).map(([name, definition]) => ({
           name,
-          public: definition.public !== false,
           definition,
         }));
       } catch {
@@ -147,7 +147,7 @@ export class ProjectService {
         rel: path.relative(this.projectRoot, file).split(path.sep).join('/'),
         ...(id ? { id } : {}),
         ...(description ? { description } : {}),
-        ...(variables.length ? { variables } : {}),
+        ...(inputs.length ? { inputs } : {}),
       };
     }));
     return descriptors.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN') || left.rel.localeCompare(right.rel, 'zh-CN'));

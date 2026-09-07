@@ -7,8 +7,8 @@
  * - instance_parallel 节点 `runs[].workflow`（同上）
  * - vision.match_template / vision.wait_template 节点 `params.template`：
  *   - 字符串 → 模板相对路径（如 assets/templates/...）
- *   - 绑定 { ref: 'blackboard.X' } → 通过该工作流 blackboard.X.default 解析为模板路径
- * - blackboard 中 type === 'asset' 的变量，其 default 为模板相对路径（asset-default）
+ *   - 绑定 { ref: 'inputs.X' } → 通过该工作流 inputs.X.default 解析为模板路径
+ * - inputs 中 type === 'asset' 的变量，其 default 为模板相对路径（asset-default）
  * - assets/templates/rewards/catalog.json 中 templates[].template（相对目录文件名）
  */
 import * as fs from 'fs';
@@ -119,8 +119,10 @@ function collectOutgoingRefs(doc: WorkflowDoc): OutgoingRef[] {
       });
     } else if (typeof template === 'object' && template !== null && !Array.isArray(template) && typeof (template as { ref?: unknown }).ref === 'string') {
       const binding = template as { ref: string };
-      const variable = binding.ref.replace(/^blackboard\./i, '');
-      const definition = doc.info.blackboard[variable];
+      const parts = binding.ref.split('.');
+      const variable = parts.slice(1).join('.');
+      const definitions = parts[0] === 'variables' ? doc.info.variables : doc.info.inputs;
+      const definition = definitions[parts[1]];
       const resolved = typeof definition?.default === 'string' ? definition.default : undefined;
       if (resolved) {
         out.push({
@@ -134,8 +136,8 @@ function collectOutgoingRefs(doc: WorkflowDoc): OutgoingRef[] {
       }
     }
   }
-  // blackboard asset 变量默认值
-  for (const [variable, definition] of Object.entries(doc.info.blackboard)) {
+  // inputs asset 变量默认值
+  for (const [variable, definition] of Object.entries(doc.info.inputs)) {
     if (definition.type === 'asset' && typeof definition.default === 'string' && definition.default.trim()) {
       out.push({
         kind: 'asset-default',

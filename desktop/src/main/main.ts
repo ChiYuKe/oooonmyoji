@@ -18,10 +18,13 @@ import type {
   SaveCanvasRequest,
   SaveTemplateRequest,
   TemplateCheckRequest,
+  VisionCommand,
+  VisionStreamEvent,
 } from '../shared/contracts';
 import { chooseRuntimeInstance } from './core/runtimeInstances';
 import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
+import { VisionStream } from './visionStream';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -35,6 +38,9 @@ let project: ProjectService;
 let runtime: RuntimeService;
 let rendererServer: Server | undefined;
 let rendererBaseUrl = '';
+let visionTestWindow: BrowserWindow | undefined;
+let visionTestStream: VisionStream | undefined;
+let visionTestInstanceId = '';
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 
 const MIME_TYPES: Record<string, string> = {
@@ -127,6 +133,77 @@ function writeLayout(key: unknown, value: unknown): void {
   }
 }
 
+function stopVisionTestStream(): void {
+  const stream = visionTestStream;
+  visionTestStream = undefined;
+  if (stream) void stream.stop();
+}
+
+function openVisionTestWindow(instanceId: string): void {
+  if (visionTestWindow && !visionTestWindow.isDestroyed()) {
+    visionTestWindow.focus();
+    return;
+  }
+  visionTestInstanceId = instanceId || '';
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 640,
+    show: false,
+    frame: false,
+    title: '模拟器画面测试工具',
+    backgroundColor: '#111317',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  visionTestWindow = window;
+  void window.loadURL(`${rendererBaseUrl}/vision-test.html?instance=${encodeURIComponent(visionTestInstanceId)}`);
+  window.once('ready-to-show', () => window.show());
+  window.on('closed', () => {
+    if (visionTestWindow === window) visionTestWindow = undefined;
+    stopVisionTestStream();
+  });
+}
+
+function startVisionTestStream(): void {
+  if (visionTestStream?.running) return;
+  stopVisionTestStream();
+  const stream = new VisionStream(project.projectRoot, visionTestInstanceId);
+  visionTestStream = stream;
+  stream.on('event', (event: VisionStreamEvent) => {
+    if (visionTestWindow && !visionTestWindow.isDestroyed()) {
+      visionTestWindow.webContents.send('vision:event', event);
+    }
+  });
+  stream.on('exit', ({ code, fatal }) => {
+    if (visionTestStream === stream) visionTestStream = undefined;
+    if (!visionTestWindow || visionTestWindow.isDestroyed()) return;
+    visionTestWindow.webContents.send('vision:event', {
+      type: 'stream_exit',
+      code,
+      message: fatal || '画面推流已停止',
+      error: Boolean(fatal),
+    });
+  });
+  void stream.start().catch((error) => {
+    if (visionTestWindow && !visionTestWindow.isDestroyed()) {
+      visionTestWindow.webContents.send('vision:event', {
+        type: 'stream_exit',
+        code: null,
+        message: `启动画面推流失败：${(error as Error).message}`,
+        error: true,
+      });
+    }
+  });
+}
+
 function registerIpc(): void {
   ipcMain.handle('window:minimize', (event) => ownerWindow(event).minimize());
   ipcMain.handle('window:toggle-maximize', (event) => {
@@ -171,6 +248,22 @@ function registerIpc(): void {
   ipcMain.handle('runtime:update-debug-settings', (_event, settings: RuntimeDebugSettings) => runtime.updateDebugSettings(settings));
   ipcMain.handle('runtime:capture-roi', (_event, request: RoiCaptureRequest) => runtime.captureRoi(request));
   ipcMain.handle('runtime:check-template', (_event, request: TemplateCheckRequest) => runtime.checkTemplate(request));
+
+  ipcMain.handle('tools:open-vision-test', (_event, instanceId: string) => {
+    openVisionTestWindow(typeof instanceId === 'string' ? instanceId : '');
+  });
+  ipcMain.handle('vision:start', (event) => {
+    if (ownerWindow(event) !== visionTestWindow) return;
+    startVisionTestStream();
+  });
+  ipcMain.handle('vision:command', (event, command: VisionCommand) => {
+    if (ownerWindow(event) !== visionTestWindow) return;
+    if (!visionTestStream || !visionTestStream.sendCommand(command)) throw new Error('画面推流未连接');
+  });
+  ipcMain.handle('vision:stop', (event) => {
+    if (ownerWindow(event) !== visionTestWindow) return;
+    stopVisionTestStream();
+  });
 }
 
 function isRendererUrl(url: string): boolean {
@@ -284,6 +377,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   runtime?.dispose();
+  stopVisionTestStream();
   rendererServer?.close();
   rendererServer = undefined;
 });

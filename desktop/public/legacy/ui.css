@@ -3,24 +3,26 @@
 .svg-icon { display: inline-flex; align-items: center; line-height: 0; }
 .svg-icon svg { display: block; }
 
-/* 自绘 tooltip：固定定位最上层，边缘避让，支持多行 */
+/* 统一 tooltip：固定定位最上层，边缘避让，支持多行 */
+.app-tooltip,
 .ui-tooltip {
   position: fixed;
-  z-index: 9999;
+  z-index: 5000;
   width: max-content;
-  max-width: 260px;
-  padding: 3px 8px;
-  border: 1px solid #3a3a3a;
-  border-radius: 3px;
-  background: #111;
-  color: #ddd;
+  max-width: 280px;
+  padding: 6px 9px;
+  border: 1px solid #4a535b;
+  border-radius: 5px;
+  background: #202327;
+  color: #e4e9ec;
   font-size: 11px;
-  line-height: 1.5;
-  white-space: normal;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: pre-line;
   pointer-events: none;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, .45);
+  box-shadow: 0 8px 18px rgba(0, 0, .42);
 }
-.ui-tooltip.hidden { display: none; }
+.app-tooltip.hidden, .ui-tooltip.hidden { display: none; }
 
 /* 自绘下拉 */
 .ui-dropdown { position: relative; min-width: 0; }

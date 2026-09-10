@@ -212,59 +212,57 @@ button { color: inherit; }
 .command-button svg { width: 14px; height: 14px; }
 .command-button:hover:not(:disabled) { background: var(--surface-hover); }
 
-/* ---------- 工作台 tooltip：替换 Chromium 的原生 title 浮窗 ---------- */
-[data-tooltip] { position: relative; }
-[data-tooltip]::before,
-[data-tooltip]::after {
-  position: absolute;
-  z-index: 3000;
-  pointer-events: none;
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
-}
-[data-tooltip]::before {
-  content: '';
-  top: calc(100% + 2px);
-  left: 50%;
-  width: 0;
-  height: 0;
-  border: 4px solid transparent;
-  border-bottom-color: #4a535b;
-  transform: translate(-50%, -2px);
-}
-[data-tooltip]::after {
-  content: attr(data-tooltip);
-  top: calc(100% + 9px);
-  left: 50%;
-  min-width: max-content;
+/* ---------- 工作台统一 tooltip：挂在文档顶层，避免被面板和滚动区裁剪 ---------- */
+[data-tooltip]::before, [data-tooltip]::after { content: none !important; display: none !important; }
+.app-tooltip {
+  position: fixed;
+  z-index: 5000;
   max-width: 280px;
   padding: 6px 9px;
   border: 1px solid #4a535b;
   border-radius: 5px;
   background: #202327;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, .42);
+  box-shadow: 0 8px 18px rgba(0, 0, .42);
   color: #e4e9ec;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
   text-align: left;
   white-space: pre-line;
-  transform: translate(-50%, -3px);
+  pointer-events: none;
 }
-[data-tooltip]:hover::before,
-[data-tooltip]:hover::after,
-[data-tooltip]:focus-visible::before,
-[data-tooltip]:focus-visible::after {
-  visibility: visible;
-  opacity: 1;
+.app-tooltip.hidden { display: none; }
+.app-tooltip.asset-preview {
+  width: min(240px, calc(100vw - 16px));
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 6px;
 }
-[data-tooltip]:hover::before,
-[data-tooltip]:focus-visible::before { transform: translate(-50%, 0); }
-[data-tooltip]:hover::after,
-[data-tooltip]:focus-visible::after { transform: translate(-50%, 0); }
-@media (prefers-reduced-motion: reduce) {
-  [data-tooltip]::before, [data-tooltip]::after { transition: none; }
+.app-tooltip.asset-preview img {
+  display: block;
+  width: 100%;
+  height: 150px;
+  object-fit: contain;
+  background: #111315;
+  border-radius: 3px;
+}
+.app-tooltip-preview-missing {
+  display: grid;
+  height: 150px;
+  place-items: center;
+  border-radius: 3px;
+  background: #111315;
+  color: #aeb8c0;
+  font-size: 11px;
+}
+.app-tooltip-preview-path {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #aeb8c0;
+  font-size: 10px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 select {
@@ -706,6 +704,13 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-browser-items.list .content-item { width: 100%; height: 30px; display: grid; grid-template-columns: 24px minmax(160px, .8fr) minmax(180px, 1.2fr); align-items: center; gap: 6px; padding: 0 9px; border-bottom: 1px solid #20252a; }
 .content-item:hover { background: #303030; }
 .content-item.selected { background: #2b5674; }
+.content-item.editing { background: #2b5674; box-shadow: inset 0 0 0 1px #397da4; cursor: default; }
+.content-item.editing:hover { background: #2b5674; }
+.content-item.dragging { opacity: .45; }
+.content-item.folder.drop-target,
+.content-folder-row.drop-target,
+.content-crumb.drop-target,
+.content-browser-items.drop-target { border-color: #65b7df; background: #244d63; box-shadow: inset 0 0 0 1px rgba(101,183,223,.35); }
 .content-item.current .content-item-name { color: #8fc8e7; }
 .content-item-preview { width: 100%; height: 72px; display: grid; place-items: center; overflow: hidden; background: #171717; }
 .content-browser-items.list .content-item-preview { width: 22px; height: 22px; background: transparent; }
@@ -715,9 +720,12 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-browser-items.list .content-item-preview svg { width: 17px; height: 17px; }
 .content-item-name, .content-item-path { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .content-item-name { font-size: 11px; }
+.content-item-name-edit { width: 100%; max-width: 100%; height: 23px; min-width: 0; padding: 2px 4px; border: 1px solid #4c9bc5; border-radius: 3px; outline: 0; background: #171b1f; color: #f1f4f6; font-size: 11px; text-align: center; }
+.content-item-name-edit:disabled { opacity: .65; }
 .content-item-path { color: #707985; font-size: 9px; }
 .content-browser-items.grid .content-item-name, .content-browser-items.grid .content-item-path { text-align: center; }
 .content-browser-items.list .content-item-path { font-size: 10px; }
+.content-browser-items.list .content-item-name-edit { height: 24px; text-align: left; }
 .content-browser-footer { grid-column: 1; display: flex; align-items: center; gap: 12px; padding: 0 8px; border-top: 1px solid var(--border-soft); background: var(--dock-panel-background, #242424); color: var(--muted); font-size: 9px; }
 .content-browser-selection { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .content-browser-results > .empty-panel { position: absolute; inset: 0 0 22px; display: grid; place-items: center; padding: 0; pointer-events: none; }
@@ -1002,6 +1010,111 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .overview-config-button.secondary:hover { border-color: #5a5f65; background: #383b3f; color: #fff; }
 .overview-config-button.primary { border-color: #31779f; background: #2a6e94; color: #fff; }
 .overview-config-button.primary:hover { border-color: #4795bf; background: #347fa8; }
+
+/* ---------- 内容浏览器名称输入 ---------- */
+.content-name-modal {
+  position: fixed;
+  z-index: 2300;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 9, 10, .72);
+  backdrop-filter: blur(2px);
+}
+.content-name-dialog {
+  width: min(400px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid #44484d;
+  border-radius: 7px;
+  background: #202225;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .62);
+}
+.content-name-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid #34373b;
+  background: #27292c;
+}
+.content-name-header strong { flex: 1; color: #e7eaed; font-size: 13px; font-weight: 600; }
+.content-name-header button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #9299a0; cursor: pointer; }
+.content-name-header button:hover { background: #3a3d41; color: #fff; }
+.content-name-header svg { width: 15px; height: 15px; }
+.content-name-body { display: grid; gap: 7px; padding: 16px 14px 18px; }
+.content-name-body label { color: #aeb6bd; font-size: 10px; }
+.content-name-input { width: 100%; height: 32px; padding: 0 9px; border: 1px solid #43474c; border-radius: 4px; outline: 0; background: #191b1d; color: #d7dade; font-size: 12px; }
+.content-name-input:focus { border-color: #397da4; box-shadow: 0 0 0 1px #397da4; }
+.content-name-footer { height: 54px; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid #34373b; background: #27292c; }
+
+/* ---------- 截取模板：挂在桌面主窗口上，避免被右侧详情 iframe 裁剪 ---------- */
+.roi-picker-modal {
+  position: fixed;
+  z-index: 2400;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 52px 34px 34px;
+  background: rgba(8, 9, 10, .78);
+  backdrop-filter: blur(2px);
+}
+.roi-picker-dialog {
+  width: min(1120px, calc(100vw - 68px));
+  height: min(820px, calc(100vh - 86px));
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #44484d;
+  border-radius: 7px;
+  background: #202225;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65);
+}
+.roi-picker-header {
+  flex: 0 0 58px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  border-bottom: 1px solid #34373b;
+  background: #27292c;
+}
+.roi-picker-header > div { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 4px; }
+.roi-picker-header strong { color: #e4e7ea; font-size: 13px; font-weight: 600; }
+.roi-picker-header span { overflow: hidden; color: #7e8790; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.roi-picker-close { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #8f98a2; cursor: pointer; }
+.roi-picker-close:hover { border-color: #4c5258; background: #383b3f; color: #fff; }
+.roi-picker-close svg { width: 15px; height: 15px; }
+.roi-picker-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 16px;
+  overflow: hidden;
+  background: #111315;
+  cursor: crosshair;
+  user-select: none;
+}
+.roi-picker-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+.roi-picker-stage img { max-width: 100%; max-height: 100%; display: block; object-fit: contain; pointer-events: none; user-select: none; }
+.roi-picker-selection { position: absolute; display: none; border: 2px solid #5cc2ed; background: rgba(41, 156, 205, .16); pointer-events: none; }
+.roi-picker-footer { flex: 0 0 54px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-top: 1px solid #34373b; background: #27292c; }
+.roi-picker-hint { min-width: 0; overflow: hidden; flex: 1; color: #89929b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.roi-picker-actions { display: flex; align-items: center; gap: 8px; }
+.roi-picker-actions button { min-width: 66px; }
+
+@media (max-width: 760px) {
+  .roi-picker-modal { padding: 42px 12px 12px; }
+  .roi-picker-dialog { width: calc(100vw - 24px); height: calc(100vh - 54px); min-height: 300px; }
+  .roi-picker-stage { margin: 10px; }
+  .roi-picker-footer { padding: 0 10px; }
+}
 
 @media (max-width: 980px) {
   .overview-title span, .overview-instance-field > span, .overview-command.secondary span { display: none; }

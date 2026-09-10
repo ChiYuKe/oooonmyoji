@@ -43,25 +43,42 @@
 
   /* ---- 自绘 tooltip（固定定位最上层，边缘避让） ---- */
   let tooltipNode = null;
+  const embedded = window.parent !== window;
   function showTip(target) {
+    const text = target.dataset.tip || '';
+    if (!text) return hideTip();
+    const rect = target.getBoundingClientRect();
+    if (embedded) {
+      window.parent.postMessage({
+        source: 'onmyoji-tooltip',
+        type: 'show',
+        text,
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+      }, '*');
+      return;
+    }
     if (!tooltipNode) {
-      tooltipNode = make('div', 'ui-tooltip hidden');
+      tooltipNode = make('div', 'app-tooltip hidden');
       document.body.appendChild(tooltipNode);
     }
-    tooltipNode.textContent = target.dataset.tip;
+    tooltipNode.textContent = text;
     tooltipNode.classList.remove('hidden');
-    const rect = target.getBoundingClientRect();
+    const margin = 8;
+    const gap = 7;
+    tooltipNode.style.left = '0px';
+    tooltipNode.style.top = '0px';
     const width = tooltipNode.offsetWidth;
     const height = tooltipNode.offsetHeight;
-    let x = rect.left + rect.width / 2 - width / 2;
-    x = Math.max(6, Math.min(x, window.innerWidth - width - 6));
-    let y = rect.bottom + 5;
-    if (y + height > window.innerHeight - 6) y = rect.top - height - 5;
+    const x = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
+    let y = rect.bottom + gap;
+    if (y + height > window.innerHeight - margin) y = rect.top - height - gap;
+    y = Math.max(margin, Math.min(y, window.innerHeight - height - margin));
     tooltipNode.style.left = `${Math.round(x)}px`;
     tooltipNode.style.top = `${Math.round(y)}px`;
   }
   function hideTip() {
-    if (tooltipNode) tooltipNode.classList.add('hidden');
+    if (embedded) window.parent.postMessage({ source: 'onmyoji-tooltip', type: 'hide' }, '*');
+    else if (tooltipNode) tooltipNode.classList.add('hidden');
   }
   function initTooltips() {
     if (initTooltips.done) return;

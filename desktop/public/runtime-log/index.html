@@ -14,10 +14,12 @@
   <header id="topbar">
     <div class="identity"><span class="mark">RUN</span><div><div id="workflow-name">尚未运行</div><div id="run-meta">等待工作流</div></div></div>
     <div class="spacer"></div>
-    <div class="segmented" role="tablist"><button id="tab-steps" class="active" role="tab">步骤</button><button id="tab-engine" role="tab">引擎输出</button></div>
-    <label class="auto-scroll"><input id="auto-scroll" type="checkbox" checked> 自动滚动</label>
-    <button id="btn-stop" class="icon-button danger" title="停止当前工作流" aria-label="停止当前工作流">■</button>
-    <button id="btn-clear" class="icon-button" title="清空日志" aria-label="清空日志">⌫</button>
+    <div class="runtime-log-actions">
+      <div class="segmented" role="tablist"><button id="tab-steps" class="active" role="tab">步骤</button><button id="tab-engine" role="tab">引擎输出</button></div>
+      <label class="auto-scroll"><input id="auto-scroll" type="checkbox" checked> 自动滚动</label>
+      <button id="btn-stop" class="icon-button danger" title="停止当前工作流" aria-label="停止当前工作流">■</button>
+      <button id="btn-clear" class="icon-button" title="清空日志" aria-label="清空日志">⌫</button>
+    </div>
   </header>
   <nav id="source-tabs" class="source-tabs hidden" role="tablist" aria-label="并行实例"></nav>
   <section id="summary">

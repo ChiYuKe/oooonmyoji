@@ -17,6 +17,7 @@ import {
   Flag,
   Folder,
   FolderOpen,
+  FolderPlus,
   FoldVertical,
   GitBranch,
   GitFork,
@@ -31,6 +32,7 @@ import {
   Minus,
   MonitorUp,
   Network,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -44,6 +46,7 @@ import {
   Scan,
   Square,
   Split,
+  Trash2,
   ToggleLeft,
   Type,
   UnfoldVertical,
@@ -115,6 +118,24 @@ interface RuntimeLogEnvelope {
   message?: { type?: string };
 }
 
+interface TooltipRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+interface TooltipMessage {
+  source?: string;
+  type?: 'show' | 'showAsset' | 'hide';
+  text?: string;
+  preview?: { uri?: string; path?: string };
+  rect?: TooltipRect;
+  frameId?: string;
+}
+
 interface InspectorSelection {
   kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow';
   nodeId?: string;
@@ -137,6 +158,16 @@ interface ContentBrowserItem {
   asset?: AssetImage;
 }
 
+interface ContentNameDialogState {
+  resolve: (value: string | null) => void;
+}
+
+interface ContentFolderDraft {
+  parentPath: string;
+  name: string;
+  busy: boolean;
+}
+
 interface OverviewRunState {
   items: Array<{ rel: string; status: OverviewItemStatus }>;
   index: number;
@@ -150,6 +181,25 @@ interface OverviewConfigReader {
   name: string;
   read: () => unknown;
   focus: () => void;
+}
+
+interface RoiPickerState {
+  requestId: string;
+  nodeId: string;
+  key: string;
+  mode: 'asset' | 'rect';
+  targetPath?: string;
+  sourceFrame: HTMLIFrameElement;
+  referenceResolution: [number, number];
+  imageWidth: number;
+  imageHeight: number;
+  dataUrl: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  dragging: boolean;
+  busy: boolean;
 }
 
 const api = window.onmyoji;
@@ -170,6 +220,7 @@ const desktopIcons = {
   Flag,
   Folder,
   FolderOpen,
+  FolderPlus,
   FoldVertical,
   GitBranch,
   GitFork,
@@ -183,6 +234,7 @@ const desktopIcons = {
   Minus,
   MonitorUp,
   Network,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -194,6 +246,7 @@ const desktopIcons = {
   SlidersHorizontal,
   Square,
   Split,
+  Trash2,
   UnfoldVertical,
   WandSparkles,
   Waypoints,
@@ -204,6 +257,83 @@ const desktopIcons = {
 /** 将浏览器原生 title 提示迁移为工作台统一的自定义 tooltip。 */
 function installCustomTooltips(): void {
   const htmlNamespace = 'http://www.w3.org/1999/xhtml';
+  const tooltip = document.createElement('div');
+  tooltip.className = 'app-tooltip hidden';
+  tooltip.setAttribute('role', 'tooltip');
+  document.body.appendChild(tooltip);
+  let activeTarget: HTMLElement | undefined;
+  let activeRect: TooltipRect | undefined;
+
+  const rectFromDomRect = (rect: DOMRect): TooltipRect => ({
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  });
+  const position = (rect: TooltipRect): void => {
+    const margin = 8;
+    const gap = 7;
+    tooltip.style.left = '0px';
+    tooltip.style.top = '0px';
+    const width = tooltip.offsetWidth;
+    const height = tooltip.offsetHeight;
+    const x = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
+    let y = rect.bottom + gap;
+    if (y + height > window.innerHeight - margin) y = rect.top - height - gap;
+    y = Math.max(margin, Math.min(y, window.innerHeight - height - margin));
+    tooltip.style.left = `${Math.round(x)}px`;
+    tooltip.style.top = `${Math.round(y)}px`;
+  };
+  const hide = (): void => {
+    activeTarget = undefined;
+    activeRect = undefined;
+    tooltip.classList.add('hidden');
+  };
+  const show = (text: string, rect: TooltipRect, target?: HTMLElement): void => {
+    if (!text.trim()) return hide();
+    activeTarget = target;
+    activeRect = rect;
+    tooltip.classList.remove('asset-preview');
+    tooltip.textContent = text;
+    tooltip.classList.remove('hidden');
+    position(rect);
+  };
+  const showAsset = (preview: { uri?: string; path?: string }, rect: TooltipRect): void => {
+    const uri = typeof preview.uri === 'string' ? preview.uri.trim() : '';
+    if (!uri) return hide();
+    activeTarget = undefined;
+    activeRect = rect;
+    tooltip.replaceChildren();
+    tooltip.classList.add('asset-preview');
+    const image = document.createElement('img');
+    image.src = uri;
+    image.alt = '';
+    image.decoding = 'async';
+    const path = document.createElement('span');
+    path.className = 'app-tooltip-preview-path';
+    path.textContent = typeof preview.path === 'string' ? preview.path : '';
+    tooltip.append(image, path);
+    tooltip.classList.remove('hidden');
+    position(rect);
+    image.addEventListener('load', () => {
+      if (activeRect === rect && tooltip.classList.contains('asset-preview')) position(rect);
+    }, { once: true });
+    image.addEventListener('error', () => {
+      if (activeRect !== rect || !tooltip.classList.contains('asset-preview')) return;
+      image.remove();
+      const missing = document.createElement('div');
+      missing.className = 'app-tooltip-preview-missing';
+      missing.textContent = '图片无法预览';
+      tooltip.insertBefore(missing, path);
+      position(rect);
+    }, { once: true });
+  };
+  const targetForEvent = (event: Event): HTMLElement | undefined => {
+    const target = event.target;
+    return target instanceof Element ? target.closest<HTMLElement>('[data-tooltip]') ?? undefined : undefined;
+  };
   const scan = (): void => {
     document.querySelectorAll<HTMLElement>('[title]').forEach((element) => {
       if (element.namespaceURI !== htmlNamespace || element.tagName === 'IFRAME') return;
@@ -220,6 +350,61 @@ function installCustomTooltips(): void {
   scan();
   const observer = new MutationObserver(scan);
   observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+  document.addEventListener('mouseover', (event) => {
+    const target = targetForEvent(event);
+    if (!target) return hide();
+    show(target.dataset.tooltip || '', rectFromDomRect(target.getBoundingClientRect()), target);
+  });
+  document.addEventListener('mouseout', (event) => {
+    if (!activeTarget || event.target !== activeTarget) return;
+    const related = event.relatedTarget;
+    if (!(related instanceof Node) || !activeTarget.contains(related)) hide();
+  });
+  document.addEventListener('focusin', (event) => {
+    const target = targetForEvent(event);
+    if (target) show(target.dataset.tooltip || '', rectFromDomRect(target.getBoundingClientRect()), target);
+  });
+  document.addEventListener('focusout', (event) => {
+    if (activeTarget && event.target === activeTarget) hide();
+  });
+  document.addEventListener('pointerdown', hide, true);
+  window.addEventListener('blur', hide);
+  window.addEventListener('resize', () => {
+    if (activeRect && !tooltip.classList.contains('hidden')) position(activeRect);
+  });
+  window.addEventListener('scroll', hide, true);
+
+  window.addEventListener('message', (event: MessageEvent<TooltipMessage>) => {
+    const message = event.data;
+    if (message?.source !== 'onmyoji-tooltip') return;
+    if (message.type === 'hide') {
+      hide();
+      return;
+    }
+    if ((message.type !== 'show' && message.type !== 'showAsset') || !message.rect) return;
+    const sourceFrame = event.source === editorFrame.contentWindow
+      ? editorFrame
+      : event.source === detailsFrame.contentWindow
+        ? detailsFrame
+        : event.source === runtimeLogFrame.contentWindow
+          ? runtimeLogFrame
+          : undefined;
+    if (!sourceFrame) return;
+    const frameRect = sourceFrame.getBoundingClientRect();
+    const rect = {
+      left: frameRect.left + message.rect.left,
+      top: frameRect.top + message.rect.top,
+      right: frameRect.left + message.rect.right,
+      bottom: frameRect.top + message.rect.bottom,
+      width: message.rect.width,
+      height: message.rect.height,
+    };
+    if (message.type === 'showAsset' && message.preview) {
+      showAsset(message.preview, rect);
+    } else if (message.type === 'show') {
+      show(message.text || '', rect);
+    }
+  });
 }
 
 const editorFrame = document.querySelector<HTMLIFrameElement>('#editor-frame')!;
@@ -249,6 +434,22 @@ const overviewRunButton = document.querySelector<HTMLButtonElement>('#overview-r
 const overviewStopButton = document.querySelector<HTMLButtonElement>('#overview-stop')!;
 const overviewConfigModal = document.querySelector<HTMLElement>('#overview-config-modal')!;
 const overviewConfigFields = document.querySelector<HTMLElement>('#overview-config-fields')!;
+const roiPickerModal = document.querySelector<HTMLElement>('#roi-picker-modal')!;
+const roiPickerTitle = document.querySelector<HTMLElement>('#roi-picker-title')!;
+const roiPickerSubtitle = document.querySelector<HTMLElement>('#roi-picker-subtitle')!;
+const roiPickerStage = document.querySelector<HTMLElement>('#roi-picker-stage')!;
+const roiPickerImage = document.querySelector<HTMLImageElement>('#roi-picker-image')!;
+const roiPickerSelection = document.querySelector<HTMLElement>('#roi-picker-selection')!;
+const roiPickerHint = document.querySelector<HTMLElement>('#roi-picker-hint')!;
+const roiPickerCancel = document.querySelector<HTMLButtonElement>('#roi-picker-cancel')!;
+const roiPickerConfirm = document.querySelector<HTMLButtonElement>('#roi-picker-confirm')!;
+const roiPickerClose = document.querySelector<HTMLButtonElement>('#roi-picker-close')!;
+const contentNameModal = document.querySelector<HTMLElement>('#content-name-modal')!;
+const contentNameTitle = document.querySelector<HTMLElement>('#content-name-title')!;
+const contentNameInput = document.querySelector<HTMLInputElement>('#content-name-input')!;
+const contentNameSubmit = document.querySelector<HTMLButtonElement>('#content-name-submit')!;
+const contentNameCancel = document.querySelector<HTMLButtonElement>('#content-name-cancel')!;
+const contentNameClose = document.querySelector<HTMLButtonElement>('#content-name-close')!;
 
 let bootstrap: BootstrapData | undefined;
 let currentUri = '';
@@ -259,6 +460,12 @@ let backStack: string[] = [];
 let editorReady = false;
 let currentEditorInit: WorkflowEditorInit | undefined;
 let dirty = false;
+const AUTO_SAVE_DELAY_MS = 700;
+let autoSaveTimer: number | undefined;
+let autoSaveInFlight = false;
+let autoSavePromise: Promise<void> | undefined;
+let autoSaveRevision = 0;
+let autoSavePending: { uri: string; text: string; revision: number } | undefined;
 let sidebarNodes: SidebarNode[] = [];
 let sidebarVariables: SidebarVariable[] = [];
 let selectedNode = '';
@@ -272,9 +479,11 @@ let docking: DockingController | undefined;
 let workbenchFrame: WorkbenchFrameController | undefined;
 let sharedPanelDockBridge: SharedPanelDockBridge | undefined;
 let contentAssets: AssetImage[] = [];
+let contentFolderPaths: string[] = [];
 let contentBrowserFolder = '';
 let contentBrowserQuery = '';
 let contentBrowserView: ContentBrowserView = 'grid';
+let contentFolderDraft: ContentFolderDraft | undefined;
 let selectedContentPath = '';
 let runtimeLogReady = false;
 let runtimeLogDescriptor: RuntimeLogDescriptor | undefined;
@@ -292,6 +501,8 @@ let overviewConfigurations: Record<string, Record<string, unknown>> = {};
 let overviewConfigWorkflow: WorkflowDescriptor | undefined;
 let overviewConfigReaders: OverviewConfigReader[] = [];
 let visionTestOpening = false;
+let roiPickerState: RoiPickerState | undefined;
+let contentNameDialogState: ContentNameDialogState | undefined;
 
 const OVERVIEW_SELECTION_KEY = 'onmyoji-studio.overview-selection.v1';
 const OVERVIEW_CONFIG_KEY = 'onmyoji-studio.overview-inputs.v1';
@@ -454,6 +665,15 @@ function editorCommand(command: string, value?: unknown): void {
 }
 
 function desktopControl(command: string, value?: unknown): void {
+  if (command === 'switchWorkflow') {
+    const uri = String(value ?? '');
+    if (!uri) return;
+    workbenchFrame?.show('workflow');
+    // 工作流切换属于桌面壳层状态，不能只更新 iframe 顶部的显示名称；
+    // 直接走主窗口的加载链路，确保画布、详情、结构树和输入状态一起刷新。
+    void handleEditorMessage({ type: 'switchWorkflow', uri }, editorFrame);
+    return;
+  }
   postToEditor({ type: 'desktopControl', command, value });
 }
 
@@ -474,8 +694,275 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function hideRoiPicker(): void {
+  roiPickerModal.classList.add('hidden');
+  roiPickerModal.setAttribute('aria-hidden', 'true');
+  roiPickerImage.removeAttribute('src');
+  roiPickerSelection.style.display = 'none';
+  roiPickerConfirm.disabled = false;
+  roiPickerCancel.disabled = false;
+  roiPickerClose.disabled = false;
+  roiPickerHint.textContent = '拖动鼠标框选区域';
+}
+
+function cancelRoiPicker(): void {
+  const request = roiPickerState;
+  if (!request || request.busy) return;
+  roiPickerState = undefined;
+  hideRoiPicker();
+  postToFrame(request.sourceFrame, { type: 'roiPickerCancelled', requestId: request.requestId });
+}
+
+function roiPickerImageBounds(): { image: DOMRect; stage: DOMRect } | undefined {
+  const image = roiPickerImage.getBoundingClientRect();
+  const stage = roiPickerStage.getBoundingClientRect();
+  if (image.width < 1 || image.height < 1 || stage.width < 1 || stage.height < 1) return undefined;
+  return { image, stage };
+}
+
+function roiPickerPoint(event: PointerEvent): { x: number; y: number } | undefined {
+  const bounds = roiPickerImageBounds();
+  if (!bounds) return undefined;
+  return {
+    x: Math.max(0, Math.min(bounds.image.width, event.clientX - bounds.image.left)),
+    y: Math.max(0, Math.min(bounds.image.height, event.clientY - bounds.image.top)),
+  };
+}
+
+function renderRoiPickerSelection(): void {
+  const state = roiPickerState;
+  const bounds = roiPickerImageBounds();
+  if (!state || !bounds) return;
+  const left = bounds.image.left - bounds.stage.left;
+  const top = bounds.image.top - bounds.stage.top;
+  const x = Math.min(state.x1, state.x2);
+  const y = Math.min(state.y1, state.y2);
+  const width = Math.abs(state.x2 - state.x1);
+  const height = Math.abs(state.y2 - state.y1);
+  roiPickerSelection.style.display = width > 0 && height > 0 ? 'block' : 'none';
+  roiPickerSelection.style.left = `${left + x}px`;
+  roiPickerSelection.style.top = `${top + y}px`;
+  roiPickerSelection.style.width = `${width}px`;
+  roiPickerSelection.style.height = `${height}px`;
+}
+
+function selectedRoi(): [number, number, number, number] | undefined {
+  const state = roiPickerState;
+  const bounds = roiPickerImageBounds();
+  if (!state || !bounds) return undefined;
+  const [referenceWidth, referenceHeight] = state.referenceResolution;
+  if (referenceWidth < 1 || referenceHeight < 1) return undefined;
+  const x = Math.round(Math.min(state.x1, state.x2) * referenceWidth / bounds.image.width);
+  const y = Math.round(Math.min(state.y1, state.y2) * referenceHeight / bounds.image.height);
+  const width = Math.round(Math.abs(state.x2 - state.x1) * referenceWidth / bounds.image.width);
+  const height = Math.round(Math.abs(state.y2 - state.y1) * referenceHeight / bounds.image.height);
+  const safeX = Math.max(0, Math.min(referenceWidth - 1, x));
+  const safeY = Math.max(0, Math.min(referenceHeight - 1, y));
+  const safeWidth = Math.max(0, Math.min(referenceWidth - safeX, width));
+  const safeHeight = Math.max(0, Math.min(referenceHeight - safeY, height));
+  if (safeWidth < 1 || safeHeight < 1) return undefined;
+  return [safeX, safeY, safeWidth, safeHeight];
+}
+
+function roiPickerMime(targetPath: string): string {
+  const extension = targetPath.slice(targetPath.lastIndexOf('.')).toLocaleLowerCase();
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  if (extension === '.webp') return 'image/webp';
+  return 'image/png';
+}
+
+async function confirmRoiPicker(): Promise<void> {
+  const state = roiPickerState;
+  if (!state || state.busy) return;
+  const roi = selectedRoi();
+  if (!roi) {
+    showToast('请选择有效区域', true);
+    return;
+  }
+
+  const request = state;
+  if (request.mode === 'rect') {
+    roiPickerState = undefined;
+    hideRoiPicker();
+    postToFrame(request.sourceFrame, {
+      type: 'roiPickerResult',
+      requestId: request.requestId,
+      nodeId: request.nodeId,
+      key: request.key,
+      roi,
+    });
+    return;
+  }
+
+  const bounds = roiPickerImageBounds();
+  if (!bounds) return;
+  const sourceWidth = roiPickerImage.naturalWidth || request.imageWidth;
+  const sourceHeight = roiPickerImage.naturalHeight || request.imageHeight;
+  const sourceX = Math.min(request.x1, request.x2) * sourceWidth / bounds.image.width;
+  const sourceY = Math.min(request.y1, request.y2) * sourceHeight / bounds.image.height;
+  const sourceW = Math.abs(request.x2 - request.x1) * sourceWidth / bounds.image.width;
+  const sourceH = Math.abs(request.y2 - request.y1) * sourceHeight / bounds.image.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = roi[2];
+  canvas.height = roi[3];
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('无法创建截图画布');
+    context.drawImage(roiPickerImage, sourceX, sourceY, sourceW, sourceH, 0, 0, canvas.width, canvas.height);
+    state.busy = true;
+    roiPickerConfirm.disabled = true;
+    roiPickerCancel.disabled = true;
+    roiPickerClose.disabled = true;
+    roiPickerHint.textContent = '正在保存模板…';
+    const savedPath = await api.saveTemplate({
+      targetPath: request.targetPath,
+      filename: `${request.nodeId}-${request.key}.png`,
+      dataUrl: canvas.toDataURL(roiPickerMime(request.targetPath || '')),
+    });
+    if (roiPickerState?.requestId !== request.requestId) return;
+    roiPickerState = undefined;
+    hideRoiPicker();
+    postToFrame(request.sourceFrame, {
+      type: 'templateSaved',
+      requestId: request.requestId,
+      nodeId: request.nodeId,
+      key: request.key,
+      path: savedPath,
+    });
+  } catch (error) {
+    if (roiPickerState?.requestId === request.requestId) {
+      roiPickerState = undefined;
+      hideRoiPicker();
+      postToFrame(request.sourceFrame, { type: 'roiPickerError', requestId: request.requestId, message: errorMessage(error) });
+    }
+    showToast(errorMessage(error), true);
+  }
+}
+
+function openRoiPickerModal(request: RoiPickerState): void {
+  if (roiPickerState) cancelRoiPicker();
+  roiPickerState = request;
+  roiPickerTitle.textContent = request.targetPath ? '重新截取模板' : request.mode === 'asset' ? '截取模板' : '选择区域';
+  roiPickerSubtitle.textContent = request.mode === 'asset' ? '从当前画面框选需要保存的区域' : '从当前画面框选识别区域';
+  roiPickerHint.textContent = '拖动鼠标框选区域';
+  roiPickerConfirm.disabled = false;
+  roiPickerSelection.style.display = 'none';
+  roiPickerModal.classList.remove('hidden');
+  roiPickerModal.setAttribute('aria-hidden', 'false');
+  roiPickerImage.onload = () => renderRoiPickerSelection();
+  roiPickerImage.src = request.dataUrl;
+  window.requestAnimationFrame(() => renderRoiPickerSelection());
+}
+
+function bindRoiPicker(): void {
+  roiPickerStage.addEventListener('pointerdown', (event) => {
+    const state = roiPickerState;
+    const point = roiPickerPoint(event);
+    if (!state || state.busy || !point) return;
+    event.preventDefault();
+    state.x1 = point.x;
+    state.y1 = point.y;
+    state.x2 = point.x;
+    state.y2 = point.y;
+    state.dragging = true;
+    roiPickerStage.setPointerCapture?.(event.pointerId);
+    renderRoiPickerSelection();
+  });
+  roiPickerStage.addEventListener('pointermove', (event) => {
+    const state = roiPickerState;
+    if (!state?.dragging || state.busy) return;
+    const point = roiPickerPoint(event);
+    if (!point) return;
+    state.x2 = point.x;
+    state.y2 = point.y;
+    renderRoiPickerSelection();
+  });
+  const finishDrag = (event: PointerEvent) => {
+    if (!roiPickerState?.dragging) return;
+    roiPickerState.dragging = false;
+    if (roiPickerStage.hasPointerCapture?.(event.pointerId)) roiPickerStage.releasePointerCapture(event.pointerId);
+  };
+  roiPickerStage.addEventListener('pointerup', finishDrag);
+  roiPickerStage.addEventListener('pointercancel', finishDrag);
+  roiPickerCancel.addEventListener('click', cancelRoiPicker);
+  roiPickerClose.addEventListener('click', cancelRoiPicker);
+  roiPickerConfirm.addEventListener('click', () => void confirmRoiPicker());
+  roiPickerModal.addEventListener('pointerdown', (event) => {
+    if (event.target === roiPickerModal) cancelRoiPicker();
+  });
+}
+
 function setDirty(value: boolean): void {
   dirty = value;
+}
+
+function clearAutoSaveTimer(): void {
+  if (autoSaveTimer !== undefined) {
+    window.clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
+  }
+}
+
+function cancelAutoSave(): void {
+  clearAutoSaveTimer();
+  autoSavePending = undefined;
+  autoSaveRevision += 1;
+}
+
+/** 文档变化后延迟写盘，连续拖拽或输入只保存最后一次内容。 */
+function scheduleAutoSave(text: string): void {
+  if (!currentUri || !text) return;
+  const revision = ++autoSaveRevision;
+  autoSavePending = { uri: currentUri, text, revision };
+  clearAutoSaveTimer();
+  autoSaveTimer = window.setTimeout(runAutoSave, AUTO_SAVE_DELAY_MS);
+}
+
+function runAutoSave(): void {
+  autoSaveTimer = undefined;
+  if (autoSaveInFlight) return;
+  const promise = flushAutoSave();
+  autoSavePromise = promise;
+  void promise.finally(() => {
+    if (autoSavePromise === promise) autoSavePromise = undefined;
+  });
+}
+
+async function waitForAutoSave(): Promise<void> {
+  if (autoSavePromise) await autoSavePromise;
+}
+
+async function flushAutoSave(): Promise<void> {
+  if (autoSaveInFlight) return;
+  const pending = autoSavePending;
+  autoSavePending = undefined;
+  if (!pending || pending.uri !== currentUri) return;
+
+  autoSaveInFlight = true;
+  const uri = pending.uri;
+  try {
+    setStatus('正在自动保存…');
+    await api.saveWorkflow(uri, pending.text);
+    if (uri === currentUri && pending.revision === autoSaveRevision) {
+      currentText = pending.text;
+      if (currentEditorInit) currentEditorInit.document.text = pending.text;
+      setDirty(false);
+      postToEditors({ type: 'workflowSaved' });
+      setStatus('工作流已自动保存');
+    }
+  } catch (error) {
+    if (uri === currentUri && pending.revision === autoSaveRevision) {
+      setDirty(true);
+      postToEditors({ type: 'workflowSaveFailed' });
+      showToast(`自动保存失败：${errorMessage(error)}`, true);
+      setStatus('自动保存失败');
+    }
+  } finally {
+    autoSaveInFlight = false;
+    if (autoSavePending && autoSaveTimer === undefined) {
+      autoSaveTimer = window.setTimeout(runAutoSave, AUTO_SAVE_DELAY_MS);
+    }
+  }
 }
 
 function workflowReference(file: WorkflowDescriptor): string {
@@ -1181,7 +1668,6 @@ async function runNextOverviewWorkflow(): Promise<void> {
       await requestRuntimeStop();
       return;
     }
-    if (workflow.uri === currentUri) setDirty(false);
     if (sharedPanelDockBridge) sharedPanelDockBridge.show('runtime');
     else docking?.showPanel('runtime');
   } catch (error) {
@@ -1298,6 +1784,7 @@ async function refreshOverviewCatalog(): Promise<void> {
       bootstrap.workflows = data.workflows;
       bootstrap.catalog = data.catalog;
       bootstrap.instances = data.instances;
+      bootstrap.defaultWorkflow = data.defaultWorkflow;
     } else {
       bootstrap = data;
     }
@@ -1420,6 +1907,7 @@ function contentName(path: string): string {
 
 function contentFolders(): string[] {
   const folders = new Set<string>(['']);
+  contentFolderPaths.forEach((folder) => folders.add(folder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')));
   const paths = [
     ...(bootstrap?.workflows.map((workflow) => workflow.rel.replace(/\\/g, '/')) ?? []),
     ...contentAssets.map((asset) => asset.path.replace(/\\/g, '/')),
@@ -1474,6 +1962,83 @@ function navigateContentBrowser(folder: string): void {
   renderContentBrowser();
 }
 
+function contentDragPath(event: DragEvent): string {
+  const transfer = event.dataTransfer;
+  if (!transfer) return '';
+  return transfer.getData('application/x-onmyoji-content') || transfer.getData('text/plain') || '';
+}
+
+function bindContentDropTarget(element: HTMLElement, folder: string | (() => string)): void {
+  const isInternalContentDrag = (event: DragEvent): boolean => {
+    const types = event.dataTransfer?.types;
+    return Boolean(types && (types.includes('application/x-onmyoji-content') || types.includes('text/plain')));
+  };
+  element.addEventListener('dragover', (event) => {
+    if (!isInternalContentDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    element.classList.add('drop-target');
+  });
+  element.addEventListener('dragleave', (event) => {
+    event.stopPropagation();
+    const related = event.relatedTarget;
+    if (!(related instanceof Node) || !element.contains(related)) element.classList.remove('drop-target');
+  });
+  element.addEventListener('drop', (event) => {
+    if (!isInternalContentDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    element.classList.remove('drop-target');
+    const sourcePath = contentDragPath(event).replace(/\\/g, '/').trim();
+    if (sourcePath) void moveContentItem(sourcePath, typeof folder === 'function' ? folder() : folder);
+  });
+}
+
+async function moveContentItem(sourcePath: string, targetFolder: string): Promise<void> {
+  const source = sourcePath.replace(/\\/g, '/').trim();
+  if (!source) return;
+  if (dirty) {
+    showToast('请先保存当前工作流，再移动内容', true);
+    return;
+  }
+  const currentRelative = currentUri ? relativeToProject(displayFileUri(currentUri)).replace(/\\/g, '/') : '';
+  const movingCurrentWorkflow = currentRelative.toLowerCase() === source.toLowerCase();
+  try {
+    const result = await api.moveContent({ sourcePath: source, targetFolder });
+    selectedContentPath = result.targetPath;
+
+    const [assets, data, folders] = await Promise.all([api.listAssets(), api.bootstrap(), api.listContentFolders()]);
+    contentAssets = assets;
+    contentFolderPaths = folders;
+    if (bootstrap) {
+      bootstrap.workflows = data.workflows;
+      bootstrap.catalog = data.catalog;
+      bootstrap.defaultWorkflow = data.defaultWorkflow;
+      bootstrap.instances = data.instances;
+    } else {
+      bootstrap = data;
+    }
+    reconcileOverviewSelection();
+    reconcileOverviewConfigurations();
+    renderWorkflowSelect(data.workflows);
+    renderContentBrowser();
+    renderOverview();
+
+    if (movingCurrentWorkflow) {
+      const moved = bootstrap.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
+      if (moved) await loadWorkflow(moved.uri);
+    } else if (result.updatedFiles > 0 && currentUri) {
+      // 移动模板后，当前工作流的磁盘引用可能已被重写；重新载入以同步编辑器内存状态。
+      await loadWorkflow(currentUri);
+    }
+    const redirectText = result.updatedReferences > 0 ? `，已重定向 ${result.updatedReferences} 处引用` : '';
+    showToast(`已移动到 ${result.targetPath}${redirectText}`);
+  } catch (error) {
+    showToast(`移动失败：${errorMessage(error)}`, true);
+  }
+}
+
 function selectContentItem(button: HTMLButtonElement, item: ContentBrowserItem): void {
   selectedContentPath = item.path;
   contentBrowserItems.querySelectorAll('.content-item.selected').forEach((element) => element.classList.remove('selected'));
@@ -1481,11 +2046,12 @@ function selectContentItem(button: HTMLButtonElement, item: ContentBrowserItem):
   document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = item.path;
 }
 
-function createContentItem(item: ContentBrowserItem): HTMLButtonElement {
+function createContentItem(item: ContentBrowserItem, editing = false): HTMLButtonElement {
   const button = document.createElement('button');
-  button.className = `content-item ${item.kind}${item.workflow?.uri === currentUri ? ' current' : ''}${item.path === selectedContentPath ? ' selected' : ''}`;
+  button.className = `content-item ${item.kind}${item.workflow?.uri === currentUri ? ' current' : ''}${item.path === selectedContentPath ? ' selected' : ''}${editing ? ' editing' : ''}`;
   button.type = 'button';
-  button.title = item.path;
+  button.draggable = !editing && item.kind !== 'folder';
+  button.title = editing ? '' : item.path;
   button.setAttribute('role', 'listitem');
 
   const preview = document.createElement('span');
@@ -1499,26 +2065,80 @@ function createContentItem(item: ContentBrowserItem): HTMLButtonElement {
   } else {
     preview.innerHTML = `<i data-lucide="${item.kind === 'folder' ? 'folder' : 'file-json-2'}"></i>`;
   }
-  const label = document.createElement('span');
-  label.className = 'content-item-name';
-  label.textContent = item.name;
+  const label = editing ? document.createElement('input') : document.createElement('span');
+  label.className = editing ? 'content-item-name-edit' : 'content-item-name';
+  if (editing) {
+    const input = label as HTMLInputElement;
+    input.type = 'text';
+    input.value = item.name;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('aria-label', '文件夹名称');
+  } else {
+    label.textContent = item.name;
+  }
   const path = document.createElement('span');
   path.className = 'content-item-path';
   path.textContent = contentBrowserQuery ? item.path : item.kind === 'folder' ? '文件夹' : item.kind === 'workflow' ? '工作流' : '模板图片';
   button.append(preview, label, path);
-  button.addEventListener('click', () => selectContentItem(button, item));
+  if (editing) {
+    const input = label as HTMLInputElement;
+    const stop = (event: Event): void => event.stopPropagation();
+    input.addEventListener('click', stop);
+    input.addEventListener('pointerdown', stop);
+    input.addEventListener('dblclick', stop);
+    input.addEventListener('input', () => {
+      if (contentFolderDraft) contentFolderDraft.name = input.value;
+    });
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void commitContentFolderDraft();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelContentFolderDraft();
+      }
+    });
+    input.addEventListener('blur', () => {
+      window.setTimeout(() => {
+        if (contentFolderDraft && !contentFolderDraft.busy) void commitContentFolderDraft();
+      }, 0);
+    });
+    window.setTimeout(() => {
+      if (contentFolderDraft && !contentFolderDraft.busy) {
+        input.focus();
+        input.select();
+      }
+    }, 0);
+  }
+  button.addEventListener('click', () => {
+    if (!editing) selectContentItem(button, item);
+  });
+  if (!editing && item.kind !== 'folder') {
+    button.addEventListener('dragstart', (event) => {
+      const transfer = event.dataTransfer;
+      if (!transfer) return;
+      transfer.setData('application/x-onmyoji-content', item.path);
+      transfer.setData('text/plain', item.path);
+      transfer.effectAllowed = 'move';
+      button.classList.add('dragging');
+    });
+    button.addEventListener('dragend', () => button.classList.remove('dragging'));
+  }
+  if (!editing && item.kind === 'folder') bindContentDropTarget(button, item.path);
   button.addEventListener('dblclick', () => {
+    if (editing) return;
     if (item.kind === 'folder') navigateContentBrowser(item.path);
     else if (item.workflow) desktopControl('switchWorkflow', item.workflow.uri);
     else if (item.asset) void api.openContentItem(item.asset.path).catch((error) => showToast(errorMessage(error), true));
   });
-  if (item.kind !== 'folder') {
-    button.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      selectContentItem(button, item);
-      showContentContextMenu(event, item, button);
-    });
-  }
+  if (!editing) button.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    selectContentItem(button, item);
+    showContentContextMenu(event, item, button);
+  });
   return button;
 }
 
@@ -1534,6 +2154,12 @@ function renderContentBrowserTree(): void {
     button.querySelector('span')!.textContent = folder ? contentName(folder) : '项目内容';
     button.title = folder || '项目内容';
     button.addEventListener('click', () => navigateContentBrowser(folder));
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showContentContextMenu(event, contentFolderItem(folder), button);
+    });
+    bindContentDropTarget(button, folder);
     contentBrowserTree.appendChild(button);
     for (const child of folders.filter((candidate) => candidate && contentParent(candidate) === folder).sort((left, right) => left.localeCompare(right, 'zh-CN'))) {
       appendFolder(child, depth + 1);
@@ -1553,6 +2179,12 @@ function renderContentBrowserBreadcrumbs(): void {
     button.textContent = path ? contentName(path) : '项目内容';
     button.title = path || '项目内容';
     button.addEventListener('click', () => navigateContentBrowser(path));
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showContentContextMenu(event, contentFolderItem(path), button);
+    });
+    bindContentDropTarget(button, path);
     contentBrowserBreadcrumbs.appendChild(button);
   }
 }
@@ -1563,8 +2195,15 @@ function renderContentBrowser(): void {
   renderContentBrowserTree();
   renderContentBrowserBreadcrumbs();
   const entries = contentBrowserEntries();
+  if (contentFolderDraft && contentFolderDraft.parentPath === contentBrowserFolder && !contentBrowserQuery) {
+    entries.unshift({
+      kind: 'folder',
+      path: `${contentFolderDraft.parentPath}/.new-folder`,
+      name: contentFolderDraft.name,
+    });
+  }
   contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
-  contentBrowserItems.replaceChildren(...entries.map(createContentItem));
+  contentBrowserItems.replaceChildren(...entries.map((item, index) => createContentItem(item, Boolean(contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder')))));
   document.querySelector<HTMLElement>('#content-browser-empty')!.classList.toggle('hidden', entries.length > 0);
   document.querySelector<HTMLElement>('#content-browser-summary')!.textContent = `${entries.length} 项`;
   document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = selectedContentPath;
@@ -1580,11 +2219,13 @@ async function refreshContentBrowser(): Promise<void> {
   refreshButton.disabled = true;
   refreshButton.classList.add('refreshing');
   try {
-    const [assets, data] = await Promise.all([api.listAssets(), api.bootstrap()]);
+    const [assets, data, folders] = await Promise.all([api.listAssets(), api.bootstrap(), api.listContentFolders()]);
     contentAssets = assets;
+    contentFolderPaths = folders;
     if (bootstrap) {
       bootstrap.workflows = data.workflows;
       bootstrap.catalog = data.catalog;
+      bootstrap.defaultWorkflow = data.defaultWorkflow;
     } else {
       bootstrap = data;
     }
@@ -1641,7 +2282,153 @@ function closeContentContextMenu(): void {
   contentContextMenu = undefined;
 }
 
-function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, button: HTMLButtonElement): void {
+function isContentRootFolder(path: string): boolean {
+  return path === 'assets' || path === 'workflows';
+}
+
+function contentFolderItem(path: string): ContentBrowserItem {
+  return { kind: 'folder', path, name: path ? contentName(path) : '项目内容' };
+}
+
+function finishContentNameDialog(value: string | null): void {
+  const request = contentNameDialogState;
+  if (!request) return;
+  contentNameDialogState = undefined;
+  contentNameModal.classList.add('hidden');
+  contentNameModal.setAttribute('aria-hidden', 'true');
+  contentNameInput.value = '';
+  request.resolve(value);
+}
+
+function requestContentName(title: string, submitLabel: string, initialValue: string): Promise<string | null> {
+  if (contentNameDialogState) finishContentNameDialog(null);
+  contentNameTitle.textContent = title;
+  contentNameSubmit.textContent = submitLabel;
+  contentNameInput.value = initialValue;
+  contentNameModal.classList.remove('hidden');
+  contentNameModal.setAttribute('aria-hidden', 'false');
+  const result = new Promise<string | null>((resolve) => {
+    contentNameDialogState = { resolve };
+  });
+  window.setTimeout(() => {
+    if (!contentNameDialogState) return;
+    contentNameInput.focus();
+    contentNameInput.select();
+  }, 0);
+  return result;
+}
+
+async function createContentFolderAt(parentPath: string): Promise<void> {
+  if (contentFolderDraft) return;
+  const normalizedParent = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (contentBrowserFolder !== normalizedParent) navigateContentBrowser(normalizedParent);
+  selectedContentPath = '';
+  contentFolderDraft = { parentPath: normalizedParent, name: '新建文件夹', busy: false };
+  renderContentBrowser();
+}
+
+function cancelContentFolderDraft(): void {
+  if (!contentFolderDraft || contentFolderDraft.busy) return;
+  contentFolderDraft = undefined;
+  renderContentBrowser();
+}
+
+async function commitContentFolderDraft(): Promise<void> {
+  const draft = contentFolderDraft;
+  if (!draft || draft.busy) return;
+  const input = contentBrowserItems.querySelector<HTMLInputElement>('.content-item-name-edit');
+  const name = input?.value ?? draft.name;
+  if (!name.trim()) {
+    input?.focus();
+    return;
+  }
+  draft.name = name;
+  draft.busy = true;
+  input?.setAttribute('aria-busy', 'true');
+  if (input) input.disabled = true;
+  try {
+    const createdPath = await api.createContentFolder({ parentPath: draft.parentPath, name });
+    contentFolderDraft = undefined;
+    selectedContentPath = createdPath;
+    await refreshContentBrowser();
+    showToast(`已创建文件夹 ${createdPath}`);
+  } catch (error) {
+    draft.busy = false;
+    if (contentFolderDraft === draft) {
+      renderContentBrowser();
+      const nextInput = contentBrowserItems.querySelector<HTMLInputElement>('.content-item-name-edit');
+      nextInput?.focus();
+      nextInput?.select();
+    }
+    showToast(`新建失败：${errorMessage(error)}`, true);
+  }
+}
+
+async function copyContentPath(path: string): Promise<void> {
+  if (!path) return;
+  try {
+    await navigator.clipboard.writeText(path);
+    showToast(`已复制路径 ${path}`);
+  } catch (error) {
+    showToast(`复制失败：${errorMessage(error)}`, true);
+  }
+}
+
+async function renameContentItem(item: ContentBrowserItem): Promise<void> {
+  if (dirty) {
+    showToast('请先保存当前工作流，再重命名内容', true);
+    return;
+  }
+  const newName = await requestContentName('重命名', '保存', item.name);
+  if (newName === null || !newName.trim() || newName.trim() === item.name) return;
+  const currentRelative = currentUri ? relativeToProject(displayFileUri(currentUri)).replace(/\\/g, '/') : '';
+  const renamingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
+  try {
+    const result = await api.renameContent({ sourcePath: item.path, newName });
+    selectedContentPath = result.targetPath;
+    await refreshContentBrowser();
+    if (renamingCurrentWorkflow) {
+      const renamed = bootstrap?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
+      if (renamed) await loadWorkflow(renamed.uri);
+    } else if (result.updatedFiles > 0 && currentUri) {
+      await loadWorkflow(currentUri);
+    }
+    const redirectText = result.updatedReferences > 0 ? `，已重定向 ${result.updatedReferences} 处引用` : '';
+    showToast(`已重命名为 ${result.targetPath}${redirectText}`);
+  } catch (error) {
+    showToast(`重命名失败：${errorMessage(error)}`, true);
+  }
+}
+
+async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
+  if (dirty) {
+    showToast('请先保存当前工作流，再删除内容', true);
+    return;
+  }
+  if (!window.confirm(`确定删除“${item.name}”吗？`)) return;
+  const currentRelative = currentUri ? relativeToProject(displayFileUri(currentUri)).replace(/\\/g, '/') : '';
+  const deletingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
+  try {
+    await api.deleteContent(item.path);
+    selectedContentPath = '';
+    await refreshContentBrowser();
+    if (deletingCurrentWorkflow) {
+      const fallback = bootstrap?.workflows.find((workflow) => workflow.uri !== currentUri);
+      if (fallback) await loadWorkflow(fallback.uri);
+    }
+    showToast(`已删除 ${item.path}`);
+  } catch (error) {
+    showToast(`删除失败：${errorMessage(error)}`, true);
+  }
+}
+
+function addContentContextSeparator(doc: Document, menu: HTMLElement): void {
+  const separator = doc.createElement('div');
+  separator.className = 'content-context-separator';
+  menu.appendChild(separator);
+}
+
+function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, button: HTMLElement): void {
   closeContentContextMenu();
   const doc = button.ownerDocument;
   const menu = doc.createElement('div');
@@ -1662,15 +2449,35 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     menu.appendChild(entry);
   };
 
-  addEntry('引用查看器', Network, () => openReferenceViewer(item.path, doc));
-  const separator = doc.createElement('div');
-  separator.className = 'content-context-separator';
-  menu.appendChild(separator);
-  if (item.workflow) {
-    addEntry('在编辑器中打开', FileJson2, () => desktopControl('switchWorkflow', item.workflow!.uri));
-  } else if (item.asset) {
-    addEntry('打开图片', Image, () => void api.openContentItem(item.asset!.path).catch((error) => showToast(errorMessage(error), true)));
+  if (item.kind === 'folder') {
+    if (item.path) addEntry('打开文件夹', FolderOpen, () => navigateContentBrowser(item.path));
+    if (item.path === '') {
+      addEntry('在 assets 中新建文件夹', FolderPlus, () => void createContentFolderAt('assets'));
+      addEntry('在 workflows 中新建文件夹', FolderPlus, () => void createContentFolderAt('workflows'));
+    } else {
+      addEntry('新建文件夹', FolderPlus, () => void createContentFolderAt(item.path));
+    }
+    if (!isContentRootFolder(item.path) && item.path) {
+      addContentContextSeparator(doc, menu);
+      addEntry('重命名', Pencil, () => void renameContentItem(item));
+      addEntry('删除', Trash2, () => void deleteContentItem(item));
+    }
+    if (item.path) addEntry('复制路径', Copy, () => void copyContentPath(item.path));
+  } else {
+    addEntry('引用查看器', Network, () => openReferenceViewer(item.path, doc));
+    addContentContextSeparator(doc, menu);
+    if (item.workflow) {
+      addEntry('在编辑器中打开', FileJson2, () => desktopControl('switchWorkflow', item.workflow!.uri));
+    } else if (item.asset) {
+      addEntry('打开图片', Image, () => void api.openContentItem(item.asset!.path).catch((error) => showToast(errorMessage(error), true)));
+    }
+    addContentContextSeparator(doc, menu);
+    addEntry('重命名', Pencil, () => void renameContentItem(item));
+    addEntry('删除', Trash2, () => void deleteContentItem(item));
+    addEntry('复制路径', Copy, () => void copyContentPath(item.path));
   }
+  addContentContextSeparator(doc, menu);
+  addEntry('刷新', RefreshCw, () => void refreshContentBrowser());
 
   doc.body.appendChild(menu);
   const rect = menu.getBoundingClientRect();
@@ -2315,6 +3122,8 @@ function renderSidebar(): void {
 
 async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> {
   if (!uri) return;
+  cancelAutoSave();
+  await waitForAutoSave();
   loadingMask.classList.remove('hidden');
   try {
     if (addToBackStack && currentUri && currentUri !== uri) backStack.push(currentUri);
@@ -2372,6 +3181,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       currentText = text;
       if (currentEditorInit) currentEditorInit.document.text = text;
       setDirty(message.dirty !== false);
+      scheduleAutoSave(text);
       const targetFrame = sourceFrame === editorFrame ? detailsFrame : editorFrame;
       postToFrame(targetFrame, { type: 'replaceDocument', text, recordHistory: true });
       return;
@@ -2419,15 +3229,20 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     }
     if (type === 'save') {
       const text = String(message.text ?? '');
+      cancelAutoSave();
+      await waitForAutoSave();
       await api.saveWorkflow(currentUri, text);
       currentText = text;
       if (currentEditorInit) currentEditorInit.document.text = text;
       setDirty(false);
+      postToEditors({ type: 'workflowSaved' });
       setStatus('工作流已保存');
       showToast('工作流已保存');
       return;
     }
     if (type === 'switchWorkflow') {
+      cancelAutoSave();
+      await waitForAutoSave();
       if (typeof message.saveText === 'string') {
         await api.saveWorkflow(currentUri, message.saveText);
         currentText = message.saveText;
@@ -2437,6 +3252,8 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       return;
     }
     if (type === 'openSubWorkflow') {
+      cancelAutoSave();
+      await waitForAutoSave();
       if (typeof message.saveText === 'string') {
         await api.saveWorkflow(currentUri, message.saveText);
         currentText = message.saveText;
@@ -2453,6 +3270,8 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       return;
     }
     if (type === 'goBackWorkflow') {
+      cancelAutoSave();
+      await waitForAutoSave();
       if (typeof message.saveText === 'string') {
         await api.saveWorkflow(currentUri, message.saveText);
         currentText = message.saveText;
@@ -2465,6 +3284,8 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       const index = Number(message.index);
       const trail = [...backStack, currentUri];
       if (!Number.isInteger(index) || index < 0 || index >= trail.length - 1) return;
+      cancelAutoSave();
+      await waitForAutoSave();
       if (typeof message.saveText === 'string') {
         await api.saveWorkflow(currentUri, message.saveText);
         currentText = message.saveText;
@@ -2481,7 +3302,6 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       const text = String(message.text ?? currentText);
       currentText = text;
       await api.runWorkflow({ uri: currentUri, instanceId: String(message.instanceId ?? selectedInstance), text });
-      setDirty(false);
       if (sharedPanelDockBridge) sharedPanelDockBridge.show('runtime');
       else docking?.showPanel('runtime');
       return;
@@ -2500,7 +3320,24 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         ? message.referenceResolution as [number, number]
         : [1920, 1080];
       const result = await api.captureRoi({ instanceId: String(message.instanceId ?? selectedInstance), referenceResolution });
-      postToFrame(sourceFrame, { type: 'roiPickerImage', requestId: message.requestId, nodeId: message.nodeId ?? message.stepId, key: message.key, ...result, referenceResolution });
+      openRoiPickerModal({
+        requestId: String(message.requestId ?? ''),
+        nodeId: String(message.nodeId ?? message.stepId ?? ''),
+        key: String(message.key ?? ''),
+        mode: message.mode === 'rect' ? 'rect' : 'asset',
+        targetPath: typeof message.targetPath === 'string' ? message.targetPath : undefined,
+        sourceFrame,
+        referenceResolution,
+        imageWidth: result.width,
+        imageHeight: result.height,
+        dataUrl: result.dataUrl,
+        x1: 0,
+        y1: 0,
+        x2: 0,
+        y2: 0,
+        dragging: false,
+        busy: false,
+      });
       return;
     }
     if (type === 'checkTemplate') {
@@ -2576,6 +3413,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     if (type === 'error') throw new Error(String(message.message ?? '编辑器错误'));
   } catch (error) {
     const text = errorMessage(error);
+    if (type === 'save') postToEditors({ type: 'workflowSaveFailed' });
     if (type === 'pickRoi' || type === 'saveTemplate') postToFrame(sourceFrame, { type: 'roiPickerError', requestId: message.requestId, message: text });
     else if (type === 'checkTemplate') postToFrame(sourceFrame, { type: 'templateCheckError', requestId: message.requestId, message: text });
     else if (type === 'listAssetImages') postToFrame(sourceFrame, { type: 'assetImagesError', requestId: message.requestId, message: text });
@@ -2592,10 +3430,18 @@ function appendOutput(event: RuntimeOutputEvent): void {
   postToRuntimeLog({ type: 'engineOutput', chunk: event.text, stream: event.stream });
 }
 
+function decodePathLabel(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function updateRuntimeState(event: RuntimeStateEvent): void {
   runtimeBusy = event.state === 'running' || event.state === 'stopping';
   if (event.state === 'running') {
-    const workflow = String(event.workflow || currentUri).replace(/\\/g, '/').split('/').pop() || '工作流';
+    const workflow = decodePathLabel(String(event.workflow || currentUri).replace(/\\/g, '/').split('/').pop() || '工作流');
     runtimeLogDescriptor = {
       workflow,
       instance: event.sources?.length ? `${event.sources.length} 个实例` : event.instance || selectedInstance,
@@ -2798,6 +3644,7 @@ function restartInstanceRefresh(): void {
 }
 
 function bindUi(): void {
+  bindRoiPicker();
   document.querySelectorAll<HTMLElement>('[data-editor-command]').forEach((button) => {
     button.addEventListener('click', () => {
       const command = button.dataset.editorCommand ?? '';
@@ -2991,8 +3838,34 @@ function bindUi(): void {
   overviewConfigModal.addEventListener('pointerdown', (event) => {
     if (event.target === overviewConfigModal) closeOverviewConfiguration();
   });
+  contentNameClose.addEventListener('click', () => finishContentNameDialog(null));
+  contentNameCancel.addEventListener('click', () => finishContentNameDialog(null));
+  contentNameSubmit.addEventListener('click', () => finishContentNameDialog(contentNameInput.value));
+  contentNameInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finishContentNameDialog(contentNameInput.value);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finishContentNameDialog(null);
+    }
+  });
+  contentNameModal.addEventListener('pointerdown', (event) => {
+    if (event.target === contentNameModal) finishContentNameDialog(null);
+  });
   document.querySelector('#content-browser-up')!.addEventListener('click', () => navigateContentBrowser(contentParent(contentBrowserFolder)));
   document.querySelector('#content-browser-refresh')!.addEventListener('click', () => void refreshContentBrowser());
+  bindContentDropTarget(contentBrowserItems, () => contentBrowserFolder);
+  contentBrowserItems.addEventListener('contextmenu', (event) => {
+    if (event.target instanceof Element && event.target.closest('.content-item')) return;
+    event.preventDefault();
+    showContentContextMenu(event, contentFolderItem(contentBrowserFolder), contentBrowserItems);
+  });
+  contentBrowserTree.addEventListener('contextmenu', (event) => {
+    if (event.target instanceof Element && event.target.closest('.content-folder-row')) return;
+    event.preventDefault();
+    showContentContextMenu(event, contentFolderItem(''), contentBrowserTree);
+  });
   contentBrowserSearch.addEventListener('input', () => {
     contentBrowserQuery = contentBrowserSearch.value;
     selectedContentPath = '';
@@ -3008,6 +3881,16 @@ function bindUi(): void {
   document.addEventListener('click', closeTitlebarMenus);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      if (!roiPickerModal.classList.contains('hidden')) {
+        event.preventDefault();
+        cancelRoiPicker();
+        return;
+      }
+      if (!contentNameModal.classList.contains('hidden')) {
+        event.preventDefault();
+        finishContentNameDialog(null);
+        return;
+      }
       if (!overviewConfigModal.classList.contains('hidden')) closeOverviewConfiguration();
       closeTitlebarMenus();
       closeInstancePicker(true);
@@ -3079,9 +3962,10 @@ async function start(): Promise<void> {
   api.onWindowMaximized(updateMaximizedState);
   updateMaximizedState(await api.isWindowMaximized());
   try {
-    const [bootstrapData, assets] = await Promise.all([api.bootstrap(), api.listAssets()]);
+    const [bootstrapData, assets, folders] = await Promise.all([api.bootstrap(), api.listAssets(), api.listContentFolders()]);
     bootstrap = bootstrapData;
     contentAssets = assets;
+    contentFolderPaths = folders;
     readSettings();
     contentBrowserView = window.localStorage.getItem('onmyoji-studio.content-browser-view') === 'list' ? 'list' : 'grid';
     renderWorkflowSelect(bootstrap.workflows);
@@ -3104,6 +3988,7 @@ async function start(): Promise<void> {
 }
 
 window.addEventListener('beforeunload', () => {
+  clearAutoSaveTimer();
   if (instanceRefreshTimer !== undefined) window.clearInterval(instanceRefreshTimer);
   sharedPanelDockBridge?.dispose();
   docking?.dispose();

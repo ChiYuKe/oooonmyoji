@@ -235,6 +235,11 @@ function registerIpc(): void {
   ipcMain.handle('project:create-workflow', (event) => project.createWorkflow(ownerWindow(event)));
   ipcMain.handle('project:open-workflow-file', (_event, uri: string) => project.openWorkflowFile(uri));
   ipcMain.handle('project:open-content-item', (_event, relativePath: string) => project.openContentItem(relativePath));
+  ipcMain.handle('project:move-content', (_event, request) => project.moveContent(request));
+  ipcMain.handle('project:list-content-folders', () => project.listContentFolders());
+  ipcMain.handle('project:create-content-folder', (_event, request) => project.createContentFolder(request));
+  ipcMain.handle('project:rename-content', (_event, request) => project.renameContent(request));
+  ipcMain.handle('project:delete-content', (_event, relativePath: string) => project.deleteContent(relativePath));
   ipcMain.handle('project:reference-graph', (_event, target: string) => project.getReferenceGraph(target));
   ipcMain.handle('project:list-assets', () => project.listAssets());
   ipcMain.handle('project:read-asset-data', (_event, paths: string[]) => project.readAssetData(paths));

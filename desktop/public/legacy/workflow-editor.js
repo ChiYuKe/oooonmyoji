@@ -69,6 +69,56 @@
 
   // 工作台统一接管 HTML 控件的 title，避免出现浏览器原生提示框。
   function installCustomTooltips() {
+    const embedded = window.parent !== window;
+    let tooltipNode = null;
+    let activeTarget = null;
+    const ensureTooltip = () => {
+      if (!tooltipNode) {
+        tooltipNode = document.createElement('div');
+        tooltipNode.className = 'app-tooltip hidden';
+        tooltipNode.setAttribute('role', 'tooltip');
+        document.body.appendChild(tooltipNode);
+      }
+      return tooltipNode;
+    };
+    const sendToParent = (message) => window.parent.postMessage({ source: 'onmyoji-tooltip', ...message }, '*');
+    const position = (node, rect) => {
+      const margin = 8;
+      const gap = 7;
+      node.style.left = '0px';
+      node.style.top = '0px';
+      const width = node.offsetWidth;
+      const height = node.offsetHeight;
+      const x = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
+      let y = rect.bottom + gap;
+      if (y + height > window.innerHeight - margin) y = rect.top - height - gap;
+      y = Math.max(margin, Math.min(y, window.innerHeight - height - margin));
+      node.style.left = `${Math.round(x)}px`;
+      node.style.top = `${Math.round(y)}px`;
+    };
+    const hide = () => {
+      activeTarget = null;
+      if (embedded) sendToParent({ type: 'hide' });
+      else if (tooltipNode) tooltipNode.classList.add('hidden');
+    };
+    const show = (target) => {
+      const text = target.dataset.tooltip || '';
+      if (!text) return hide();
+      const rect = target.getBoundingClientRect();
+      activeTarget = target;
+      if (embedded) {
+        sendToParent({ type: 'show', text, rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } });
+        return;
+      }
+      const node = ensureTooltip();
+      node.textContent = text;
+      node.classList.remove('hidden');
+      position(node, rect);
+    };
+    const targetForEvent = (event) => {
+      const target = event.target;
+      return target instanceof Element ? target.closest('[data-tooltip]') : null;
+    };
     const scan = () => {
       document.querySelectorAll('[title]').forEach((element) => {
         if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || element.tagName === 'IFRAME') return;
@@ -84,6 +134,27 @@
     scan();
     const observer = new MutationObserver(scan);
     observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
+    document.addEventListener('mouseover', (event) => {
+      const target = targetForEvent(event);
+      // 资源路径输入框有自己的图片预览；不要让这里的通用 tooltip 清理掉它。
+      const element = event.target instanceof Element ? event.target : null;
+      if (!target && element && element.closest('[data-asset-preview]')) return;
+      if (target) show(target); else hide();
+    });
+    document.addEventListener('mouseout', (event) => {
+      if (!activeTarget || event.target !== activeTarget) return;
+      const related = event.relatedTarget;
+      if (!(related instanceof Node) || !activeTarget.contains(related)) hide();
+    });
+    document.addEventListener('focusin', (event) => {
+      const target = targetForEvent(event);
+      if (target) show(target);
+    });
+    document.addEventListener('focusout', (event) => {
+      if (activeTarget && event.target === activeTarget) hide();
+    });
+    document.addEventListener('pointerdown', hide, true);
+    window.addEventListener('blur', hide);
   }
   installCustomTooltips();
 
@@ -942,14 +1013,130 @@
         ? definition.default
         : '';
     }
+    return assetPreviewForPath(value);
+  }
+
+  function assetPreviewForPath(value) {
     if (typeof value !== 'string' || !state.assetsBaseUri) return null;
     const path = value.trim().replace(/\\/g, '/').replace(/^\.\//, '');
     const parts = path.split('/');
+    const extension = parts.length ? parts[parts.length - 1].slice(parts[parts.length - 1].lastIndexOf('.')).toLocaleLowerCase() : '';
     if (parts[0] !== 'assets' || parts.length < 2 || parts.some((part) => !part || part === '.' || part === '..')) return null;
+    if (!['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'].includes(extension)) return null;
     return {
       path,
       uri: `${state.assetsBaseUri}${parts.slice(1).map((part) => encodeURIComponent(part)).join('/')}`,
     };
+  }
+
+  let activeAssetPreview = null;
+
+  function hideAssetPathPreview() {
+    const current = activeAssetPreview;
+    if (!current) return;
+    activeAssetPreview = null;
+    if (current.node) current.node.remove();
+    if (window.parent !== window) window.parent.postMessage({ source: 'onmyoji-tooltip', type: 'hide' }, '*');
+  }
+
+  function showAssetPathPreview(target, preview) {
+    if (!target || !preview) return hideAssetPathPreview();
+    hideAssetPathPreview();
+    const embedded = window.parent !== window;
+    let hostDocument = document;
+    let hostWindow = window;
+    let frameRect = null;
+    if (embedded) {
+      // 详情页是 iframe。直接把预览挂到宿主窗口 body，避免被详情栏的滚动容器裁剪；
+      // 跨源或弹出窗口不允许访问宿主时，再退回 postMessage 通道。
+      try {
+        const frame = window.frameElement;
+        if (frame) {
+          hostDocument = window.parent.document;
+          hostWindow = window.parent;
+          frameRect = frame.getBoundingClientRect();
+        }
+      } catch {
+        hostDocument = document;
+        hostWindow = window;
+      }
+    }
+    if (embedded && hostDocument === document) {
+      const rect = target.getBoundingClientRect();
+      activeAssetPreview = { target, preview };
+      window.parent.postMessage({
+        source: 'onmyoji-tooltip',
+        type: 'showAsset',
+        preview: { uri: preview.uri, path: preview.path },
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+      }, '*');
+      return;
+    }
+    const node = hostDocument.createElement('div');
+    node.className = 'app-tooltip asset-preview';
+    node.setAttribute('role', 'tooltip');
+    const image = hostDocument.createElement('img');
+    image.alt = '';
+    image.src = preview.uri;
+    const caption = hostDocument.createElement('span');
+    caption.className = 'asset-hover-preview-path';
+    caption.textContent = preview.path;
+    node.append(image, caption);
+    hostDocument.body.appendChild(node);
+    activeAssetPreview = { target, preview, node };
+    const position = () => {
+      if (!activeAssetPreview || activeAssetPreview.node !== node) return;
+      const margin = 8;
+      const gap = 8;
+      const targetRect = target.getBoundingClientRect();
+      const rect = frameRect
+        ? {
+          left: frameRect.left + targetRect.left,
+          right: frameRect.left + targetRect.right,
+          top: frameRect.top + targetRect.top,
+          bottom: frameRect.top + targetRect.bottom,
+        }
+        : targetRect;
+      node.style.left = '0px';
+      node.style.top = '0px';
+      const width = node.offsetWidth;
+      const height = node.offsetHeight;
+      let left = rect.right + gap;
+      if (left + width > hostWindow.innerWidth - margin) left = rect.left - width - gap;
+      left = Math.max(margin, Math.min(left, hostWindow.innerWidth - width - margin));
+      let top = rect.top;
+      if (top + height > hostWindow.innerHeight - margin) top = hostWindow.innerHeight - height - margin;
+      top = Math.max(margin, top);
+      node.style.left = `${Math.round(left)}px`;
+      node.style.top = `${Math.round(top)}px`;
+    };
+    image.addEventListener('load', position, { once: true });
+    image.addEventListener('error', () => {
+      if (!activeAssetPreview || activeAssetPreview.node !== node) return;
+      image.remove();
+      const missing = hostDocument.createElement('div');
+      missing.className = 'app-tooltip-preview-missing';
+      missing.textContent = '图片无法预览';
+      node.insertBefore(missing, caption);
+      position();
+    }, { once: true });
+    hostWindow.requestAnimationFrame(position);
+  }
+
+  function bindAssetPreview(input) {
+    if (!input) return;
+    input.dataset.assetPreview = 'true';
+    const refresh = () => showAssetPathPreview(input, assetPreviewForPath(input.value));
+    const hide = () => {
+      if (activeAssetPreview && activeAssetPreview.target === input) hideAssetPathPreview();
+    };
+    // 使用 mouseenter 而不是 pointerenter：统一 tooltip 的 mouseover 监听会先清理旧提示，
+    // 让预览在事件顺序的最后显示，避免刚弹出就被隐藏。
+    input.addEventListener('mouseenter', refresh);
+    input.addEventListener('mouseleave', hide);
+    input.addEventListener('input', () => {
+      if (activeAssetPreview && activeAssetPreview.target === input) refresh();
+    });
   }
 
   function renderNodePreview(group, preview, className, preserveAspectRatio, onOpen) {
@@ -1747,6 +1934,7 @@
 
   function clearInspector(title) {
     UI.closeDropdowns?.();
+    hideAssetPathPreview();
     $('inspector-title').textContent = title;
     const empty = $('inspector-empty');
     const body = $('inspector-body');
@@ -1947,6 +2135,7 @@
 
   function renderInspector() {
     if (!state.raw) return;
+    hideAssetPathPreview();
     // 下拉列表使用 body 级浮层；详情面板切换或清空时必须先销毁，
     // 否则宿主控件被重建后菜单仍会悬浮在旧位置。
     UI.closeDropdowns?.();
@@ -2547,7 +2736,9 @@
       return complexValueControl(`task:${node.id}:${name}`, definition, value, set, { node, key: name, headingActions });
     }
     const shell = el('div', 'inline-control');
-    shell.appendChild(textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : workflowParameter ? '_folder/workflow.json' : '' }));
+    const input = textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : workflowParameter ? '_folder/workflow.json' : '' });
+    if (definition.type === 'asset' || assetPreviewForPath(value)) bindAssetPreview(input);
+    shell.appendChild(input);
     if (definition.type === 'asset') {
       const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片'; browse.addEventListener('click', () => openAssetBrowser(node.id, name, value)); shell.appendChild(browse);
       const pick = el('button', '', '截取'); pick.addEventListener('click', () => requestRoi(node.id, name, 'asset')); shell.appendChild(pick);
@@ -2701,7 +2892,9 @@
     }
     if (def.type === 'asset' || def.type === 'path') {
       const shell = el('div', 'inline-control');
-      shell.appendChild(textInput(value, onChange, { placeholder: def.type === 'asset' ? 'assets/templates/...' : '' }));
+      const input = textInput(value, onChange, { placeholder: def.type === 'asset' ? 'assets/templates/...' : '' });
+      if (def.type === 'asset' || assetPreviewForPath(value)) bindAssetPreview(input);
+      shell.appendChild(input);
       if (def.type === 'asset') {
         const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片';
         browse.addEventListener('click', () => openAssetBrowser(ctx.node ? ctx.node.id : '', ctx.key || '', value, (assetPath) => onChange(assetPath)));
@@ -3701,7 +3894,7 @@
   function requestRoi(nodeId, key, mode, options = {}) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     state.roi = { requestId, nodeId, key, mode, ...options };
-    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, targetPath: options.targetPath, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
+    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, mode, targetPath: options.targetPath, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
   }
 
   function templateCheckParam(node, name, fallback) {
@@ -4498,6 +4691,17 @@
       if (request && request.returnToAssetBrowser) restoreAssetBrowserAfterRoi();
       if (message.message) toast(message.message, true);
     }
+    else if (message.type === 'roiPickerResult' && state.roi && state.roi.requestId === message.requestId) {
+      const request = state.roi;
+      const roi = Array.isArray(message.roi) ? message.roi.map(Number) : [];
+      if (roi.length !== 4 || roi.some((item) => !Number.isFinite(item))) return;
+      const node = nodeById(request.nodeId);
+      if (typeof request.applyValue === 'function') mutate(() => request.applyValue(roi));
+      else if (node) mutate(() => { node.params[request.key] = roi; });
+      state.roi = null;
+      const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden');
+      toast('区域已更新');
+    }
     else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) {
       const request = state.roi;
       const browser = request.returnToAssetBrowser ? state.assetBrowser : null;
@@ -4530,6 +4734,8 @@
     else if (message.type === 'canvasImageCancelled') { setExportBusy(false); }
     else if (message.type === 'canvasImageError') { setExportBusy(false); toast(message.message || '保存完整画布图片失败', true); }
     else if (message.type === 'instanceSelected') { state.instanceId = String(message.instanceId || ''); renderInstancePicker(); }
+    else if (message.type === 'workflowSaved') setDirty(false);
+    else if (message.type === 'workflowSaveFailed') setDirty(true);
     else if (message.type === 'externalChange') { const banner = $('external-banner'); banner.textContent = '文件已在外部修改'; banner.classList.remove('hidden'); }
     else if (message.type === 'replaceDocument') replaceDocument(String(message.text || ''), message.recordHistory === true);
     else if (message.type === 'editorCommand') executeEditorCommand(String(message.command || ''), message.value);

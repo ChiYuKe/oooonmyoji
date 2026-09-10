@@ -9,6 +9,10 @@ import type {
   RuntimeInstance,
   SaveCanvasRequest,
   SaveTemplateRequest,
+  MoveContentRequest,
+  MoveContentResult,
+  CreateContentFolderRequest,
+  RenameContentRequest,
   WorkflowDescriptor,
   WorkflowEditorInit,
 } from '../shared/contracts';
@@ -54,6 +58,119 @@ function workflowTemplate(id: string): Record<string, unknown> {
       { id: 'capture', type: 'task', action: 'core.capture', params: {} },
     ],
   };
+}
+
+interface ContentFileLocation {
+  relative: string;
+  absolute: string;
+  kind: 'workflow' | 'asset';
+}
+
+interface ContentReferenceMapping {
+  oldRelative: string;
+  newRelative: string;
+  kind: 'workflow' | 'asset';
+}
+
+interface RewritePlan {
+  absolute: string;
+  original: string;
+  updated: string;
+  references: number;
+}
+
+function normalizeProjectRelative(raw: string): string {
+  const value = String(raw ?? '').replace(/\\/g, '/').trim();
+  if (!value || value.startsWith('/') || /^[A-Za-z]:\//.test(value)) throw new Error('文件路径无效');
+  const normalized = path.posix.normalize(value).replace(/^\.\//, '');
+  if (!normalized || normalized === '.' || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
+    throw new Error('文件路径无效');
+  }
+  return normalized;
+}
+
+function normalizeContentName(raw: string): string {
+  const name = String(raw ?? '').trim();
+  if (!name || name === '.' || name === '..' || /[\\/]/.test(name) || /[<>:"|?*\x00-\x1f]/.test(name) || /[. ]$/.test(name)) {
+    throw new Error('名称无效');
+  }
+  return name;
+}
+
+function preservePathStyle(original: string, target: string): string {
+  const replacement = target.replace(/\//g, original.includes('\\') ? '\\' : '/');
+  return original.trim().startsWith('./') ? `./${replacement}` : replacement;
+}
+
+function replaceExactReference(value: string, oldRelative: string, newRelative: string, kind: 'workflow' | 'asset'): string {
+  const normalized = value.replace(/\\/g, '/').trim();
+  const stripped = normalized.replace(/^\.\//, '');
+  const oldPath = oldRelative.toLowerCase();
+  const oldWithoutRoot = oldRelative.replace(/^(?:workflows|assets)\//i, '').toLowerCase();
+  const candidates = new Set([oldPath, oldWithoutRoot]);
+  const matched = candidates.has(stripped.toLowerCase())
+    ? stripped.toLowerCase()
+    : undefined;
+  if (!matched) return value;
+  const target = kind === 'workflow' && matched === oldWithoutRoot
+    ? newRelative.replace(/^workflows\//i, '')
+    : newRelative;
+  return preservePathStyle(value, target);
+}
+
+function rewriteJsonReferences(value: unknown, oldRelative: string, newRelative: string, kind: 'workflow' | 'asset'): { value: unknown; references: number } {
+  if (typeof value === 'string') {
+    const replaced = replaceExactReference(value, oldRelative, newRelative, kind);
+    return { value: replaced, references: replaced === value ? 0 : 1 };
+  }
+  if (Array.isArray(value)) {
+    let references = 0;
+    const rewritten = value.map((item) => {
+      const result = rewriteJsonReferences(item, oldRelative, newRelative, kind);
+      references += result.references;
+      return result.value;
+    });
+    return { value: rewritten, references };
+  }
+  if (!value || typeof value !== 'object') return { value, references: 0 };
+  let references = 0;
+  const rewritten: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const result = rewriteJsonReferences(item, oldRelative, newRelative, kind);
+    references += result.references;
+    rewritten[key] = result.value;
+  }
+  return { value: rewritten, references };
+}
+
+function rewriteSerializedReferences(original: string, oldRelative: string, newRelative: string, kind: 'workflow' | 'asset'): string {
+  const oldRoot = kind === 'workflow' ? 'workflows/' : 'assets/';
+  const oldWithoutRoot = oldRelative.replace(new RegExp(`^${oldRoot}`, 'i'), '');
+  const newWithoutRoot = newRelative.replace(new RegExp(`^${oldRoot}`, 'i'), '');
+  const variants = new Set<string>();
+  for (const relative of [oldRelative, oldWithoutRoot]) {
+    for (const prefix of ['', './']) {
+      for (const separator of ['/', '\\']) {
+        variants.add(`${prefix}${relative.replace(/\//g, separator)}`);
+      }
+    }
+  }
+  let updated = original;
+  for (const variant of variants) {
+    const normalized = variant.replace(/\\/g, '/');
+    const isRootless = normalized.replace(/^\.\//, '').toLowerCase() === oldWithoutRoot.toLowerCase();
+    const replacementPath = kind === 'workflow' && isRootless ? newWithoutRoot : newRelative;
+    const replacement = replacementPath.replace(/\//g, variant.includes('\\') ? '\\' : '/');
+    const encodedOld = JSON.stringify(variant);
+    const encodedNew = JSON.stringify(variant.trim().startsWith('./') ? `./${replacement}` : replacement);
+    // A JSON string followed by a comma/closing token is a value (not an object key).
+    updated = updated.replace(new RegExp(`${escapeRegExp(encodedOld)}(?=\\s*[,}\\]])`, 'g'), encodedNew);
+  }
+  return updated;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export class ProjectService {
@@ -236,6 +353,351 @@ export class ProjectService {
     if (!isWorkflow && !isAsset) throw new Error('内容浏览器不允许打开此文件');
     const error = await shell.openPath(absolutePath);
     if (error) throw new Error(error);
+  }
+
+  private resolveContentLocation(relativePath: string): ContentFileLocation {
+    const normalized = normalizeProjectRelative(relativePath);
+    const rootName = normalized.split('/')[0]?.toLowerCase();
+    const root = rootName === 'workflows' ? this.workflowRoot : rootName === 'assets' ? this.assetsRoot : undefined;
+    if (!root) throw new Error('内容必须位于 assets 或 workflows 目录内');
+    const absolute = path.resolve(this.projectRoot, ...normalized.split('/'));
+    if (!isPathInside(root, absolute)) throw new Error('文件必须位于项目目录内');
+    return { relative: normalized, absolute, kind: rootName === 'workflows' ? 'workflow' : 'asset' };
+  }
+
+  private async resolveContentEntry(relativePath: string): Promise<ContentFileLocation & { isDirectory: boolean }> {
+    const location = this.resolveContentLocation(relativePath);
+    const stat = await fs.promises.stat(location.absolute).catch(() => undefined);
+    if (!stat) throw new Error('内容不存在');
+    if (stat.isDirectory()) return { ...location, isDirectory: true };
+    const extension = path.extname(location.absolute).toLowerCase();
+    const supported = location.kind === 'workflow' ? extension === '.json' : IMAGE_MIME.has(extension);
+    if (!supported) throw new Error('内容浏览器只支持工作流和模板图片');
+    return { ...location, isDirectory: false };
+  }
+
+  private resolveContentFile(relativePath: string): ContentFileLocation {
+    const location = this.resolveContentLocation(relativePath);
+    const extension = path.extname(location.absolute).toLowerCase();
+    const supported = location.kind === 'workflow' ? extension === '.json' : IMAGE_MIME.has(extension);
+    if (!supported) throw new Error('内容浏览器只支持移动工作流和模板图片');
+    return location;
+  }
+
+  async listContentFolders(): Promise<string[]> {
+    const folders = new Set<string>(['assets', 'workflows']);
+    const visit = async (root: string): Promise<void> => {
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(root, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const absolute = path.join(root, entry.name);
+        folders.add(path.relative(this.projectRoot, absolute).split(path.sep).join('/'));
+        await visit(absolute);
+      }
+    };
+    await Promise.all([visit(this.assetsRoot), visit(this.workflowRoot)]);
+    return [...folders].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+  }
+
+  async createContentFolder(request: CreateContentFolderRequest): Promise<string> {
+    const parent = normalizeProjectRelative(request.parentPath || '');
+    const parentLocation = this.resolveContentLocation(parent);
+    const parentStat = await fs.promises.stat(parentLocation.absolute).catch(() => undefined);
+    if (!parentStat?.isDirectory()) throw new Error('目标文件夹不存在');
+    const name = normalizeContentName(request.name);
+    const targetRelative = path.posix.join(parentLocation.relative, name);
+    const targetAbsolute = path.resolve(this.projectRoot, ...targetRelative.split('/'));
+    if (!isPathInside(parentLocation.kind === 'workflow' ? this.workflowRoot : this.assetsRoot, targetAbsolute)) {
+      throw new Error('目标文件夹无效');
+    }
+    if (await fs.promises.stat(targetAbsolute).then(() => true).catch(() => false)) throw new Error('文件夹已存在');
+    await fs.promises.mkdir(targetAbsolute);
+    return targetRelative;
+  }
+
+  private async workflowFiles(): Promise<string[]> {
+    const files: string[] = [];
+    const visit = async (directory: string): Promise<void> => {
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+      }
+      for (const entry of entries) {
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) await visit(absolute);
+        else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) files.push(absolute);
+      }
+    };
+    await visit(this.workflowRoot);
+    return files;
+  }
+
+  private async contentFiles(root: string, kind: 'workflow' | 'asset'): Promise<ContentFileLocation[]> {
+    const files: ContentFileLocation[] = [];
+    const visit = async (directory: string): Promise<void> => {
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+      }
+      for (const entry of entries) {
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await visit(absolute);
+          continue;
+        }
+        const extension = path.extname(entry.name).toLowerCase();
+        const supported = kind === 'workflow' ? extension === '.json' : IMAGE_MIME.has(extension);
+        if (entry.isFile() && supported) {
+          files.push({
+            relative: path.relative(this.projectRoot, absolute).split(path.sep).join('/'),
+            absolute,
+            kind,
+          });
+        }
+      }
+    };
+    await visit(root);
+    return files;
+  }
+
+  private async buildFolderRewritePlan(source: ContentFileLocation, targetRelative: string): Promise<RewritePlan[]> {
+    const descendants = await this.contentFiles(source.absolute, source.kind);
+    const mappings: ContentReferenceMapping[] = descendants.map((file) => ({
+      oldRelative: file.relative,
+      newRelative: path.posix.join(targetRelative, path.relative(source.absolute, file.absolute).split(path.sep).join('/')),
+      kind: source.kind,
+    }));
+    if (mappings.length === 0) return [];
+
+    const plans: RewritePlan[] = [];
+    for (const absolute of await this.workflowFiles()) {
+      const original = await fs.promises.readFile(absolute, 'utf8');
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(original) as unknown;
+      } catch {
+        continue;
+      }
+      let updated = original;
+      let references = 0;
+      for (const mapping of mappings) {
+        const result = rewriteJsonReferences(parsed, mapping.oldRelative, mapping.newRelative, mapping.kind);
+        if (result.references === 0) continue;
+        const serialized = rewriteSerializedReferences(updated, mapping.oldRelative, mapping.newRelative, mapping.kind);
+        updated = serialized === updated ? `${JSON.stringify(result.value, null, 2)}\n` : serialized;
+        parsed = result.value;
+        references += result.references;
+      }
+      if (references > 0) plans.push({ absolute, original, updated, references });
+    }
+    return plans;
+  }
+
+  private async buildMoveRewritePlan(source: ContentFileLocation, targetRelative: string): Promise<RewritePlan[]> {
+    const plans: RewritePlan[] = [];
+    if (source.kind === 'workflow') {
+      for (const absolute of await this.workflowFiles()) {
+        if (path.resolve(absolute).toLowerCase() === path.resolve(source.absolute).toLowerCase()) continue;
+        const original = await fs.promises.readFile(absolute, 'utf8');
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(original) as unknown;
+        } catch {
+          continue;
+        }
+        const result = rewriteJsonReferences(parsed, source.relative, targetRelative, 'workflow');
+        if (result.references > 0) {
+          const updated = rewriteSerializedReferences(original, source.relative, targetRelative, 'workflow');
+          plans.push({ absolute, original, updated: updated === original ? `${JSON.stringify(result.value, null, 2)}\n` : updated, references: result.references });
+        }
+      }
+      return plans;
+    }
+
+    for (const absolute of await this.workflowFiles()) {
+      const original = await fs.promises.readFile(absolute, 'utf8');
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(original) as unknown;
+      } catch {
+        continue;
+      }
+      const result = rewriteJsonReferences(parsed, source.relative, targetRelative, 'asset');
+      if (result.references > 0) {
+        const updated = rewriteSerializedReferences(original, source.relative, targetRelative, 'asset');
+        plans.push({ absolute, original, updated: updated === original ? `${JSON.stringify(result.value, null, 2)}\n` : updated, references: result.references });
+      }
+    }
+
+    // 奖励模板目录使用相对于 catalog.json 的 template 字段，不能只按完整项目路径替换。
+    const catalogRelative = 'assets/templates/rewards/catalog.json';
+    const catalogAbsolute = path.join(this.projectRoot, ...catalogRelative.split('/'));
+    const catalogDir = path.dirname(catalogAbsolute);
+    try {
+      const original = await fs.promises.readFile(catalogAbsolute, 'utf8');
+      const parsed = JSON.parse(original) as unknown;
+      const templates = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as { templates?: unknown }).templates
+        : undefined;
+      let references = 0;
+      if (Array.isArray(templates)) {
+        const sourceAbsolute = path.resolve(source.absolute);
+        const nextRelative = path.relative(catalogDir, path.resolve(this.projectRoot, ...targetRelative.split('/'))).split(path.sep).join('/');
+        for (const entry of templates) {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+          const template = (entry as { template?: unknown }).template;
+          if (typeof template !== 'string') continue;
+          const referencedAbsolute = path.resolve(catalogDir, ...template.replace(/\\/g, '/').split('/'));
+          if (referencedAbsolute.toLowerCase() !== sourceAbsolute.toLowerCase()) continue;
+          (entry as { template: string }).template = nextRelative;
+          references += 1;
+        }
+      }
+      if (references > 0) {
+        const sourceName = path.basename(source.relative);
+        const targetName = path.relative(catalogDir, path.resolve(this.projectRoot, ...targetRelative.split('/'))).split(path.sep).join('/');
+        const updated = rewriteSerializedReferences(original, sourceName, targetName, 'asset');
+        plans.push({
+          absolute: catalogAbsolute,
+          original,
+          updated: updated === original ? `${JSON.stringify(parsed, null, 2)}\n` : updated,
+          references,
+        });
+      }
+    } catch {
+      // catalog.json 可选，缺失或无效时不影响普通模板移动。
+    }
+    return plans;
+  }
+
+  private async moveFile(source: ContentFileLocation, targetRelative: string): Promise<MoveContentResult> {
+    const targetAbsolute = path.resolve(this.projectRoot, ...targetRelative.split('/'));
+    const sourceRoot = source.kind === 'workflow' ? this.workflowRoot : this.assetsRoot;
+    if (!isPathInside(sourceRoot, targetAbsolute)) throw new Error('目标位置无效');
+    if (source.absolute.toLowerCase() === targetAbsolute.toLowerCase()) throw new Error('文件已经在此文件夹中');
+    let targetStat: fs.Stats | undefined;
+    try { targetStat = await fs.promises.stat(targetAbsolute); } catch { /* 目标不存在 */ }
+    if (targetStat) throw new Error('目标文件夹中已存在同名文件');
+    const folderStat = await fs.promises.stat(path.dirname(targetAbsolute)).catch(() => undefined);
+    if (!folderStat?.isDirectory()) throw new Error('目标文件夹不存在');
+    const sourceStat = await fs.promises.stat(source.absolute).catch(() => undefined);
+    if (!sourceStat?.isFile()) throw new Error('源文件不存在');
+
+    const plans = await this.buildMoveRewritePlan(source, targetRelative);
+    const written: RewritePlan[] = [];
+    let moved = false;
+    try {
+      await fs.promises.rename(source.absolute, targetAbsolute);
+      moved = true;
+      for (const plan of plans) {
+        await fs.promises.writeFile(plan.absolute, plan.updated, 'utf8');
+        written.push(plan);
+      }
+    } catch (error) {
+      for (const plan of written.reverse()) {
+        try { await fs.promises.writeFile(plan.absolute, plan.original, 'utf8'); } catch { /* 尽力回滚 */ }
+      }
+      if (moved) {
+        try { await fs.promises.rename(targetAbsolute, source.absolute); } catch { /* 尽力回滚 */ }
+      }
+      throw error;
+    }
+
+    return {
+      sourcePath: source.relative,
+      targetPath: targetRelative,
+      updatedFiles: plans.length,
+      updatedReferences: plans.reduce((total, plan) => total + plan.references, 0),
+    };
+  }
+
+  async moveContent(request: MoveContentRequest): Promise<MoveContentResult> {
+    const source = this.resolveContentFile(request.sourcePath);
+    const sourceRoot = source.relative.slice(0, source.relative.indexOf('/'));
+    const requestedFolder = request.targetFolder ? normalizeProjectRelative(request.targetFolder) : '';
+    const targetFolder = requestedFolder || sourceRoot;
+    if (targetFolder !== sourceRoot && !targetFolder.startsWith(`${sourceRoot}/`)) {
+      throw new Error(`文件只能移动到 ${sourceRoot}/ 目录内`);
+    }
+    const targetRelative = path.posix.join(targetFolder, path.posix.basename(source.relative));
+    const folderStat = await fs.promises.stat(path.resolve(this.projectRoot, ...targetFolder.split('/'))).catch(() => undefined);
+    if (!folderStat?.isDirectory()) throw new Error('目标文件夹不存在');
+    return this.moveFile(source, targetRelative);
+  }
+
+  async renameContent(request: RenameContentRequest): Promise<MoveContentResult> {
+    const source = await this.resolveContentEntry(request.sourcePath);
+    if (!source.relative.includes('/')) throw new Error('项目根目录不能重命名');
+    const newName = normalizeContentName(request.newName);
+    const parentRelative = path.posix.dirname(source.relative);
+    const targetRelative = path.posix.join(parentRelative, newName);
+    const targetAbsolute = path.resolve(this.projectRoot, ...targetRelative.split('/'));
+    const sourceRoot = source.kind === 'workflow' ? this.workflowRoot : this.assetsRoot;
+    if (!isPathInside(sourceRoot, targetAbsolute)) throw new Error('目标位置无效');
+    if (source.absolute.toLowerCase() === targetAbsolute.toLowerCase()) throw new Error('名称没有变化');
+    if (await fs.promises.stat(targetAbsolute).then(() => true).catch(() => false)) throw new Error('目标位置已存在同名内容');
+
+    if (!source.isDirectory) {
+      const extension = path.extname(source.relative).toLowerCase();
+      if (path.extname(newName).toLowerCase() !== extension) throw new Error('不能修改文件类型');
+      return this.moveFile(source, targetRelative);
+    }
+
+    const plans = await this.buildFolderRewritePlan(source, targetRelative);
+    const written: RewritePlan[] = [];
+    let moved = false;
+    try {
+      // 文件仍在旧目录时先改写，目录整体改名后这些文件会一起带着新引用移动。
+      for (const plan of plans) {
+        await fs.promises.writeFile(plan.absolute, plan.updated, 'utf8');
+        written.push(plan);
+      }
+      await fs.promises.rename(source.absolute, targetAbsolute);
+      moved = true;
+    } catch (error) {
+      if (moved) {
+        try { await fs.promises.rename(targetAbsolute, source.absolute); } catch { /* 尽力回滚 */ }
+      }
+      for (const plan of written.reverse()) {
+        try { await fs.promises.writeFile(plan.absolute, plan.original, 'utf8'); } catch { /* 尽力回滚 */ }
+      }
+      throw error;
+    }
+    return {
+      sourcePath: source.relative,
+      targetPath: targetRelative,
+      updatedFiles: plans.length,
+      updatedReferences: plans.reduce((total, plan) => total + plan.references, 0),
+    };
+  }
+
+  async deleteContent(relativePath: string): Promise<void> {
+    const target = await this.resolveContentEntry(relativePath);
+    if (!target.relative.includes('/')) throw new Error('项目根目录不能删除');
+    if (target.isDirectory) {
+      const entries = await fs.promises.readdir(target.absolute);
+      if (entries.length > 0) throw new Error('文件夹不为空，请先处理其中的内容');
+      await fs.promises.rmdir(target.absolute);
+      return;
+    }
+
+    const graph = await this.getReferenceGraph(target.relative);
+    if (graph.referencedBy.length > 0) {
+      throw new Error(`内容仍被 ${graph.referencedBy.length} 项引用，暂不能删除`);
+    }
+    await fs.promises.unlink(target.absolute);
   }
 
   async listAssets(): Promise<AssetImage[]> {

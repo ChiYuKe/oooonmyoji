@@ -47,8 +47,8 @@ button:hover { background: #393939; }
   height: 40px;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 10px;
+  gap: 0;
+  padding: 4px 8px 4px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   overflow-x: auto;
@@ -56,6 +56,7 @@ button:hover { background: #393939; }
   white-space: nowrap;
 }
 .identity { display: flex; align-items: center; min-width: 0; gap: 0; }
+.runtime-log-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; height: 28px; }
 .mark {
   display: grid;
   place-items: center;
@@ -69,69 +70,61 @@ button:hover { background: #393939; }
 #workflow-name { max-width: 360px; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 600; }
 #run-meta, .identity .mark { display: none; }
 .segmented { display: flex; height: 28px; }
-.segmented button { min-width: 58px; border-radius: 0; margin-left: -1px; padding: 3px 7px; font-size: 12px; }
-.segmented button:first-child { margin-left: 0; border-radius: 3px 0 0 3px; }
-.segmented button:last-child { border-radius: 0 3px 3px 0; }
+.segmented button {
+  min-width: 58px;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding: 3px 8px;
+  border-color: transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+.segmented button + button { margin-left: 1px; }
+.segmented button:hover { background: #30363d; color: var(--fg); }
 .segmented button.active { color: #fff; border-color: var(--focus); background: color-mix(in srgb, var(--focus) 55%, var(--panel-2)); }
-.auto-scroll { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.auto-scroll { display: flex; align-items: center; gap: 5px; height: 28px; padding: 0 3px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .auto-scroll input { width: 14px; height: 14px; margin: 0; accent-color: var(--focus); }
-.icon-button { width: 28px; min-width: 28px; padding: 0; font-size: 14px; }
+.icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 28px;
+  min-height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+}
+.icon-button:hover:not(:disabled) { border-color: transparent; background: #30363d; }
+.icon-button:disabled { opacity: .35; cursor: default; }
 .icon-button.danger { color: #f08c93; }
 
-/* ---------- 运行日志 tooltip：替换 Chromium 的原生 title 浮窗 ---------- */
-[data-tooltip] { position: relative; }
-[data-tooltip]::before,
-[data-tooltip]::after {
-  position: absolute;
-  z-index: 3000;
-  pointer-events: none;
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
-}
-[data-tooltip]::before {
-  content: '';
-  top: calc(100% + 2px);
-  left: 50%;
-  width: 0;
-  height: 0;
-  border: 4px solid transparent;
-  border-bottom-color: #4a535b;
-  transform: translate(-50%, -2px);
-}
-[data-tooltip]::after {
-  content: attr(data-tooltip);
-  top: calc(100% + 9px);
-  left: 50%;
-  min-width: max-content;
+/* ---------- 运行日志统一 tooltip：挂在文档顶层，避免被面板和滚动区裁剪 ---------- */
+[data-tooltip]::before, [data-tooltip]::after { content: none !important; display: none !important; }
+.app-tooltip {
+  position: fixed;
+  z-index: 5000;
   max-width: 280px;
   padding: 6px 9px;
   border: 1px solid #4a535b;
   border-radius: 5px;
   background: #202327;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, .42);
+  box-shadow: 0 8px 18px rgba(0, 0, .42);
   color: #e4e9ec;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
   text-align: left;
   white-space: pre-line;
-  transform: translate(-50%, -3px);
+  pointer-events: none;
 }
-[data-tooltip]:hover::before,
-[data-tooltip]:hover::after,
-[data-tooltip]:focus-visible::before,
-[data-tooltip]:focus-visible::after {
-  visibility: visible;
-  opacity: 1;
-}
-[data-tooltip]:hover::before,
-[data-tooltip]:focus-visible::before { transform: translate(-50%, 0); }
-[data-tooltip]:hover::after,
-[data-tooltip]:focus-visible::after { transform: translate(-50%, 0); }
-@media (prefers-reduced-motion: reduce) {
-  [data-tooltip]::before, [data-tooltip]::after { transition: none; }
-}
+.app-tooltip.hidden { display: none; }
 
 .source-tabs {
   height: 30px;
@@ -143,6 +136,7 @@ button:hover { background: #393939; }
   background: color-mix(in srgb, var(--panel) 82%, var(--bg));
   overflow-x: auto;
 }
+.source-tabs button {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
@@ -322,8 +316,9 @@ body.has-sources.has-rewards main { height: calc(100% - 156px); }
   .auto-scroll { display: none; }
   #workflow-name { max-width: 220px; font-size: 12px; }
   .segmented { height: 26px; }
-  .segmented button { min-height: 26px; }
-  .icon-button { min-height: 26px; height: 26px; }
+  .runtime-log-actions, .segmented { height: 26px; }
+  .segmented button { min-height: 26px; height: 26px; }
+  .auto-scroll, .icon-button { min-height: 26px; height: 26px; }
   .source-tabs { height: 26px; padding-inline: 6px; }
   .source-tabs button { min-width: 110px; padding-inline: 8px; }
   #summary, #reward-summary, .filterbar { display: none; }

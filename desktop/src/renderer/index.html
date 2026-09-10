@@ -325,6 +325,44 @@
         </footer>
       </section>
     </div>
+    <div id="roi-picker-modal" class="roi-picker-modal hidden" role="presentation" aria-hidden="true">
+      <section class="roi-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="roi-picker-title">
+        <header class="roi-picker-header">
+          <div>
+            <strong id="roi-picker-title">截取模板</strong>
+            <span id="roi-picker-subtitle">从当前画面框选需要保存的区域</span>
+          </div>
+          <button id="roi-picker-close" class="roi-picker-close" type="button" aria-label="取消截取"><i data-lucide="x"></i></button>
+        </header>
+        <div id="roi-picker-stage" class="roi-picker-stage">
+          <img id="roi-picker-image" alt="当前画面" draggable="false" />
+          <div id="roi-picker-selection" class="roi-picker-selection"></div>
+        </div>
+        <footer class="roi-picker-footer">
+          <span id="roi-picker-hint">拖动鼠标框选区域</span>
+          <div class="roi-picker-actions">
+            <button id="roi-picker-cancel" class="overview-config-button secondary" type="button">取消</button>
+            <button id="roi-picker-confirm" class="overview-config-button primary" type="button">确认</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+    <div id="content-name-modal" class="content-name-modal hidden" role="presentation" aria-hidden="true">
+      <section class="content-name-dialog" role="dialog" aria-modal="true" aria-labelledby="content-name-title">
+        <header class="content-name-header">
+          <strong id="content-name-title">新建文件夹</strong>
+          <button id="content-name-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+        </header>
+        <div class="content-name-body">
+          <label for="content-name-input">名称</label>
+          <input id="content-name-input" class="content-name-input" type="text" autocomplete="off" spellcheck="false" />
+        </div>
+        <footer class="content-name-footer">
+          <button id="content-name-cancel" class="overview-config-button secondary" type="button">取消</button>
+          <button id="content-name-submit" class="overview-config-button primary" type="button">创建</button>
+        </footer>
+      </section>
+    </div>
     <div id="app-toast" class="app-toast hidden"></div>
   </div>
   <script type="module" src="./main.ts"></script>

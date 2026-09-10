@@ -116,6 +116,34 @@ export interface AssetImage {
   uri: string;
 }
 
+export interface MoveContentRequest {
+  /** 要移动的项目相对文件路径（正斜杠）。 */
+  sourcePath: string;
+  /** 目标文件夹的项目相对路径（不含文件名）。 */
+  targetFolder: string;
+}
+
+export interface MoveContentResult {
+  sourcePath: string;
+  targetPath: string;
+  updatedFiles: number;
+  updatedReferences: number;
+}
+
+export interface CreateContentFolderRequest {
+  /** 父文件夹的项目相对路径，只允许位于 assets 或 workflows 下。 */
+  parentPath: string;
+  /** 新文件夹名称，不包含路径分隔符。 */
+  name: string;
+}
+
+export interface RenameContentRequest {
+  /** 要重命名的文件或文件夹项目相对路径。 */
+  sourcePath: string;
+  /** 新名称，不包含路径分隔符。 */
+  newName: string;
+}
+
 export interface RoiCaptureRequest {
   instanceId?: string;
   referenceResolution: [number, number];
@@ -239,6 +267,11 @@ export interface OnmyojiDesktopApi {
   createWorkflow(): Promise<string | undefined>;
   openWorkflowFile(uri: string): Promise<void>;
   openContentItem(path: string): Promise<void>;
+  moveContent(request: MoveContentRequest): Promise<MoveContentResult>;
+  listContentFolders(): Promise<string[]>;
+  createContentFolder(request: CreateContentFolderRequest): Promise<string>;
+  renameContent(request: RenameContentRequest): Promise<MoveContentResult>;
+  deleteContent(path: string): Promise<void>;
   getReferenceGraph(target: string): Promise<ReferenceGraph>;
   runWorkflow(request: RunWorkflowRequest): Promise<void>;
   stopWorkflow(): Promise<void>;

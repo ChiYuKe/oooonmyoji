@@ -1,0 +1,427 @@
+{
+  "schema_version": 4,
+  "id": "_",
+  "version": "4.1.0",
+  "description": "活动副本循环：识别挑战按钮或结算页，点击后确认目标消失；漏点时在当前阶段有限重试。",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "limits": {
+    "timeout_seconds": 99999999,
+    "max_steps": 99999999
+  },
+  "inputs": {},
+  "variables": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "repeat_rounds"
+      ]
+    },
+    {
+      "id": "repeat_rounds",
+      "type": "sequence",
+      "name": "重复执行 100 次活动副本",
+      "children": [
+        "round"
+      ],
+      "decorators": [
+        {
+          "type": "repeat",
+          "count": 1600
+        }
+      ]
+    },
+    {
+      "id": "round",
+      "type": "sequence",
+      "name": "单轮活动副本",
+      "children": [
+        "wait_round_state",
+        "round_state_selector"
+      ],
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 2,
+          "delay_seconds": 1
+        }
+      ]
+    },
+    {
+      "id": "wait_round_state",
+      "type": "task",
+      "action": "vision.wait_any",
+      "params": {
+        "templates": [
+          "assets/templates/task_1-template.png",
+          "assets/templates/task_3-template.png"
+        ],
+        "timeout_seconds": 60,
+        "threshold": 0.88
+      },
+      "name": "等待挑战按钮或战斗结算页",
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 2,
+          "delay_seconds": 0.5
+        }
+      ]
+    },
+    {
+      "id": "round_state_selector",
+      "type": "selector",
+      "children": [
+        "start_round",
+        "continue_round"
+      ],
+      "name": "按当前页面选择动作"
+    },
+    {
+      "id": "start_round",
+      "type": "sequence",
+      "children": [
+        "start_click_retry",
+        "wait_battle_end_after_start",
+        "continue_click_after_start_retry"
+      ],
+      "name": "点击挑战并等待战斗结束",
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.wait_round_state.output.template"
+              },
+              "assets/templates/task_1-template.png"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "start_click_retry",
+      "type": "sequence",
+      "children": [
+        "tap_challenge",
+        "confirm_challenge_disappeared"
+      ],
+      "name": "点击挑战并确认已切页",
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 5,
+          "delay_seconds": 0.8
+        }
+      ]
+    },
+    {
+      "id": "tap_challenge",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_round_state.output.match"
+        },
+        "revalidate": true,
+        "disappeared_states": [
+          {
+            "name": "battle_end",
+            "template": "assets/templates/task_3-template.png",
+            "threshold": 0.88,
+            "roi": [
+              608,
+              943,
+              734,
+              137
+            ]
+          },
+          {
+            "name": "battle_started",
+            "template": "assets/templates/task_2-disappeared_states.png",
+            "threshold": 0.9
+          }
+        ],
+        "disappeared_state_timeout_seconds": 2,
+        "random_offset": 15,
+        "random_interval": [
+          0.2,
+          0.6
+        ]
+      },
+      "name": "点击挑战按钮"
+    },
+    {
+      "id": "confirm_challenge_disappeared",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/task_1-template.png",
+        "present": false,
+        "timeout_seconds": 6,
+        "roi": [
+          1621,
+          796,
+          299,
+          284
+        ],
+        "threshold": 0.88
+      },
+      "name": "确认挑战按钮已消失"
+    },
+    {
+      "id": "wait_battle_end_after_start",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/task_3-template.png",
+        "timeout_seconds": 90,
+        "roi": [
+          608,
+          943,
+          734,
+          137
+        ],
+        "threshold": 0.88
+      },
+      "name": "等待本轮战斗结束",
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 10,
+          "delay_seconds": 0.5
+        }
+      ]
+    },
+    {
+      "id": "continue_click_after_start_retry",
+      "type": "sequence",
+      "children": [
+        "tap_continue_after_start",
+        "confirm_continue_disappeared_after_start"
+      ],
+      "name": "点击继续并确认已返回",
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 5,
+          "delay_seconds": 0.8
+        }
+      ]
+    },
+    {
+      "id": "tap_continue_after_start",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_battle_end_after_start.output.0"
+        },
+        "revalidate": true,
+        "disappeared_states": [
+          {
+            "name": "challenge",
+            "template": "assets/templates/task_1-template.png",
+            "threshold": 0.88,
+            "roi": [
+              1621,
+              796,
+              299,
+              284
+            ]
+          }
+        ],
+        "disappeared_state_timeout_seconds": 2,
+        "random_offset": 12,
+        "random_interval": [
+          0.2,
+          0.5
+        ]
+      },
+      "name": "点击战斗结束后的继续"
+    },
+    {
+      "id": "confirm_continue_disappeared_after_start",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/task_3-template.png",
+        "present": false,
+        "timeout_seconds": 6,
+        "roi": [
+          608,
+          943,
+          734,
+          137
+        ],
+        "threshold": 0.88
+      },
+      "name": "确认结算提示已消失"
+    },
+    {
+      "id": "continue_round",
+      "type": "sequence",
+      "children": [
+        "continue_click_retry"
+      ],
+      "name": "处理已在战斗中的结算页",
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.wait_round_state.output.template"
+              },
+              "assets/templates/task_3-template.png"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "continue_click_retry",
+      "type": "sequence",
+      "children": [
+        "tap_continue",
+        "confirm_continue_disappeared"
+      ],
+      "name": "点击结算页继续并确认",
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 5,
+          "delay_seconds": 0.8
+        }
+      ]
+    },
+    {
+      "id": "tap_continue",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_round_state.output.match"
+        },
+        "revalidate": true,
+        "disappeared_states": [
+          {
+            "name": "challenge",
+            "template": "assets/templates/task_1-template.png",
+            "threshold": 0.88,
+            "roi": [
+              1621,
+              796,
+              299,
+              284
+            ]
+          }
+        ],
+        "disappeared_state_timeout_seconds": 2,
+        "random_offset": 12,
+        "random_interval": [
+          0.2,
+          0.5
+        ]
+      },
+      "name": "点击结算页继续"
+    },
+    {
+      "id": "confirm_continue_disappeared",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/task_3-template.png",
+        "present": false,
+        "timeout_seconds": 6,
+        "roi": [
+          608,
+          943,
+          734,
+          137
+        ],
+        "threshold": 0.88
+      },
+      "name": "确认结算提示已消失"
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 789,
+      "y": 0
+    },
+    "repeat_rounds": {
+      "x": 789,
+      "y": 208
+    },
+    "round": {
+      "x": 789,
+      "y": 416
+    },
+    "wait_round_state": {
+      "x": 0,
+      "y": 624
+    },
+    "round_state_selector": {
+      "x": 1577,
+      "y": 624
+    },
+    "start_round": {
+      "x": 1000,
+      "y": 832
+    },
+    "continue_round": {
+      "x": 2158,
+      "y": 832
+    },
+    "start_click_retry": {
+      "x": 498,
+      "y": 1040
+    },
+    "tap_challenge": {
+      "x": 332,
+      "y": 1248
+    },
+    "confirm_challenge_disappeared": {
+      "x": 984,
+      "y": 1256
+    },
+    "wait_battle_end_after_start": {
+      "x": 1000,
+      "y": 1040
+    },
+    "continue_click_after_start_retry": {
+      "x": 1494,
+      "y": 1040
+    },
+    "tap_continue_after_start": {
+      "x": 1328,
+      "y": 1248
+    },
+    "confirm_continue_disappeared_after_start": {
+      "x": 1660,
+      "y": 1248
+    },
+    "continue_click_retry": {
+      "x": 2158,
+      "y": 1040
+    },
+    "tap_continue": {
+      "x": 1992,
+      "y": 1248
+    },
+    "confirm_continue_disappeared": {
+      "x": 2324,
+      "y": 1248
+    }
+  },
+  "_variableCards": {},
+  "_inputParams": {},
+  "_variableLinks": {}
+}

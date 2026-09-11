@@ -127,6 +127,7 @@
   }
 
   function formatDuration(value) {
+    if (value === null || value === undefined) return '—';
     const milliseconds = Number(value);
     if (!Number.isFinite(milliseconds)) return '';
     if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
@@ -168,6 +169,8 @@
       status: source.status || 'idle',
       rows: [],
       openRows: new Map(),
+      expandedRows: new Set(),
+      scrollTop: 0,
       runStartedAt: Number(source.startedAt) || null,
       runFinishedAt: null,
       runId: '',
@@ -197,7 +200,7 @@
       ? (multi ? `${state.descriptor.workflow} · ${source.label || source.instance}` : state.descriptor.workflow)
       : run.rows.length > 0 ? '最近一次运行' : '尚未运行';
     $('run-meta').textContent = state.descriptor
-      ? [source.instance || state.descriptor.instance, run.runId || '等待运行事件'].filter(Boolean).join(' · ')
+      ? [source.label || source.instance || state.descriptor.instance, run.runId || '等待运行事件'].filter(Boolean).join(' · ')
       : '等待工作流';
   }
 
@@ -210,7 +213,7 @@
     for (const source of state.sources) {
       const run = state.runs.get(source.id);
       const button = document.createElement('button');
-      button.className = source.id === state.activeSource ? 'active' : '';
+      button.className = `ui-button${source.id === state.activeSource ? ' active' : ''}`;
       button.dataset.sourceId = source.id;
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', String(source.id === state.activeSource));
@@ -218,14 +221,11 @@
       const labelText = source.label || source.instance;
       const label = document.createElement('strong'); label.textContent = labelText;
       button.append(dot, label);
-      if (source.instance && source.instance !== labelText) {
-        const instance = document.createElement('span'); instance.textContent = source.instance;
-        button.appendChild(instance);
-      }
+      button.title = [labelText, source.instance].filter(Boolean).join(' · ');
       button.addEventListener('click', () => {
         state.activeSource = source.id;
         updateIdentity();
-        renderSourceTabs();
+        setStatus(activeRun().status);
         render();
       });
       container.appendChild(button);
@@ -361,6 +361,11 @@
       if (params.roi || match.roi) facts.push(`ROI ${formatRect(params.roi || match.roi)}`);
       if (Array.isArray(output)) facts.push(`命中 ${output.length} 个`);
       if (Number.isFinite(Number(match.confidence))) facts.push(`最高匹配 ${formatPercent(match.confidence)}`);
+    } else if (row.action === 'vision.wait_any') {
+      const templates = Array.isArray(params.templates) ? params.templates : [];
+      operation = `等待任一模板${templates.length ? ` · ${templates.length} 个候选` : ''}`;
+      if (Number.isFinite(Number(params.timeout_seconds))) facts.push(`超时 ${formatNumber(params.timeout_seconds)} s`);
+      if (params.roi) facts.push(`ROI ${formatRect(params.roi)}`);
     } else if (row.action === 'input.tap' || row.action === 'input.tap_match') {
       const match = asObject(params.match);
       const point = formatPoint(outputObject.x ?? params.x, outputObject.y ?? params.y);
@@ -503,6 +508,8 @@
       if (run.runId && nextRunId && run.runId !== nextRunId) {
         run.rows = [];
         run.openRows.clear();
+        run.expandedRows.clear();
+        run.scrollTop = 0;
         run.materialTotals = {};
         run.rewardBattles.clear();
       }
@@ -650,7 +657,11 @@
     }
     $('completed-count').textContent = String(completed);
     $('failed-count').textContent = String(failed);
+    $('failed-count').parentElement.classList.toggle('has-failures', failed > 0);
     $('current-step').textContent = current ? (current.name || '未命名任务') : '-';
+    $('current-step').parentElement.classList.toggle('hidden', !current);
+    $('current-step').title = current ? (current.name || '未命名任务') : '';
+    $('btn-stop').disabled = ![...state.runs.values()].some((item) => ['running', 'starting', 'queued', 'retrying'].includes(item.status));
     const end = run.runFinishedAt || Date.now();
     $('elapsed').textContent = run.runStartedAt ? formatElapsed(end - run.runStartedAt) : '00:00.0';
   }
@@ -687,7 +698,13 @@
 
   function appendStepDetails(main, row) {
     const entries = [];
+    entries.push(['节点 ID', row.stepId]);
     if (row.action) entries.push(['动作类型', row.action]);
+    const description = describeStep(row);
+    entries.push(['执行操作', description.operation]);
+    if (description.facts.length) entries.push(['执行信息', description.facts.join(' · ')]);
+    const relative = formatRelative(row.startedAt, activeRun());
+    if (relative) entries.push(['开始时间', relative]);
     if (row.params !== null && row.params !== undefined) entries.push(['实际参数', row.params]);
     if (row.output !== null && row.output !== undefined) entries.push(['节点输出', row.output]);
     if (row.workflowDepth > 0 && row.workflowPath.length > 0) entries.push(['调用路径', row.workflowPath.join(' > ')]);
@@ -696,8 +713,7 @@
     if (row.error) entries.push([row.status === 'branch_miss' ? '原始未完成原因' : '原始错误', row.error]);
     if (entries.length === 0) return;
 
-    const details = document.createElement('details'); details.className = 'step-details';
-    const summary = document.createElement('summary'); summary.textContent = '参数与输出'; details.appendChild(summary);
+    const details = document.createElement('div'); details.className = 'step-details';
     const grid = document.createElement('div'); grid.className = 'detail-grid';
     for (const [labelText, value] of entries) {
       const label = document.createElement('span'); label.className = 'detail-label'; label.textContent = labelText;
@@ -706,6 +722,13 @@
       grid.append(label, content);
     }
     details.appendChild(grid);
+    if (row.thumbnail) {
+      const screenshot = document.createElement('button'); screenshot.type = 'button'; screenshot.className = 'ui-button screenshot-button';
+      const image = document.createElement('img'); image.className = 'thumb'; image.src = row.thumbnail; image.alt = ''; image.loading = 'lazy';
+      const label = document.createElement('span'); label.textContent = '查看运行截图';
+      screenshot.append(image, label); screenshot.addEventListener('click', () => openLightbox(row.thumbnail, screenshot));
+      details.appendChild(screenshot);
+    }
     main.appendChild(details);
   }
 
@@ -720,81 +743,93 @@
     }
   }
 
+  let renderedRun = null;
   function renderSteps() {
     const list = $('step-list');
+    const run = activeRun();
+    if (renderedRun) {
+      renderedRun.scrollTop = list.scrollTop;
+      for (const item of list.children) {
+        if (item.open) renderedRun.expandedRows.add(item.dataset.rowKey);
+        else renderedRun.expandedRows.delete(item.dataset.rowKey);
+      }
+    }
+    const focusedRow = renderedRun === run ? document.activeElement?.closest('.step-row')?.dataset.rowKey : null;
+    renderedRun = run;
     list.innerHTML = '';
     state.runningDurationNodes = [];
     const all = visibleRows();
     const rows = all.length > MAX_VISIBLE_ROWS ? all.slice(all.length - MAX_VISIBLE_ROWS) : all;
     $('empty-state').classList.toggle('hidden', rows.length > 0);
     const capNote = $('cap-note');
-    capNote.classList.toggle('hidden', all.length <= MAX_VISIBLE_ROWS);
-    capNote.textContent = `仅显示最新 ${MAX_VISIBLE_ROWS} 行 · 共 ${all.length} 条`;
+    capNote.textContent = all.length > MAX_VISIBLE_ROWS ? `最近 ${MAX_VISIBLE_ROWS} / ${all.length} 条` : `${all.length} 条`;
+    capNote.title = all.length > MAX_VISIBLE_ROWS ? `仅展示最近 ${MAX_VISIBLE_ROWS} 条，统计包含全部步骤` : '当前筛选下的步骤数量';
     for (const row of rows) {
-      const item = document.createElement('article');
+      const item = document.createElement('details');
       item.className = `step-row ${row.status}`;
       if (row.kind === 'reward') item.classList.add('reward');
       item.dataset.stepId = row.stepId;
-
-      const rail = document.createElement('div');
-      rail.className = 'step-rail';
-      const dot = document.createElement('span'); dot.className = 'step-dot'; rail.appendChild(dot);
-
-      const main = document.createElement('div'); main.className = 'step-main';
-      const title = document.createElement('div'); title.className = 'step-title';
-      const strong = document.createElement('strong'); strong.textContent = row.name || (row.kind === 'reward' ? row.stepId : '未命名任务'); title.appendChild(strong);
-      const action = document.createElement('span'); action.className = 'step-action'; action.textContent = row.action || row.nodeKind; title.appendChild(action);
-      if (row.workflowDepth > 0 && row.workflowPath.length > 0) {
-        const workflow = document.createElement('span'); workflow.className = 'step-workflow';
-        workflow.textContent = row.workflowPath.join(' > '); title.appendChild(workflow);
-      }
-      main.appendChild(title);
+      item.dataset.rowKey = row.key;
+      item.open = run.expandedRows.has(row.key);
+      item.addEventListener('toggle', () => {
+        // Ignore delayed toggle events from a row replaced by a live update.
+        if (!item.isConnected) return;
+        if (item.open) run.expandedRows.add(row.key); else run.expandedRows.delete(row.key);
+      });
+      const overview = document.createElement('summary'); overview.className = 'step-overview';
+      const dot = document.createElement('span'); dot.className = 'step-dot'; dot.setAttribute('aria-hidden', 'true');
+      const title = document.createElement('strong'); title.className = 'step-title';
+      title.textContent = row.name || (row.kind === 'reward' ? row.stepId : '未命名任务'); title.title = title.textContent;
+      overview.append(dot, title);
       const description = describeStep(row);
-      const operation = document.createElement('div'); operation.className = 'step-operation'; operation.textContent = description.operation; main.appendChild(operation);
-      if (description.facts.length > 0) {
-        const facts = document.createElement('div'); facts.className = 'step-facts';
-        for (const factText of description.facts) {
+      const context = document.createElement('span'); context.className = 'step-context';
+      const operation = document.createElement('span'); operation.className = 'step-operation'; operation.textContent = description.operation; operation.title = description.operation; context.appendChild(operation);
+      // Keep outcomes in the overview; configuration and timing stay in details.
+      const highlights = description.facts.filter(fact => /^(命中|最高匹配|实际坐标|尝试|重复|子工作流|识别)/.test(fact)).slice(0, 2);
+      if (highlights.length > 0) {
+        const facts = document.createElement('span'); facts.className = 'step-facts';
+        for (const factText of highlights) {
           const fact = document.createElement('span'); fact.textContent = factText; facts.appendChild(fact);
         }
-        main.appendChild(facts);
+        context.appendChild(facts);
       }
+      if (row.thumbnail) {
+        const attachment = document.createElement('span'); attachment.className = 'step-attachment'; attachment.textContent = '含截图';
+        context.appendChild(attachment);
+      }
+      overview.appendChild(context);
       if (row.kind === 'reward') {
-        const materials = document.createElement('div'); materials.className = 'step-materials';
+        const materials = document.createElement('span'); materials.className = 'step-materials';
         materials.textContent = row.materials.length > 0
           ? row.materials.map((material) => `${material.name} ×${formatQuantity(material)}`).join(' · ')
           : '未识别到材料';
-        main.appendChild(materials);
+        overview.appendChild(materials);
       }
       const reasonText = failureReason(row);
       if (reasonText) {
-        const reason = document.createElement('div');
+        const reason = document.createElement('span');
         reason.className = row.status === 'branch_miss' ? 'step-note' : 'step-error';
         reason.textContent = `${row.status === 'branch_miss' ? '跳过原因' : '失败原因'}：${reasonText}`;
-        main.appendChild(reason);
+        overview.appendChild(reason);
       }
-      const relative = formatRelative(row.startedAt, activeRun());
-      if (relative) {
-        const time = document.createElement('div'); time.className = 'step-time'; time.textContent = `开始 ${relative}`; main.appendChild(time);
-      }
-      appendStepDetails(main, row);
-
-      const side = document.createElement('div'); side.className = 'step-side';
+      const side = document.createElement('span'); side.className = 'step-side';
       const rowStatus = document.createElement('span'); rowStatus.className = 'row-status'; rowStatus.textContent = rowStatusLabel(row); side.appendChild(rowStatus);
       const duration = document.createElement('span'); duration.className = 'duration'; duration.textContent = formatDuration(currentRowDuration(row)); duration.title = '节点耗时'; side.appendChild(duration);
       if (row.status === 'running') state.runningDurationNodes.push({ node: duration, row });
-      if (row.thumbnail) {
-        const image = document.createElement('img'); image.className = 'thumb'; image.src = row.thumbnail; image.alt = row.name || (row.kind === 'reward' ? row.stepId : '未命名任务'); image.addEventListener('click', () => openLightbox(row.thumbnail)); side.appendChild(image);
-      }
-      item.append(rail, main, side);
+      const chevron = document.createElement('span'); chevron.className = 'step-chevron'; chevron.textContent = '›'; chevron.setAttribute('aria-hidden', 'true');
+      overview.append(side, chevron);
+      item.appendChild(overview);
+      appendStepDetails(item, row);
       list.appendChild(item);
+      if (row.key === focusedRow) overview.focus({ preventScroll: true });
     }
     updateRunningDurations();
-    if ($('auto-scroll').checked && rows.length > 0) {
+    if ($('auto-scroll').checked && !focusedRow && rows.length > 0) {
       const current = list.lastElementChild;
       list.scrollTop = current && current.clientHeight > list.clientHeight
         ? Math.max(0, current.offsetTop - list.offsetTop)
         : list.scrollHeight;
-    }
+    } else list.scrollTop = run.scrollTop;
   }
 
   function render() {
@@ -806,15 +841,30 @@
     $('engine-view').classList.toggle('hidden', state.view !== 'engine');
     $('tab-steps').classList.toggle('active', state.view === 'steps');
     $('tab-engine').classList.toggle('active', state.view === 'engine');
+    $('tab-steps').setAttribute('aria-selected', String(state.view === 'steps'));
+    $('tab-engine').setAttribute('aria-selected', String(state.view === 'engine'));
+    $('filters').classList.toggle('hidden', state.view !== 'steps');
+    $('cap-note').classList.toggle('hidden', state.view !== 'steps');
     if (state.view === 'engine' && $('auto-scroll').checked) $('engine-view').scrollTop = $('engine-view').scrollHeight;
   }
 
-  function openLightbox(source) {
+  let lightboxTrigger = null;
+  function openLightbox(source, trigger) {
+    lightboxTrigger = trigger;
     $('lightbox-image').src = source;
     $('lightbox').classList.remove('hidden');
+    $('lightbox-close').focus();
   }
 
-  function closeLightbox() { $('lightbox').classList.add('hidden'); }
+  function closeLightbox() { $('lightbox').classList.add('hidden'); if (lightboxTrigger?.isConnected) lightboxTrigger.focus(); }
+
+  $('step-list').addEventListener('scroll', () => { activeRun().scrollTop = $('step-list').scrollTop; });
+  $('auto-scroll').addEventListener('change', () => { if ($('auto-scroll').checked) render(); });
+  document.addEventListener('keydown', event => {
+    if ($('lightbox').classList.contains('hidden')) return;
+    if (event.key === 'Escape') closeLightbox();
+    if (event.key === 'Tab') { event.preventDefault(); $('lightbox-close').focus(); }
+  });
 
   $('tab-steps').addEventListener('click', () => {
     state.view = 'steps';
@@ -833,8 +883,25 @@
   for (const button of document.querySelectorAll('#filters button')) {
     button.addEventListener('click', () => {
       state.filter = button.dataset.filter || 'tasks';
-      for (const item of document.querySelectorAll('#filters button')) item.classList.toggle('active', item === button);
+      for (const item of document.querySelectorAll('#filters button')) {
+        item.classList.toggle('active', item === button);
+        item.setAttribute('aria-pressed', String(item === button));
+      }
       renderSteps();
+    });
+  }
+
+  for (const tablist of document.querySelectorAll('[role="tablist"]')) {
+    tablist.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+      const index = tabs.indexOf(event.target);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[next].click();
+      // Source tabs are regenerated by the click handler.
+      tablist.querySelectorAll('[role="tab"]')[next]?.focus();
     });
   }
 

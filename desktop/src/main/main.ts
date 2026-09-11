@@ -8,6 +8,7 @@ import {
   BrowserWindow,
   ipcMain,
   net,
+  nativeTheme,
   protocol,
   type IpcMainInvokeEvent,
 } from 'electron';
@@ -42,6 +43,10 @@ let visionTestWindow: BrowserWindow | undefined;
 let visionTestStream: VisionStream | undefined;
 let visionTestInstanceId = '';
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
+const THEME_STORE_KEY = 'onmyoji-studio.appearance';
+function readTheme(): 'dark' | 'light' {
+  return readLayoutStore()[THEME_STORE_KEY] === 'light' ? 'light' : 'dark';
+}
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -153,7 +158,7 @@ function openVisionTestWindow(instanceId: string): void {
     show: false,
     frame: false,
     title: '模拟器画面测试工具',
-    backgroundColor: '#111317',
+    backgroundColor: readTheme() === 'light' ? '#f4f4f4' : '#141414',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -217,6 +222,17 @@ function registerIpc(): void {
   ipcMain.handle('window:is-maximized', (event) => ownerWindow(event).isMaximized());
   ipcMain.on('layout:read', (event, key: unknown) => {
     event.returnValue = typeof key === 'string' ? readLayoutStore()[key] ?? null : null;
+  });
+  ipcMain.on('appearance:read', (event) => { event.returnValue = readTheme(); });
+  ipcMain.on('appearance:write', (event, value: unknown) => {
+    if (value === 'dark' || value === 'light') writeLayout(THEME_STORE_KEY, value);
+    const theme = readTheme();
+    nativeTheme.themeSource = theme;
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.setBackgroundColor(theme === 'light' ? '#f4f4f4' : '#141414');
+      window.webContents.send('appearance:changed', theme);
+    }
+    event.returnValue = theme;
   });
   ipcMain.on('layout:write', (_event, key: unknown, value: unknown) => {
     writeLayout(key, value);
@@ -288,7 +304,7 @@ function createWindow(): BrowserWindow {
     show: false,
     frame: false,
     title: 'Onmyoji Studio',
-    backgroundColor: '#111317',
+    backgroundColor: readTheme() === 'light' ? '#f4f4f4' : '#141414',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -313,7 +329,7 @@ function createWindow(): BrowserWindow {
           minHeight: 220,
           frame: false,
           title: 'Onmyoji Studio',
-          backgroundColor: '#111317',
+          backgroundColor: readTheme() === 'light' ? '#f4f4f4' : '#141414',
           autoHideMenuBar: true,
           webPreferences: {
             preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -352,6 +368,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  nativeTheme.themeSource = readTheme();
   const configuredRoot = process.env.ONMYOJI_PROJECT_ROOT;
   const projectRoot = configuredRoot ? path.resolve(configuredRoot) : path.resolve(app.getAppPath(), '..');
   project = new ProjectService(projectRoot);

@@ -5,9 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
   <title>Onmyoji Studio</title>
-  <link rel="stylesheet" href="./fonts/harmonyos-sans-sc/Regular.css">
-  <link rel="stylesheet" href="./fonts/harmonyos-sans-sc/Semibold.css">
-  <link rel="stylesheet" href="./fonts/harmonyos-sans-sc/Bold.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Bold.css">
+  <link rel="stylesheet" href="/legacy/ui.css">
+  <link rel="stylesheet" href="/settings/settings.css">
+  <link rel="stylesheet" href="/theme/workbench-light.css">
+  <link rel="stylesheet" href="/theme/theme.css">
+  <script src="/theme/theme.js"></script>
+  <link rel="stylesheet" href="/workbench/workbench.css">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -131,6 +137,7 @@
           <div class="tool-strip" aria-label="画布工具">
             <div class="tool-group">
               <button class="tool-command" data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i><span class="tool-command-label">任务</span></button>
+              <details class="tool-overflow"><summary class="tool-menu-trigger">添加节点 <span aria-hidden="true">▾</span></summary><div class="tool-menu" aria-label="添加节点">
               <button class="tool-command" data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i><span class="tool-command-label">顺序</span></button>
               <button class="tool-command" data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i><span class="tool-command-label">选择</span></button>
               <button class="tool-command" data-editor-command="addParallel" title="添加并行节点"><i data-lucide="columns-3"></i><span class="tool-command-label">并行</span></button>
@@ -139,13 +146,16 @@
               <button class="tool-command" data-editor-command="addBranch" title="添加条件分支"><i data-lucide="git-fork"></i><span class="tool-command-label">条件</span></button>
               <button class="tool-command" data-editor-command="addSwitch" title="添加值分支"><i data-lucide="route"></i><span class="tool-command-label">分支</span></button>
               <button class="tool-command" data-editor-command="addInstanceParallel" title="添加多实例节点"><i data-lucide="monitor-up"></i><span class="tool-command-label">多实例</span></button>
+              </div></details>
             </div>
             <span class="tool-divider"></span>
             <div class="tool-group">
               <button class="tool-command" data-editor-command="autoLayout" title="自动排列"><i data-lucide="wand-sparkles"></i><span class="tool-command-label">排列</span></button>
               <button class="tool-command" data-editor-command="fitView" title="适应画布"><i data-lucide="maximize"></i><span class="tool-command-label">适应</span></button>
+              <details class="tool-overflow"><summary class="tool-menu-trigger">工具 <span aria-hidden="true">▾</span></summary><div class="tool-menu" aria-label="画布工具">
               <button class="tool-command" data-editor-command="exportImage" title="导出画布图片"><i data-lucide="image-down"></i><span class="tool-command-label">导出</span></button>
               <button class="tool-command" data-editor-command="workflowSettings" title="工作流设置"><i data-lucide="settings-2"></i><span class="tool-command-label">设置</span></button>
+              </div></details>
             </div>
             <span class="tool-divider"></span>
             <div id="instance-picker" class="instance-picker">
@@ -208,38 +218,61 @@
         <section id="module-reference-viewer" class="dock-module reference-viewer-module" aria-label="引用查看器"></section>
 
         <section id="module-settings" class="dock-module settings-module">
+          <nav class="settings-nav" aria-label="设置分类">
+            <div class="settings-nav-title">偏好设置</div>
+            <div role="tablist" aria-orientation="vertical">
+              <button id="settings-tab-appearance" class="settings-nav-item active" role="tab" aria-selected="true" aria-controls="settings-page-appearance" data-settings-page="appearance">外观</button>
+              <button id="settings-tab-interface" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-interface" data-settings-page="interface" tabindex="-1">界面</button>
+              <button id="settings-tab-runtime" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-runtime" data-settings-page="runtime" tabindex="-1">运行</button>
+              <button id="settings-tab-about" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-about" data-settings-page="about" tabindex="-1">关于</button>
+            </div>
+            <div class="settings-nav-footer">Onmyoji Studio</div>
+          </nav>
           <div class="settings-body">
-            <section class="settings-section">
-              <h3 class="settings-section-title">界面</h3>
+            <section id="settings-page-appearance" class="settings-page" role="tabpanel" aria-labelledby="settings-tab-appearance">
+              <h2>外观</h2><p class="settings-intro">选择工作台的配色，立即应用到所有窗口。</p>
+              <h3 class="settings-section-title">颜色主题</h3>
+              <div class="theme-options" role="radiogroup" aria-label="颜色主题">
+                <label class="theme-option"><input type="radio" name="appearance-theme" value="dark" checked><span class="theme-preview preview-dark" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>深色</strong><span>中性炭黑 · 当前风格</span></span></label>
+                <label class="theme-option"><input type="radio" name="appearance-theme" value="light"><span class="theme-preview preview-light" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>浅色</strong><span>柔和浅灰 · 清晰明亮</span></span></label>
+              </div>
+              <p id="settings-theme-feedback" class="settings-footnote" role="status">主题自动保存，下次启动沿用。</p>
+            </section>
+            <section id="settings-page-interface" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-interface">
+              <h2>界面</h2><p class="settings-intro">设置内容浏览和实例列表的默认行为。</p>
+              <h3 class="settings-section-title">内容与实例</h3>
               <label class="settings-row">
-                <span>内容浏览器默认视图</span>
+                <span class="settings-row-copy"><strong>内容浏览器默认视图</strong><small>缩略图便于识别图片，列表适合查看路径。</small></span>
                 <select id="settings-content-view" aria-label="内容浏览器默认视图">
                   <option value="grid">缩略图</option>
                   <option value="list">列表</option>
                 </select>
               </label>
               <label class="settings-row">
-                <span>实例列表自动刷新</span>
-                <input id="settings-auto-refresh" type="checkbox" aria-label="实例列表自动刷新">
+                <span class="settings-row-copy"><strong>实例列表自动刷新</strong><small>定期更新已连接的模拟器实例。</small></span>
+                <input id="settings-auto-refresh" class="ui-checkbox" type="checkbox" aria-label="实例列表自动刷新">
               </label>
             </section>
-            <section class="settings-section">
-              <h3 class="settings-section-title">运行</h3>
+            <section id="settings-page-runtime" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-runtime">
+              <h2>运行</h2><p class="settings-intro">配置启动行为与调试记录。</p>
+              <h3 class="settings-section-title">启动</h3>
               <label class="settings-row">
-                <span>启动时加载默认工作流</span>
-                <input id="settings-default-workflow" type="checkbox" aria-label="启动时加载默认工作流">
+                <span class="settings-row-copy"><strong>启动时加载默认工作流</strong><small>打开应用后自动加载，不会自动执行。</small></span>
+                <input id="settings-default-workflow" class="ui-checkbox" type="checkbox" aria-label="启动时加载默认工作流">
+              </label>
+              <h3 class="settings-section-title">调试截图</h3>
+              <label class="settings-row">
+                <span class="settings-row-copy"><strong>Debug 逐步截图</strong><small>记录执行画面，修改后从下次运行生效。</small></span>
+                <input id="settings-debug-enabled" class="ui-checkbox" type="checkbox" aria-label="Debug 逐步截图">
               </label>
               <label class="settings-row">
-                <span>Debug 逐步截图</span>
-                <input id="settings-debug-enabled" type="checkbox" aria-label="Debug 逐步截图">
-              </label>
-              <label class="settings-row">
-                <span>标注 ROI、匹配度和点击位置</span>
-                <input id="settings-debug-annotate" type="checkbox" aria-label="标注 Debug 截图">
+                <span class="settings-row-copy"><strong>标注识别与点击位置</strong><small>在截图中显示 ROI、匹配度及点击位置。</small></span>
+                <input id="settings-debug-annotate" class="ui-checkbox" type="checkbox" aria-label="标注 Debug 截图">
               </label>
             </section>
-            <section class="settings-section">
-              <h3 class="settings-section-title">关于</h3>
+            <section id="settings-page-about" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-about">
+              <h2>关于</h2><p class="settings-intro">Onmyoji Studio · 工作流编辑与运行工具。</p>
+              <h3 class="settings-section-title">应用信息</h3>
               <div class="settings-row">
                 <span>项目根目录</span>
                 <span id="settings-project-root" class="settings-value"></span>
@@ -284,8 +317,8 @@
         <section id="module-variables" class="dock-module variables-module">
           <div class="module-command-strip">
             <span class="module-context">输入与状态</span>
-            <button id="add-input-button" class="panel-action" title="添加工作流输入"><i data-lucide="plus"></i></button>
-            <button id="add-variable-button" class="panel-action" title="添加运行变量"><i data-lucide="circle-plus"></i></button>
+            <button id="add-input-button" class="panel-action" type="button" title="添加工作流输入" aria-label="添加工作流输入"><i data-lucide="plus"></i><span>输入</span></button>
+            <button id="add-variable-button" class="panel-action" type="button" title="添加运行变量" aria-label="添加运行变量"><i data-lucide="plus"></i><span>变量</span></button>
           </div>
           <div id="variables-view" class="panel-content variables-content"></div>
         </section>
@@ -365,6 +398,8 @@
     </div>
     <div id="app-toast" class="app-toast hidden"></div>
   </div>
+  <script src="/settings/settings.js"></script>
+  <script src="/workbench/workbench.js"></script>
   <script type="module" src="./main.ts"></script>
 </body>
 </html>

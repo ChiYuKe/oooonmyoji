@@ -1,0 +1,28 @@
+html, body { height: auto; min-height: 100%; overflow: auto; }
+body { margin: 0; background: var(--ui-bg); }
+.showcase-header { min-height: 64px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 24px; border-bottom: 1px solid var(--ui-line); }
+.showcase-header strong { font-size: 18px; font-weight: 600; }
+.showcase-header span { color: var(--ui-muted); margin-left: 16px; }
+#demo-theme span { margin: 0; color: inherit; }
+.showcase-layout { height: auto; display: grid; grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.5fr) minmax(210px, .7fr); gap: 1px; background: var(--ui-line); }
+.showcase-panel { min-width: 0; padding: 20px; background: var(--ui-bg); }
+h1 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+h2 { margin: 22px 0 8px; font-size: 11px; font-weight: 600; color: var(--ui-text); }
+.showcase-panel p { color: var(--ui-muted); line-height: 1.7; }
+.demo-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.demo-stack { display: grid; gap: 6px; max-width: 300px; }
+#demo-feedback { padding: 8px 0; margin-top: 20px; border-top: 1px solid var(--ui-line); color: var(--ui-text); }
+.preview-size { display: flex; align-items: center; gap: 8px; margin: 14px 0; color: var(--ui-muted); }
+.preview-size input { width: 140px; min-height: 0; accent-color: #888; padding: 0; }
+.preview-size output { font-variant-numeric: tabular-nums; }
+.preview-viewport { overflow-x: auto; padding-bottom: 10px; }
+#inspector { width: 400px; height: auto; border: 0; }
+.preview-tabs { height: 28px; padding: 6px 10px; background: var(--ui-surface); font-weight: 600; }
+.preview-tabs span { margin-left: 18px; font-weight: 400; color: var(--ui-muted); }
+.specification dl { display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-top: 20px; }
+.specification dt { color: var(--ui-muted); }
+.specification dd { margin: 0; font-variant-numeric: tabular-nums; }
+.swatch { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.swatch i { display: block; width: 24px; height: 24px; border-radius: 3px; }
+@media (max-width: 1050px) { .showcase-layout { grid-template-columns: minmax(260px, 1fr) minmax(340px, 1.4fr); } .specification { grid-column: 1 / -1; } }
+@media (max-width: 650px) { .showcase-layout { display: block; } .showcase-panel { padding: 14px; } .showcase-header { padding: 0 14px; } }

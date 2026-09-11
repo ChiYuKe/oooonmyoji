@@ -32,7 +32,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private stopRequested = false;
   private stopGeneration = 0;
   private watchTimer: NodeJS.Timeout | undefined;
-  private watchedFiles = new Map<string, number>();
+  private watchedFiles = new Map<string, { offset: number; instanceId: string }>();
 
   constructor(private readonly project: ProjectService) {
     super();
@@ -160,7 +160,13 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     } catch {
       // The engine will provide the detailed parse failure in stderr.
     }
-    const available = new Set((await this.listInstances()).map((item) => item.id));
+    const availableInstances = await this.listInstances();
+    const available = new Set(availableInstances.map((item) => item.id));
+    const instanceLabel = (instanceId: string): string => {
+      const instance = availableInstances.find((item) => item.id === instanceId);
+      return instance?.displayName
+        || (instance?.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instanceId);
+    };
     if (runs.length > 0) {
       const missing = [...new Set(runs.map((item) => item.instance).filter((id) => !available.has(id)))];
       if (missing.length > 0) throw new Error(`未发现运行实例：${missing.join('、')}`);
@@ -187,10 +193,13 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
       this.emitState({ state: 'idle', label: '已停止', workflow: request.uri, instance: request.instanceId });
       return;
     }
-    this.startWatching(runs.length > 0
-      ? runs.map((item) => path.join(runDirectory, `desktop-events-${stamp}-${item.instance}.jsonl`))
-      : [eventsFile]);
     const instance = request.instanceId || runs[0]?.instance || '';
+    this.startWatching(runs.length > 0
+      ? runs.map((item) => ({
+        file: path.join(runDirectory, `desktop-events-${stamp}-${item.instance}.jsonl`),
+        instanceId: item.instance,
+      }))
+      : [{ file: eventsFile, instanceId: instance }]);
     const args = [
       '-m', 'src.oooonmyoji.cli', '--config', this.configPath,
       'run-workflow', workflowReference,
@@ -207,10 +216,10 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     this.activeProcess = child;
     this.stopRequested = false;
     const startedAt = Date.now();
-    const label = `${path.basename(workflowPath)} · ${runs.length > 0 ? `${runs.length} 个实例` : instance}`;
+    const label = `${path.basename(workflowPath)} · ${runs.length > 0 ? `${runs.length} 个实例` : instanceLabel(instance)}`;
     const sources = runs.length > 0 ? runs.map((run) => ({
       id: run.instance,
-      label: run.instance,
+      label: instanceLabel(run.instance),
       workflow: path.basename(workflowPath),
       instance: run.instance,
       startedAt,
@@ -276,9 +285,9 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     }
   }
 
-  private startWatching(files: string[]): void {
+  private startWatching(files: Array<{ file: string; instanceId: string }>): void {
     this.stopWatching();
-    this.watchedFiles = new Map(files.map((file) => [file, 0]));
+    this.watchedFiles = new Map(files.map(({ file, instanceId }) => [file, { offset: 0, instanceId }]));
     this.watchTimer = setInterval(() => this.tickWatcher(), 350);
   }
 
@@ -297,13 +306,14 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   }
 
   private tickWatcher(): void {
-    for (const [file, offset] of this.watchedFiles) {
+    for (const [file, watch] of this.watchedFiles) {
       let size = 0;
       try {
         size = fs.statSync(file).size;
       } catch {
         continue;
       }
+      const offset = watch.offset;
       const start = size < offset ? 0 : offset;
       if (size === start) continue;
       try {
@@ -316,11 +326,16 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
         } finally {
           fs.closeSync(descriptor);
         }
-        this.watchedFiles.set(file, size);
+        this.watchedFiles.set(file, { ...watch, offset: size });
         for (const line of chunk.split('\n')) {
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line) as Record<string, unknown>;
+            // Each parallel instance has its own event file. Bind the file's
+            // owner here so events without an instance_id cannot fall back to
+            // whichever source tab happens to be active.
+            event.log_source = watch.instanceId;
+            if (typeof event.instance_id !== 'string' || !event.instance_id) event.instance_id = watch.instanceId;
             if (typeof event.screenshot === 'string') {
               const uri = this.project.resourceUrl(event.screenshot);
               if (uri) event.screenshot = uri;

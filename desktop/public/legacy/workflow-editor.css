@@ -1,3 +1,5 @@
+/* Legacy canvas/layout rules sit below the reusable Studio UI components. */
+@layer legacy {
 :root {
   color-scheme: dark;
   --vscode-editor-background: #1b1b1b;
@@ -459,6 +461,9 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .decorator-block { padding: 7px 0 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent); }
 .decorator-heading { height: 26px; display: flex; align-items: center; justify-content: space-between; color: #e0b95c; font-size: 11px; }
 .decorator-heading .icon-button { width: 22px; min-width: 22px; height: 22px; min-height: 22px; line-height: 18px; }
+.repeat-decorator-control > .value-mode { flex: 0 1 78px; width: 78px; }
+.decorator-expose { flex: 0 0 auto !important; padding-inline: 7px; color: #9fc9df; }
+.decorator-expose:disabled { border-color: transparent; background: transparent; color: #7d9aab; opacity: 1; cursor: default; }
 .condition-control { display: grid; gap: 5px; }
 .when-op { width: 110px; }
 .variable-inspector-empty { padding: 18px 8px; color: var(--muted); font-size: 11px; text-align: center; }
@@ -859,6 +864,7 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .section-header:hover::before { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3 5.2h10L8 12z' fill='%23e3e3e3'/></svg>"); }
 
 /* 自绘 tooltip：固定定位最上层，自动避让屏幕边缘 */
+.ui-tooltip {
   position: fixed;
   z-index: 9999;
   max-width: 260px;
@@ -878,18 +884,22 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .object-array-head button:hover { background: #3a3a3a; }
 
 /* 动作下拉：自绘组件（中文名 + 英文 id 副文本 + 搜索） */
+.ui-dropdown-button {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
   width: 100%; min-height: 24px; height: 24px; padding: 2px 6px; font-size: 11px;
   background: #161616; border: 1px solid #0e0e0e; color: #e3e3e3; border-radius: 2px; text-align: left;
 }
+.ui-dropdown-list {
   position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 80;
   display: flex; flex-direction: column;
   background: #1f1f1f; border: 1px solid #3a3a3a; border-radius: 3px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
 }
+.ui-dropdown-search {
   height: 26px; min-height: 26px; padding: 3px 8px; font-size: 11px;
   background: #161616; color: #e3e3e3; border: 0; border-bottom: 1px solid #333; border-radius: 3px 3px 0 0;
 }
+.ui-dropdown-item {
   display: flex; flex-direction: column; gap: 1px; align-items: stretch;
   min-height: 0; height: auto; padding: 4px 8px;
   background: transparent; border: 0; border-radius: 0;
@@ -988,4 +998,5 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
   #inspector-body .parameter-block > .field-hint { margin-top: 5px; margin-bottom: 8px; }
   #inspector-body .parameter-check { padding-inline: 6px; }
   #inspector-body .object-array-body { padding-inline: 5px; }
+}
 }

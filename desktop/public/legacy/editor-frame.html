@@ -11,14 +11,12 @@
   <link rel="stylesheet" href="./workflow-editor.css">
   <link rel="stylesheet" href="./ui.css">
   <link rel="stylesheet" href="./child-order-dnd.css">
-  <style>
-    #topbar { display: none !important; }
-    main { height: calc(100% - 30px); }
-    #external-banner { top: 38px; }
-    #inspector, #inspector-title { background: var(--panel); }
-    .desktop-details-mode #inspector-title { display: none !important; }
-    .desktop-details-mode #workflow-breadcrumb { display: none !important; }
-  </style>
+  <link rel="stylesheet" href="./inspector.css">
+  <link rel="stylesheet" href="/theme/editor-light.css">
+  <link rel="stylesheet" href="/theme/theme.css">
+  <script src="/theme/theme.js"></script>
+  <link rel="stylesheet" href="./node-cards.css">
+  <link rel="stylesheet" href="./editor-frame.css">
 </head>
 <body>
   <header id="topbar">
@@ -54,6 +52,7 @@
   <div id="toast" class="hidden"></div>
   <script src="./bridge.js"></script>
   <script src="./ui.js"></script>
+  <script src="./node-cards.js"></script>
   <script src="./workflow-editor.js"></script>
   <script src="./child-order-dnd.js"></script>
 </body>

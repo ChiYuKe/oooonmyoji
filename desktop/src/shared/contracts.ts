@@ -260,6 +260,9 @@ export interface OnmyojiDesktopApi {
   closeWindow(): Promise<void>;
   isWindowMaximized(): Promise<boolean>;
   readLayout(key: string): string | null;
+  getTheme(): 'dark' | 'light';
+  setTheme(theme: 'dark' | 'light'): 'dark' | 'light';
+  onThemeChanged(listener: (theme: 'dark' | 'light') => void): () => void;
   writeLayout(key: string, value: string | null): void;
   bootstrap(): Promise<BootstrapData>;
   getWorkflowInit(uri: string, selectedInstance: string, canGoBack: boolean): Promise<WorkflowEditorInit>;

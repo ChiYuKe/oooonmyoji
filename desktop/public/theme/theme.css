@@ -1,0 +1,77 @@
+/* Shared semantic palette. Load after component and layout styles. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --light-chrome: #e7eaed; --light-canvas: #dfe4e8; --light-header: #e9edf0;
+  --light-selection: #d7e3ed; --light-selection-text: #31546e;
+  --ui-bg: #edf0f2; --ui-panel: #f5f6f7; --ui-field: #ffffff;
+  --ui-surface: #e8ecf0; --ui-hover: #dce3e9; --ui-selected: #d0dce6;
+  --ui-line: #d4dbe1; --ui-text: #29343e; --ui-muted: #5e6b76;
+  --ui-danger: #a63e46; --ui-focus: #627e93;
+  --bg: var(--light-canvas); --surface: var(--ui-panel); --surface-raised: var(--ui-surface); --surface-hover: var(--ui-hover);
+  --panel: var(--ui-panel); --panel-2: var(--ui-surface); --border: #c3ccd4; --border-soft: var(--ui-line);
+  --text: var(--ui-text); --fg: var(--ui-text); --muted: var(--ui-muted); --status: var(--light-chrome);
+  --blue: #27698f; --blue-strong: #27698f; --green: #397747; --red: #a63e46; --yellow: #806323;
+  --success: #397747; --danger: #a63e46; --warning: #806323; --info: #386c88;
+  --wire: #8192a0; --grid: rgba(67,86,103,.045);
+  --vscode-editor-background: var(--light-canvas); --vscode-sideBar-background: var(--ui-panel);
+  --vscode-editorWidget-background: var(--ui-surface); --vscode-panel-border: var(--border);
+  --vscode-foreground: var(--ui-text); --vscode-descriptionForeground: var(--ui-muted);
+  --vscode-input-background: #fff; --vscode-list-hoverBackground: var(--ui-hover);
+  --vscode-list-activeSelectionBackground: var(--light-selection); --vscode-menu-background: var(--ui-panel);
+  --vscode-menu-selectionBackground: var(--light-selection);
+}
+:root[data-theme="light"] .ui-segmented .ui-segment.active { color: #252525; }
+:root[data-theme="light"] .ui-checkbox { border-color: #929292; }
+:root[data-theme="light"] .ui-checkbox:checked { background: #676767; border-color: #676767; }
+:root[data-theme="light"] .ui-checkbox:checked::after { border-color: #fff; }
+:root[data-theme="light"] .ui-dropdown-item.selected { color: #252525; }
+:root[data-theme="light"] .ui-input::placeholder { color: #6a6a6a; }
+:root[data-theme="light"] .ui-segmented .ui-segment:hover:not(:disabled) { background: var(--ui-hover); }
+:root[data-theme="light"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) {
+  --dv-group-view-background-color: var(--ui-panel); --dock-tab-row-background: var(--light-chrome);
+  --dock-panel-background: var(--ui-panel); --dock-panel-header-background: var(--ui-panel);
+  --dv-tab-divider-color: var(--ui-line); --dv-separator-border: #c8d0d7;
+  --dv-floating-titlebar-background-color: var(--light-chrome); --dv-floating-border: 1px solid var(--border);
+  --dv-activegroup-visiblepanel-tab-color: #29343e; --dv-inactivegroup-visiblepanel-tab-color: #465460;
+  --dv-activegroup-hiddenpanel-tab-color: #5e6b76; --dv-inactivegroup-hiddenpanel-tab-color: #5e6b76;
+}
+
+/* Curated workbench surfaces take precedence over the generic legacy adapter. */
+:root[data-theme="light"] :is(.custom-titlebar, .app-header, .dockview-popout-host .popout-titlebar, .status-bar) { background: var(--light-chrome); color: var(--ui-text); }
+:root[data-theme="light"] .status-bar { border-top: 1px solid var(--ui-line); }
+:root[data-theme="light"] .onmyoji-workbench-dockview { --dv-tabs-and-actions-container-background-color: var(--light-chrome); }
+:root[data-theme="light"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) .dv-tab.dv-inactive-tab { background: transparent; color: var(--ui-muted); }
+:root[data-theme="light"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) .dv-tab.dv-active-tab { background: var(--ui-panel); color: var(--ui-text); }
+:root[data-theme="light"] .dv-tab .dv-default-tab .dv-default-tab-content { color: inherit; }
+:root[data-theme="light"] :is(.module-command-strip, .content-browser-toolbar) { background: var(--ui-panel); border-color: var(--ui-line); }
+:root[data-theme="light"] :is(.content-browser-tree, .content-browser-items, .tree-content, .variables-module) { background: var(--ui-panel); }
+:root[data-theme="light"] :is(.content-item-preview, .reference-graph-stage) { background-color: var(--ui-bg); }
+:root[data-theme="light"] :is(.content-item.selected, .content-folder-row.selected, .tree-row.selected) { background: var(--light-selection); color: var(--light-selection-text); }
+:root[data-theme="light"] :is(.reference-graph, #canvas-wrap) { background-color: var(--light-canvas); }
+:root[data-theme="light"] #canvas-wrap { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
+
+/* Flat, paper-like graph nodes; shape fills and text fills are intentionally separate. */
+:root[data-theme="light"] :is(.node .node-box, .instance-run-card .instance-run-card-box, .variable-card .variable-card-box) { fill: #f9fafb; stroke: #aab8c3; stroke-width: 1; filter: none; }
+:root[data-theme="light"] :is(.node .node-head, .instance-run-card .instance-run-card-head, .variable-card .variable-card-head) { fill: #eaf0f4; filter: none; }
+:root[data-theme="light"] :is(.node.selected .node-box, .instance-run-card.selected .instance-run-card-box, .variable-card.selected .variable-card-box) { fill: #f1f6fa; stroke: #879fb1; stroke-width: 1; filter: none; }
+:root[data-theme="light"] :is(.node.selected .node-head, .instance-run-card.selected .instance-run-card-head, .variable-card.selected .variable-card-head) { fill: #d9e5ee; }
+:root[data-theme="light"] :is(.node-name, .instance-run-card-instance, .variable-card-name) { fill: #293b49; }
+:root[data-theme="light"] :is(.node-type, .node-meta, .node-duration, .node-field-label, .instance-run-card-type, .instance-run-card-field-label, .variable-card-type, .variable-card-access, .pin-variable-param) { fill: #5e6c78; }
+:root[data-theme="light"] :is(.node-subtitle, .instance-run-card-workflow, .instance-variable-name, .instance-variable-value, .variable-card-value, .pin-variable-name) { fill: #41586b; }
+:root[data-theme="light"] :is(.node-icon, .instance-run-card-icon, .decorator-icon) { fill: #536e83; }
+:root[data-theme="light"] :is(.node-header-rule, .instance-run-card-header-rule, .variable-card-header-rule, .instance-variable-rule) { stroke: #d5dfe6; }
+:root[data-theme="light"] #minimap { background: #edf1f4; border: 1px solid #c2cdd6; box-shadow: none; }
+:root[data-theme="light"] .mini-node { fill: #9dadb9; stroke: #718898; }
+:root[data-theme="light"] .mini-viewport { fill: rgba(72,106,132,.08); stroke: #6c879b; }
+:root[data-theme="light"] #viewport-tools { background: #f2f5f7; border-color: #c8d2da; }
+
+/* Inspector and log use the same quiet header / field hierarchy. */
+:root[data-theme="light"] #inspector-body .section-header { background: var(--light-header); color: var(--ui-text); border-color: var(--ui-line); }
+:root[data-theme="light"] :is(.ui-input, .ui-dropdown-button) { background: var(--ui-field); color: var(--ui-text); }
+:root[data-theme="light"] .ui-dropdown-button { box-shadow: inset 0 0 0 1px #dde4e9; }
+:root[data-theme="light"] .ui-dropdown-button:hover:not(:disabled) { background: #f7fafc; }
+:root[data-theme="light"] .ui-segmented .ui-segment.active { background: var(--ui-selected); color: #31546e; }
+:root[data-theme="light"] :is(.ui-section-header, .source-tabs, #topbar) { background: var(--light-header); }
+:root[data-theme="light"] :is(.step-overview:hover, .step-details) { background: #eaf0f4; }
+:root[data-theme="light"] .source-tabs .ui-button.active { background: var(--light-selection); color: var(--light-selection-text); }
+/* Screenshots and assets retain their actual pixels. No image inversion filters. */

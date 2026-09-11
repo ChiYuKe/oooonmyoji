@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Studio UI · 运行日志</title>
+  <link rel="stylesheet" href="../legacy/ui.css">
+  <link rel="stylesheet" href="./showcase.css">
+</head>
+<body class="studio-ui">
+  <header><strong>Studio UI <span>/ 运行日志</span></strong><a href="../legacy/ui-showcase.html">基础组件</a></header>
+  <main>
+    <aside>
+      <h1>紧凑的步骤日志</h1>
+      <p>名称与结果先读，执行细节按需展开。与详情面板共用控件和色阶。</p>
+      <h2>示例场景</h2>
+      <div id="scenarios" class="ui-segmented" role="group" aria-label="示例场景"></div>
+      <h2>面板尺寸</h2>
+      <div class="sizes"><button class="ui-button" data-width="680" data-height="800">常规</button><button class="ui-button" data-width="340" data-height="800">窄栏</button><button class="ui-button" data-width="680" data-height="260">底部停靠</button></div>
+      <h2>可以试试</h2>
+      <p>点击整条步骤展开参数、输出及调用路径。切换 mumu 实例，筛选失败记录；关闭「跟随」后翻阅历史。</p>
+      <p class="note">这是独立示例，不连接模拟器，不执行工作流，也不修改你的日志。</p>
+      <p id="feedback" role="status">正在加载示例…</p>
+    </aside>
+    <section class="preview"><iframe id="log-preview" src="./index.html" title="运行日志交互预览"></iframe></section>
+  </main>
+  <script src="../legacy/ui.js"></script>
+  <script src="./showcase.js"></script>
+</body>
+</html>

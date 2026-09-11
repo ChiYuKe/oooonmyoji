@@ -22,6 +22,13 @@ const api: OnmyojiDesktopApi = {
   closeWindow: () => ipcRenderer.invoke('window:close'),
   isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   readLayout: (key) => ipcRenderer.sendSync('layout:read', key),
+  getTheme: () => ipcRenderer.sendSync('appearance:read'),
+  setTheme: (theme) => ipcRenderer.sendSync('appearance:write', theme),
+  onThemeChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, theme: 'dark' | 'light') => listener(theme);
+    ipcRenderer.on('appearance:changed', handler);
+    return () => ipcRenderer.removeListener('appearance:changed', handler);
+  },
   writeLayout: (key, value) => ipcRenderer.send('layout:write', key, value),
   bootstrap: () => ipcRenderer.invoke('project:bootstrap'),
   getWorkflowInit: (uri, selectedInstance, canGoBack) => ipcRenderer.invoke('project:get-workflow-init', uri, selectedInstance, canGoBack),

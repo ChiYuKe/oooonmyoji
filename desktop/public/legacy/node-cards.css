@@ -1,0 +1,39 @@
+/* Studio SVG cards: shared across tasks, instance runs and variable sources.
+ * Load after theme adapters; no layout dimensions or port coordinates here. */
+:root {
+  --card-bg: #25282b; --card-head: #2e3338; --card-selected: #2c353d; --card-selected-head: #394b59;
+  --card-line: #424a51; --card-rule: #353c42; --card-text: #e2e7ec; --card-secondary: #b1bdc7;
+  --card-muted: #95a4b0; --card-icon-bg: #384149; --card-icon: #adc0cf; --card-port: #a2b3c1;
+}
+:root[data-theme="light"] {
+  --card-bg: #fbfcfd; --card-head: #edf2f6; --card-selected: #f1f6fa; --card-selected-head: #d8e5ef;
+  --card-line: #b6c4cf; --card-rule: #dde5eb; --card-text: #293d4b; --card-secondary: #425d70;
+  --card-muted: #5e7282; --card-icon-bg: #dde7ef; --card-icon: #526e84; --card-port: #6e899e;
+}
+:root[data-theme] .studio-card .card-body { fill: var(--card-bg); stroke: var(--card-line); stroke-width: 1; filter: none; }
+:root[data-theme] .studio-card .card-head { fill: var(--card-head); filter: none; }
+:root[data-theme] .studio-card.selected .card-body { fill: var(--card-selected); stroke: var(--card-line); stroke-width: 1; filter: none; }
+:root[data-theme] .studio-card.selected .card-head { fill: var(--card-selected-head); }
+:root[data-theme] .studio-card .card-title { fill: var(--card-text); font-weight: 600; }
+:root[data-theme] .studio-card .card-description { fill: var(--card-secondary); font-size: 11px; font-weight: 400; }
+:root[data-theme] .studio-card :is(.card-kicker, .card-meta) { fill: var(--card-muted); font-weight: 400; letter-spacing: 0; }
+:root[data-theme] .studio-card .card-kicker { font-size: 10px; }
+:root[data-theme] .studio-card .node-meta { font: 10px var(--ui-font); }
+:root[data-theme] .studio-card :is(.node-header-rule, .instance-run-card-header-rule, .variable-card-header-rule, .instance-variable-rule, .decorator-rule) { stroke: var(--card-rule); stroke-width: 1; }
+:root[data-theme] .studio-card :is(.node-icon-plate, .instance-run-card-icon-plate) { fill: var(--card-icon-bg); stroke: none; filter: none; }
+:root[data-theme] .studio-card :is(.node-icon, .instance-run-card-icon) { fill: var(--card-icon); font-weight: 500; pointer-events: none; }
+:root[data-theme] .studio-card :is(.pin-variable-name, .instance-variable-name, .variable-card-value) { fill: var(--card-secondary); font-size: 10px; font-weight: 400; }
+:root[data-theme] .studio-card :is(.pin-variable-param, .instance-variable-value, .node-duration, .variable-card-access) { fill: var(--card-muted); font-size: 10px; font-weight: 400; }
+:root[data-theme] .studio-card .variable-card-access { font-size: 9px; }
+:root[data-theme] .studio-card .decorator-label { fill: var(--card-secondary); }
+:root[data-theme] .studio-card .decorator-icon { fill: #b59d74; }
+:root[data-theme] .studio-card .node-preview-frame { fill: var(--card-head); stroke: var(--card-rule); }
+:root[data-theme] .studio-card :is(.port-in, .port-out) { fill: var(--card-bg); stroke: var(--card-port); stroke-width: 1.5; filter: none; }
+:root[data-theme] .studio-card .port:hover { fill: var(--card-port); stroke: var(--card-port); stroke-width: 1.5; filter: none; }
+:root[data-theme] .studio-card .run-label { fill: var(--card-muted); font-size: 10px; }
+:root[data-theme] .studio-card:is(.run-running, .run-retrying) .run-label { fill: var(--warning); }
+:root[data-theme] .studio-card:is(.run-succeeded, .run-matched) .run-label { fill: var(--success); }
+:root[data-theme] .studio-card.run-failed .run-label { fill: var(--danger); }
+:root[data-theme] .studio-card:is(.connect-hover, .connect-target) .card-head { fill: var(--card-selected-head); }
+:root[data-theme] .studio-card text { pointer-events: visiblePainted; cursor: inherit; }
+:root[data-theme] .studio-card text.node-icon { pointer-events: none; }

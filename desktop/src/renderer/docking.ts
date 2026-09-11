@@ -880,8 +880,8 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     } : panelId === 'settings' ? {
       left: window.screenX + 120,
       top: window.screenY + 72,
-      width: 520,
-      height: Math.min(720, Math.max(480, window.screen.availHeight - 144)),
+      width: Math.min(760, Math.max(520, window.screen.availWidth - 160)),
+      height: Math.min(560, Math.max(440, window.screen.availHeight - 144)),
     } : undefined;
     void api.addPopoutGroup(panel, { popoutUrl: '/popout.html', position }).then((opened) => {
       if (!opened) onPopoutFailure?.();

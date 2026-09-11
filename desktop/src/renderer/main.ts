@@ -1807,6 +1807,11 @@ function instanceLabel(instance: RuntimeInstance): string {
     || (instance.backend === 'mumu' && Number.isInteger(instance.mumuIndex) ? `MuMu ${instance.mumuIndex}` : instance.id);
 }
 
+function instanceLabelById(instanceId: string): string {
+  const instance = runtimeInstances.find((item) => item.id === instanceId);
+  return instance ? instanceLabel(instance) : instanceId;
+}
+
 function closeInstancePicker(restoreFocus = false): void {
   if (instanceMenu.hidden) return;
   instanceMenu.hidden = true;
@@ -2203,7 +2208,19 @@ function renderContentBrowser(): void {
     });
   }
   contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
-  contentBrowserItems.replaceChildren(...entries.map((item, index) => createContentItem(item, Boolean(contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder')))));
+  const renderedEntries = entries.map((item, index) => ({ item, element: createContentItem(item, Boolean(contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder'))) }));
+  if (contentBrowserView === 'list') contentBrowserItems.replaceChildren(...renderedEntries.map(entry => entry.element));
+  else {
+    contentBrowserItems.replaceChildren();
+    for (const [kind, label] of [['folder', '文件夹'], ['workflow', '工作流'], ['asset', '模板图片']]) {
+      const matches = renderedEntries.filter(entry => entry.item.kind === kind);
+      if (!matches.length) continue;
+      const group = document.createElement('div'); group.className = 'content-kind-group'; group.setAttribute('role', 'presentation');
+      const heading = document.createElement('h3'); heading.className = 'content-kind-heading'; heading.textContent = `${label} · ${matches.length}`;
+      const items = document.createElement('div'); items.className = 'content-kind-items'; items.setAttribute('role', 'presentation');
+      items.append(...matches.map(entry => entry.element)); group.append(heading, items); contentBrowserItems.appendChild(group);
+    }
+  }
   document.querySelector<HTMLElement>('#content-browser-empty')!.classList.toggle('hidden', entries.length > 0);
   document.querySelector<HTMLElement>('#content-browser-summary')!.textContent = `${entries.length} 项`;
   document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = selectedContentPath;
@@ -2902,6 +2919,10 @@ const variableTypeGlyphs: Record<string, { icon: IconComponent; className: strin
   any: { icon: CircleHelp, className: 'type-any' },
 };
 const variableTypeFallbackGlyph = { icon: CircleHelp, className: 'type-any' };
+const variableTypeLabels: Record<string, string> = {
+  string: '文本', number: '数值', integer: '整数', boolean: '布尔', rect: '区域',
+  asset: '资源', path: '路径', array: '列表', object: '对象', any: '任意',
+};
 
 /** 内联创建 Lucide SVG，供动态树行使用（data-lucide + createIcons 无法覆盖局部更新）。 */
 function createTreeIcon(icon: IconComponent, className: string): SVGSVGElement {
@@ -3043,9 +3064,10 @@ function syncTreeSelection(previousNode: string): void {
 function syncVariableSelection(previousVariable: string, previousScope: 'inputs' | 'variables'): void {
   if (previousVariable === selectedVariable && previousScope === selectedVariableScope) return;
   const previousRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-scope="${previousScope}"][data-variable-name="${CSS.escape(previousVariable)}"]`);
-  if (previousRow) previousRow.classList.remove('selected');
+  if (previousRow) { previousRow.classList.remove('selected'); previousRow.setAttribute('aria-pressed', 'false'); }
   const nextRow = variablesView.querySelector<HTMLButtonElement>(`.variable-row[data-variable-scope="${selectedVariableScope}"][data-variable-name="${CSS.escape(selectedVariable)}"]`);
   nextRow?.classList.add('selected');
+  nextRow?.setAttribute('aria-pressed', 'true');
 }
 
 /** 输入与状态列表内容指纹。 */
@@ -3054,29 +3076,31 @@ function variableSignature(): string {
 }
 
 function renderVariables(): void {
+  const keepScroll = variablesView.scrollTop;
   variablesView.replaceChildren();
-  if (sidebarVariables.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-panel';
-    empty.textContent = '此工作流还没有输入或运行变量';
-    variablesView.appendChild(empty);
-    return;
-  }
   for (const scope of ['inputs', 'variables'] as const) {
-    const heading = document.createElement('div');
-    heading.className = 'variable-group-heading';
-    heading.textContent = scope === 'inputs' ? '工作流输入' : '运行变量';
-    variablesView.appendChild(heading);
     const scoped = sidebarVariables.filter((variable) => variable.scope === scope);
+    const heading = document.createElement('h3');
+    heading.className = 'variable-group-heading';
+    const label = document.createElement('span');
+    label.textContent = scope === 'inputs' ? '工作流输入' : '运行变量';
+    const count = document.createElement('span');
+    count.className = 'variable-group-count'; count.textContent = String(scoped.length);
+    const hint = document.createElement('span');
+    hint.className = 'variable-group-hint'; hint.textContent = scope === 'inputs' ? '只读' : '可更新';
+    heading.append(label, count, hint);
+    variablesView.appendChild(heading);
     if (scoped.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'variable-group-empty';
-      empty.textContent = scope === 'inputs' ? '无调用参数' : '无可变状态';
+      empty.textContent = scope === 'inputs' ? '暂无输入 · 点击上方「＋ 输入」添加' : '暂无运行变量 · 点击上方「＋ 变量」添加';
       variablesView.appendChild(empty);
     }
     for (const variable of scoped) {
     const row = document.createElement('button');
+    row.type = 'button';
     row.className = `variable-row scope-${scope}${variable.name === selectedVariable && scope === selectedVariableScope ? ' selected' : ''}`;
+    row.setAttribute('aria-pressed', String(variable.name === selectedVariable && scope === selectedVariableScope));
     row.title = `${overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${scope === 'inputs' ? '调用方传入，只读' : '流程内状态，可更新'}\n拖到画布可创建引用卡片`;
     row.dataset.variableName = variable.name;
     row.dataset.variableScope = scope;
@@ -3087,7 +3111,8 @@ function renderVariables(): void {
     icon.appendChild(createTreeIcon(variableGlyph.icon, 'variable-icon-svg'));
     row.querySelector<HTMLElement>('.variable-name')!.textContent = overviewInputDisplayName(variable.name);
     const flags = row.querySelector<HTMLElement>('.variable-flags')!;
-    flags.innerHTML = `<span>${variable.type}</span><span class="variable-scope">${scope === 'inputs' ? 'INPUT' : 'STATE'}</span>`;
+    flags.textContent = variableTypeLabels[variable.type.toLowerCase()] ?? variable.type;
+    flags.title = variable.type;
     row.draggable = true;
     row.addEventListener('dragstart', (event) => {
       const transfer = event.dataTransfer;
@@ -3102,6 +3127,7 @@ function renderVariables(): void {
     variablesView.appendChild(row);
     }
   }
+  variablesView.scrollTop = keepScroll;
 }
 
 function renderSidebar(): void {
@@ -3444,7 +3470,7 @@ function updateRuntimeState(event: RuntimeStateEvent): void {
     const workflow = decodePathLabel(String(event.workflow || currentUri).replace(/\\/g, '/').split('/').pop() || '工作流');
     runtimeLogDescriptor = {
       workflow,
-      instance: event.sources?.length ? `${event.sources.length} 个实例` : event.instance || selectedInstance,
+      instance: event.sources?.length ? `${event.sources.length} 个实例` : instanceLabelById(event.instance || selectedInstance),
       startedAt: event.startedAt ?? Date.now(),
       status: 'running',
       sources: event.sources,

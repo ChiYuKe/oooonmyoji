@@ -7,10 +7,6 @@
     1920,
     1080
   ],
-  "limits": {
-    "timeout_seconds": 1209600,
-    "max_steps": 1000
-  },
   "inputs": {
     "运行轮数": {
       "type": "integer",
@@ -191,5 +187,9 @@
       "y": 0
     }
   },
-  "_variableCards": {}
+  "_variableCards": {},
+  "limits": {
+    "timeout_seconds": 300,
+    "max_steps": 1000
+  }
 }

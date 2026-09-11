@@ -360,5 +360,85 @@
         }
       ]
     }
-  ]
+  ],
+  "_layout": {
+    "entry_recovery": {
+      "x": 0,
+      "y": 416
+    },
+    "final_round": {
+      "x": 332,
+      "y": 624
+    },
+    "automatic_round": {
+      "x": 664,
+      "y": 624
+    },
+    "battle_plan": {
+      "x": 498,
+      "y": 416
+    },
+    "final_recovery": {
+      "x": 996,
+      "y": 416
+    },
+    "main": {
+      "x": 498,
+      "y": 208
+    },
+    "root": {
+      "x": 498,
+      "y": 0
+    }
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "启用结界突破",
+      "scope": "inputs",
+      "x": 128,
+      "y": 1200
+    },
+    "card_2": {
+      "name": "结界突破阈值",
+      "scope": "inputs",
+      "x": 112,
+      "y": 752
+    },
+    "card_3": {
+      "name": "结界通关识别区域",
+      "scope": "inputs",
+      "x": 112,
+      "y": 776
+    },
+    "card_4": {
+      "name": "结界突破入口位置",
+      "scope": "inputs",
+      "x": 112,
+      "y": 800
+    },
+    "card_5": {
+      "name": "结界目标点击位置列表",
+      "scope": "inputs",
+      "x": 112,
+      "y": 824
+    },
+    "card_6": {
+      "name": "结界目标识别区域列表",
+      "scope": "inputs",
+      "x": 112,
+      "y": 848
+    },
+    "card_7": {
+      "name": "结界完成文字列表",
+      "scope": "inputs",
+      "x": 112,
+      "y": 872
+    },
+    "card_8": {
+      "name": "结界完成模板列表",
+      "scope": "inputs",
+      "x": 112,
+      "y": 896
+    }
+  }
 }

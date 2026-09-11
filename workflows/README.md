@@ -15,7 +15,9 @@ Behavior Tree schema v4。
 需要一次启动多个实例时，编排入口也放在 `entrypoints/`（开发验证可放在
 `examples/`），只描述实例与工作流的映射。示例见
 `examples/three_instance_parallel.json`；日常三开入口是
-`entrypoints/three_mumu_souls_parallel.json`。
+`entrypoints/three_mumu_souls_parallel.json`，日常双开活动副本入口是
+`entrypoints/two_mumu_activity_parallel.json`（两个实例分别在
+`runs[].inputs.repeat_rounds_repeat_count` 指定自己的轮数）。
 
 ## 引用规则
 

@@ -1,0 +1,55 @@
+{
+  "schema_version": 4,
+  "id": "two_mumu_activity_parallel",
+  "version": "4.1.0",
+  "description": "双开活动副本：mumu-1 与 mumu-2 并行执行 活动副本.json，按实例分别传入轮数；单个实例失败不会取消另一个实例。",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "inputs": {},
+  "variables": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "instances_1"
+      ]
+    },
+    {
+      "id": "instances_1",
+      "type": "instance_parallel",
+      "runs": [
+        {
+          "instance": "mumu-1",
+          "workflow": "活动副本.json",
+          "inputs": {
+            "repeat_rounds_repeat_count": 1236
+          }
+        },
+        {
+          "instance": "mumu-2",
+          "workflow": "活动副本.json",
+          "inputs": {
+            "repeat_rounds_repeat_count": 940
+          }
+        }
+      ],
+      "wait_for": "all",
+      "cancel_on_failure": false
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 0,
+      "y": 0
+    },
+    "instances_1": {
+      "x": 0,
+      "y": 208
+    }
+  },
+  "_variableCards": {}
+}

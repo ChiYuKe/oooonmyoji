@@ -453,8 +453,8 @@
       "name": "等待创建确认按钮",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/souls/party/create-confirm-button.png",
-        "timeout_seconds": 20,
+        "template": "",
+        "timeout_seconds": 0,
         "roi": [
           1150,
           780,
@@ -504,7 +504,7 @@
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/souls/party/lobby-title.png",
-        "timeout_seconds": 30,
+        "timeout_seconds": 2,
         "roi": [
           80,
           0,
@@ -1008,7 +1008,7 @@
       "y": 1248
     },
     "wait_map_from_courtyard": {
-      "x": 2324,
+      "x": 2328,
       "y": 1248
     },
     "tap_map_from_courtyard": {
@@ -1048,7 +1048,7 @@
       "y": 1040
     },
     "tap_create_team": {
-      "x": 4980,
+      "x": 4984,
       "y": 1040
     },
     "detect_create_dialog_quick": {
@@ -1072,8 +1072,8 @@
       "y": 832
     },
     "wait_create_confirm": {
-      "x": 5644,
-      "y": 832
+      "x": 5648,
+      "y": 848
     },
     "tap_private_permission": {
       "x": 5976,
@@ -1168,8 +1168,8 @@
       "y": 1040
     },
     "detect_initial_member_present": {
-      "x": 6972,
-      "y": 832
+      "x": 7016,
+      "y": 840
     },
     "initial_member_already_present": {
       "x": 6972,
@@ -1261,14 +1261,14 @@
     "card_1": {
       "name": "队员已在场模板",
       "scope": "inputs",
-      "x": 9072,
-      "y": 1120
+      "x": 7616,
+      "y": 1296
     },
     "card_2": {
       "name": "邀请目标模板",
       "scope": "inputs",
-      "x": 10432,
-      "y": 1376
+      "x": 9264,
+      "y": 1528
     },
     "card_3": {
       "name": "队员加入超时时间",
@@ -1282,5 +1282,6 @@
       "x": 9408,
       "y": 1120
     }
-  }
+  },
+  "_variableLinks": {}
 }

@@ -1491,188 +1491,262 @@
       "y": 624
     },
     "prepare_unlocked_lineup": {
-      "x": 2822,
+      "x": 2656,
       "y": 624
     },
     "lineup_started_without_ready": {
-      "x": 3320,
+      "x": 2988,
       "y": 624
     },
     "prepare_lineup_if_needed": {
-      "x": 2822,
+      "x": 2656,
       "y": 416
     },
     "await_victory": {
-      "x": 3652,
+      "x": 3320,
       "y": 416
     },
     "wait_map_direct": {
-      "x": 4316,
-      "y": 832
+      "x": 4648,
+      "y": 1040
     },
     "wait_courtyard_direct": {
-      "x": 4648,
-      "y": 832
+      "x": 4980,
+      "y": 1040
     },
     "wait_lobby_direct": {
+      "x": 5312,
+      "y": 1040
+    },
+    "settled_direct": {
       "x": 4980,
       "y": 832
     },
-    "settled_direct": {
-      "x": 4648,
-      "y": 624
-    },
     "stats_reward_layer_1": {
-      "x": 5312,
-      "y": 832
+      "x": 3652,
+      "y": 416
     },
     "dismiss_reward_once": {
       "x": 5644,
-      "y": 832
+      "y": 1040
     },
     "pause_after_reward_once": {
       "x": 5976,
-      "y": 832
+      "y": 1040
     },
     "wait_reward_overlay_gone_after_one": {
       "x": 6308,
-      "y": 832
+      "y": 1040
     },
     "wait_map_after_one": {
       "x": 6640,
-      "y": 1040
+      "y": 1248
     },
     "wait_courtyard_after_one": {
       "x": 6972,
-      "y": 1040
+      "y": 1248
     },
     "wait_lobby_after_one": {
       "x": 7304,
-      "y": 1040
+      "y": 1248
     },
     "done_after_one": {
       "x": 6972,
-      "y": 832
+      "y": 1040
     },
     "settled_after_one_tap": {
-      "x": 6142,
-      "y": 624
+      "x": 6308,
+      "y": 832
     },
     "stats_reward_layer_2": {
       "x": 7636,
-      "y": 832
+      "y": 1040
     },
     "dismiss_reward_twice": {
       "x": 7968,
-      "y": 832
+      "y": 1040
     },
     "pause_after_reward_twice": {
       "x": 8300,
-      "y": 832
+      "y": 1040
     },
     "wait_reward_overlay_gone_after_two": {
       "x": 8632,
-      "y": 832
+      "y": 1040
     },
     "wait_map_after_two": {
       "x": 8964,
-      "y": 1040
+      "y": 1248
     },
     "wait_courtyard_after_two": {
       "x": 9296,
-      "y": 1040
+      "y": 1248
     },
     "wait_lobby_after_two": {
       "x": 9628,
-      "y": 1040
+      "y": 1248
     },
     "done_after_two": {
       "x": 9296,
-      "y": 832
+      "y": 1040
     },
     "settled_after_two_taps": {
       "x": 8466,
-      "y": 624
+      "y": 832
     },
     "settle_to_round_destination": {
-      "x": 6557,
+      "x": 5354,
       "y": 416
     },
     "wait_auto_ready_invite": {
-      "x": 9960,
+      "x": 10956,
       "y": 1248
     },
     "tap_auto_ready_invite": {
-      "x": 10292,
+      "x": 11288,
       "y": 1248
     },
     "wait_lobby_without_confirmation": {
-      "x": 10624,
+      "x": 11620,
       "y": 1456
     },
     "wait_auto_ready_confirmation": {
-      "x": 10956,
-      "y": 1664
-    },
-    "wait_never_prompt_checkbox": {
-      "x": 11288,
-      "y": 1664
-    },
-    "tap_never_prompt_checkbox": {
-      "x": 11620,
-      "y": 1664
-    },
-    "tap_auto_ready_confirm": {
       "x": 11952,
       "y": 1664
     },
-    "wait_lobby_after_auto_ready_confirm": {
+    "wait_never_prompt_checkbox": {
       "x": 12284,
       "y": 1664
     },
+    "tap_never_prompt_checkbox": {
+      "x": 12616,
+      "y": 1664
+    },
+    "tap_auto_ready_confirm": {
+      "x": 12948,
+      "y": 1664
+    },
+    "wait_lobby_after_auto_ready_confirm": {
+      "x": 13280,
+      "y": 1664
+    },
     "handle_auto_ready_confirmation": {
-      "x": 11620,
+      "x": 12616,
       "y": 1456
     },
     "complete_auto_ready_setup": {
-      "x": 11122,
+      "x": 12118,
       "y": 1248
     },
     "configure_auto_ready": {
-      "x": 10541,
+      "x": 11537,
       "y": 1040
     },
     "auto_ready_already_active": {
-      "x": 12616,
+      "x": 10624,
       "y": 1040
     },
     "prepare_auto_ready_setup": {
-      "x": 11579,
+      "x": 11081,
       "y": 832
     },
     "setup_auto_ready": {
-      "x": 11579,
+      "x": 11081,
       "y": 624
     },
     "finish_settled": {
-      "x": 12948,
+      "x": 13612,
       "y": 624
     },
     "auto_ready_settled": {
-      "x": 13280,
+      "x": 13944,
       "y": 624
     },
     "choose_after_battle_action": {
-      "x": 12429,
+      "x": 12512,
       "y": 416
     },
     "round": {
-      "x": 6381,
+      "x": 6422,
       "y": 208
     },
     "root": {
-      "x": 6381,
+      "x": 6422,
       "y": 0
+    },
+    "recover_final_round": {
+      "x": 3984,
+      "y": 624
+    },
+    "recover_round_destination": {
+      "x": 4316,
+      "y": 624
+    },
+    "legacy_settlement_disabled": {
+      "x": 6723,
+      "y": 624
+    },
+    "run_realm": {
+      "x": 9960,
+      "y": 624
+    },
+    "continue_souls": {
+      "x": 10292,
+      "y": 624
+    },
+    "realm_scheduler": {
+      "x": 10126,
+      "y": 416
+    }
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "启用结界突破",
+      "scope": "inputs",
+      "x": 3432,
+      "y": 544
+    },
+    "card_2": {
+      "name": "结界突破阈值",
+      "scope": "inputs",
+      "x": 3432,
+      "y": 568
+    },
+    "card_3": {
+      "name": "结界突破入口位置",
+      "scope": "inputs",
+      "x": 9736,
+      "y": 704
+    },
+    "card_4": {
+      "name": "结界通关识别区域",
+      "scope": "inputs",
+      "x": 9736,
+      "y": 752
+    },
+    "card_5": {
+      "name": "结界目标点击位置列表",
+      "scope": "inputs",
+      "x": 9736,
+      "y": 992
+    },
+    "card_6": {
+      "name": "结界目标识别区域列表",
+      "scope": "inputs",
+      "x": 9736,
+      "y": 1280
+    },
+    "card_7": {
+      "name": "结界完成文字列表",
+      "scope": "inputs",
+      "x": 9736,
+      "y": 1304
+    },
+    "card_8": {
+      "name": "结界完成模板列表",
+      "scope": "inputs",
+      "x": 9736,
+      "y": 1328
     }
   }
 }

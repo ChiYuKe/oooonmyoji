@@ -12,7 +12,12 @@
     "timeout_seconds": 99999999,
     "max_steps": 99999999
   },
-  "inputs": {},
+  "inputs": {
+    "repeat_rounds_repeat_count": {
+      "type": "integer",
+      "default": 1600
+    }
+  },
   "variables": {},
   "nodes": [
     {
@@ -32,7 +37,9 @@
       "decorators": [
         {
           "type": "repeat",
-          "count": 1600
+          "count": {
+            "ref": "inputs.repeat_rounds_repeat_count"
+          }
         }
       ]
     },
@@ -149,7 +156,7 @@
           }
         ],
         "disappeared_state_timeout_seconds": 2,
-        "random_offset": 15,
+        "random_offset": 21,
         "random_interval": [
           0.2,
           0.6
@@ -181,12 +188,13 @@
       "action": "vision.wait_template",
       "params": {
         "template": "assets/templates/task_3-template.png",
-        "timeout_seconds": 90,
+        "present": true,
+        "timeout_seconds": 6,
         "roi": [
-          608,
-          943,
-          734,
-          137
+          708,
+          958,
+          491,
+          122
         ],
         "threshold": 0.88
       },
@@ -238,7 +246,7 @@
           }
         ],
         "disappeared_state_timeout_seconds": 2,
-        "random_offset": 12,
+        "random_offset": 21,
         "random_interval": [
           0.2,
           0.5
@@ -324,7 +332,7 @@
           }
         ],
         "disappeared_state_timeout_seconds": 2,
-        "random_offset": 12,
+        "random_offset": 21,
         "random_interval": [
           0.2,
           0.5
@@ -373,7 +381,7 @@
       "y": 624
     },
     "start_round": {
-      "x": 1000,
+      "x": 996,
       "y": 832
     },
     "continue_round": {
@@ -389,11 +397,11 @@
       "y": 1248
     },
     "confirm_challenge_disappeared": {
-      "x": 984,
-      "y": 1256
+      "x": 664,
+      "y": 1248
     },
     "wait_battle_end_after_start": {
-      "x": 1000,
+      "x": 996,
       "y": 1040
     },
     "continue_click_after_start_retry": {

@@ -13,7 +13,6 @@ v4 将调用方输入与流程内可变状态彻底分离。旧顶层参数容�
   "description": "示例工作流的用途说明",
   "resolution": [1920, 1080],
   "root": "root",
-  "limits": { "timeout_seconds": 300, "max_steps": 1000 },
   "inputs": {
     "模板": { "type": "asset", "required": true }
   },
@@ -37,6 +36,19 @@ v4 将调用方输入与流程内可变状态彻底分离。旧顶层参数容�
   ]
 }
 ```
+
+## 运行限制
+
+`limits` 完全可选，缺省表示不限制总超时与节点执行数；也可以只开启其中一项：
+
+```json
+"limits": { "timeout_seconds": 300 }
+```
+
+- `timeout_seconds`：整个工作流的总超时秒数，超时后以 `workflow_timeout` 结束。
+- `max_steps`：整个工作流允许的节点执行次数上限，超出后以 `workflow_limit` 结束。
+
+编辑器右侧“工作流设置 → 运行限制”为两项限制分别提供启用开关，关闭时不会写入对应字段。
 
 ## 树结构不变量
 
@@ -114,6 +126,9 @@ Condition 外，同一节点不允许重复同类装饰器。
   { "type": "do_once", "reset_on_failure": true }
 ]
 ```
+
+`repeat.count` 也可以绑定整数输入或运行变量，例如
+`{ "type": "repeat", "count": { "ref": "inputs.运行轮数" } }`；编辑器中的“公开”按钮会自动创建一个整数工作流输入并完成绑定。
 
 - Condition 在分支进入前求值，false 是普通分支失败。
 - Cooldown 在节点离开后启动，锁定期间分支返回失败。

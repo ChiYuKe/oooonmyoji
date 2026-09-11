@@ -50,7 +50,6 @@ function workflowTemplate(id: string): Record<string, unknown> {
     description: '',
     resolution: [1920, 1080],
     root: 'root',
-    limits: { timeout_seconds: 300, max_steps: 1000 },
     inputs: {},
     variables: {},
     nodes: [

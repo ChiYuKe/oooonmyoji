@@ -855,6 +855,8 @@ def validate_workflow(
 
     limits = raw.get("limits", {})
     assert isinstance(limits, dict)
+    timeout_seconds = limits.get("timeout_seconds")
+    max_steps = limits.get("max_steps")
     return WorkflowSpec(
         schema_version=4,
         workflow_id=str(raw["id"]),
@@ -862,8 +864,8 @@ def validate_workflow(
         description=str(raw.get("description", "")),
         resolution=(int(raw["resolution"][0]), int(raw["resolution"][1])),
         root=root.id,
-        timeout_seconds=float(limits.get("timeout_seconds", 300.0)),
-        max_steps=int(limits.get("max_steps", 1000)),
+        timeout_seconds=float(timeout_seconds) if timeout_seconds is not None else None,
+        max_steps=int(max_steps) if max_steps is not None else None,
         input_schema=input_schema,
         variable_schema=variable_schema,
         variable_defaults=variable_defaults,

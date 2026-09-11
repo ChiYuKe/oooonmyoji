@@ -75,8 +75,8 @@ class WorkflowSpec:
     description: str
     resolution: tuple[int, int]
     root: str
-    timeout_seconds: float
-    max_steps: int
+    timeout_seconds: float | None
+    max_steps: int | None
     input_schema: dict[str, Any]
     variable_schema: dict[str, Any]
     variable_defaults: dict[str, Any]

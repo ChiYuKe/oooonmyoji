@@ -236,18 +236,29 @@ def test_detect_state_uses_one_capture_and_skips_ocr_after_template_hit() -> Non
 
 
 def test_wait_any_match_can_be_revalidated_by_tap_match() -> None:
-    context = StateContext("realm")
+    class OrderedContext(StateContext):
+        def __init__(self) -> None:
+            super().__init__("realm")
+            self.template_calls: list[tuple[str, bool]] = []
+
+        def find_template(self, template: str, **kwargs: Any) -> list[TemplateMatch]:
+            self.template_calls.append((template, bool(kwargs.get("scale_search", False))))
+            return super().find_template(template, **kwargs)
+
+    context = OrderedContext()
     result = WaitAnyAction().execute(context, {
         "templates": ["missing.png", "realm.png"],
         "timeout_seconds": 0.1,
         "roi": [0, 0, 1920, 1080],
         "threshold": 0.9,
+        "scale_search": True,
     })
 
     assert result.status.value == "succeeded"
     assert result.output["match"]["template"] == "realm.png"
     assert result.output["match"]["threshold"] == 0.9
     assert result.output["match"]["roi"] == [0, 0, 1920, 1080]
+    assert context.template_calls == [("missing.png", True), ("realm.png", True)]
 
 
 def test_detect_state_ocr_fallback_reuses_the_captured_frame() -> None:

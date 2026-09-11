@@ -323,11 +323,17 @@ class WaitAnyAction(Action):
             return ActionResult.failed("templates must be a non-empty list", category="workflow")
         deadline = time.monotonic() + float(arguments["timeout_seconds"])
         threshold = float(arguments.get("threshold", 0.85))
+        scale_search = bool(arguments.get("scale_search", False))
         while True:
             context.check_cancelled()
             context.capture()
             for template in templates:
-                matches = context.find_template(str(template), roi=arguments.get("roi"), threshold=threshold)
+                matches = context.find_template(
+                    str(template),
+                    roi=arguments.get("roi"),
+                    threshold=threshold,
+                    scale_search=scale_search,
+                )
                 if matches:
                     match = matches[0].to_dict()
                     match["template"] = str(template)

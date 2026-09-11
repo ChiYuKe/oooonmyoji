@@ -669,6 +669,22 @@ def test_engine_timeout_limit_cancel_and_bad_output() -> None:
     limited_result = WorkflowEngine(validate(limited, actions), actions, Context(), {}).run()
     assert limited_result.error_category == "workflow_limit"
 
+    unlimited = validate(tree([task("a", "test.echo")], "a"), actions)
+    assert unlimited.timeout_seconds is None
+    assert unlimited.max_steps is None
+
+    many_children = [
+        task(f"step_{index}", "test.echo", decorators=[{"type": "condition", "expression": False}])
+        for index in range(1001)
+    ]
+    many = tree(
+        [{"id": "pick", "type": "selector", "children": [child["id"] for child in many_children]}, *many_children],
+        "pick",
+    )
+    many_result = WorkflowEngine(validate(many, actions), actions, Context(), {}).run()
+    assert many_result.error_category == "condition"
+    assert len(many_result.step_history) >= 1001
+
 
 def test_simple_parallel_abort_and_wait_modes_use_isolated_cancellation() -> None:
     cooperative = CooperativeAction()

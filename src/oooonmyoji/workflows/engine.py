@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import queue
 import threading
 import time
@@ -104,7 +105,11 @@ class WorkflowEngine:
             self._cooldowns = {}
             self._done_once = set()
             self._current_step = None
-        self._workflow_deadline = time.monotonic() + self.workflow.timeout_seconds
+        self._workflow_deadline = (
+            time.monotonic() + self.workflow.timeout_seconds
+            if self.workflow.timeout_seconds is not None
+            else math.inf
+        )
         if hasattr(self.context, "set_deadline"):
             self.context.set_deadline(self._workflow_deadline)
         try:
@@ -149,7 +154,7 @@ class WorkflowEngine:
     def _run_node(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         self._ensure_running(deadline, branch_cancel)
         with self._lock:
-            if self._steps >= self.workflow.max_steps:
+            if self.workflow.max_steps is not None and self._steps >= self.workflow.max_steps:
                 raise _ExecutionLimit("workflow max_steps exceeded")
             self._steps += 1
             self._current_step = node_id

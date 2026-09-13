@@ -1,0 +1,91 @@
+{
+  "schema_version": 4,
+  "id": "test_template",
+  "version": "1.0.0",
+  "description": "识别阴阳师图标模板并点击匹配中心",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "inputs": {
+    "v_908db55950144308afef97e7d04e2197": {
+      "type": "asset",
+      "display_name": "新输入",
+      "default": "assets/templates/shared/buff-auto-disabled-cancel.png"
+    },
+    "v_887f96dadcf74bffb30e9de7aba89e7e": {
+      "type": "string",
+      "display_name": "新输入",
+      "default": ""
+    }
+  },
+  "variables": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "main"
+      ]
+    },
+    {
+      "id": "main",
+      "type": "sequence",
+      "children": [
+        "find_icon",
+        "tap_icon"
+      ]
+    },
+    {
+      "id": "find_icon",
+      "type": "task",
+      "action": "vision.match_template",
+      "params": {
+        "template": "assets/templates/start/yys_tubiao.png"
+      }
+    },
+    {
+      "id": "tap_icon",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.find_icon.output.0"
+        }
+      }
+    }
+  ],
+  "_layout": {
+    "find_icon": {
+      "x": 0,
+      "y": 424
+    },
+    "tap_icon": {
+      "x": 336,
+      "y": 416
+    },
+    "main": {
+      "x": 166,
+      "y": 208
+    },
+    "root": {
+      "x": 166,
+      "y": 0
+    }
+  },
+  "_inputParams": {
+    "find_icon": [
+      "template"
+    ]
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "v_908db55950144308afef97e7d04e2197",
+      "scope": "inputs",
+      "x": -144,
+      "y": 560
+    }
+  },
+  "_variableLinks": {}
+}

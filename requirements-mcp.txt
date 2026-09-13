@@ -1,0 +1,6 @@
+# Optional dependency for the MCP template factory.
+# MCP Python SDK v2 is the current stable SDK line.
+mcp>=2.0,<3
+# Required by the screenshot-to-template tools and the existing vision layer.
+numpy>=1.26,<3
+opencv-python-headless>=4.10,<5

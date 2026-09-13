@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "oooonmyoji-template-factory": {
+      "command": "C:\\path\\to\\oooonmyoji\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "src.oooonmyoji.mcp.server",
+        "--config",
+        "C:\\path\\to\\oooonmyoji\\config\\config.json"
+      ],
+      "cwd": "C:\\path\\to\\oooonmyoji"
+    }
+  }
+}

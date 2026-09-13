@@ -68,11 +68,11 @@ button.icon-button { width: 28px; min-width: 28px; padding: 0; font-size: 16px; 
   z-index: 5000;
   max-width: 280px;
   padding: 6px 9px;
-  border: 1px solid #4a535b;
-  border-radius: 5px;
-  background: #202327;
-  box-shadow: 0 8px 18px rgba(0, 0, .42);
-  color: #e4e9ec;
+  border: 0;
+  border-radius: 4px;
+  background: var(--ui-tooltip-bg);
+  box-shadow: var(--ui-tooltip-shadow);
+  color: var(--ui-tooltip-text);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
@@ -167,7 +167,7 @@ button.icon-button { width: 28px; min-width: 28px; padding: 0; font-size: 16px; 
   gap: 3px;
   padding: 2px 10px;
   border-bottom: 1px solid var(--border);
-  background: #202328;
+  background: color-mix(in srgb, #202328 72%, transparent);
   overflow-x: auto;
   white-space: nowrap;
 }
@@ -175,7 +175,7 @@ button.icon-button { width: 28px; min-width: 28px; padding: 0; font-size: 16px; 
 .workflow-breadcrumb-separator { color: #69727b; font-size: 16px; line-height: 1; }
 .workflow-crumb { min-height: 24px; padding: 2px 7px; border: 0; border-radius: 3px; background: transparent; color: #aeb6bf; font-size: 11px; }
 .workflow-crumb:hover:not(:disabled) { border: 0; background: #303943; color: #f2f4f5; }
-.workflow-crumb.current { background: #303943; color: #fff8ea; font-weight: 650; }
+.workflow-crumb.current { background: var(--ui-selected, #424242); color: var(--ui-text, #dddddd); font-weight: 650; }
 .workflow-crumb.current:disabled { opacity: 1; cursor: default; }
 
 @media (max-width: 720px) {
@@ -869,15 +869,15 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
   z-index: 9999;
   max-width: 260px;
   padding: 3px 8px;
-  border: 1px solid #3a3a3a;
-  border-radius: 3px;
-  background: #111;
-  color: #ddd;
+  border: 0;
+  border-radius: 4px;
+  background: var(--ui-tooltip-bg);
+  color: var(--ui-tooltip-text);
   font-size: 11px;
   line-height: 1.4;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, .45);
+  box-shadow: var(--ui-tooltip-shadow);
 }
 .object-array-head { cursor: pointer; }
 .object-array-head:hover { background: #333; }
@@ -1000,3 +1000,11 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
   #inspector-body .object-array-body { padding-inline: 5px; }
 }
 }
+
+/* 面包屑按钮必须放在 @layer 之外：
+ * ui.css 的 .ui-button / .ui-button:disabled 是无 layer 规则，会压过 layer 内任何选择器，
+ * 导致 .workflow-crumb.current 的当前层级高亮被覆盖成普通按钮灰。 */
+.workflow-crumb { background: transparent; border: 0; color: #aeb6bf; opacity: 1; }
+.workflow-crumb:hover:not(:disabled) { background: #303943; color: #f2f4f5; opacity: 1; }
+.workflow-crumb.current { background: var(--ui-selected, #424242); color: var(--ui-text, #dddddd); font-weight: 650; }
+.workflow-crumb.current:disabled { opacity: 1; cursor: default; }

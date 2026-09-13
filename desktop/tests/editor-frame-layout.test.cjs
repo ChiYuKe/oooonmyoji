@@ -22,9 +22,10 @@ test('desktop canvas always defines one full-height row, including narrow select
   assert.equal(canvas.display,'grid');
   assert.equal(canvas['grid-template-rows'],'minmax(0, 1fr)');
   assert.equal(canvas['grid-template-columns'],'minmax(0, 1fr)');
-  assert.equal(canvas.height,'calc(100% - 30px)');
+  assert.equal(canvas.height,'100%');
   assert.equal(properties('.desktop-canvas-mode #canvas-wrap')['min-height'],'0');
   assert.equal(properties('.desktop-canvas-mode #inspector').display,'none');
+  assert.equal(properties('.desktop-canvas-mode #workflow-breadcrumb').position,'absolute');
 });
 
 test('separate details panel fills its host without reserving a hidden breadcrumb', () => {

@@ -42,6 +42,8 @@
     selectedRun: null,
     selectedVariable: '',
     selectedVariableScope: 'inputs',
+    selectedVariableCardId: '',
+    selectedVariableCardIds: new Set(),
     zoom: 1,
     panX: 80,
     panY: 48,
@@ -57,6 +59,8 @@
     activeRun: null,
     roi: null,
     assetBrowser: null,
+    assetPaths: null,
+    assetInventoryRequestId: '',
     workflowBrowser: null,
     assetsBaseUri: '',
     templateCheck: null,
@@ -219,6 +223,17 @@
       .filter((card) => Object.prototype.hasOwnProperty.call(state.raw[card.scope] || {}, card.name));
   }
 
+  function clearVariableCardSelection() {
+    state.selectedVariableCardId = '';
+    state.selectedVariableCardIds = new Set();
+  }
+
+  function setVariableCardSelection(ids) {
+    const selected = new Set(Array.isArray(ids) ? ids : []);
+    state.selectedVariableCardIds = selected;
+    state.selectedVariableCardId = selected.size === 1 ? [...selected][0] : '';
+  }
+
   function variableTypeOf(scope, name) {
     const definition = state.raw[scope] && state.raw[scope][name];
     return definition && typeof definition === 'object' && definition.type ? definition.type : 'any';
@@ -326,6 +341,7 @@
 
   function variableCompatibleWithPin(scope, variableName, node, param) {
     if (!node) return false;
+    if (scope === 'variables' && !VariableSystem.visible(state.raw, state.raw.variables?.[variableName]?.owner, node.id)) return false;
     const spec = node.action ? catalogByName(node.action) : null;
     let definition = spec && spec.parameters ? spec.parameters[param] : undefined;
     if (!definition && typeof param === 'string' && param.startsWith('inputs.')) {
@@ -431,19 +447,24 @@
     const inputs = state.raw && state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)
       ? state.raw.inputs
       : {};
-    const workflowInputs = Object.entries(inputs).map(([name, rawDefinition]) => {
-      const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
-      return { name, type: definition.type || 'any', scope: 'inputs' };
-    });
+    const workflowInputs = Object.entries(inputs)
+      .filter(([, rawDefinition]) => !(rawDefinition && rawDefinition._autoPublished))
+      .map(([name, rawDefinition]) => {
+        const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
+        return { name, displayName: definition.display_name || name, group: definition.group || '', type: definition.type || 'any', scope: 'inputs', public: true };
+      });
     const runtimeVariables = state.raw && state.raw.variables && typeof state.raw.variables === 'object' && !Array.isArray(state.raw.variables)
       ? state.raw.variables
       : {};
     const variables = Object.entries(runtimeVariables).map(([name, rawDefinition]) => {
       const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
-      return { name, type: definition.type || 'any', scope: 'variables' };
+      return { name, displayName: definition.display_name || name, group: definition.group || '', type: definition.type || 'any', scope: 'variables', public: !!definition.initial_from };
     });
     const selectedDefinitions = state.selectedVariableScope === 'variables' ? runtimeVariables : inputs;
-    const selectedVariable = state.inspector === 'variables' && Object.prototype.hasOwnProperty.call(selectedDefinitions, state.selectedVariable)
+    const canvasVariableCardSelected = state.inspector === 'variables'
+      && ((state.selectedVariableCardIds instanceof Set && state.selectedVariableCardIds.size > 0) || state.selectedVariableCardId);
+    const selectedVariable = state.inspector === 'variables' && !canvasVariableCardSelected
+      && Object.prototype.hasOwnProperty.call(selectedDefinitions, state.selectedVariable)
       ? state.selectedVariable
       : '';
     const sidebarNodes = nodes().map((node) => {
@@ -486,6 +507,7 @@
   function mutate(fn, options = {}) {
     const before = snapshot();
     fn();
+    VariableSystem.cleanupReleased(state.raw, JSON.parse(before));
     if (snapshot() === before) return;
     state.undo.push(before);
     if (state.undo.length > 80) state.undo.shift();
@@ -499,6 +521,7 @@
     state.selected.clear();
     state.selectedEdge = null;
     state.selectedRun = null;
+    clearVariableCardSelection();
     render();
   }
 
@@ -1143,6 +1166,16 @@
     });
   }
 
+  function bindAssetPathPreview(target, getValue) {
+    if (!target) return;
+    const refresh = () => showAssetPathPreview(target, assetPreviewForPath(typeof getValue === 'function' ? getValue() : getValue));
+    const hide = () => {
+      if (activeAssetPreview && activeAssetPreview.target === target) hideAssetPathPreview();
+    };
+    target.addEventListener('mouseenter', refresh);
+    target.addEventListener('mouseleave', hide);
+  }
+
   function renderNodePreview(group, preview, className, preserveAspectRatio, onOpen) {
     const frame = svgEl('rect', { class: 'node-preview-frame', x: PREVIEW.x, y: PREVIEW.y, width: PREVIEW.width, height: PREVIEW.height, rx: 3 }, group);
     const image = svgEl('image', {
@@ -1365,7 +1398,9 @@
   function renderVariableCard(layer, card) {
     const definition = (state.raw[card.scope] && state.raw[card.scope][card.name]) || {};
     const type = definition.type || 'any';
-    const selected = state.inspector === 'variables' && state.selectedVariableScope === card.scope && state.selectedVariable === card.name;
+    const selectedCardIds = state.selectedVariableCardIds instanceof Set ? state.selectedVariableCardIds : new Set();
+    const selected = state.inspector === 'variables'
+      && (selectedCardIds.has(card.id) || state.selectedVariableCardId === card.id);
     const targeted = state.variableConnect && state.variableConnect.direction === 'from-pin'
       && state.variableConnect.hover && state.variableConnect.hover.card === card.name && state.variableConnect.hover.scope === card.scope;
     const group = svgEl('g', {
@@ -1379,10 +1414,16 @@
     svgEl('rect', { class: 'variable-card-accent card-accent', x:1,y:10,width:3,height:14,rx:1 }, group);
     svgEl('line', { class: 'variable-card-header-rule', x1: 1, y1: 33, x2: VARIABLE_CARD_W - 1, y2: 33 }, group);
     svgEl('circle', { class: `variable-card-dot type-${type}`, cx: 15, cy: 18, r: 4.5 }, group);
-    NodeCards.text(group, {className:'variable-card-name card-title',x:27,y:22,value:card.name,width:VARIABLE_CARD_W-39,size:11});
+    NodeCards.text(group, {className:'variable-card-name card-title',x:27,y:22,value:definition.display_name || card.name,width:VARIABLE_CARD_W-39,size:11});
     const typeName = ({integer:'整数',number:'数值',boolean:'布尔',string:'文本',asset:'资源',array:'列表',rect:'区域',object:'对象'})[type] || type;
     NodeCards.text(group, {className:'variable-card-access card-meta',x:12,y:49,value:`${typeName} · ${card.scope === 'inputs' ? '输入' : '状态'}`,width:76,size:9});
-    NodeCards.text(group, {className:'variable-card-value',x:VARIABLE_CARD_W-12,y:49,value:variableValueSummary(definition),width:58,size:10,anchor:'end'});
+    const live = card.scope === 'variables' && state.variableValues && Object.prototype.hasOwnProperty.call(state.variableValues,card.name);
+    const value = live ? state.variableValues[card.name] : definition.default;
+    const valueNode = NodeCards.text(group, {className:'variable-card-value',x:VARIABLE_CARD_W-12,y:49,value:live ? compactValue(value,Infinity) : variableValueSummary(definition),width:58,size:10,anchor:'end'});
+    if (assetPreviewForPath(value)) bindAssetPathPreview(valueNode, () => {
+      const currentLive = card.scope === 'variables' && state.variableValues && Object.prototype.hasOwnProperty.call(state.variableValues,card.name);
+      return currentLive ? state.variableValues[card.name] : definition.default;
+    });
     svgEl('circle', { class: `port port-variable-out type-${type}`, cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: PORT_R }, group);
     const port = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: 10, 'data-variable': card.name }, group);
     port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.scope, card.name, card.id));
@@ -1393,6 +1434,7 @@
       state.selected.clear(); state.selectedEdge = null; state.selectedRun = null;
       state.selectedVariable = card.name;
       state.selectedVariableScope = card.scope;
+      setVariableCardSelection([card.id]);
       state.inspector = 'variables';
       const point = worldPoint(event);
       state.drag = { kind: 'variable-card', id: card.id, name: card.name, start: point, origin: { x: card.x, y: card.y }, before: snapshot(), moved: false };
@@ -1404,6 +1446,7 @@
       state.selected.clear(); state.selectedEdge = null; state.selectedRun = null;
       state.selectedVariable = card.name;
       state.selectedVariableScope = card.scope;
+      setVariableCardSelection([card.id]);
       state.inspector = 'variables';
       render();
       showMenu(event.clientX, event.clientY, [
@@ -1419,10 +1462,19 @@
   }
 
   function removeVariableCard(id) {
-    if (!Object.prototype.hasOwnProperty.call(variableCards(), id)) return;
+    removeVariableCards([id]);
+  }
+
+  function removeVariableCards(ids) {
+    const targets = [...new Set(Array.isArray(ids) ? ids : [])]
+      .filter((id) => Object.prototype.hasOwnProperty.call(variableCards(), id));
+    if (!targets.length) return;
     mutate(() => {
-      delete variableCards()[id];
-      for (const [key, cardId] of Object.entries(variableLinks())) if (cardId === id) delete variableLinks()[key];
+      const targetSet = new Set(targets);
+      for (const id of targets) delete variableCards()[id];
+      for (const [key, cardId] of Object.entries(variableLinks())) if (targetSet.has(cardId)) delete variableLinks()[key];
+      const selected = state.selectedVariableCardIds instanceof Set ? state.selectedVariableCardIds : new Set();
+      setVariableCardSelection([...selected].filter((id) => !targetSet.has(id)));
     });
   }
 
@@ -1508,11 +1560,11 @@
   function decoratorLabel(decorator) {
     if (!decorator) return 'Decorator';
     if (decorator.type === 'condition') return `Condition · ${conditionSummary(decorator.expression)}`;
-    if (decorator.type === 'cooldown') return `Cooldown · ${decorator.seconds}s`;
-    if (decorator.type === 'timeout') return `Time Limit · ${decorator.seconds}s`;
-    if (decorator.type === 'retry') return `Retry · ${decorator.attempts} 次`;
+    if (decorator.type === 'cooldown') return `Cooldown · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
+    if (decorator.type === 'timeout') return `Time Limit · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
+    if (decorator.type === 'retry') return `Retry · ${compactValue(decorator.attempts, 22)}${isBindingValue(decorator.attempts) ? '' : ' 次'}`;
     if (decorator.type === 'repeat') return `Repeat · ${compactValue(decorator.count, 22)}${decorator.count && typeof decorator.count === 'object' ? '' : ' 次'}`;
-    if (decorator.type === 'do_once') return `Do Once · ${decorator.reset_on_failure ? '成功才锁定' : '整个运行只执行一次'}`;
+    if (decorator.type === 'do_once') return `Do Once · ${isBindingValue(decorator.reset_on_failure) ? compactValue(decorator.reset_on_failure, 22) : decorator.reset_on_failure ? '成功才锁定' : '整个运行只执行一次'}`;
     return String(decorator.type || 'Decorator');
   }
 
@@ -1703,6 +1755,7 @@
   function connectVariableToPin(scope, variable, nodeId, param, cardId) {
     const node = nodeById(nodeId);
     if (!node || !state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], variable)) return;
+    if (!variableCompatibleWithPin(scope, variable, node, param)) { toast('变量类型或作用范围与目标不兼容', true); return; }
     mutate(() => {
       if (param.startsWith('inputs.')) {
         if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
@@ -1760,7 +1813,10 @@
     }
     if (event.button === 0 && event.target === graph) {
       const point = worldPoint(event);
-      if (!event.shiftKey) state.selected.clear();
+      if (!event.shiftKey) {
+        state.selected.clear();
+        clearVariableCardSelection();
+      }
       state.selectedEdge = null;
       state.selectedRun = null;
       state.inspector = 'node';
@@ -1835,11 +1891,28 @@
       const x1 = Math.min(state.marquee.x1, point.x); const x2 = Math.max(state.marquee.x1, point.x);
       const y1 = Math.min(state.marquee.y1, point.y); const y2 = Math.max(state.marquee.y1, point.y);
       const selected = state.marquee.additive ? new Set(state.selected) : new Set();
+      const selectedCardIds = state.marquee.additive && state.selectedVariableCardIds instanceof Set
+        ? new Set(state.selectedVariableCardIds)
+        : new Set();
       for (const node of nodes()) {
         const pos = position(node);
         if (pos.x + NODE_W >= x1 && pos.x <= x2 && pos.y + nodeHeight(node) >= y1 && pos.y <= y2) selected.add(node.id);
       }
+      for (const card of variableCardList()) {
+        if (card.x + VARIABLE_CARD_W >= x1 && card.x <= x2 && card.y + VARIABLE_CARD_H >= y1 && card.y <= y2) selectedCardIds.add(card.id);
+      }
       state.selected = selected;
+      if (selectedCardIds.size && !selected.size) {
+        state.selectedVariableCardIds = selectedCardIds;
+        state.selectedVariableCardId = selectedCardIds.size === 1 ? [...selectedCardIds][0] : '';
+        const first = variableCardList().find((card) => selectedCardIds.has(card.id));
+        state.selectedVariable = first?.name || '';
+        state.selectedVariableScope = first?.scope || 'inputs';
+        state.inspector = 'variables';
+      } else {
+        clearVariableCardSelection();
+        state.inspector = 'node';
+      }
     }
     render();
   }
@@ -2202,12 +2275,13 @@
     if (!node) return;
     const body = clearInspector(node.name || node.id);
     section(body, '节点');
-    const idRow = field(body, 'ID', '引用与运行事件使用的稳定标识');
+    const basics = el('div', 'node-basics'); body.appendChild(basics);
+    const idRow = field(basics, 'ID', '引用与运行事件使用的稳定标识');
     idRow.appendChild(textInput(node.id, (value) => renameNode(node.id, value.trim())));
-    const nameRow = field(body, '显示名称');
+    const nameRow = field(basics, '名称');
     nameRow.appendChild(textInput(node.name || '', (value) => mutate(() => { if (value.trim()) node.name = value.trim(); else delete node.name; })));
     if (node.type !== 'root') {
-      const typeRow = field(body, '类型');
+      const typeRow = field(basics, '类型');
       typeRow.appendChild(selectInput(node.type, TYPES.filter((type) => type !== 'root').map((type) => ({ value: type, label: TYPE_NAMES[type] || TYPE_LABEL[type] })), (value) => changeNodeType(node, value)));
     }
     if (node.type === 'task') renderTaskInspector(body, node);
@@ -2360,7 +2434,7 @@
       const definition = variable.definition || {};
       const block = el('div', 'run-variable-block');
       const heading = el('div', 'run-variable-heading');
-      const name = el('span', 'run-input-name', `${variable.name}${definition.required ? ' *' : ''}`);
+      const name = el('span', 'run-input-name', `${definition.display_name || variable.name}${definition.required ? ' *' : ''}`);
       name.title = `${variable.name} · ${definition.type || 'any'}`;
       heading.appendChild(name);
       block.appendChild(heading);
@@ -2595,6 +2669,7 @@
       ? state.raw.variables
       : {};
     for (const [name, rawDefinition] of Object.entries(variables)) {
+      if(rawDefinition.owner && !VariableSystem.visible(state.raw,rawDefinition.owner,node?.id))continue;
       const schema = definitionSchema(rawDefinition);
       const ref = `variables.${name}`;
       candidates.push({ ref, schema });
@@ -2613,8 +2688,7 @@
 
   function referenceLabel(ref) {
     if (!ref) return '无可用引用';
-    if (ref.startsWith('inputs.')) return `输入 · ${ref.slice('inputs.'.length)}`;
-    if (ref.startsWith('variables.')) return `状态 · ${ref.slice('variables.'.length)}`;
+    if (ref.startsWith('inputs.') || ref.startsWith('variables.')) return VariableSystem.referenceLabel(state.raw,ref);
     return ref;
   }
 
@@ -2682,7 +2756,7 @@
     'input.recover_state': '页面状态恢复', 'input.swipe': '滑动', 'input.tap': '坐标点击',
     'input.tap_match': '点击匹配项', 'input.type_text': '输入文本',
     'realm.detect_progress': '结界进度检测', 'realm.read_pass_count': '读取结界券数',
-    'stats.enqueue_reward': '奖励统计', 'variables.set': '设置变量',
+    'stats.enqueue_reward': '奖励统计',
     'vision.detect_state': '识别页面状态', 'vision.match_template': '模板匹配', 'vision.ocr': '文字识别',
     'vision.wait_any': '等待任一模板', 'vision.wait_any_text': '等待任一文字',
     'vision.wait_template': '等待模板', 'vision.wait_text': '等待文字',
@@ -2753,6 +2827,7 @@
       check.addEventListener('click', () => { if (!pointerPending) requestTemplateCheck(node.id); });
       headingActions.appendChild(check);
     }
+    headingActions.appendChild(valueBindingMenu(node,definition,()=>node.params[name],value=>{node.params[name]=value;},fieldLabel(name)));
     heading.appendChild(headingActions);
     block.appendChild(heading);
     if (definition.description) block.appendChild(el('div', 'field-hint', definition.description));
@@ -2897,12 +2972,14 @@
     }
     const shell = el('div', 'inline-control');
     const input = textInput(value, set, { placeholder: definition.type === 'asset' ? 'assets/templates/...' : workflowParameter ? '_folder/workflow.json' : '' });
+    if (definition.type === 'asset' && assetPathStatus(value) === 'missing') input.classList.add('asset-missing');
     if (definition.type === 'asset' || assetPreviewForPath(value)) bindAssetPreview(input);
     shell.appendChild(input);
     if (definition.type === 'asset') {
       const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片'; browse.addEventListener('click', () => openAssetBrowser(node.id, name, value)); shell.appendChild(browse);
       const pick = el('button', '', '截取'); pick.addEventListener('click', () => requestRoi(node.id, name, 'asset')); shell.appendChild(pick);
       const replace = el('button', '', '替换'); replace.title = '从当前画面截取并覆盖当前模板'; replace.addEventListener('click', () => requestTemplateReplacement(node.id, name, input.value)); shell.appendChild(replace);
+      appendMissingAssetAction(shell, node, name, value, set);
     } else if (workflowParameter) {
       const browse = el('button', '', '浏览'); browse.title = '浏览 workflows 中的脚本'; browse.addEventListener('click', () => openWorkflowBrowser(node.id, name, value)); shell.appendChild(browse);
     }
@@ -3017,7 +3094,10 @@
     const current = value.ref;
     const options = refs.includes(current) ? refs : [current, ...refs];
     shell.appendChild(selectInput(current, options.length ? options.map((item) => ({ value: item, label: referenceLabel(item) })) : [{ value: current, label: current || '没有可用引用' }], (next) => onChange({ ref: next }), 'full'));
-    shell.appendChild(iconButton('scalar-array-remove', '解除引用，改为常量', 'unlink', () => onChange(defaultValue(definition))));
+    shell.appendChild(iconButton('scalar-array-remove', '解除引用，改为常量', 'unlink', () => {
+      const restored = VariableSystem.defaultAt(state.raw, current);
+      onChange(restored === undefined ? defaultValue(definition) : restored);
+    }));
     return shell;
   }
 
@@ -3054,6 +3134,7 @@
     if (def.type === 'asset' || def.type === 'path') {
       const shell = el('div', 'inline-control');
       const input = textInput(value, onChange, { placeholder: def.type === 'asset' ? 'assets/templates/...' : '' });
+      if (def.type === 'asset' && assetPathStatus(value) === 'missing') input.classList.add('asset-missing');
       if (def.type === 'asset' || assetPreviewForPath(value)) bindAssetPreview(input);
       shell.appendChild(input);
       if (def.type === 'asset') {
@@ -3067,6 +3148,7 @@
           const replace = el('button', '', '替换'); replace.title = '从当前画面截取并覆盖当前模板';
           replace.addEventListener('click', () => requestTemplateReplacement(ctx.node.id, ctx.key || '', input.value, { applyValue: (assetPath) => onChange(assetPath) }));
           shell.appendChild(replace);
+          appendMissingAssetAction(shell, ctx.node, ctx.key || '', value, onChange);
         }
       }
       return shell;
@@ -3337,7 +3419,7 @@
   }
 
   function renderCompositeInspector(body, node) {
-    section(body, '复合节点');
+    if (!['sequence', 'selector'].includes(node.type)) section(body, '执行设置');
     if (node.type === 'selector') body.appendChild(el('div', 'description', '按顺序执行，首个成功后返回成功。'));
     if (node.type === 'sequence') body.appendChild(el('div', 'description', '按顺序执行，首个失败后返回失败。'));
     if (node.type === 'parallel') {
@@ -3457,13 +3539,14 @@
       body.appendChild(addRun);
       return;
     }
-    section(body, '有序子节点');
     const children = Array.isArray(node.children) ? node.children : [];
+    section(body, `子节点 · ${children.length}`);
     if (!children.length) body.appendChild(el('div', 'empty-section', '尚未连接'));
     children.forEach((childId, index) => {
       const row = el('div', 'child-row');
       row.appendChild(el('span', 'child-order', String(index + 1)));
-      row.appendChild(el('span', 'child-name', nodeById(childId)?.name || childId));
+      const childName = el('span', 'child-name', nodeById(childId)?.name || childId);
+      childName.title = `${childName.textContent}\n${childId}`; row.appendChild(childName);
       const up = el('button', 'icon-button', '↑'); up.title = '提高优先级'; up.disabled = index === 0;
       up.addEventListener('click', () => mutate(() => { const value = node.children.splice(index, 1)[0]; node.children.splice(index - 1, 0, value); }));
       const down = el('button', 'icon-button', '↓'); down.title = '降低优先级'; down.disabled = index === children.length - 1;
@@ -3493,24 +3576,128 @@
     decorators.forEach((decorator, index) => renderDecorator(body, node, decorator, index));
   }
 
+  function decoratorField(label, control) {
+    const field = el('div', 'decorator-field');
+    const caption = el('span', 'decorator-field-label', label);
+    const actions = control.querySelector?.('.decorator-param-actions');
+    if (actions) actions.prepend(caption);
+    else field.appendChild(caption);
+    field.appendChild(control); return field;
+  }
+
+  function decoratorVectorField(label, control) {
+    const field = el('div', 'decorator-vector-component');
+    const input = control.children[1];
+    const value = el('div', 'decorator-vector-value');
+    const caption = el('span', 'decorator-vector-label', label);
+    input.setAttribute('aria-label', label === '次数' ? '重试尝试次数' : '重试间隔（秒）');
+    value.appendChild(caption); value.appendChild(input);
+    field.appendChild(value);
+    return field;
+  }
+
+  const decoratorLiteralCache = new WeakMap();
+  function decoratorParameterDefinition(decorator, key) {
+    if (key === 'expression') return {type: typeof decorator.expression === 'boolean' ? 'boolean' : 'object'};
+    if (key === 'reset_on_failure') return {type:'boolean'};
+    if (key === 'attempts') return {type:'integer',min:1};
+    return {type:'number',min:key === 'delay_seconds' ? 0 : 0.001};
+  }
+
+  function exposeDecoratorParameter(node, decorator, key) {
+    const keys = (Array.isArray(key) ? key : [key]).filter(item => !isBindingValue(decorator[item]));
+    if (!keys.length) return;
+    const names = [];
+    mutate(() => {
+      if (!state.raw.inputs || typeof state.raw.inputs !== 'object' || Array.isArray(state.raw.inputs)) state.raw.inputs = {};
+      for (const item of keys) {
+        const current = decorator[item] ?? (item === 'reset_on_failure' ? false : item === 'attempts' ? 1 : 0);
+        const base = `${String(node.id || 'node').replace(/[^\w\u4e00-\u9fff-]/g, '_')}_${decorator.type}_${item}`;
+        let name = base, suffix = 1;
+        while (Object.prototype.hasOwnProperty.call(state.raw.inputs, name) || Object.prototype.hasOwnProperty.call(state.raw.variables || {}, name)) name = `${base}_${++suffix}`;
+        const cache = decoratorLiteralCache.get(decorator) || {};
+        cache[item] = clone(current); decoratorLiteralCache.set(decorator, cache);
+        state.raw.inputs[name] = {...decoratorParameterDefinition(decorator,item),default:clone(current),_autoPublished:true};
+        decorator[item] = {ref:`inputs.${name}`}; names.push(name);
+      }
+    });
+    toast(`已公开为输入：${names.join('、')}`);
+  }
+
+  function restoreDecoratorParameter(decorator, key) {
+    const current = decorator[key];
+    if (!isBindingValue(current)) return;
+    const cache = decoratorLiteralCache.get(decorator) || {};
+    const initial = VariableSystem.defaultAt(state.raw,current.ref);
+    decorator[key] = initial !== undefined ? initial : Object.prototype.hasOwnProperty.call(cache,key) ? clone(cache[key]) : key === 'expression' ? true : key === 'reset_on_failure' ? false : key === 'delay_seconds' ? 0 : 1;
+  }
+
+  function retryPublicActions(node, decorator) {
+    const actions = el('div', 'decorator-param-actions');
+    const keys = ['attempts', 'delay_seconds'];
+    const bound = keys.every(key => isBindingValue(decorator[key]));
+    const exposed = bound && keys.every(key => decorator[key].ref.startsWith('inputs.'));
+    actions.appendChild(UI.button({label:exposed ? '已公开' : bound ? '已绑定' : '公开', disabled:bound, tip:'将重试配置公开为一个结构体输入', onClick:()=>{
+      if(keys.some(key=>isBindingValue(decorator[key]))) {exposeDecoratorParameter(node,decorator,keys);return;}
+      mutate(()=>{const id=VariableSystem.create(state.raw,'inputs',`${node.name||node.id} · 重试配置`,{...VariableSystem.presets.retry,_autoPublished:true},{attempts:decorator.attempts??1,delay_seconds:decorator.delay_seconds??0});for(const key of keys)decorator[key]={ref:`inputs.${id}.${key}`};});
+    }}));
+    actions.appendChild(valueBindingMenu(node,VariableSystem.presets.retry,()=>({attempts:decorator.attempts,delay_seconds:decorator.delay_seconds}),value=>{for(const key of keys)decorator[key]=isBindingValue(value)?{ref:`${value.ref}.${key}`}:value[key];},'重试配置'));
+    if (keys.some(key => isBindingValue(decorator[key]))) actions.appendChild(UI.button({label:'固定值',tip:'恢复整组固定值，清理不再使用的自动输入',onClick:()=>mutate(()=>keys.forEach(key=>restoreDecoratorParameter(decorator,key)))}));
+    return actions;
+  }
+
+  function decoratorParameterControl(node, decorator, key, literalControl, actionTarget = null) {
+    const shell = el('div', 'decorator-parameter');
+    const actions = el('div', 'decorator-param-actions');
+    const current = decorator[key], bound = isBindingValue(current);
+    const exposed = bound && current.ref.startsWith('inputs.') && Object.prototype.hasOwnProperty.call(state.raw.inputs || {}, current.ref.slice(7));
+    actions.appendChild(UI.button({label:exposed ? '已公开' : '公开',disabled:bound,tip:exposed ? '已绑定工作流输入，可在变量详情中编辑默认值' : '将当前值公开为工作流输入',onClick:()=>exposeDecoratorParameter(node, decorator, key)}));
+    if (bound) actions.appendChild(UI.button({label:'固定值',tip:'恢复固定值，清理不再使用的自动输入',onClick:()=>mutate(()=>{
+      restoreDecoratorParameter(decorator,key);
+    })}));
+    (actionTarget || shell).appendChild(actions);
+    if (bound) {
+      const refs = allRefs(node, key === 'expression' ? undefined : decoratorParameterDefinition(decorator,key));
+      const options = refs.includes(current.ref) ? refs : [current.ref,...refs];
+      shell.appendChild(selectInput(current.ref,options.map(ref=>({value:ref,label:referenceLabel(ref)})),ref=>mutate(()=>{decorator[key]={ref};}),'full'));
+    } else shell.appendChild(literalControl);
+    return shell;
+  }
+
   function renderDecorator(body, node, decorator, index) {
     const block = el('div', 'decorator-block');
-    const head = el('div', 'decorator-heading'); head.appendChild(el('span', '', decoratorLabel(decorator)));
-    const remove = el('button', 'icon-button danger', '×'); remove.addEventListener('click', () => mutate(() => node.decorators.splice(index, 1))); head.appendChild(remove); block.appendChild(head);
-    if (decorator.type === 'condition') block.appendChild(conditionDecoratorControl(node, decorator));
-    else if (decorator.type === 'cooldown' || decorator.type === 'timeout') block.appendChild(textInput(decorator.seconds, (value) => mutate(() => { decorator.seconds = Math.max(0.001, parseFloat(value || '0')); }), { type: 'number', min: 0.001, step: 0.1 }));
-    else if (decorator.type === 'retry') {
-      const row = el('div', 'inline-control');
-      row.appendChild(textInput(decorator.attempts, (value) => mutate(() => { decorator.attempts = Math.max(1, parseInt(value || '1', 10)); }), { type: 'number', min: 1, step: 1 }));
-      row.appendChild(textInput(decorator.delay_seconds || 0, (value) => mutate(() => { decorator.delay_seconds = Math.max(0, parseFloat(value || '0')); }), { type: 'number', min: 0, step: 0.1 }));
-      block.appendChild(row);
-    } else if (decorator.type === 'repeat') block.appendChild(repeatDecoratorControl(node, decorator));
-    else if (decorator.type === 'do_once') {
-      const row = el('div', 'inline-control');
-      row.appendChild(checkbox(decorator.reset_on_failure === true, (value) => mutate(() => { decorator.reset_on_failure = value; if (!value) delete decorator.reset_on_failure; })));
-      row.appendChild(el('span', 'do-once-note', '失败后自动重置（成功才锁定）'));
-      block.appendChild(row);
+    const titles = {retry:'失败重试',repeat:'重复执行',cooldown:'冷却',timeout:'限时',condition:'条件',do_once:'仅执行一次'};
+    const subtitles = {retry:'Retry',repeat:'Repeat',cooldown:'Cooldown',timeout:'Time Limit',condition:'Condition',do_once:'Do Once'};
+    const head = el('div', 'decorator-heading');
+    const title = el('span', 'decorator-title', titles[decorator.type] || decoratorLabel(decorator));
+    title.title = decoratorLabel(decorator); head.appendChild(title);
+    head.appendChild(el('span', 'decorator-subtitle', subtitles[decorator.type] || ''));
+    const headActions = el('div', 'decorator-head-actions'); head.appendChild(headActions);
+    const remove = el('button', 'decorator-remove danger', '删除'); remove.title = '移除装饰器'; remove.setAttribute('aria-label', `移除${titles[decorator.type] || '装饰器'}`); remove.addEventListener('click', () => mutate(() => node.decorators.splice(index, 1))); block.appendChild(head);
+    if (decorator.type === 'condition') block.appendChild(decoratorParameterControl(node, decorator, 'expression', conditionDecoratorControl(node, decorator), headActions));
+    else if (decorator.type === 'cooldown' || decorator.type === 'timeout') {
+      const field = decoratorField('时长（秒）', decoratorParameterControl(node, decorator, 'seconds', textInput(decorator.seconds, (value) => mutate(() => { decorator.seconds = Math.max(0.001, parseFloat(value || '0')); }), { type: 'number', min: 0.001, step: 0.1 }), headActions));
+      field.classList.add('decorator-field-inline'); block.appendChild(field);
     }
+    else if (decorator.type === 'retry') {
+      headActions.appendChild(retryPublicActions(node, decorator));
+      const row = el('div', 'decorator-vector'); row.setAttribute('role', 'group'); row.setAttribute('aria-label', '重试次数与间隔');
+      row.appendChild(decoratorVectorField('次数', decoratorParameterControl(node, decorator, 'attempts', textInput(decorator.attempts, (value) => mutate(() => { decorator.attempts = Math.max(1, parseInt(value || '1', 10)); }), { type: 'number', min: 1, step: 1 }))));
+      row.appendChild(decoratorVectorField('间隔·秒', decoratorParameterControl(node, decorator, 'delay_seconds', textInput(decorator.delay_seconds || 0, (value) => mutate(() => { decorator.delay_seconds = Math.max(0, parseFloat(value || '0')); }), { type: 'number', min: 0, step: 0.1 }))));
+      block.appendChild(row);
+    } else if (decorator.type === 'repeat') {
+      const control = repeatDecoratorControl(node, decorator);
+      const expose = control.querySelector('.decorator-expose');
+      if (expose) headActions.appendChild(expose);
+      control.title = '循环次数'; block.appendChild(control);
+    }
+    else if (decorator.type === 'do_once') {
+      const row = el('label', 'inline-control');
+      row.appendChild(checkbox(decorator.reset_on_failure === true, (value) => mutate(() => { decorator.reset_on_failure = value; if (!value) delete decorator.reset_on_failure; })));
+      row.appendChild(el('span', 'do-once-note', '失败后重置，成功后锁定'));
+      block.appendChild(decoratorParameterControl(node, decorator, 'reset_on_failure', row, headActions));
+    }
+    headActions.appendChild(remove);
     body.appendChild(block);
   }
 
@@ -3560,7 +3747,7 @@
     }
     const literal = Number.isInteger(decorator.count) ? Math.max(1, decorator.count) : 1;
     mutate(() => {
-      if (state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)) state.raw.inputs[name] = { type: 'integer', default: literal };
+      if (state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)) state.raw.inputs[name] = { type: 'integer', default: literal, _autoPublished:true };
       else state.raw.inputs = { [name]: { type: 'integer', default: literal } };
       decorator.count = { ref: `inputs.${name}` };
     });
@@ -3572,14 +3759,20 @@
     const expression = decorator.expression;
     const op = expression && typeof expression === 'object' && !Array.isArray(expression) ? Object.keys(expression)[0] : 'literal';
     const choices = ['literal', 'exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'];
-    shell.appendChild(selectInput(op, choices.map((value) => ({ value, label: value.toUpperCase() })), (next) => mutate(() => {
+    const labels = {literal:'固定条件',exists:'存在',eq:'等于',ne:'不等于',gt:'大于',gte:'大于等于',lt:'小于',lte:'小于等于',contains:'包含',and:'全部满足',or:'任一满足',not:'取反'};
+    shell.appendChild(selectInput(op, choices.map((value) => ({ value, label: labels[value] })), (next) => mutate(() => {
       if (next === 'literal') decorator.expression = true;
       else if (next === 'exists') decorator.expression = { exists: { ref: allRefs(node, undefined, true)[0] || '' } };
       else if (next === 'and' || next === 'or') decorator.expression = { [next]: [true, true] };
       else if (next === 'not') decorator.expression = { not: true };
       else decorator.expression = { [next]: [{ ref: allRefs(node)[0] || '' }, null] };
     }), 'when-op'));
-    if (op === 'literal') shell.appendChild(checkbox(!!expression, (value) => mutate(() => { decorator.expression = value; })));
+    if (op === 'literal') {
+      shell.classList.add('condition-literal');
+      const toggle = el('label', 'check-label');
+      toggle.appendChild(checkbox(!!expression, (value) => mutate(() => { decorator.expression = value; })));
+      toggle.appendChild(el('span', '', '满足条件')); shell.appendChild(toggle);
+    }
     else if (op === 'exists') {
       const ref = expression.exists && expression.exists.ref;
       const refs = allRefs(node, undefined, true);
@@ -3695,6 +3888,20 @@
 
   function definitionValueControl(definition, value, assign, options = {}) {
     const set = (next) => mutate(() => assign(next));
+    if(definition.type==='object' && Object.keys(definition.properties||{}).length) {
+      const shell=el('div','variable-struct-value');
+      for(const [key,child] of Object.entries(definition.properties)) {
+        const row=field(shell,child.display_name||fieldLabel(key));
+        const current=value && typeof value==='object' ? value[key] : undefined;
+        row.appendChild(definitionValueControl(child,current===undefined?initialDefinitionValue(child):current,next=>assign({...value,[key]:next}),options));
+      }
+      return shell;
+    }
+    if(definition.type==='array' && definition.items) {
+      const shell=el('div','variable-array-value'),items=Array.isArray(value)?value:[];
+      items.forEach((item,index)=>{const row=el('div','variable-array-item');row.appendChild(definitionValueControl(definition.items,item,next=>{const updated=items.slice();updated[index]=next;assign(updated);},options));row.appendChild(UI.button({label:'删除',onClick:()=>set(items.filter((_,i)=>i!==index))}));shell.appendChild(row);});
+      shell.appendChild(UI.button({label:'添加元素',onClick:()=>set([...items,initialDefinitionValue(definition.items)])}));return shell;
+    }
     if (options.useEnum !== false && Array.isArray(definition.enum) && definition.enum.length) {
       const values = definition.enum.slice();
       if (!values.some((item) => sameDefinitionValue(item, value))) values.unshift(value);
@@ -3721,136 +3928,15 @@
     }
     if (definition.type === 'asset') {
       const shell = el('div', 'inline-control');
-      shell.appendChild(textInput(value ?? '', set, { placeholder: 'assets/templates/...' }));
+      const input = textInput(value ?? '', set, { placeholder: 'assets/templates/...' });
+      bindAssetPreview(input);
+      shell.appendChild(input);
       const browse = el('button', '', '浏览'); browse.title = '从 assets 中选择模板';
       browse.addEventListener('click', () => openAssetBrowser(options.nodeId || '', options.key || '', value, assign));
       shell.appendChild(browse);
       return shell;
     }
     return textInput(value ?? '', set);
-  }
-
-  function optionalDefinitionNumber(body, label, definition, key, options = {}) {
-    const row = field(body, label);
-    row.appendChild(textInput(definition[key] ?? '', (value) => mutate(() => {
-      if (String(value).trim() === '') delete definition[key];
-      else definition[key] = options.integer ? parseInt(value, 10) : parseFloat(value);
-    }), { type: 'number', min: options.min, step: options.integer ? 1 : 'any', placeholder: '不限' }));
-  }
-
-  function nextEnumValue(definition) {
-    const values = Array.isArray(definition.enum) ? definition.enum : [];
-    if (definition.type === 'boolean') return values.includes(false) ? true : false;
-    if (definition.type === 'number' || definition.type === 'integer') {
-      let value = 0; while (values.includes(value)) value += 1; return value;
-    }
-    let index = values.length + 1;
-    let value = `选项 ${index}`;
-    while (values.includes(value)) { index += 1; value = `选项 ${index}`; }
-    return value;
-  }
-
-  function renderDefinitionEnum(body, definition) {
-    if (!['string', 'number', 'integer', 'boolean', 'path'].includes(definition.type)) return;
-    const heading = el('div', 'definition-option-heading');
-    heading.appendChild(el('span', '', '可选值'));
-    const add = el('button', 'small-command', '＋ 添加选项');
-    add.disabled = definition.type === 'boolean' && Array.isArray(definition.enum) && definition.enum.length >= 2;
-    add.addEventListener('click', () => mutate(() => {
-      if (!Array.isArray(definition.enum)) definition.enum = [];
-      definition.enum.push(nextEnumValue(definition));
-    }));
-    heading.appendChild(add); body.appendChild(heading);
-    const values = Array.isArray(definition.enum) ? definition.enum : [];
-    if (!values.length) body.appendChild(el('div', 'definition-option-empty', '未限制可选值'));
-    values.forEach((value, index) => {
-      const row = el('div', 'definition-enum-row');
-      const editable = { ...definition }; delete editable.enum;
-      row.appendChild(definitionValueControl(editable, value, (next) => { definition.enum[index] = next; }, { useEnum: false }));
-      const remove = el('button', 'icon-button danger', '×'); remove.title = '删除选项';
-      remove.addEventListener('click', () => mutate(() => {
-        const removed = definition.enum.splice(index, 1)[0];
-        if (!definition.enum.length) delete definition.enum;
-        if (Object.prototype.hasOwnProperty.call(definition, 'default') && sameDefinitionValue(definition.default, removed)) {
-          if (Array.isArray(definition.enum) && definition.enum.length) definition.default = clone(definition.enum[0]);
-          else delete definition.default;
-        }
-      }));
-      row.appendChild(remove); body.appendChild(row);
-    });
-  }
-
-  function renameDefinitionProperty(definition, oldName, name) {
-    if (!name || name === oldName) return;
-    if (definition.properties[name]) { toast('字段名称已存在', true); return; }
-    const next = {};
-    for (const [key, value] of Object.entries(definition.properties)) next[key === oldName ? name : key] = value;
-    definition.properties = next;
-  }
-
-  function renderDefinitionShape(body, definition) {
-    if (definition.type === 'number' || definition.type === 'integer') {
-      optionalDefinitionNumber(body, '最小值', definition, 'min');
-      optionalDefinitionNumber(body, '最大值', definition, 'max');
-    } else if (['string', 'asset', 'path'].includes(definition.type)) {
-      optionalDefinitionNumber(body, '最短长度', definition, 'min_length', { integer: true, min: 0 });
-      optionalDefinitionNumber(body, '最长长度', definition, 'max_length', { integer: true, min: 0 });
-    } else if (definition.type === 'array') {
-      optionalDefinitionNumber(body, '最少元素', definition, 'min_items', { integer: true, min: 0 });
-      optionalDefinitionNumber(body, '最多元素', definition, 'max_items', { integer: true, min: 0 });
-      const itemType = field(body, '元素类型');
-      itemType.appendChild(selectInput(definition.items?.type || '', [
-        { value: '', label: '任意类型' },
-        ...DEFINITION_TYPES.map((type) => ({ value: type, label: type })),
-      ], (type) => mutate(() => { if (type) definition.items = { type }; else delete definition.items; })));
-    } else if (definition.type === 'object') {
-      if (!definition.properties || typeof definition.properties !== 'object' || Array.isArray(definition.properties)) definition.properties = {};
-      const heading = el('div', 'definition-option-heading'); heading.appendChild(el('span', '', '对象字段'));
-      const add = el('button', 'small-command', '＋ 添加字段');
-      add.addEventListener('click', () => mutate(() => {
-        let index = 1; while (definition.properties[`field_${index}`]) index += 1;
-        definition.properties[`field_${index}`] = { type: 'string' };
-      }));
-      heading.appendChild(add); body.appendChild(heading);
-      const properties = Object.entries(definition.properties);
-      if (!properties.length) body.appendChild(el('div', 'definition-option-empty', '自由对象，不限制字段'));
-      properties.forEach(([name, child]) => {
-        const row = el('div', 'definition-property-row');
-        row.appendChild(textInput(name, (value) => mutate(() => renameDefinitionProperty(definition, name, value.trim()))));
-        row.appendChild(selectInput(child.type || 'string', DEFINITION_TYPES.map((type) => ({ value: type, label: type })), (type) => mutate(() => changeDefinitionType(child, type))));
-        const required = checkbox(child.required === true, (value) => mutate(() => { if (value) child.required = true; else delete child.required; })); required.title = '必填字段'; row.appendChild(required);
-        const remove = el('button', 'icon-button danger', '×'); remove.title = '删除字段'; remove.addEventListener('click', () => mutate(() => { delete definition.properties[name]; })); row.appendChild(remove);
-        body.appendChild(row);
-      });
-    }
-  }
-
-  function renderDefinitionOptions(body, name, definition, options = {}) {
-    field(body, '描述').appendChild(textInput(definition.description || '', (value) => mutate(() => {
-      if (value.trim()) definition.description = value.trim(); else delete definition.description;
-    }), { placeholder: '说明这个变量的用途' }));
-    const hasDefault = Object.prototype.hasOwnProperty.call(definition, 'default');
-    const defaultHeading = el('div', 'variable-option-heading');
-    defaultHeading.appendChild(el('span', '', options.requireDefault ? '初始值' : '默认值'));
-    body.appendChild(defaultHeading);
-    const defaultShell = el('div', 'definition-default');
-    if (!options.requireDefault) {
-      const enabled = el('label', 'check-label'); enabled.appendChild(checkbox(hasDefault, (value) => mutate(() => {
-        if (value) definition.default = initialDefinitionValue(definition); else delete definition.default;
-      }))); enabled.appendChild(el('span', '', '启用')); defaultHeading.appendChild(enabled);
-    }
-    if (hasDefault) defaultShell.appendChild(definitionValueControl(definition, definition.default, (value) => { definition.default = value; }, { key: name }));
-    else defaultShell.appendChild(el('div', 'definition-option-empty', definition.required ? '未设置默认值，调用方必须传入。' : '未设置默认值，调用方可省略。'));
-    body.appendChild(defaultShell);
-    const shape = el('div', 'definition-shape');
-    renderDefinitionShape(shape, definition);
-    const choices = el('div', 'definition-choices');
-    renderDefinitionEnum(choices, definition);
-    if (shape.children.length || choices.children.length) {
-      body.appendChild(el('div', 'variable-option-heading', '约束'));
-      if (shape.children.length) body.appendChild(shape);
-      if (choices.children.length) body.appendChild(choices);
-    }
   }
 
   function nextVariableName(scope) {
@@ -3861,16 +3947,32 @@
   }
 
   function variableReferenceCount(scope, name) {
-    const prefix = `${scope}.${name}`;
-    let count = 0;
-    const visit = (value) => {
-      if (Array.isArray(value)) { value.forEach(visit); return; }
-      if (!value || typeof value !== 'object') return;
-      if (typeof value.ref === 'string' && (value.ref === prefix || value.ref.startsWith(`${prefix}.`))) count += 1;
-      Object.values(value).forEach(visit);
-    };
-    visit(state.raw.nodes);
-    return count;
+    return VariableSystem.references(state.raw,scope,name).length;
+  }
+
+  /** 取消输入的公开：转为运行变量，并同步改写节点绑定与变量卡片。 */
+  function convertInputToVariable(name) {
+    if (!state.raw.inputs || !state.raw.inputs[name]) return;
+    mutate(() => {
+      const definition = state.raw.inputs[name];
+      const newId = VariableSystem.create(state.raw, 'variables', VariableSystem.label(state.raw, 'inputs', name), definition, definition.default);
+      const prefix = `inputs.${name}`, target = `variables.${newId}`;
+      const rewrite = (value) => {
+        if (!value || typeof value !== 'object') return;
+        if (typeof value.ref === 'string' && (value.ref === prefix || value.ref.startsWith(`${prefix}.`))) value.ref = target + value.ref.slice(prefix.length);
+        for (const child of Object.values(value)) rewrite(child);
+      };
+      for (const node of state.raw.nodes || []) rewrite(node);
+      for (const card of Object.values(variableCards())) {
+        if (card && typeof card === 'object' && card.scope !== 'variables' && card.name === name) { card.scope = 'variables'; card.name = newId; }
+      }
+      for (const variable of Object.values(state.raw.variables || {})) {
+        if (variable && variable.initial_from === name) delete variable.initial_from;
+      }
+      delete state.raw.inputs[name];
+      state.selectedVariable = newId;
+      state.selectedVariableScope = 'variables';
+    });
   }
 
   function removeVariable(scope, name) {
@@ -3880,6 +3982,7 @@
       return;
     }
     mutate(() => {
+      clearVariableCardSelection();
       const definitions = state.raw[scope];
       const names = Object.keys(definitions);
       const index = names.indexOf(name);
@@ -3897,14 +4000,14 @@
     });
   }
 
-  function addVariable(scope = 'inputs') {
+  function addVariable(scope = 'variables') {
     mutate(() => {
-      if (scope !== 'variables') scope = 'inputs';
+      if (scope !== 'inputs') scope = 'variables';
       if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) state.raw[scope] = {};
-      const name = nextVariableName(scope);
-      state.raw[scope][name] = scope === 'variables' ? { type: 'string', default: '' } : { type: 'string' };
+      const name = VariableSystem.create(state.raw,scope,'新变量',{type:'string'},'');
       state.selectedVariable = name;
       state.selectedVariableScope = scope;
+      clearVariableCardSelection();
       state.inspector = 'variables';
       state.selected.clear();
       state.selectedEdge = null;
@@ -3915,7 +4018,7 @@
   function renderVariablesInspector() {
     const name = state.selectedVariable;
     const scope = state.selectedVariableScope === 'variables' ? 'variables' : 'inputs';
-    const scopeLabel = scope === 'inputs' ? '工作流输入' : '运行变量';
+    const scopeLabel = '变量';
     const body = clearInspector(name ? `${scopeLabel} · ${name}` : scopeLabel);
     if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) state.raw[scope] = {};
     const rawDefinition = name ? state.raw[scope][name] : null;
@@ -3928,48 +4031,87 @@
       : { type: 'any' };
     if (scope === 'variables' && !Object.prototype.hasOwnProperty.call(definition, 'default')) definition.default = initialDefinitionValue(definition);
     if (definition !== rawDefinition) state.raw[scope][name] = definition;
-    section(body, scopeLabel);
     const details = el('div', 'variable-details');
-    details.appendChild(el('div', 'description', scope === 'inputs' ? '由调用方传入，流程运行期间只读。' : '仅属于本次运行，通过 variables.set 更新。'));
-    field(details, '名称').appendChild(textInput(name, (value) => renameVariable(scope, name, value.trim())));
-    field(details, '类型').appendChild(selectInput(definition.type || 'string', DEFINITION_TYPES.map((value) => ({ value, label: value })), (value) => mutate(() => changeDefinitionType(definition, value))));
-    const flags = el('div', 'variable-detail-meta');
-    if (scope === 'inputs') {
-      const required = el('label', 'check-label'); required.appendChild(checkbox(definition.required === true, (value) => mutate(() => { if (value) definition.required = true; else delete definition.required; }))); required.appendChild(el('span', '', '必填')); flags.appendChild(required);
+    section(details, '变量');
+    field(details, '变量命名').appendChild(textInput(variableDisplayName(scope, name), (value) => renameVariable(scope, name, value.trim())));
+    field(details, '变量类型').appendChild(selectInput(definition.type || 'string', DEFINITION_TYPES.map((value) => ({ value, label: value })), (value) => {
+      if (variableReferenceCount(scope, name)) { toast('变量已有引用，请先解除引用再修改类型', true); return; }
+      mutate(() => { changeDefinitionType(definition, value); syncExposedInput(definition, name); });
+    }));
+    field(details, '描述').appendChild(textInput(definition.description || '', (value) => mutate(() => {
+      if (value.trim()) definition.description = value.trim(); else delete definition.description;
+      syncExposedInput(definition, name);
+    }), { placeholder: '说明这个变量的用途' }));
+    field(details, '分组').appendChild(textInput(definition.group || '', (value) => mutate(() => {
+      if (value.trim()) definition.group = value.trim(); else delete definition.group;
+      syncExposedInput(definition, name);
+    }), { placeholder: '例如：战斗设置；留空为未分组' }));
+    if (scope === 'variables') {
+      field(details, '公开').appendChild(checkbox(!!definition.initial_from, (value) => mutate(() => {
+        if (value) VariableSystem.expose(state.raw, name);
+        else delete definition.initial_from;
+      })));
+    } else {
+      const auto = definition._autoPublished === true;
+      const initializers = Object.entries(state.raw.variables || {})
+        .filter(([, item]) => item && item.initial_from === name)
+        .map(([key]) => key);
+      const publicBox = checkbox(true, (value) => {
+        if (value) return;
+        if (auto) {
+          mutate(() => {
+            for (const key of initializers) delete state.raw.variables[key].initial_from;
+            delete state.raw.inputs[name];
+          });
+          return;
+        }
+        convertInputToVariable(name);
+      });
+      publicBox.title = auto ? '取消公开会移除自动输入，并解除变量的初始化绑定' : '取消公开后转为运行变量，引用它的地方会同步改写';
+      field(details, '公开').appendChild(publicBox);
     }
-    const references = variableReferenceCount(scope, name);
-    const usage = el('div', 'variable-usage', references ? `${references} 处节点引用` : '尚未被节点引用');
-    flags.appendChild(usage); details.appendChild(flags);
-    const options = el('div', 'variable-options'); renderDefinitionOptions(options, name, definition, { requireDefault: scope === 'variables' }); details.appendChild(options);
+    section(details, '默认值');
+    field(details, '默认值').appendChild(definitionValueControl(definition, definition.default, (value) => {
+      definition.default = value;
+      syncExposedInput(definition, name);
+    }, { key: name }));
     body.appendChild(details);
-    const remove = UI.button({label: `删除${scopeLabel}`, variant: 'danger', className: 'variable-delete', onClick: () => removeVariable(scope, name)});
+    const remove = UI.button({ label: `删除${scopeLabel}`, variant: 'danger', className: 'variable-delete', onClick: () => removeVariable(scope, name) });
     body.appendChild(remove);
   }
 
   function renameVariable(scope, oldName, name) {
-    if (!name || name === oldName) return;
-    if ((state.raw.inputs && state.raw.inputs[name]) || (state.raw.variables && state.raw.variables[name])) { toast('名称已存在', true); return; }
-    mutate(() => {
-      const next = {};
-      for (const [key, value] of Object.entries(state.raw[scope])) next[key === oldName ? name : key] = value;
-      state.raw[scope] = next;
-      for (const [id, card] of Object.entries(variableCards())) {
-        const cardName = card && typeof card.name === 'string' ? card.name : id;
-        const cardScope = card && card.scope === 'variables' ? 'variables' : 'inputs';
-        if (cardScope === scope && cardName === oldName && card && typeof card === 'object') card.name = name;
-      }
-      const remap = (item) => {
-        if (Array.isArray(item)) return item.forEach(remap);
-        if (!item || typeof item !== 'object') return;
-        const prefix = `${scope}.${oldName}`;
-        if (typeof item.ref === 'string' && (item.ref === prefix || item.ref.startsWith(`${prefix}.`))) {
-          item.ref = `${scope}.${name}${item.ref.slice(prefix.length)}`;
-        }
-        Object.values(item).forEach(remap);
-      };
-      remap(state.raw.nodes);
-      state.selectedVariable = name;
-    });
+    if (!name || name === variableDisplayName(scope,oldName)) return;
+    try { mutate(()=>{VariableSystem.rename(state.raw,scope,oldName,name);syncExposedInput(state.raw[scope][oldName],oldName);}); } catch(error) { toast(error.message,true); }
+  }
+
+  function variableDisplayName(scope, name) { return state.raw?.[scope]?.[name]?.display_name || name; }
+
+  /** 公开变量的自动输入是它的镜像：改名、改类型、改说明、改默认值时同步过去。 */
+  function syncExposedInput(definition, name) {
+    const twin = definition && definition.initial_from && state.raw.inputs ? state.raw.inputs[definition.initial_from] : null;
+    if (!twin || !twin._autoPublished) return;
+    for (const key of ['type', 'description', 'group']) {
+      if (definition[key] === undefined) delete twin[key]; else twin[key] = clone(definition[key]);
+    }
+    if (Object.prototype.hasOwnProperty.call(definition, 'default')) twin.default = clone(definition.default); else delete twin.default;
+    twin.display_name = `${VariableSystem.label(state.raw, 'variables', name)} · 初始值`;
+  }
+
+  function valueBindingMenu(node, definition, getValue, assign, label) {
+    const refs = allRefs(node,definition);
+    return UI.dropdown({value:'',label:'绑定',options:[
+      {value:'',label:'绑定',disabled:true},
+      ...refs.map(ref=>({value:ref,label:referenceLabel(ref)})),
+      {value:'$variable',label:'提升为变量'},
+    ],searchable:true,placeholder:'搜索兼容变量或节点输出',onChange:choice=>{
+      if(!choice)return;
+      if(choice.startsWith('$')) {
+        const current=getValue();
+        if(VariableSystem.containsBinding(current)){toast('请先恢复固定值，或选择已有引用',true);return;}
+        mutate(()=>{const id=VariableSystem.create(state.raw,'variables',label,{...definition},current===undefined?initialDefinitionValue(definition):current);assign({ref:`variables.${id}`});});
+      } else mutate(()=>assign({ref:choice}));
+    }});
   }
 
   const SVG_EXPORT_STYLE_PROPERTIES = [
@@ -4025,6 +4167,37 @@
       window.addEventListener('message', listener);
       vscode.postMessage({ type: 'requestAssetData', requestId, paths });
     });
+  }
+
+  function normalizedAssetPath(value) {
+    if (typeof value !== 'string') return '';
+    return value.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  }
+
+  function assetPathStatus(value) {
+    const normalized = normalizedAssetPath(value);
+    if (!normalized || !state.assetPaths) return 'unknown';
+    return state.assetPaths.has(normalized) ? 'available' : 'missing';
+  }
+
+  function requestAssetInventory() {
+    if (state.assetPaths || state.assetInventoryRequestId || !state.raw) return;
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    state.assetInventoryRequestId = requestId;
+    vscode.postMessage({ type: 'listAssetImages', requestId });
+  }
+
+  function appendMissingAssetAction(shell, node, key, value, onChange) {
+    if (!node || assetPathStatus(value) !== 'missing') return;
+    const normalized = normalizedAssetPath(value);
+    const hint = el('div', 'asset-missing-hint');
+    hint.appendChild(el('span', '', '找不到此模板图片'));
+    const repair = el('button', 'small-command', '从当前画面补齐');
+    repair.type = 'button';
+    repair.title = `截取后保存为 ${normalized}`;
+    repair.addEventListener('click', () => requestTemplateReplacement(node.id, key, normalized, { targetPath: normalized, applyValue: onChange }));
+    hint.appendChild(repair);
+    shell.appendChild(hint);
   }
 
   /** 收集画布上需要内嵌的模板路径（运行截图已是 data URL，无需请求）。 */
@@ -4272,6 +4445,40 @@
     overlay.appendChild(dialog);
   }
 
+  let assetBrowserPortal = null;
+  function assetBrowserOverlay() { return assetBrowserPortal ? assetBrowserPortal.overlay : $('asset-browser'); }
+
+  function mountAssetBrowser() {
+    if (assetBrowserPortal) return;
+    let owner = document;
+    try { owner = window.top.document; } catch { /* Standalone / cross-origin host. */ }
+    const overlay = $('asset-browser'), originalParent = overlay.parentNode;
+    const returnFocus = document.activeElement;
+    const host = owner.createElement('dialog');
+    host.setAttribute('aria-label', '选择模板');
+    host.style.cssText = 'padding:0;border:0;max-width:none;max-height:none;width:100vw;height:100vh;background:transparent;color:inherit;overflow:hidden;';
+    const surface = owner.createElement('div'); host.appendChild(surface);
+    const shadow = surface.attachShadow({mode:'open'});
+    const sheet = owner.createElement('link'); sheet.rel = 'stylesheet';
+    sheet.href = new URL('./asset-browser.css', document.baseURI).href;
+    shadow.appendChild(sheet); shadow.appendChild(overlay);
+    const syncTheme = () => {
+      const computed = getComputedStyle(document.documentElement);
+      for (const name of ['--ui-panel','--ui-bg','--ui-field','--ui-surface','--ui-hover','--ui-selected','--ui-line','--ui-text','--ui-muted','--ui-focus']) host.style.setProperty(name, computed.getPropertyValue(name));
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme','style','class']});
+    host.addEventListener('cancel', event => { event.preventDefault(); closeAssetBrowser(); });
+    host.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); closeAssetBrowser(); }
+      event.stopPropagation();
+    });
+    owner.body.appendChild(host);
+    assetBrowserPortal = {host,overlay,originalParent,returnFocus,observer};
+    host.showModal();
+  }
+
   function openAssetBrowser(nodeId, key, currentPath, applyValue = null) {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const normalized = typeof currentPath === 'string' ? currentPath.replace(/\\/g, '/') : '';
@@ -4286,14 +4493,22 @@
       query: '',
       selectedPath: normalized,
     };
-    $('asset-browser').classList.remove('hidden');
+    mountAssetBrowser();
+    assetBrowserOverlay().classList.remove('hidden');
     renderAssetBrowser();
+    assetBrowserOverlay().querySelector('input')?.focus();
     vscode.postMessage({ type: 'listAssetImages', requestId });
   }
 
   function closeAssetBrowser() {
-    const overlay = $('asset-browser');
+    const overlay = assetBrowserOverlay();
     if (overlay) overlay.classList.add('hidden');
+    if (assetBrowserPortal) {
+      const {host,originalParent,returnFocus,observer} = assetBrowserPortal;
+      observer.disconnect(); host.close(); originalParent.appendChild(overlay); host.remove();
+      assetBrowserPortal = null;
+      if (returnFocus?.isConnected) returnFocus.focus();
+    }
     state.assetBrowser = null;
   }
 
@@ -4324,7 +4539,8 @@
 
   function restoreAssetBrowserAfterRoi() {
     if (!state.assetBrowser) return;
-    const overlay = $('asset-browser');
+    const overlay = assetBrowserOverlay();
+    if (assetBrowserPortal && !assetBrowserPortal.host.open) assetBrowserPortal.host.showModal();
     if (overlay) overlay.classList.remove('hidden');
     renderAssetBrowser();
   }
@@ -4334,7 +4550,8 @@
     if (!browser || !assetPath) return;
     browser.selectedPath = assetPath;
     if (!requestTemplateReplacement(browser.nodeId, browser.key, assetPath, { returnToAssetBrowser: true })) return;
-    $('asset-browser').classList.add('hidden');
+    assetBrowserOverlay().classList.add('hidden');
+    assetBrowserPortal?.host.close();
   }
 
   function requestTemplateReplacement(nodeId, key, assetPath, options = {}) {
@@ -4353,7 +4570,7 @@
 
   function renderAssetBrowser() {
     const browser = state.assetBrowser;
-    const overlay = $('asset-browser');
+    const overlay = assetBrowserOverlay();
     if (!browser || !overlay) return;
     overlay.innerHTML = '';
 
@@ -4368,7 +4585,8 @@
 
     const toolbar = el('div', 'asset-browser-toolbar');
     const search = el('input', 'asset-search'); search.type = 'search'; search.placeholder = '搜索图片名称或路径'; search.value = browser.query;
-    search.addEventListener('input', () => { browser.query = search.value; renderAssetBrowser(); const next = $('asset-browser').children[0]; if (next) { const input = next.children[1] && next.children[1].children[0]; if (input) { input.focus(); input.setSelectionRange?.(input.value.length, input.value.length); } } });
+    search.setAttribute('aria-label', '搜索图片名称或路径');
+    search.addEventListener('input', () => { browser.query = search.value; renderAssetBrowser(); assetBrowserOverlay().querySelector('input')?.focus(); });
     toolbar.appendChild(search);
     const total = Array.isArray(browser.images) ? browser.images.length : 0;
     toolbar.appendChild(el('span', 'asset-total', browser.images === null ? '正在读取…' : `${total} 张图片`));
@@ -4383,7 +4601,9 @@
     const selectedValue = el('div', 'asset-selected-path', browser.selectedPath || '未选择图片'); selectedValue.title = browser.selectedPath || '';
     const cancel = el('button', '', '取消'); cancel.addEventListener('click', closeAssetBrowser);
     const confirm = el('button', 'primary', '选择'); confirm.disabled = !browser.selectedPath; confirm.addEventListener('click', () => applyAssetSelection(browser.selectedPath));
-    const actions = el('div', 'asset-browser-actions'); actions.appendChild(cancel); actions.appendChild(confirm);
+    const recapture = el('button', '', '重新截取'); recapture.disabled = !browser.selectedPath;
+    recapture.addEventListener('click', () => recaptureAsset(browser.selectedPath));
+    const actions = el('div', 'asset-browser-actions'); actions.appendChild(recapture); actions.appendChild(cancel); actions.appendChild(confirm);
     footer.appendChild(selectedValue); footer.appendChild(actions); dialog.appendChild(footer);
     overlay.appendChild(dialog);
 
@@ -4408,6 +4628,7 @@
       const inFolder = browser.folder === 'assets' || image.path.startsWith(`${browser.folder}/`);
       return inFolder && (!query || image.path.toLocaleLowerCase('zh-CN').includes(query));
     });
+    toolbar.lastChild.textContent = `${visible.length} / ${total} 张图片`;
     if (!visible.length) {
       grid.appendChild(el('div', 'asset-browser-status', browser.images.length ? '没有匹配的图片' : 'assets 中暂无图片'));
       return;
@@ -4418,11 +4639,13 @@
       selectedValue.textContent = assetPath;
       selectedValue.title = assetPath;
       confirm.disabled = false;
-      for (const tile of grid.children) tile.classList.toggle('selected', tile.dataset.path === assetPath);
+      recapture.disabled = false;
+      for (const tile of grid.children) { tile.classList.toggle('selected', tile.dataset.path === assetPath); tile.setAttribute('aria-pressed', String(tile.dataset.path === assetPath)); }
     };
     for (const asset of visible) {
       const tile = el('button', `asset-tile${asset.path === browser.selectedPath ? ' selected' : ''}`);
       tile.dataset.path = asset.path; tile.title = asset.path;
+      tile.setAttribute('aria-pressed', String(asset.path === browser.selectedPath));
       const preview = el('span', 'asset-preview');
       const image = el('img'); image.src = asset.uri; image.alt = ''; image.loading = 'lazy';
       if (browser.cacheBust) image.src += `${image.src.includes('?') ? '&' : '?'}v=${browser.cacheBust}`;
@@ -4437,9 +4660,14 @@
         event.preventDefault();
         event.stopPropagation();
         setSelection(asset.path);
-        showMenu(event.clientX, event.clientY, [
-          { label: '重新截取', run: () => recaptureAsset(asset.path) },
-        ]);
+        // Keep the menu inside the top-level modal, not the inspector iframe.
+        overlay.querySelector('.asset-context-menu')?.remove();
+        const menu = el('button', 'asset-context-menu', '重新截取');
+        menu.style.left = `${Math.max(8, Math.min(event.clientX, overlay.clientWidth - 112))}px`;
+        menu.style.top = `${Math.max(8, Math.min(event.clientY, overlay.clientHeight - 40))}px`;
+        menu.addEventListener('click', () => { menu.remove(); recaptureAsset(asset.path); });
+        menu.addEventListener('blur', () => menu.remove());
+        overlay.appendChild(menu); menu.focus();
       });
       grid.appendChild(tile);
     }
@@ -4634,11 +4862,17 @@
 
   function handleRunEvent(event) {
     if (!event || typeof event !== 'object') return;
-    if (event.type === 'run_started') { state.activeRun = event.run_id; state.run.clear(); }
+    if (event.type === 'run_started') {
+      state.variableSnapshots ||= {}; delete state.variableSnapshots[event.instance_id || 'default'];
+      if(!event.instance_id || !state.instanceId || event.instance_id===state.instanceId){state.activeRun = event.run_id; state.run.clear(); state.variableValues = null;}
+    }
     if (event.type === 'step' && event.step_id) {
       const step = event.step || {};
       const workflowId = typeof step.workflow_id === 'string' ? step.workflow_id : '';
       if (workflowId && state.raw && workflowId !== state.raw.id) return;
+      if(step.variable_values){state.variableSnapshots ||= {};state.variableSnapshots[event.instance_id || 'default']=clone(step.variable_values);}
+      if(event.instance_id && state.instanceId && event.instance_id!==state.instanceId)return;
+      if (step.variable_values) state.variableValues = clone(step.variable_values);
       let status = String(step.status || '');
       if (status === 'succeeded' && step.action === 'vision.match_template') status = 'matched';
       if (status === 'failed' && step.error_category === 'not_matched') status = 'not_matched';
@@ -4733,19 +4967,51 @@
     toast(`卡片 ${index + 1}/${matches.length}：${String(target.name).trim()}`);
   }
 
+  /**
+   * 删除当前选区：实例运行项 → 变量 → 连线/节点。
+   * 画布 Delete 键、详情面板 Delete 键与标题栏“删除所选”命令都走这一入口，保证行为一致。
+   */
+  function deleteCurrentSelection() {
+    if (state.selectedRun) {
+      const selection = state.selectedRun;
+      const node = nodeById(selection.nodeId);
+      if (node && Array.isArray(node.runs) && node.runs[selection.index]) removeInstanceRun(node, selection.index);
+      else { state.selectedRun = null; render(); }
+      return;
+    }
+    if (state.inspector === 'variables' && state.selectedVariableCardIds instanceof Set && state.selectedVariableCardIds.size) {
+      removeVariableCards([...state.selectedVariableCardIds]);
+      return;
+    }
+    if (state.inspector === 'variables' && state.selectedVariableCardId) {
+      removeVariableCard(state.selectedVariableCardId);
+      return;
+    }
+    if (state.inspector === 'variables' && state.selectedVariable) {
+      removeVariable(state.selectedVariableScope === 'variables' ? 'variables' : 'inputs', state.selectedVariable);
+      return;
+    }
+    deleteSelection();
+  }
+
+  /** Delete 与 Backspace 等价：部分键盘（含小键盘/紧凑键盘）只发送 Backspace。 */
+  function isDeleteKey(event) {
+    return event.key === 'Delete' || event.key === 'Backspace';
+  }
+
   function executeEditorCommand(command, value) {
     if (command === 'undo') undo();
     else if (command === 'redo') redo();
     else if (command === 'cut') cutSelection();
     else if (command === 'copy') copySelection();
     else if (command === 'paste') pasteClipboard();
-    else if (command === 'deleteSelection') deleteSelection();
+    else if (command === 'deleteSelection') deleteCurrentSelection();
     else if (command === 'selectAll') {
       state.selected = new Set(nodes().map((node) => node.id));
-      state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; state.inspector = 'node'; render();
+      state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); state.inspector = 'node'; render();
     }
     else if (command === 'clearSelection') {
-      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; render();
+      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); render();
     }
     else if (command === 'addTask') addNode('task');
     else if (command === 'addSelector') addNode('selector');
@@ -4763,6 +5029,7 @@
     else if (command === 'variables') {
       const scope = state.raw.inputs && Object.keys(state.raw.inputs).length ? 'inputs' : 'variables';
       state.selectedVariableScope = scope;
+      clearVariableCardSelection();
       if (!state.raw[scope][state.selectedVariable]) state.selectedVariable = Object.keys(state.raw[scope])[0] || '';
       state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
     }
@@ -4772,9 +5039,21 @@
       if (!state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], name)) return;
       state.selectedVariable = name;
       state.selectedVariableScope = scope;
+      clearVariableCardSelection();
       state.inspector = 'variables'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; render();
     }
-    else if (command === 'addVariable') addVariable(value === 'variables' ? 'variables' : 'inputs');
+    else if (command === 'setVariablePublic') {
+      const name = String(value && value.name !== undefined ? value.name : value ?? '');
+      const definition = state.raw.variables && Object.prototype.hasOwnProperty.call(state.raw.variables, name)
+        ? state.raw.variables[name]
+        : null;
+      if (!definition || typeof definition !== 'object') return;
+      mutate(() => {
+        if (value && value.public) VariableSystem.expose(state.raw, name);
+        else delete definition.initial_from;
+      });
+    }
+    else if (command === 'addVariable') addVariable('variables');
     else if (command === 'addVariableCard') addVariableCardCommand(value);
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {
@@ -4793,6 +5072,7 @@
       state.selectedEdge = null;
       state.selectedRun = null;
       state.selectedVariable = '';
+      clearVariableCardSelection();
       if (selection.kind === 'workflow') state.inspector = 'workflow';
       else if (selection.kind === 'variables') {
         state.inspector = 'variables';
@@ -4882,21 +5162,17 @@
       }
     } catch { /* Older drag payloads contain only the input name. */ }
     if (!name) return;
-    placeVariableCard(scope, name, worldPoint(event));
+    const point=worldPoint(event);
+    placeVariableCard(scope,name,point);
   });
   wrap.addEventListener('pointerdown', hideVariableDropGhost);
   window.addEventListener('keydown', (event) => {
     const tag = event.target && event.target.tagName;
     const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     if (event.key === 'Escape') { if (state.connect) cancelConnection(); if (state.variableConnect) cancelVariableConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
-    if (!editing && event.key === 'Delete') {
+    if (!editing && isDeleteKey(event)) {
       event.preventDefault();
-      if (state.selectedRun) {
-        const selection = state.selectedRun;
-        const node = nodeById(selection.nodeId);
-        if (node && Array.isArray(node.runs) && node.runs[selection.index]) removeInstanceRun(node, selection.index);
-        else { state.selectedRun = null; render(); }
-      } else deleteSelection();
+      deleteCurrentSelection();
     }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); }
     if (!editing && event.ctrlKey && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection(); }
@@ -4925,6 +5201,7 @@
       // 同一文档的重复初始化（如保存后的外部变更同步）保留当前视口；
       // 只有切换/重新打开其他工作流时才重新适配。
       const sameDocument = Boolean(message.document && message.document.uri && message.document.uri === state.docUri);
+      if (!sameDocument) { state.variableSnapshots = {}; state.variableValues = null; }
       state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
       state.assetsBaseUri = typeof message.assetsBaseUri === 'string' ? message.assetsBaseUri.replace(/\/?$/, '/') : '';
       state.refs = message.refs || { inputs: [], variables: [], nodes: [] }; state.issues = message.issues || [];
@@ -4934,14 +5211,16 @@
       state.workflowTrail = Array.isArray(message.workflowTrail) ? message.workflowTrail : [];
       state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
       state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
-      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; state.undo = []; state.redo = []; state.run.clear(); state.paramLiteralCache = {}; state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
+      state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); state.undo = []; state.redo = []; state.run.clear(); state.paramLiteralCache = {}; state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
       $('btn-back').classList.toggle('hidden', !message.canGoBack);
       renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
+      requestAssetInventory();
       setTimeout(() => { if (!sameDocument) fitView(); }, 0);
     } else if (message.type === 'runEvent') handleRunEvent(message.event);
     else if (message.type === 'runtimeInstances') {
       state.instances = Array.isArray(message.instances) ? message.instances.filter((item) => item && typeof item.id === 'string' && item.id) : [];
       state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : state.instanceId;
+      state.variableValues = state.variableSnapshots?.[state.instanceId || 'default'] || null;
       renderInstancePicker();
     }
     else if (message.type === 'runReplay') { state.run.clear(); (message.events || []).forEach(handleRunEvent); }
@@ -4967,6 +5246,10 @@
     else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) {
       const request = state.roi;
       const browser = request.returnToAssetBrowser ? state.assetBrowser : null;
+      if (typeof message.path === 'string') {
+        if (!state.assetPaths) state.assetPaths = new Set();
+        state.assetPaths.add(normalizedAssetPath(message.path));
+      }
       if (typeof request.applyValue === 'function') mutate(() => request.applyValue(message.path));
       else if (browser && typeof browser.applyValue === 'function') mutate(() => browser.applyValue(message.path));
       else {
@@ -4979,6 +5262,13 @@
         restoreAssetBrowserAfterRoi();
       }
       toast(request.targetPath ? '模板已重新截取' : '模板已保存');
+    }
+    else if (message.type === 'assetImages' && state.assetInventoryRequestId === message.requestId) {
+      state.assetInventoryRequestId = '';
+      state.assetPaths = new Set((Array.isArray(message.images) ? message.images : [])
+        .map((item) => normalizedAssetPath(item && item.path))
+        .filter(Boolean));
+      renderInspector();
     }
     else if (message.type === 'assetImages' && state.assetBrowser && state.assetBrowser.requestId === message.requestId) {
       state.assetBrowser.images = Array.isArray(message.images) ? message.images.filter((item) => item && typeof item.path === 'string' && typeof item.uri === 'string') : [];
@@ -4995,7 +5285,7 @@
     else if (message.type === 'canvasImageSaved') { setExportBusy(false); toast('完整画布图片已保存'); }
     else if (message.type === 'canvasImageCancelled') { setExportBusy(false); }
     else if (message.type === 'canvasImageError') { setExportBusy(false); toast(message.message || '保存完整画布图片失败', true); }
-    else if (message.type === 'instanceSelected') { state.instanceId = String(message.instanceId || ''); renderInstancePicker(); }
+    else if (message.type === 'instanceSelected') { state.instanceId = String(message.instanceId || ''); state.variableValues = state.variableSnapshots?.[state.instanceId || 'default'] || null; render(); }
     else if (message.type === 'workflowSaved') setDirty(false);
     else if (message.type === 'workflowSaveFailed') setDirty(true);
     else if (message.type === 'externalChange') { const banner = $('external-banner'); banner.textContent = '文件已在外部修改'; banner.classList.remove('hidden'); }

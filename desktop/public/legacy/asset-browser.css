@@ -1,0 +1,48 @@
+/* Top-level template picker. Shadow-scoped: no workbench/inspector overrides. */
+:host { font: 12px "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif; color: var(--ui-text, #dedede); }
+* { box-sizing: border-box; }
+.hidden { display: none !important; }
+#asset-browser { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .22); }
+.asset-browser-dialog { width: min(1040px, 100%); height: min(700px, 100%); min-height: 0; display: grid; grid-template-rows: 44px 46px minmax(0, 1fr) 48px; overflow: hidden; border: 0; border-radius: 8px; background: var(--ui-panel, #252525); box-shadow: 0 8px 28px rgb(0 0 0 / .2); }
+.asset-browser-head, .asset-browser-toolbar, .asset-browser-footer { display: flex; align-items: center; gap: 12px; padding: 8px 14px; }
+.asset-browser-head { justify-content: space-between; }
+.asset-browser-title { font-size: 14px; font-weight: 600; }
+.asset-browser-toolbar { background: var(--ui-surface, #2c2c2c); }
+button, input { font: inherit; color: inherit; border: 0; border-radius: 3px; outline: none; }
+button { cursor: pointer; min-height: 26px; padding: 4px 9px; background: var(--ui-surface, #303030); }
+button:hover:not(:disabled) { background: var(--ui-hover, #393939); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 1px solid var(--ui-focus, #82929d); outline-offset: -1px; }
+.icon-button { width: 26px; padding: 0; font-size: 17px; background: transparent; }
+.asset-search { width: min(460px, 75%); height: 28px; padding: 4px 9px; background: var(--ui-field, #191919); }
+.asset-search::placeholder { color: var(--ui-muted, #999); }
+.asset-total { margin-left: auto; color: var(--ui-muted, #999); white-space: nowrap; font-size: 11px; }
+.asset-browser-content { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
+.asset-folders { min-width: 0; overflow: auto; padding: 10px 6px; border-right: 1px solid var(--ui-line, #303030); }
+.asset-folder { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; background: transparent; text-align: left; }
+.asset-folder.selected { background: var(--ui-selected, #383d42); }
+.asset-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-folder-count { color: var(--ui-muted, #999); font-size: 10px; font-variant-numeric: tabular-nums; }
+.asset-grid { min-width: 0; overflow: auto; align-content: start; display: grid; grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); gap: 8px; padding: 12px; background: var(--ui-bg, #202020); }
+.asset-tile { min-width: 0; height: 126px; display: grid; grid-template-rows: 72px 18px 16px; gap: 3px; padding: 6px; background: transparent; text-align: left; }
+.asset-tile.selected { background: var(--ui-selected, #383d42); }
+.asset-preview { min-height: 0; min-width: 0; display: grid; place-items: center; overflow: hidden; border-radius: 3px; background: var(--ui-field, #191919); }
+.asset-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.asset-name, .asset-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-name { font-size: 11px; }
+.asset-path { color: var(--ui-muted, #999); font-size: 10px; }
+.asset-browser-status { grid-column: 1 / -1; padding: 40px 10px; text-align: center; color: var(--ui-muted, #999); }
+.asset-browser-footer { border-top: 1px solid var(--ui-line, #303030); }
+.asset-selected-path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-muted, #999); font-size: 11px; }
+.asset-browser-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.asset-context-menu { position: fixed; z-index: 2; width: 104px; box-shadow: 0 3px 10px rgb(0 0 0 / .18); }
+.primary { background: #365d73; color: #fff; }
+.primary:hover:not(:disabled) { background: #416a81; }
+* { scrollbar-width: thin; scrollbar-color: var(--ui-line, #414141) transparent; }
+@media (max-width: 600px) {
+  #asset-browser { padding: 10px; }
+  .asset-browser-content { grid-template-columns: 126px minmax(0, 1fr); }
+  .asset-grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); padding: 8px; gap: 4px; }
+  .asset-browser-footer { flex-wrap: wrap; }
+  .asset-browser-dialog { grid-template-rows: 40px 42px minmax(0, 1fr) auto; }
+}

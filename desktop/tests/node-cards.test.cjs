@@ -25,7 +25,7 @@ function harness() {
   for(const name of ['nodeCardSummary','compactValue','workflowInputVariableValue','variableValueSummary','renderNode','renderInstanceRunCard','renderVariableCard']) {
     const start=source.indexOf(`  function ${name}(`); vm.runInContext(source.slice(start,source.indexOf('\n  }',start)+4),ctx);
   }
-  Object.assign(ctx,{state:{run:new Map(),selected:new Set(),raw:{inputs:{count:{type:'integer',default:0}}}},position:()=>({x:0,y:0}),subWorkflowRef:()=>null,templatePreview:()=>null,
+  Object.assign(ctx,{state:{run:new Map(),selected:new Set(),raw:{inputs:{count:{type:'integer',default:0}}}},position:()=>({x:0,y:0}),subWorkflowRef:()=>null,templatePreview:()=>null,assetPreviewForPath:()=>null,bindAssetPathPreview:()=>{},
     TYPE_NAMES:{task:'任务',sequence:'顺序',root:'根节点'},TYPE_ICON:{task:'□',sequence:'→'},RUN_LABEL:{succeeded:'已完成'},compositeSubtitle:()=> '执行子节点',decoratorLabel:()=> 'Retry · 3 次'});
   return {ctx,Element,svgEl};
 }
@@ -65,6 +65,33 @@ test('instance and variable cards retain dimensions, pins and unclipped value so
   assert.equal(byClass(source,'card-body')[0].attrs.width,'168');assert.equal(byClass(source,'card-body')[0].attrs.height,'58');
   assert.equal(byClass(source,'port-variable-out')[0].attrs.cy,'29');
   assert.equal(byClass(source,'variable-card-value')[0].textContent,'0');
+});
+test('删除变量卡片后不会因为保留变量详情而选中同名卡片',()=>{
+  const {ctx,Element}=harness();
+  ctx.state.inspector='variables';ctx.state.selectedVariable='count';ctx.state.selectedVariableScope='inputs';
+  const layer=new Element('g');
+  ctx.state.selectedVariableCardId='count-1';ctx.renderVariableCard(layer,{name:'count',scope:'inputs',id:'count-2',x:0,y:0});
+  assert.equal((layer.children[0].attrs.class||'').includes('selected'),false);
+  const selectedLayer=new Element('g');
+  ctx.renderVariableCard(selectedLayer,{name:'count',scope:'inputs',id:'count-1',x:0,y:0});
+  assert.equal((selectedLayer.children[0].attrs.class||'').includes('selected'),true);
+  const clearedLayer=new Element('g');ctx.state.selectedVariableCardId='';
+  ctx.renderVariableCard(clearedLayer,{name:'count',scope:'inputs',id:'count-1',x:0,y:0});
+  assert.equal((clearedLayer.children[0].attrs.class||'').includes('selected'),false);
+});
+test('资源变量卡片的路径值支持图片悬浮预览',()=>{
+  const {ctx,Element}=harness();
+  const previews=[];
+  ctx.state.assetsBaseUri='assets-base/';
+  ctx.state.raw.inputs.icon_template={type:'asset',default:'assets/templates/start/icon.png'};
+  ctx.assetPreviewForPath=value=>value?{uri:'assets-base/templates/start/icon.png',path:value}:null;
+  ctx.bindAssetPathPreview=(target,getValue)=>target.addEventListener('mouseenter',()=>previews.push(getValue()));
+  const layer=new Element('g');
+  ctx.renderVariableCard(layer,{name:'icon_template',scope:'inputs',id:'icon',x:0,y:0});
+  const valueNode=byClass(layer.children[0],'variable-card-value')[0];
+  assert.equal(valueNode.events.mouseenter.length,1);
+  valueNode.events.mouseenter[0]();
+  assert.deepEqual(previews,['assets/templates/start/icon.png']);
 });
 test('summary preserves zero settings; shared styling covers both themes without glow',()=>{
   const {ctx}=harness();assert.equal(ctx.nodeCardSummary({type:'task',params:{timeout_seconds:0,threshold:0,present:false}}),'等待消失 · 超时 0s · 阈值 0%');

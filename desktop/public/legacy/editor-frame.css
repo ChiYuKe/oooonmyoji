@@ -6,7 +6,7 @@
 #inspector, #inspector-title { background: var(--panel); }
 
 .desktop-canvas-mode #editor-main {
-  height: calc(100% - 30px); /* The canvas still displays its breadcrumb. */
+  height: 100%;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -14,6 +14,15 @@
 }
 .desktop-canvas-mode #canvas-wrap { min-height: 0; }
 .desktop-canvas-mode #inspector { display: none !important; }
+/* 让画布铺满整列，面包屑悬浮在画布上方，半透明背景透出网格 */
+.desktop-canvas-mode #workflow-breadcrumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  border-bottom: 0;
+}
 
 .desktop-details-mode #editor-main { height: 100%; min-height: 0; display: block; }
 .desktop-details-mode #canvas-wrap { display: none; }

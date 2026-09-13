@@ -51,7 +51,6 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 ## VS Code 运行
 
 日常使用统一从 VS Code 左侧活动栏的 **Onmyoji** 页面操作：
-
 - **组队御魂**：按配置启动 `mumu-0` 队长和 `mumu-1` 队员。
 - **停止**：协作取消当前运行。
 - **运行日志**：分别查看队长、队员步骤和奖励统计。
@@ -307,6 +306,38 @@ Action 代码属于可信本地扩展；更新代码后需要重启监督器，�
 有输入副作用的 Action（`effects.retry: "unsafe"`）不可自动重试。模板和产物
 路径必须留在项目资源目录或当前运行的产物目录内；失败和中断会保存最后一帧、
 步骤历史及元数据。
+
+## MCP 模板工厂
+
+项目提供一个可选的 MCP 服务，让 AI 查询 Action、工作流和图片资源，读取设备截图，
+按 ROI 生成图片模板，生成并校验工作流，再将有效模板保存到受控目录。MCP 不会
+执行点击、滑动、输入或启动工作流。
+
+MCP 依赖独立于运行时依赖：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-mcp.txt
+```
+
+MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-client-config.example.json)
+复制到所使用的 AI 客户端配置中，并把其中的 Python、项目根目录和配置文件路径替换为本机实际路径。
+服务入口为：
+
+```powershell
+.\.venv\Scripts\python.exe -m src.oooonmyoji.mcp.server `
+  --config .\config\config.json
+```
+
+修改 MCP 服务代码或依赖后，请重启 Codex，让客户端重新加载 STDIO 服务和新增工具。
+
+可用工具和生成示例见 [docs/mcp-template-factory-plan.md](docs/mcp-template-factory-plan.md)
+及 [docs/mcp-template-generation-example.md](docs/mcp-template-generation-example.md)。
+
+截图模板生成流程为：先调用 `capture_screen(instance_id)` 获取当前画面和临时
+`capture_id`，再调用 `select_roi(capture_id)` 打开项目自带的 ROI 框选窗口；用户确认
+后，调用 `create_template_asset(capture_id, roi, name)` 保存到
+`assets/templates/generated/`。这些工具只做设备读取、打开本地框选窗口和图片文件写入，
+不发送任何设备输入事件；工作流执行能力仍保持关闭。
 
 ## 调度和故障产物
 

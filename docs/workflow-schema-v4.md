@@ -130,6 +130,9 @@ Condition 外，同一节点不允许重复同类装饰器。
 `repeat.count` 也可以绑定整数输入或运行变量，例如
 `{ "type": "repeat", "count": { "ref": "inputs.运行轮数" } }`；编辑器中的“公开”按钮会自动创建一个整数工作流输入并完成绑定。
 
+其他装饰器参数同样支持 `{ "ref": "inputs.参数名" }`：冷却与限时的 `seconds`、重试的 `attempts` 和 `delay_seconds`、仅执行一次的 `reset_on_failure`，以及条件的 `expression`。编辑器“公开”会按参数类型创建工作流输入，将当前值保留为默认值，名称冲突时自动加后缀。“固定值”恢复输入默认值，但不删除工作流输入。
+次数必须为正整数，时长必须为正数，重试间隔允许为零，失败重置必须为布尔值；运行时同样检查引用解析后的值。条件可公开为布尔输入或条件表达式对象输入。动态重试次数仍遵循 Action 的重试安全限制。
+
 - Condition 在分支进入前求值，false 是普通分支失败。
 - Cooldown 在节点离开后启动，锁定期间分支返回失败。
 - Timeout 限制 Task 或整个子树的本次执行。
@@ -153,7 +156,7 @@ Condition 运算符：`exists`、`eq`、`ne`、`gt`、`gte`、`lt`、`lte`、
 传入常量，也可以绑定父工作流的同类型输入。
 
 `variables` 只属于当前运行，不能由调用方传入，且每个变量必须有默认值。
-使用 `variables.set` 更新变量：
+变量只作为只读值在卡片参数中引用，运行期间不可修改：
 
 ```json
 {
@@ -165,10 +168,10 @@ Condition 运算符：`exists`、`eq`、`ne`、`gt`、`gte`、`lt`、`lte`、
   },
   "nodes": [
     {
-      "id": "mark_ready",
+      "id": "use_state",
       "type": "task",
-      "action": "variables.set",
-      "params": { "name": "内部状态", "value": "ready" }
+      "action": "core.log",
+      "params": { "message": { "ref": "variables.内部状态" } }
     }
   ]
 }
@@ -188,6 +191,8 @@ Condition 运算符：`exists`、`eq`、`ne`、`gt`、`gte`、`lt`、`lte`、
 - 复合节点卡片下方是输出引脚，非 Root 卡片上方是单输入引脚。
 - 新连接会把目标节点从旧父级移出，再插入新父级的有序 `children`。
 - 连线手柄支持重新连接；双击、Delete 或详情栏按钮可断开。
+- `Delete` 与 `Backspace` 等价：断连线、删节点、删选中变量与 `runs[]` 实例运行项；
+  桌面端的内容浏览器条目、目录行与面包屑、执行队列行、结构树与变量列表也响应同一按键。
 - 右侧详情栏编辑 Action 参数、装饰器、Simple Parallel 模式和子节点优先级。
 - Instance Parallel 会在节点下展开每个 `runs[]` 子工作流卡片；卡片只显示工作流输入，
   可选择使用子工作流默认值、填写常量或绑定父工作流输入。
@@ -198,3 +203,16 @@ Condition 运算符：`exists`、`eq`、`ne`、`gt`、`gte`、`lt`、`lte`、
 Action manifest 仍使用独立的 `schema_version: 2`。它是 Action 参数、默认值、
 输出 JSON Schema、副作用与重试安全性的唯一事实来源；工作流 schema v4 与
 Action manifest v2 是两个不同版本域。
+
+## 变量编辑与作用域
+
+- 定义的 JSON 键是稳定标识，`display_name` 仅用于显示。新建变量使用 `v_…` 标识；旧工作流的键不迁移，改显示名不会改写引用。
+- `variables.<id>.initial_from` 可填写一个输入标识，在每次运行开始时将该输入深拷贝为变量初值，运行期间保持只读；取消开放会清理已无引用的自动输入，手动输入保留。
+- 定义的 `group` 是自定义分组名称，留空为未分组。输入与运行变量各自分组，分组不改变标识或执行作用域。
+- 编辑器公开操作生成的输入带 `_autoPublished: true`。解除最后一个引用时清理该输入；其他节点、初始化来源或 Get 卡片仍在使用则保留。清理与修改在同一次撤销记录内。无标记的历史输入不自动删除。
+- `variables.<id>.owner` 可指定复合节点。只有该节点及其后代可读取，进入范围时初始化，退出时恢复外层值。不填写则属于本次工作流运行。
+- Get 使用 `{"ref":"variables.<id>"}`；变量只读，不再提供 Set 动作，也不允许在运行期间写入。
+- 结构体通过 `type: object` 与 `properties` 定义，可整体绑定或引用成员，例如 `inputs.<id>.attempts`。Retry 一次公开产生一个含 `attempts`、`delay_seconds` 的结构输入。
+- `_variableTypes` 保存当前工作流可复用的结构预设，是编辑器元数据，不改变执行语义。不是项目级全局类型注册表。
+- 步骤事件的 `variable_values` 是最近执行快照，按实例展示；大对象沿用日志摘要截断规则，不代表暂停调试器的实时求值。
+- 输入始终只读，实例之间不共享变量。这里保留行为树执行模型，并不引入 UE 对象、继承或事件图系统。

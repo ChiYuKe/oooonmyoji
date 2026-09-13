@@ -17,20 +17,6 @@
       ],
       "default": 9999
     },
-    "队员已在场模板": {
-      "type": "asset",
-      "default": "assets/templates/souls/party/member-present.png",
-      "description": "队长用于确认目标队友已经进入协战房间"
-    },
-    "邀请目标模板": {
-      "type": "asset",
-      "default": "assets/templates/souls/party/member-invite-target.png",
-      "description": "队长在好友邀请列表中定位目标队友的名字模板"
-    },
-    "启用结界突破": {
-      "type": "boolean",
-      "default": true
-    },
     "结界突破阈值": {
       "type": "integer",
       "default": 30,
@@ -115,10 +101,23 @@
       "items": {
         "type": "rect"
       }
+    },
+    "v_549a284d14b948fd8bb6a57224d67b89": {
+      "type": "boolean",
+      "default": true,
+      "display_name": "启用结界突破 · 初始值",
+      "_autoPublished": true
     }
   },
   "root": "root",
-  "variables": {},
+  "variables": {
+    "v_bdfbfdc959a846dcac7f9a10e2240dad": {
+      "type": "boolean",
+      "default": true,
+      "display_name": "启用结界突破",
+      "initial_from": "v_549a284d14b948fd8bb6a57224d67b89"
+    }
+  },
   "nodes": [
     {
       "id": "root",
@@ -139,39 +138,150 @@
           "instance": "mumu-0",
           "workflow": "entrypoints/mumu_0_souls_party_leader.json",
           "inputs": {
-            "运行轮数": {
-              "ref": "inputs.运行轮数"
-            },
-            "队员已在场模板": {
-              "ref": "inputs.队员已在场模板"
-            },
-            "邀请目标模板": {
-              "ref": "inputs.邀请目标模板"
-            }
+            "队员已在场模板": "assets/templates/souls/party/member-present.png",
+            "邀请目标模板": "assets/templates/souls/party/member-invite-target.png",
+            "运行轮数": 9999,
+            "队员离开宽限时间": 5
           }
         },
         {
           "instance": "mumu-1",
           "workflow": "entrypoints/mumu_1_souls_party_member.json",
           "inputs": {
-            "运行轮数": {
-              "ref": "inputs.运行轮数"
-            },
-            "启用结界突破": {
-              "ref": "inputs.启用结界突破"
-            },
-            "结界突破阈值": {
-              "ref": "inputs.结界突破阈值"
-            },
-            "结界通关识别区域": {
-              "ref": "inputs.结界通关识别区域"
-            },
-            "结界突破入口位置": {
-              "ref": "inputs.结界突破入口位置"
-            },
-            "结界目标点击位置列表": {
-              "ref": "inputs.结界目标点击位置列表"
-            }
+            "运行轮数": 9999,
+            "启用结界突破": true,
+            "结界突破阈值": 30,
+            "结界通关识别区域": [
+              1450,
+              0,
+              470,
+              180
+            ],
+            "结界突破入口位置": [
+              450,
+              1000,
+              0,
+              0
+            ],
+            "结界目标点击位置列表": [
+              [
+                500,
+                275,
+                0,
+                0
+              ],
+              [
+                1000,
+                275,
+                0,
+                0
+              ],
+              [
+                1500,
+                275,
+                0,
+                0
+              ],
+              [
+                500,
+                475,
+                0,
+                0
+              ],
+              [
+                1000,
+                475,
+                0,
+                0
+              ],
+              [
+                1500,
+                475,
+                0,
+                0
+              ],
+              [
+                500,
+                675,
+                0,
+                0
+              ],
+              [
+                1000,
+                675,
+                0,
+                0
+              ],
+              [
+                1500,
+                675,
+                0,
+                0
+              ]
+            ],
+            "结界完成模板列表": [],
+            "结界完成文字列表": [
+              "已挑战",
+              "已击败",
+              "胜利",
+              "占领"
+            ],
+            "结界目标识别区域列表": [
+              [
+                220,
+                220,
+                500,
+                190
+              ],
+              [
+                720,
+                220,
+                500,
+                190
+              ],
+              [
+                1220,
+                220,
+                500,
+                190
+              ],
+              [
+                220,
+                420,
+                500,
+                190
+              ],
+              [
+                720,
+                420,
+                500,
+                190
+              ],
+              [
+                1220,
+                420,
+                500,
+                190
+              ],
+              [
+                220,
+                620,
+                500,
+                190
+              ],
+              [
+                720,
+                620,
+                500,
+                190
+              ],
+              [
+                1220,
+                620,
+                500,
+                190
+              ]
+            ]
           }
         }
       ]
@@ -191,5 +301,6 @@
   "limits": {
     "timeout_seconds": 300,
     "max_steps": 1000
-  }
+  },
+  "_variableLinks": {}
 }

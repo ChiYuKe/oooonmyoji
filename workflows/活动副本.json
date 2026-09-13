@@ -8,17 +8,20 @@
     1080
   ],
   "root": "root",
-  "limits": {
-    "timeout_seconds": 99999999,
-    "max_steps": 99999999
-  },
   "inputs": {
-    "repeat_rounds_repeat_count": {
-      "type": "integer",
-      "default": 1600
+    "v_2644f348b37b42aa8523d5bfa7941dec": {
+      "type": "string",
+      "display_name": "新输入",
+      "default": "1"
     }
   },
-  "variables": {},
+  "variables": {
+    "v_4440e95d521e43379c19b17765005aa5": {
+      "type": "asset",
+      "display_name": "新输入",
+      "default": ""
+    }
+  },
   "nodes": [
     {
       "id": "root",
@@ -140,7 +143,7 @@
         "disappeared_states": [
           {
             "name": "battle_end",
-            "template": "assets/templates/task_3-template.png",
+            "template": "assets/templates/task_1-template.png",
             "threshold": 0.88,
             "roi": [
               608,
@@ -262,13 +265,13 @@
         "template": "assets/templates/task_3-template.png",
         "present": false,
         "timeout_seconds": 6,
+        "threshold": 0.88,
         "roi": [
-          608,
-          943,
-          734,
-          137
-        ],
-        "threshold": 0.88
+          0,
+          0,
+          100,
+          100
+        ]
       },
       "name": "确认结算提示已消失"
     },
@@ -357,6 +360,41 @@
         "threshold": 0.88
       },
       "name": "确认结算提示已消失"
+    },
+    {
+      "id": "task_1",
+      "type": "task",
+      "action": "core.assert",
+      "params": {
+        "value": ""
+      },
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": false
+        },
+        {
+          "type": "cooldown",
+          "seconds": 1
+        },
+        {
+          "type": "timeout",
+          "seconds": 10
+        },
+        {
+          "type": "repeat",
+          "count": 1
+        },
+        {
+          "type": "retry",
+          "attempts": 2,
+          "delay_seconds": 0
+        },
+        {
+          "type": "do_once",
+          "reset_on_failure": false
+        }
+      ]
     }
   ],
   "_layout": {
@@ -389,8 +427,8 @@
       "y": 832
     },
     "start_click_retry": {
-      "x": 498,
-      "y": 1040
+      "x": 520,
+      "y": 1024
     },
     "tap_challenge": {
       "x": 332,
@@ -427,9 +465,32 @@
     "confirm_continue_disappeared": {
       "x": 2324,
       "y": 1248
+    },
+    "task_1": {
+      "x": 2656,
+      "y": 0
     }
   },
-  "_variableCards": {},
+  "_variableCards": {
+    "card_1": {
+      "name": "repeat_rounds_repeat_count",
+      "scope": "inputs",
+      "x": -200,
+      "y": 1448
+    },
+    "card_2": {
+      "name": "v_2644f348b37b42aa8523d5bfa7941dec",
+      "scope": "inputs",
+      "x": -48,
+      "y": 1296
+    },
+    "card_3": {
+      "name": "v_4440e95d521e43379c19b17765005aa5",
+      "scope": "variables",
+      "x": -56,
+      "y": 1224
+    }
+  },
   "_inputParams": {},
   "_variableLinks": {}
 }

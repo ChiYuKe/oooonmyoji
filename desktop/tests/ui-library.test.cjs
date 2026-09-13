@@ -104,6 +104,30 @@ test('all styles parse; legacy rules are layered below the component library', (
   assert.equal(css.nodes.find(node=>node.type!=='comment').name,'layer');
 });
 
+test('tooltips share a borderless neutral surface and reduced shadow across renderers', () => {
+  const postcss=require('postcss');
+  for(const file of ['ui.css','workflow-editor.css','../../src/renderer/styles.css']) {
+    const css=postcss.parse(fs.readFileSync(path.join(root,file),'utf8'));
+    let found=0;
+    css.walkRules(rule=>{
+      if(!rule.selectors.some(selector=>['.app-tooltip','.ui-tooltip'].includes(selector))) return;
+      const declarations=Object.fromEntries(rule.nodes.filter(node=>node.type==='decl').map(node=>[node.prop,node.value]));
+      assert.equal(declarations.border,'0',file);
+      assert.equal(declarations.background,'var(--ui-tooltip-bg)',file);
+      assert.equal(declarations.color,'var(--ui-tooltip-text)',file);
+      assert.equal(declarations['box-shadow'],'var(--ui-tooltip-shadow)',file);
+      found++;
+    });
+    assert(found>0,file);
+  }
+  const ui=fs.readFileSync(path.join(root,'ui.css'),'utf8');
+  assert(ui.includes('--ui-tooltip-bg: #303030'));
+  assert(ui.includes('--ui-tooltip-shadow: 0 3px 8px rgba(0, 0, 0, .18)'));
+  const light=fs.readFileSync(path.join(root,'../theme/theme.css'),'utf8');
+  assert(light.includes('--ui-tooltip-bg: #fcfcfc'));
+  assert(light.includes('--ui-tooltip-shadow: 0 3px 8px rgba(0, 0, 0, .12)'));
+});
+
 test('search dropdown supports arrows, skips disabled options and commits with Enter', () => {
   const {UI,doc}=harness(); const changes=[];
   const control=UI.dropdown({value:'a',label:'动作',searchable:true,options:[{value:'a',label:'甲'},{value:'b',label:'乙',disabled:true},{value:'c',label:'丙'}],onChange:value=>changes.push(value)});

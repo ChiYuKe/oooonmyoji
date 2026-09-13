@@ -10,6 +10,7 @@
   ['浏览', '截取', '替换'].forEach(label => $('demo-buttons').appendChild(UI.button({ label, onClick: () => report(`点击了「${label}」`) })));
   $('demo-buttons').appendChild(UI.button({ label: '删除', variant: 'danger', onClick: () => report('删除按钮示例，不删除数据') }));
   $('demo-buttons').appendChild(UI.button({ label: '不可用', disabled: true }));
+  $('demo-buttons').appendChild(UI.button({label:'悬浮提示',tip:'repeat轮数repeatcount\n(repeat_rounds_repeat_count)\n类型：integer\n调用方传入，只读\n拖到画布可创建引用卡片'}));
   $('demo-inputs').appendChild(UI.input({ value: '等待挑战按钮消失', label: '显示名称', onChange: value => report(`名称：${value}`) }));
   $('demo-inputs').appendChild(UI.input({ placeholder: '输入模板路径', label: '模板路径' }));
   $('demo-inputs').appendChild(UI.input({ value: '只读字段', readOnly: true, label: '只读示例' }));
@@ -102,7 +103,19 @@
     const shape = make('div','definition-shape'); variableOptions.appendChild(shape);
     field(shape,'最小值',UI.input({value:1,type:'number',label:'最小值'}));
     field(shape,'最大值',UI.input({placeholder:'不限',type:'number',label:'最大值'}));
-    const decorators = section('装饰器',UI.button({label:'+ 添加',onClick:()=>report('添加装饰器入口示例')})); decorators.appendChild(make('div','empty-section','无装饰器'));
+    const decorators = section('装饰器',UI.button({label:'+ 添加',onClick:()=>report('添加装饰器入口示例')}));
+    const retry = make('div','decorator-block');
+    const retryHead = make('div','decorator-heading');
+    const retryActions = make('div','decorator-head-actions'); retryActions.appendChild(UI.button({label:'删除',className:'decorator-remove',onClick:()=>report('移除装饰器入口示例')}));
+    retryHead.append(make('span','decorator-title','失败重试'),make('span','decorator-subtitle','Retry'),retryActions);
+    const publish = make('div','decorator-param-actions'); publish.appendChild(UI.button({label:'公开',onClick:()=>report('一起公开重试次数和间隔')})); retryActions.prepend(publish);
+    const retryFields = make('div','decorator-vector');
+    for (const [label,value,step] of [['次数',2,1],['间隔·秒',0,.1]]) {
+      const field = make('div','decorator-vector-component');
+      const input = make('div','decorator-vector-value'); input.append(make('span','decorator-vector-label',label),UI.input({value,type:'number',step,label}));
+      field.append(input); retryFields.appendChild(field);
+    }
+    retry.append(retryHead,retryFields); decorators.appendChild(retry);
     decorators.appendChild(UI.button({label:'删除节点',variant:'danger',className:'danger full-command',onClick:()=>report('删除入口示例，不删除数据')}));
   }
   render();

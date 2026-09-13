@@ -12,6 +12,9 @@
   --ui-muted: #a0a0a0;
   --ui-danger: #d98989;
   --ui-focus: #999999;
+  --ui-tooltip-bg: #303030;
+  --ui-tooltip-text: #d6d6d6;
+  --ui-tooltip-shadow: 0 3px 8px rgba(0, 0, 0, .18);
   --ui-font: "HarmonyOS Sans SC", "Segoe UI", "Microsoft YaHei", sans-serif;
   --ui-font-size: 11px;
   --ui-height: 26px;
@@ -80,16 +83,16 @@
   max-width: min(280px, calc(100vw - 16px));
   overflow-wrap: anywhere;
   padding: 6px 9px;
-  border: 1px solid var(--ui-line);
-  border-radius: 5px;
-  background: var(--ui-bg);
-  color: var(--ui-text);
+  border: 0;
+  border-radius: 4px;
+  background: var(--ui-tooltip-bg);
+  color: var(--ui-tooltip-text);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
   white-space: pre-line;
   pointer-events: none;
-  box-shadow: 0 8px 18px rgba(0, 0, .42);
+  box-shadow: var(--ui-tooltip-shadow);
 }
 .app-tooltip.hidden, .ui-tooltip.hidden { display: none; }
 

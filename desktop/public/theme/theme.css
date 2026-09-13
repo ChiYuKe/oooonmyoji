@@ -7,6 +7,8 @@
   --ui-surface: #e8ecf0; --ui-hover: #dce3e9; --ui-selected: #d0dce6;
   --ui-line: #d4dbe1; --ui-text: #29343e; --ui-muted: #5e6b76;
   --ui-danger: #a63e46; --ui-focus: #627e93;
+  --ui-tooltip-bg: #fcfcfc; --ui-tooltip-text: #3b3b3b;
+  --ui-tooltip-shadow: 0 3px 8px rgba(0, 0, 0, .12);
   --bg: var(--light-canvas); --surface: var(--ui-panel); --surface-raised: var(--ui-surface); --surface-hover: var(--ui-hover);
   --panel: var(--ui-panel); --panel-2: var(--ui-surface); --border: #c3ccd4; --border-soft: var(--ui-line);
   --text: var(--ui-text); --fg: var(--ui-text); --muted: var(--ui-muted); --status: var(--light-chrome);
@@ -46,7 +48,7 @@
 :root[data-theme="light"] :is(.module-command-strip, .content-browser-toolbar) { background: var(--ui-panel); border-color: var(--ui-line); }
 :root[data-theme="light"] :is(.content-browser-tree, .content-browser-items, .tree-content, .variables-module) { background: var(--ui-panel); }
 :root[data-theme="light"] :is(.content-item-preview, .reference-graph-stage) { background-color: var(--ui-bg); }
-:root[data-theme="light"] :is(.content-item.selected, .content-folder-row.selected, .tree-row.selected) { background: var(--light-selection); color: var(--light-selection-text); }
+:root[data-theme="light"] :is(.content-item.selected, .content-folder-row.selected, .tree-row.selected, .overview-queue-row.selected) { background: var(--light-selection); color: var(--light-selection-text); }
 :root[data-theme="light"] :is(.reference-graph, #canvas-wrap) { background-color: var(--light-canvas); }
 :root[data-theme="light"] #canvas-wrap { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
 

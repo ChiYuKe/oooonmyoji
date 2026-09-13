@@ -219,11 +219,11 @@ button { color: inherit; }
   z-index: 5000;
   max-width: 280px;
   padding: 6px 9px;
-  border: 1px solid #4a535b;
-  border-radius: 5px;
-  background: #202327;
-  box-shadow: 0 8px 18px rgba(0, 0, .42);
-  color: #e4e9ec;
+  border: 0;
+  border-radius: 4px;
+  background: var(--ui-tooltip-bg);
+  box-shadow: var(--ui-tooltip-shadow);
+  color: var(--ui-tooltip-text);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
@@ -633,9 +633,11 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .palette-content svg { width: 15px; height: 15px; color: #70b4da; }
 
 .variables-content { padding: 5px 0 10px; }
-.variable-group-heading { height: 25px; display: flex; align-items: center; padding: 5px 10px 2px; color: #8f98a3; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.variable-category-toggle { display: block; width: 100%; border: 0; box-shadow: none; background: transparent; color: inherit; text-align: left; padding: 4px 10px; font-size: 11px; cursor: pointer; }
+.variable-category-toggle:hover { background: var(--ui-hover, #333); }
+.variable-row[hidden] { display: none; }
 .variable-group-empty { padding: 4px 11px 7px 31px; color: #69727c; font-size: 10px; }
-.variable-row { width: 100%; height: 30px; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 0 9px 0 11px; border: 0; background: transparent; color: #cbd0d6; text-align: left; cursor: pointer; }
+.variable-row { width: 100%; height: 30px; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 16px; align-items: center; gap: 6px; padding: 0 7px 0 11px; border: 0; background: transparent; color: #cbd0d6; text-align: left; cursor: pointer; }
 .variable-row:hover { background: var(--surface-hover); }
 .variable-row.selected { background: #2b5674; color: #fff; }
 .variable-icon { width: 14px; height: 14px; display: grid; place-items: center; color: #82909c; }
@@ -654,6 +656,15 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .variable-flags { display: flex; align-items: center; gap: 5px; color: var(--muted); font: 9px/1 Consolas, monospace; }
 .variable-scope { color: #78a9bf; }
 .variable-row.scope-variables .variable-scope { color: #d1b56e; }
+.variable-eye { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; color: var(--muted); }
+.variable-eye-svg { width: 13px; height: 13px; stroke-width: 1.8; }
+.variable-eye.off { color: #6b757f; }
+.variable-eye.off .variable-eye-svg { opacity: .6; }
+.variable-eye.toggle { cursor: pointer; }
+.variable-eye.toggle:hover { color: var(--text); background: var(--surface-hover); }
+.variable-eye.fixed { opacity: .4; cursor: default; }
+.variable-row.selected .variable-eye { color: inherit; }
+.variable-row.selected .variable-eye.toggle:hover { background: rgba(255, 255, 255, 0.14); }
 
 .editor-surface { position: relative; min-width: 0; min-height: 0; background: #1b1b1b; }
 #editor-frame, #details-frame, #runtime-log-frame { width: 100%; height: 100%; display: block; border: 0; background: #1b1b1b; }
@@ -866,6 +877,10 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .overview-card-description { overflow: hidden; color: #989fa6; font-size: 10px; line-height: 16px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .overview-card-footer { min-width: 0; display: flex; align-items: center; gap: 5px; }
 .overview-card-tag { height: 18px; display: inline-flex; align-items: center; padding: 0 6px; border-radius: 3px; background: #303236; color: #8f979f; font-size: 9px; }
+.overview-card-tag.workflow-validation-valid { color: #83b891; }
+.overview-card-tag.workflow-validation-invalid { color: #e08a8f; }
+.overview-card-tag.workflow-validation-unknown { color: #b39a63; }
+.overview-card-tag.workflow-updated { color: #7f8992; }
 .overview-card-config, .overview-card-open { height: 20px; padding: 0 5px; border: 0; border-radius: 3px; background: transparent; color: #759bb0; font-size: 9px; cursor: pointer; }
 .overview-card-config { margin-left: auto; }
 .overview-card-config.configured { color: #d0a64b; }
@@ -889,6 +904,7 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
   background: transparent;
 }
 .overview-queue-row.current { background: #292d30; }
+.overview-queue-row.selected { background: #2b5674; }
 .overview-queue-index { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 50%; background: #303337; color: #aeb5bc; font-size: 9px; }
 .overview-queue-row.running .overview-queue-index { background: #6c5627; color: #ffe0a0; }
 .overview-queue-row.succeeded .overview-queue-index { background: #2e5938; color: #b9e5c3; }

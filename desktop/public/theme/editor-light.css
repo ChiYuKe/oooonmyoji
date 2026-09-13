@@ -26,11 +26,6 @@
 :root[data-theme="light"] button.primary {
     color: var(--vscode-button-foreground, #232323)
 }
-:root[data-theme="light"] .app-tooltip {
-    border: 1px solid #d3d3d3;
-    background: #eeeeee;
-    color: #232323
-}
 :root[data-theme="light"] .app-tooltip.asset-preview img {
     background: #f6f6f6
 }
@@ -55,7 +50,7 @@
     color: #885054
 }
 :root[data-theme="light"] #workflow-breadcrumb {
-    background: #eeeeee
+    background: color-mix(in srgb, #eeeeee 72%, transparent)
 }
 :root[data-theme="light"] .workflow-breadcrumb-separator {
     color: #696969
@@ -68,8 +63,8 @@
     color: #232323
 }
 :root[data-theme="light"] .workflow-crumb.current {
-    background: #e3e3e3;
-    color: #232323
+    background: var(--ui-selected, #dedede);
+    color: var(--ui-text, #262626)
 }
 :root[data-theme="light"] #external-banner {
     background: #e5e5e5;
@@ -699,11 +694,6 @@
 :root[data-theme="light"] .section-header:hover {
     color: #232323
 }
-:root[data-theme="light"] .ui-tooltip {
-    border: 1px solid #dcdcdc;
-    background: #f7f7f7;
-    color: #262626
-}
 :root[data-theme="light"] .object-array-head:hover {
     background: #e6e6e6
 }
@@ -741,6 +731,17 @@
 :root[data-theme="light"] .topbar-slot .ui-dropdown-button:hover, :root[data-theme="light"] .topbar-slot .ui-dropdown.open .ui-dropdown-button {
     border-color: var(--accent, #3591d0)
 }
+:root[data-theme="light"] .workflow-crumb {
+    color: #4e4e4e
+}
+:root[data-theme="light"] .workflow-crumb:hover:not(:disabled) {
+    background: #e3e3e3;
+    color: #232323
+}
+:root[data-theme="light"] .workflow-crumb.current {
+    background: var(--ui-selected, #dedede);
+    color: var(--ui-text, #262626)
+}
 :root[data-theme="light"] {
     --ui-bg: #f3f3f3;
     --ui-panel: #eeeeee;
@@ -752,7 +753,9 @@
     --ui-text: #262626;
     --ui-muted: #626262;
     --ui-danger: #825252;
-    --ui-focus: #696969
+    --ui-focus: #696969;
+    --ui-tooltip-bg: #e7e7e7;
+    --ui-tooltip-text: #2d2d2d
 }
 :root[data-theme="light"] .ui-checkbox {
     border: 1px solid #cdcdcd
@@ -781,7 +784,10 @@
 }
 :root[data-theme="light"] #inspector-body .section-header {
     border-bottom: 1px solid #e6e6e6;
-    background: #ebebeb
+    background: #e5e5e5
+}
+:root[data-theme="light"] #inspector-body .section-header:hover {
+    background: #e2e2e2
 }
 :root[data-theme="light"] #inspector-body .danger:hover:not(:disabled) {
     background: #e9e9e9;
@@ -792,7 +798,4 @@
 }
 :root[data-theme="light"] #inspector-body .object-array-head {
     background: #eaeaea
-}
-:root[data-theme="light"] #inspector-body .decorator-heading {
-    color: #655c43
 }

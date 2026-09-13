@@ -10,7 +10,9 @@
     --ui-text: #262626;
     --ui-muted: #626262;
     --ui-danger: #825252;
-    --ui-focus: #696969
+    --ui-focus: #696969;
+    --ui-tooltip-bg: #e7e7e7;
+    --ui-tooltip-text: #2d2d2d
 }
 :root[data-theme="light"] .ui-checkbox {
     border: 1px solid #cdcdcd

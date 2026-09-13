@@ -98,6 +98,7 @@ class WorkflowEngine:
 
     def run(self) -> WorkflowResult:
         with self._lock:
+            self.variables = deepcopy(self.workflow.variable_defaults)
             self.outputs = {}
             self.history = []
             self.requires_worker_restart = False
@@ -113,6 +114,11 @@ class WorkflowEngine:
         if hasattr(self.context, "set_deadline"):
             self.context.set_deadline(self._workflow_deadline)
         try:
+            for name, definition in self.workflow.raw.get("variables", {}).items():
+                source = definition.get("initial_from")
+                if source is not None and source in self.inputs:
+                    self._validate_action_input(self.workflow.variable_schema["properties"][name], self.inputs[source], f"variable {name}")
+                    self.variables[name] = deepcopy(self.inputs[source])
             outcome = self._run_node(self.compiled.root, self._workflow_deadline, None)
         except CancelledError as exc:
             outcome = _Outcome(ActionStatus.CANCELLED, error=str(exc), category="cancelled")
@@ -152,6 +158,18 @@ class WorkflowEngine:
             return ReferenceResolver(self.inputs, dict(self.outputs), runtime, variables=dict(self.variables))
 
     def _run_node(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
+        local = {name: definition for name, definition in self.workflow.raw.get("variables", {}).items() if definition.get("owner") == node_id}
+        with self._lock:
+            saved = {name: deepcopy(self.variables[name]) for name in local}
+            for name, definition in local.items():
+                self.variables[name] = deepcopy(self.inputs.get(definition.get("initial_from"), self.workflow.variable_defaults[name]))
+        try:
+            return self._run_node_scoped(node_id, deadline, branch_cancel)
+        finally:
+            with self._lock:
+                self.variables.update(saved)
+
+    def _run_node_scoped(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         self._ensure_running(deadline, branch_cancel)
         with self._lock:
             if self.workflow.max_steps is not None and self._steps >= self.workflow.max_steps:
@@ -198,10 +216,36 @@ class WorkflowEngine:
                 return outcome
 
         timeout = self._decorator(node, "timeout")
-        node_deadline = min(deadline, time.monotonic() + timeout.seconds) if timeout is not None and timeout.seconds is not None else deadline
         retry = self._decorator(node, "retry")
         repeat = self._decorator(node, "repeat")
-        attempts = retry.attempts if retry is not None else 1
+        resolved = {}
+        decorator_specs: list[tuple[str, BehaviorDecorator | None, tuple[str, ...]]] = [
+            ("cooldown", cooldown, ("seconds",)), ("timeout", timeout, ("seconds",)),
+            ("retry", retry, ("attempts", "delay_seconds")), ("do_once", do_once, ("reset_on_failure",)),
+        ]
+        for kind, active, keys in decorator_specs:
+            if active is None:
+                continue
+            try:
+                with self._lock:
+                    values = {key: self._resolver().value(getattr(active, key)) for key in keys}
+                for key, value in values.items():
+                    if key == "reset_on_failure":
+                        valid = isinstance(value, bool)
+                    elif key == "attempts":
+                        valid = not isinstance(value, bool) and isinstance(value, int) and value >= 1
+                    else:
+                        valid = not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) and (value >= 0 if key == "delay_seconds" else value > 0)
+                    if not valid:
+                        raise ValueError(f"invalid resolved {key}: {value!r}")
+                resolved[kind] = values
+            except Exception as exc:
+                outcome = _Outcome(ActionStatus.FAILED, error=f"{kind} decorator failed: {exc}", category="workflow")
+                self._record_node(node, outcome, started_perf, started_at, decorator=kind)
+                return outcome
+        node_deadline = min(deadline, time.monotonic() + resolved["timeout"]["seconds"]) if timeout is not None else deadline
+        attempts = resolved["retry"]["attempts"] if retry is not None else 1
+        retry_delay = resolved["retry"]["delay_seconds"] if retry is not None else 0
         repeat_count = 1
         if repeat is not None:
             try:
@@ -234,8 +278,8 @@ class WorkflowEngine:
                         outcome = self._run_core(node, node_deadline, branch_cancel)
                         if outcome.status != ActionStatus.FAILED or outcome.fatal:
                             break
-                        if attempt < attempts and retry is not None and retry.delay_seconds:
-                            self._sleep(retry.delay_seconds, node_deadline, branch_cancel)
+                        if attempt < attempts and retry_delay:
+                            self._sleep(retry_delay, node_deadline, branch_cancel)
                 finally:
                     if repeat is not None:
                         repeat_stack.pop()
@@ -255,8 +299,8 @@ class WorkflowEngine:
 
         if cooldown is not None and cooldown.seconds is not None:
             with self._lock:
-                self._cooldowns[node.id] = time.monotonic() + cooldown.seconds
-        if do_once is not None and (outcome.status == ActionStatus.SUCCEEDED or not do_once.reset_on_failure):
+                self._cooldowns[node.id] = time.monotonic() + resolved["cooldown"]["seconds"]
+        if do_once is not None and (outcome.status == ActionStatus.SUCCEEDED or not resolved["do_once"]["reset_on_failure"]):
             with self._lock:
                 self._done_once.add(node.id)
         self._record_node(node, outcome, started_perf, started_at, attempts=attempts_used, repeats=repeats_used)
@@ -410,7 +454,7 @@ class WorkflowEngine:
         with self._lock:
             resolver = self._resolver()
         try:
-            arguments = resolver.value(node.params)
+            arguments = deepcopy(resolver.value(node.params))
             self._validate_action_input(action.input_schema, arguments, node.id)
             result = self._execute(action, arguments, deadline, branch_cancel)
         except CancelledError:
@@ -428,8 +472,6 @@ class WorkflowEngine:
         if result.status == ActionStatus.SUCCEEDED:
             with self._lock:
                 self.outputs[node.id] = output
-                if node.action == "variables.set" and isinstance(arguments.get("name"), str) and arguments["name"]:
-                    self.variables[arguments["name"]] = arguments.get("value")
             return _Outcome(ActionStatus.SUCCEEDED, output=output)
         if result.status == ActionStatus.CANCELLED:
             return _Outcome(
@@ -584,6 +626,7 @@ class WorkflowEngine:
         if outcome.category:
             event["error_category"] = outcome.category
         with self._lock:
+            event["variable_values"] = _summary(deepcopy(self.variables))
             self.history.append(dict(event))
             if self.on_step is not None:
                 self.on_step(dict(event))

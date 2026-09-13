@@ -92,16 +92,16 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                             "properties": {
                                 "type": {"enum": list(DECORATOR_TYPES)},
                                 "expression": {},
-                                "seconds": {"type": "number", "exclusiveMinimum": 0},
-                                "attempts": {"type": "integer", "minimum": 1},
-                                "delay_seconds": {"type": "number", "minimum": 0},
+                                "seconds": {"anyOf": [{"type": "number", "exclusiveMinimum": 0}, deepcopy(_BINDING_SCHEMA)]},
+                                "attempts": {"anyOf": [{"type": "integer", "minimum": 1}, deepcopy(_BINDING_SCHEMA)]},
+                                "delay_seconds": {"anyOf": [{"type": "number", "minimum": 0}, deepcopy(_BINDING_SCHEMA)]},
                                 "count": {
                                     "anyOf": [
                                         {"type": "integer", "minimum": 1},
                                         deepcopy(_BINDING_SCHEMA),
                                     ]
                                 },
-                                "reset_on_failure": {"type": "boolean"},
+                                "reset_on_failure": {"anyOf": [{"type": "boolean"}, deepcopy(_BINDING_SCHEMA)]},
                             },
                             "additionalProperties": False,
                         },
@@ -491,15 +491,20 @@ def _parse_decorators(
             if kind in seen_singletons:
                 raise ConfigError(f"nodes[{node_index}] contains duplicate {kind} decorators")
             seen_singletons.add(kind)
+        for key, expected_type in {"seconds": "number", "attempts": "integer", "delay_seconds": "number", "reset_on_failure": "boolean"}.items():
+            if key in item:
+                _validate_value(item[key], node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas,
+                                available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids,
+                                path=f"{path}.{key}", expected_schema={"type": expected_type})
         if kind == "condition":
             _validate_value(item["expression"], node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{path}.expression", condition=True)
             parsed.append(BehaviorDecorator(type=kind, expression=item["expression"]))
         elif kind in {"cooldown", "timeout"}:
-            parsed.append(BehaviorDecorator(type=kind, seconds=float(item["seconds"])))
+            parsed.append(BehaviorDecorator(type=kind, seconds=deepcopy(item["seconds"])))
         elif kind == "retry":
-            parsed.append(BehaviorDecorator(type=kind, attempts=int(item["attempts"]), delay_seconds=float(item.get("delay_seconds", 0.0))))
+            parsed.append(BehaviorDecorator(type=kind, attempts=deepcopy(item["attempts"]), delay_seconds=deepcopy(item.get("delay_seconds", 0.0))))
         elif kind == "do_once":
-            parsed.append(BehaviorDecorator(type=kind, reset_on_failure=bool(item.get("reset_on_failure", False))))
+            parsed.append(BehaviorDecorator(type=kind, reset_on_failure=deepcopy(item.get("reset_on_failure", False))))
         elif kind == "repeat":
             _validate_value(
                 item["count"],
@@ -605,6 +610,14 @@ def validate_workflow(
         "additionalProperties": False,
     }
     variable_defaults = apply_parameter_defaults(variable_definitions, {})
+    for name, definition in variables_raw.items():
+        initial_from = definition.get("initial_from")
+        if initial_from is not None:
+            if not isinstance(initial_from, str) or initial_from not in input_definitions:
+                raise ConfigError(f"variables.{name}.initial_from must name a declared input")
+            _validate_value({"ref": f"inputs.{initial_from}"}, node_ids=set(), reference_schema=reference_schema,
+                            output_schemas={}, available_node_ids=set(), possibly_available_node_ids=set(),
+                            path=f"variables.{name}.initial_from", expected_schema=variable_schema["properties"][name])
 
     nodes_raw = raw["nodes"]
     assert isinstance(nodes_raw, list)
@@ -612,6 +625,31 @@ def validate_workflow(
     if len(node_ids) != len(set(node_ids)):
         raise ConfigError(f"workflow {path} contains duplicate node IDs")
     node_id_set = set(node_ids)
+    owners = {name: definition.get("owner") for name, definition in variables_raw.items() if definition.get("owner")}
+    node_map = {item["id"]: item for item in nodes_raw}
+    for name, owner in owners.items():
+        if not isinstance(owner, str) or owner not in node_map or node_map[owner]["type"] in {"task", "instance_parallel"}:
+            raise ConfigError(f"variables.{name}.owner must name a composite node")
+        descendants: set[str] = set()
+        pending = [owner]
+        while pending:
+            current = pending.pop()
+            if current in descendants:
+                continue
+            descendants.add(current)
+            pending.extend(node_map.get(current, {}).get("children", []))
+        def check_scope(value: Any, caller: str) -> None:
+            if isinstance(value, dict):
+                ref = value.get("ref")
+                if isinstance(ref, str) and (ref == f"variables.{name}" or ref.startswith(f"variables.{name}.")) and caller not in descendants:
+                    raise ConfigError(f"node {caller} cannot read local variable {name} outside {owner}")
+                for child in value.values():
+                    check_scope(child, caller)
+            elif isinstance(value, list):
+                for child in value:
+                    check_scope(child, caller)
+        for item in nodes_raw:
+            check_scope(item, item["id"])
     if raw["root"] not in node_id_set:
         raise ConfigError(f"workflow {path} root does not name a node: {raw['root']}")
 
@@ -643,10 +681,6 @@ def validate_workflow(
             assert isinstance(params, dict)
             spec = action_specs[item["id"]]
             _validate_value(params, node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"nodes[{index}].params", expected_schema=spec.input_schema)
-            if item.get("action") == "variables.set":
-                variable_name = params.get("name")
-                if not isinstance(variable_name, str) or variable_name not in variable_definitions:
-                    raise ConfigError(f"nodes[{index}].params.name must name a declared workflow variable")
             normalized = apply_parameter_defaults(spec.definition.parameters, params)
             _validate_json_schema(normalized, _binding_aware_parameter_schema(spec.input_schema), f"nodes[{index}].params")
             action = str(item["action"])
@@ -757,7 +791,7 @@ def validate_workflow(
         if node_type == "root" and decorators:
             raise ConfigError(f"nodes[{index}] root cannot have decorators")
         retry = next((decorator for decorator in decorators if decorator.type == "retry"), None)
-        if retry is not None and retry.attempts > 1 and node_type == "task" and not action_specs[item["id"]].definition.retry_safe and not raw.get("retry_safe", False):
+        if retry is not None and (is_binding(retry.attempts) or retry.attempts > 1) and node_type == "task" and not action_specs[item["id"]].definition.retry_safe and not raw.get("retry_safe", False):
             raise ConfigError(f"nodes[{index}] retries an Action that is not declared retry-safe")
         instance_runs = tuple(
             InstanceParallelRun(

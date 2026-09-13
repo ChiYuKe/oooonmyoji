@@ -18,11 +18,11 @@ INSTANCE_PARALLEL_WAIT_MODES = ("all", "any")
 class BehaviorDecorator:
     type: str
     expression: Any = None
-    seconds: float | None = None
-    attempts: int = 1
-    delay_seconds: float = 0.0
+    seconds: Any = None
+    attempts: Any = 1
+    delay_seconds: Any = 0.0
     count: Any = 1
-    reset_on_failure: bool = False
+    reset_on_failure: Any = False
 
 
 @dataclass(frozen=True)

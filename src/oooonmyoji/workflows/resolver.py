@@ -67,6 +67,10 @@ class ReferenceResolver:
         return value
 
     def condition(self, expression: Any) -> bool:
+        if is_binding(expression):
+            expression = self.value(expression)
+            if is_binding(expression):
+                raise WorkflowError("condition input must contain a boolean or condition expression, not another reference")
         if isinstance(expression, bool):
             return expression
         if not isinstance(expression, dict) or len(expression) != 1:

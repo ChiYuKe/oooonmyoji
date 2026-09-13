@@ -548,13 +548,6 @@ class TypeTextAction(Action):
         return ActionResult.succeeded({"text": value, "length": len(value)})
 
 
-class AssignAction(Action):
-    name = "variables.set"
-
-    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
-        return ActionResult.succeeded({"name": str(arguments["name"]), "value": arguments.get("value")})
-
-
 class TapMatchAction(Action):
     name = "input.tap_match"
 

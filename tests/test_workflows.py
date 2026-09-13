@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from src.oooonmyoji.actions import Action, ActionRegistry, ActionResult, ActionSpec, ActionStatus
-from src.oooonmyoji.actions.builtin import AssignAction
 from src.oooonmyoji.actions.manifest import ActionDefinition, ParameterDefinition
 from src.oooonmyoji.exceptions import CancelledError, ConfigError
 from src.oooonmyoji.workflows.compiler import compile_workflow
@@ -424,6 +423,14 @@ def test_unsafe_retry_is_rejected() -> None:
         validate(raw, actions)
 
 
+def test_public_retry_cannot_bypass_retry_safety() -> None:
+    actions = registry(action_spec(EchoAction(), retry_safe=False))
+    raw = tree([task("a", "test.echo", decorators=[{"type": "retry", "attempts": {"ref": "inputs.tries"}}])], "a")
+    raw["inputs"] = {"tries": {"type": "integer", "default": 1}}
+    with pytest.raises(ConfigError, match="not declared retry-safe"):
+        validate(raw, actions)
+
+
 def test_engine_sequence_selector_condition_retry_and_references() -> None:
     retry_action = RetryAction()
     actions = registry(action_spec(EchoAction()), action_spec(FailAction()), action_spec(retry_action))
@@ -452,14 +459,13 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     assert not ReferenceResolver({}, {}).condition({"exists": {"ref": "inputs.missing"}})
 
 
-def test_engine_keeps_inputs_read_only_and_updates_declared_variables() -> None:
-    actions = registry(action_spec(AssignAction()), action_spec(EchoAction()))
+def test_engine_keeps_inputs_and_variables_read_only() -> None:
+    actions = registry(action_spec(EchoAction()))
     raw = tree([
-        {"id": "seq", "type": "sequence", "children": ["set_state", "read_state"]},
-        task("set_state", "variables.set", {"name": "counter", "value": 7}),
+        {"id": "seq", "type": "sequence", "children": ["read_state"]},
         task("read_state", "test.echo", {"value": {"ref": "variables.counter"}}),
     ], "seq", inputs={"rounds": {"type": "integer", "default": 1}}, variables={
-        "counter": {"type": "integer", "default": 0},
+        "counter": {"type": "integer", "default": 7},
     })
     caller_inputs = {"rounds": 3}
 
@@ -489,6 +495,46 @@ def test_engine_do_once_runs_action_only_once_across_repeat_iterations() -> None
     assert once_events[0].get("decorator") is None
     assert all(item["status"] == ActionStatus.SUCCEEDED.value for item in once_events[1:])
     assert all(item["decorator"] == "do_once" for item in once_events[1:])
+
+
+@pytest.mark.parametrize("kind,key,value,input_type", [
+    ("cooldown", "seconds", 1, "number"),
+    ("timeout", "seconds", 2, "number"),
+    ("retry", "attempts", 2, "integer"),
+    ("retry", "delay_seconds", 0, "number"),
+    ("do_once", "reset_on_failure", False, "boolean"),
+    ("condition", "expression", True, "boolean"),
+    ("condition", "expression", {"eq": [1, 1]}, "object"),
+])
+def test_all_decorator_parameters_accept_public_inputs(kind, key, value, input_type):
+    actions = registry(action_spec(EchoAction()))
+    decorator = {"type": kind, **({"attempts": 2} if kind == "retry" else {}), key: {"ref": "inputs.setting"}}
+    raw = tree([task("item", "test.echo", decorators=[decorator])], "item")
+    raw["inputs"] = {"setting": {"type": input_type, "default": value}}
+    workflow = validate(raw, actions)
+    result = WorkflowEngine(workflow, actions, Context(), {"setting": value}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+
+
+def test_public_retry_attempts_override_default():
+    action = RetryAction()
+    actions = registry(action_spec(action))
+    raw = tree([task("item", "test.retry", decorators=[{"type": "retry", "attempts": {"ref": "inputs.tries"}}])], "item")
+    raw["inputs"] = {"tries": {"type": "integer", "default": 1}}
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {"tries": 2}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert action.calls == 2
+
+
+@pytest.mark.parametrize("kind,key,value", [("retry", "attempts", 0), ("retry", "delay_seconds", -1), ("timeout", "seconds", 0), ("cooldown", "seconds", -1)])
+def test_invalid_public_decorator_values_fail_cleanly(kind, key, value):
+    actions = registry(action_spec(EchoAction()))
+    decorator = {"type": kind, **({"attempts": 2} if kind == "retry" else {}), key: {"ref": "inputs.setting"}}
+    raw = tree([task("item", "test.echo", decorators=[decorator])], "item")
+    raw["inputs"] = {"setting": {"type": "integer", "default": value}}
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {"setting": value}).run()
+    assert result.status == ActionStatus.FAILED
+    assert any(kind + " decorator failed" in (event.get("error") or "") for event in result.step_history)
 
 
 def test_engine_repeat_count_can_bind_to_inputs_integer() -> None:

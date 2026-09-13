@@ -183,12 +183,10 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
     nodes = {node["id"]: node for node in workflow["nodes"]}
 
     assert workflow["inputs"]["结算页面模板"]["default"] == "assets/templates/souls/souls-victory-continue.png"
-    assert workflow["variables"] == {"是否有可挑战次数": {"type": "boolean", "default": True}}
-    assert {
-        node["params"]["name"]
-        for node in workflow["nodes"]
-        if node.get("action") == "variables.set"
-    } == {"是否有可挑战次数"}
+    assert workflow["variables"] == {}
+    assert not any(node.get("action") == "variables.set" for node in workflow["nodes"])
+    assert nodes["exhausted_during_page"]["children"] == ["read_passes_after_failure", "exhausted_during_page_log"]
+    assert nodes["exhausted_during_page_log"]["decorators"][0]["expression"]["eq"][0]["ref"] == "nodes.read_passes_after_failure.output.mode"
 
     page = nodes["challenge_page"]["children"]
     assert page[:8] == [f"target_{index}" for index in range(1, 9)]
@@ -212,13 +210,12 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
         assert run["children"] == [
             f"wait_target_page_{index}",
             f"read_passes_before_{index}",
-            f"set_passes_before_{index}",
             f"tap_{index}",
             f"target_select_delay_{index}",
             f"fight_{index}",
         ]
         assert nodes[f"tap_{index}"]["decorators"][0]["expression"] == {
-            "eq": [{"ref": "variables.是否有可挑战次数"}, True]
+            "eq": [{"ref": f"nodes.read_passes_before_{index}.output.should_enter"}, True]
         }
         assert run["decorators"][0]["expression"] == {
             "eq": [{"ref": f"nodes.detect_progress.output.selected.{index - 1}"}, True]
@@ -231,8 +228,8 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
     assert nodes["target_9_reset_run"]["decorators"][0]["expression"] == {
         "eq": [{"ref": "nodes.detect_progress.output.selected.8"}, True]
     }
-    assert nodes["target_9_reset_run"]["children"][:4] == [
-        "wait_target_page_9_initial", "read_passes_before_9a", "set_passes_before_9a", "tap_9"
+    assert nodes["target_9_reset_run"]["children"][:3] == [
+        "wait_target_page_9_initial", "read_passes_before_9a", "tap_9"
     ]
     reset_children = nodes["target_9_reset_run"]["children"]
     assert reset_children.index("confirm_exit_9") < reset_children.index("wait_continue_after_exit_9")
@@ -252,7 +249,7 @@ def test_realm_workflow_explicitly_models_nine_targets_and_four_resets() -> None
     ]
     for suffix, tap_id in [("9a", "tap_9"), ("9b", "tap_retry_after_exit_9"), ("9c", "tap_retry_after_exit_9b"), ("9d", "tap_retry_after_exit_9c")]:
         assert nodes[tap_id]["decorators"][0]["expression"] == {
-            "eq": [{"ref": "variables.是否有可挑战次数"}, True]
+            "eq": [{"ref": "nodes.read_passes_before_9a.output.should_enter"}, True]
         }
     for node_id in ["wait_victory_1", "wait_victory_8", "wait_victory_9_final"]:
         wait_node = nodes[node_id]

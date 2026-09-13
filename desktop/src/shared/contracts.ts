@@ -1,5 +1,6 @@
 export interface ParameterInfo {
   type: string;
+  display_name?: string;
   required?: boolean;
   default?: unknown;
   description?: string;
@@ -21,6 +22,9 @@ export interface WorkflowDescriptor {
   rel: string;
   id?: string;
   description?: string;
+  source?: 'generated' | 'project';
+  validationStatus?: 'valid' | 'invalid' | 'unknown';
+  updatedAt?: number;
   inputs?: Array<{
     name: string;
     definition: ParameterInfo;

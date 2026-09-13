@@ -25,6 +25,7 @@ function harness(variables) {
   const ctx=vm.createContext({document:{createElement:tag=>new Element(tag)},variablesView:list,sidebarVariables:variables,
     selectedVariable:'shared',selectedVariableScope:'inputs',overviewInputDisplayName:name=>name,
     variableTypeGlyphs:{},variableTypeFallbackGlyph:{icon:{},className:'type-any'},createTreeIcon:()=>new Element('svg'),
+    Eye:{},EyeOff:{},
     docking:{showPanel:name=>panels.push(name)},editorCommand:(...args)=>commands.push(args),CSS:{escape:value=>value}});
   const start=source.indexOf('const variableTypeLabels:');
   vm.runInContext(stripTypeScriptTypes(source.slice(start,source.indexOf('\n};',start)+3)),ctx);
@@ -38,8 +39,7 @@ function harness(variables) {
 test('variable groups show counts once and rows keep complete names, types and scroll',()=>{
   const h=harness([{name:'shared',scope:'inputs',type:'integer'},{name:'长名称'.repeat(12),scope:'inputs',type:'array'}, {name:'shared',scope:'variables',type:'custom<type>'}]);
   h.list.scrollTop=96; h.ctx.renderVariables();
-  const headings=h.list.children.filter(x=>x.tagName==='h3');
-  assert.deepEqual(headings.map(x=>x.children.map(c=>c.textContent)),[['工作流输入','2','只读'],['运行变量','1','可更新']]);
+  assert.equal(h.list.children.filter(x=>x.tagName==='h3').length,0);
   assert.equal(h.rows()[0].querySelector('.variable-flags').textContent,'整数');
   assert.equal(h.rows()[2].querySelector('.variable-flags').textContent,'custom<type>');
   assert.equal(h.rows()[1].querySelector('.variable-name').textContent,'长名称'.repeat(12));
@@ -62,13 +62,38 @@ test('variable selection and drag preserve existing scope-aware commands',()=>{
   assert.equal(h.rows()[1].className.includes('selected'),true);
 });
 
-test('empty variable groups keep their headings and explain the two add controls',()=>{
+test('empty variable list skips the redundant heading and explains the single add control',()=>{
   const h=harness([]); h.ctx.renderVariables();
-  assert.equal(h.list.children.filter(x=>x.tagName==='h3').length,2);
+  assert.equal(h.list.children.filter(x=>x.tagName==='h3').length,0);
   const empty=h.list.children.filter(x=>x.className==='variable-group-empty');
-  assert(empty[0].textContent.includes('＋ 输入')); assert(empty[1].textContent.includes('＋ 变量'));
+  assert(empty[0].textContent.includes('＋ 变量'));
   const html=fs.readFileSync(path.join(__dirname,'../src/renderer/index.html'),'utf8');
-  for(const [id,label] of [['add-input-button','输入'],['add-variable-button','变量']]) {
-    assert(new RegExp(`id="${id}"[^>]*>[\\s\\S]*?<span>${label}</span></button>`).test(html));
-  }
+  assert(new RegExp('id="add-input-button"').test(html)===false);
+  assert(/id="add-variable-button"[^>]*>[\s\S]*?<span>变量<\/span><\/button>/.test(html));
+});
+
+test('eye toggles public state for variables and stays fixed for inputs',()=>{
+  const h=harness([{name:'v_1',scope:'variables',type:'integer',public:false},{name:'new_input',scope:'inputs',type:'integer',public:true}]);
+  h.ctx.renderVariables();
+  const eye=row=>row.children.find(x=>x.className.includes('variable-eye'));
+  assert(eye(h.rows()[0]).className.includes('off'));
+  assert(eye(h.rows()[0]).className.includes('toggle'));
+  eye(h.rows()[0]).events.click({stopPropagation(){}});
+  assert.equal(h.commands[0][0],'setVariablePublic');
+  assert.equal(h.commands[0][1].name,'v_1'); assert.equal(h.commands[0][1].scope,'variables'); assert.equal(h.commands[0][1].public,true);
+  assert(eye(h.rows()[1]).className.includes('fixed'));
+  assert(!eye(h.rows()[1]).className.includes('toggle'));
+  assert.equal(eye(h.rows()[1]).events.click,undefined);
+});
+
+test('custom categories collapse without losing rows or drag identity',()=>{
+  const h=harness([{name:'a',scope:'inputs',type:'integer',group:'战斗'},{name:'b',scope:'inputs',type:'integer',group:'战斗'},{name:'c',scope:'inputs',type:'integer'}]);
+  h.ctx.renderVariables();
+  let toggle=h.list.children.find(x=>x.className==='variable-category-toggle');
+  assert.equal(toggle.textContent,'▾ 战斗 · 2');toggle.events.click();
+  const rows=h.list.children.filter(x=>x.className.includes('variable-row'));
+  assert.equal(rows[0].hidden,true);assert.equal(rows[1].hidden,true);assert.equal(rows[2].hidden,false);
+  toggle=h.list.children.find(x=>x.className==='variable-category-toggle');
+  assert.equal(toggle.attrs['aria-expanded'],'false');toggle.events.click();
+  assert.equal(h.list.children.find(x=>x.dataset.variableName==='a').hidden,false);
 });

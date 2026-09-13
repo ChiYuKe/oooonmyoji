@@ -302,23 +302,25 @@
 
         <section id="module-palette" class="dock-module palette-module">
           <div id="palette-view" class="panel-content palette-content">
-            <button data-editor-command="addTask"><i data-lucide="box"></i><span>任务 Task</span></button>
-            <button data-editor-command="addSequence"><i data-lucide="list-tree"></i><span>顺序 Sequence</span></button>
-            <button data-editor-command="addSelector"><i data-lucide="git-branch"></i><span>选择 Selector</span></button>
-            <button data-editor-command="addParallel"><i data-lucide="columns-3"></i><span>简单并行</span></button>
-            <button data-editor-command="addGenericParallel"><i data-lucide="split"></i><span>通用并发</span></button>
-            <button data-editor-command="addRepeatUntil"><i data-lucide="repeat-2"></i><span>循环直到</span></button>
-            <button data-editor-command="addBranch"><i data-lucide="git-fork"></i><span>条件分支</span></button>
-            <button data-editor-command="addSwitch"><i data-lucide="route"></i><span>值分支</span></button>
-            <button data-editor-command="addInstanceParallel"><i data-lucide="monitor-up"></i><span>多实例并行</span></button>
+            <h3 class="palette-group-heading">基础节点 <span>2</span></h3>
+            <button data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i><span>任务</span><small>Task</small></button>
+            <button data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i><span>顺序</span><small>Sequence</small></button>
+            <h3 class="palette-group-heading">流程控制 <span>4</span></h3>
+            <button data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i><span>选择</span><small>Selector</small></button>
+            <button data-editor-command="addRepeatUntil" title="添加循环直到节点"><i data-lucide="repeat-2"></i><span>循环直到</span><small>Repeat</small></button>
+            <button data-editor-command="addBranch" title="添加条件分支"><i data-lucide="git-fork"></i><span>条件分支</span><small>Branch</small></button>
+            <button data-editor-command="addSwitch" title="添加值分支"><i data-lucide="route"></i><span>值分支</span><small>Switch</small></button>
+            <h3 class="palette-group-heading">并行执行 <span>3</span></h3>
+            <button data-editor-command="addParallel" title="添加简单并行节点"><i data-lucide="columns-3"></i><span>简单并行</span><small>Parallel</small></button>
+            <button data-editor-command="addGenericParallel" title="添加通用并发节点"><i data-lucide="split"></i><span>通用并发</span><small>Concurrent</small></button>
+            <button data-editor-command="addInstanceParallel" title="添加多实例并行节点"><i data-lucide="monitor-up"></i><span>多实例并行</span><small>Instances</small></button>
           </div>
         </section>
 
         <section id="module-variables" class="dock-module variables-module">
           <div class="module-command-strip">
-            <span class="module-context">输入与状态</span>
-            <button id="add-input-button" class="panel-action" type="button" title="添加工作流输入" aria-label="添加工作流输入"><i data-lucide="plus"></i><span>输入</span></button>
-            <button id="add-variable-button" class="panel-action" type="button" title="添加运行变量" aria-label="添加运行变量"><i data-lucide="plus"></i><span>变量</span></button>
+            <span class="module-context">变量</span>
+            <button id="add-variable-button" class="panel-action" type="button" title="添加变量" aria-label="添加变量"><i data-lucide="plus"></i><span>变量</span></button>
           </div>
           <div id="variables-view" class="panel-content variables-content"></div>
         </section>

@@ -240,11 +240,15 @@ export class ProjectService {
       }
     };
     await visit(this.workflowRoot);
+    const actionCatalog = loadActionCatalog(this.projectRoot);
 
     const descriptors = await Promise.all(files.slice(0, 500).map(async (file): Promise<WorkflowDescriptor> => {
       let id = '';
       let description = '';
       let inputs: WorkflowDescriptor['inputs'] = [];
+      let validationStatus: WorkflowDescriptor['validationStatus'] = 'unknown';
+      let updatedAt: number | undefined;
+      const relativePath = path.relative(this.projectRoot, file).split(path.sep).join('/');
       try {
         const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as unknown;
         const parsed = parseWorkflow(raw);
@@ -254,15 +258,27 @@ export class ProjectService {
           name,
           definition,
         }));
+        validationStatus = validateWorkflow(raw, actionCatalog).some((issue) => issue.severity === 'error')
+          ? 'invalid'
+          : 'valid';
       } catch {
         // Invalid JSON remains visible so the user can repair it in the editor.
+        validationStatus = 'invalid';
+      }
+      try {
+        updatedAt = (await fs.promises.stat(file)).mtimeMs;
+      } catch {
+        // A disappearing file can be skipped on the next refresh.
       }
       return {
         uri: pathToFileURL(file).toString(),
         name: path.basename(file),
-        rel: path.relative(this.projectRoot, file).split(path.sep).join('/'),
+        rel: relativePath,
         ...(id ? { id } : {}),
         ...(description ? { description } : {}),
+        source: relativePath.toLowerCase().startsWith('workflows/generated/') ? 'generated' : 'project',
+        validationStatus,
+        ...(updatedAt !== undefined ? { updatedAt } : {}),
         ...(inputs.length ? { inputs } : {}),
       };
     }));

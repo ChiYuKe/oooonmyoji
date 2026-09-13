@@ -10,6 +10,7 @@ import Ajv2020 from 'ajv/dist/2020';
 
 export interface ParameterInfo {
   type: string;
+  display_name?: string;
   required?: boolean;
   default?: unknown;
   description?: string;
@@ -251,6 +252,7 @@ function validateParameter(param: ParameterInfo, key: string): void {
 export function parseParameterDefinition(raw: unknown, key: string): ParameterInfo {
   const obj = asRecord(raw);
   const info: ParameterInfo = { type: String(obj.type ?? '') };
+  if (typeof obj.display_name === 'string') info.display_name = obj.display_name;
   if (obj.required === true) info.required = true;
   if (obj.default !== undefined) info.default = obj.default;
   if (typeof obj.description === 'string') info.description = obj.description;

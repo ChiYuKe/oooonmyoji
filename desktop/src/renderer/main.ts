@@ -12,6 +12,8 @@ import {
   Copy,
   Ellipsis,
   ExternalLink,
+  Eye,
+  EyeOff,
   FilePlus2,
   FileJson2,
   Flag,
@@ -94,8 +96,11 @@ interface SidebarNode {
 
 interface SidebarVariable {
   name: string;
+  displayName?: string;
+  group?: string;
   type: string;
   scope: 'inputs' | 'variables';
+  public?: boolean;
 }
 
 interface EditorEnvelope {
@@ -103,6 +108,9 @@ interface EditorEnvelope {
   frameId?: string;
   message?: Record<string, unknown>;
   state?: { dirty?: boolean };
+  /** 独立窗口转发的壳层快捷键与指针事件。 */
+  type?: 'shellShortcut' | 'shellContextReset';
+  key?: string;
 }
 
 interface RuntimeLogDescriptor {
@@ -182,6 +190,15 @@ interface OverviewConfigReader {
   read: () => unknown;
   focus: () => void;
 }
+
+/**
+ * 桌面壳层的删除键目标：由各面板的点击处理器登记，新的一次点击会先作废上一次登记。
+ * editor 表示“结构树/变量列表里选中的东西”，交给画布执行删除。
+ */
+type DeleteTarget =
+  | { kind: 'content'; path: string }
+  | { kind: 'queue'; rel: string }
+  | { kind: 'editor' };
 
 interface RoiPickerState {
   requestId: string;
@@ -485,6 +502,10 @@ let contentBrowserQuery = '';
 let contentBrowserView: ContentBrowserView = 'grid';
 let contentFolderDraft: ContentFolderDraft | undefined;
 let selectedContentPath = '';
+/** 最近一次被点选的删除目标（内容项、队列行或画布选区）；Delete/Backspace 只作用于它。 */
+let deleteTarget: DeleteTarget | undefined;
+/** 概览「执行顺序」里被点选的行，用于显示选中背景并作为队列删除目标。 */
+let selectedQueueRel = '';
 let runtimeLogReady = false;
 let runtimeLogDescriptor: RuntimeLogDescriptor | undefined;
 let runtimeLogEvents: Record<string, unknown>[] = [];
@@ -1008,6 +1029,7 @@ function overviewWorkflowName(workflow: WorkflowDescriptor): string {
 
 function overviewWorkflowKind(workflow: WorkflowDescriptor): string {
   const rel = workflow.rel.replace(/\\/g, '/').toLowerCase();
+  if (workflow.source === 'generated' || rel.startsWith('workflows/generated/')) return 'AI 生成';
   if (rel.includes('/entrypoints/')) return '入口脚本';
   if (rel.includes('/examples/')) return '示例';
   if (rel.includes('/shared/')) return '共享流程';
@@ -1016,7 +1038,23 @@ function overviewWorkflowKind(workflow: WorkflowDescriptor): string {
 
 function overviewWorkflowRank(workflow: WorkflowDescriptor): number {
   const kind = overviewWorkflowKind(workflow);
-  return kind === '入口脚本' ? 0 : kind === '工作流' ? 1 : kind === '共享流程' ? 2 : 3;
+  return kind === '入口脚本' ? 0 : kind === 'AI 生成' ? 1 : kind === '工作流' ? 2 : kind === '共享流程' ? 3 : 4;
+}
+
+function overviewWorkflowValidation(workflow: WorkflowDescriptor): { label: string; title: string; className: string } {
+  if (workflow.validationStatus === 'valid') return { label: '已校验', title: '工作流校验通过', className: 'valid' };
+  if (workflow.validationStatus === 'invalid') return { label: '有错误', title: '工作流存在校验错误，请打开编辑器查看', className: 'invalid' };
+  return { label: '未校验', title: '尚未完成工作流校验', className: 'unknown' };
+}
+
+function overviewWorkflowUpdated(workflow: WorkflowDescriptor): string | undefined {
+  if (typeof workflow.updatedAt !== 'number' || !Number.isFinite(workflow.updatedAt)) return undefined;
+  return `更新 ${new Date(workflow.updatedAt).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
 }
 
 function sortedOverviewWorkflows(): WorkflowDescriptor[] {
@@ -1304,7 +1342,7 @@ function renderOverviewConfigFields(workflow: WorkflowDescriptor): void {
     heading.className = 'overview-config-field-heading';
     const label = document.createElement('label');
     const displayName = document.createElement('span');
-    displayName.textContent = overviewInputDisplayName(name);
+    displayName.textContent = definition.display_name || overviewInputDisplayName(name);
     const parameterName = document.createElement('code');
     parameterName.textContent = name;
     label.append(displayName);
@@ -1411,10 +1449,22 @@ function resetOverviewRunResult(): void {
 function updateOverviewSelection(rel: string, checked: boolean): void {
   if (overviewRun?.active) return;
   if (checked && !overviewSelection.includes(rel)) overviewSelection.push(rel);
-  if (!checked) overviewSelection = overviewSelection.filter((item) => item !== rel);
+  if (!checked) {
+    overviewSelection = overviewSelection.filter((item) => item !== rel);
+    if (selectedQueueRel === rel) selectedQueueRel = '';
+    if (deleteTarget?.kind === 'queue' && deleteTarget.rel === rel) deleteTarget = undefined;
+  }
   resetOverviewRunResult();
   persistOverviewSelection();
   renderOverview();
+}
+
+/** 点选执行队列里的一行：只做选中高亮，真正的移除由 Delete 键或行内按钮触发。 */
+function selectOverviewQueueRow(rel: string): void {
+  selectedQueueRel = rel;
+  overviewQueueElement.querySelectorAll<HTMLElement>('.overview-queue-row').forEach((row) => {
+    row.classList.toggle('selected', Boolean(rel) && row.dataset.queueRel === rel);
+  });
 }
 
 function moveOverviewSelection(index: number, offset: number): void {
@@ -1503,6 +1553,18 @@ function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
   const inputs = document.createElement('span');
   inputs.className = 'overview-card-tag';
   inputs.textContent = `${workflow.inputs?.length ?? 0} 个输入`;
+  const validation = overviewWorkflowValidation(workflow);
+  const validationTag = document.createElement('span');
+  validationTag.className = `overview-card-tag workflow-validation-${validation.className}`;
+  validationTag.textContent = validation.label;
+  validationTag.title = validation.title;
+  const updated = overviewWorkflowUpdated(workflow);
+  const updatedTag = updated ? document.createElement('span') : undefined;
+  if (updatedTag && updated !== undefined) {
+    updatedTag.className = 'overview-card-tag workflow-updated';
+    updatedTag.textContent = updated;
+    updatedTag.title = `文件更新时间：${new Date(workflow.updatedAt!).toLocaleString('zh-CN')}`;
+  }
   const configure = document.createElement('button');
   const configured = Boolean(overviewConfiguredInputs(workflow));
   configure.className = `overview-card-config${configured ? ' configured' : ''}`;
@@ -1524,7 +1586,9 @@ function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
   const state = document.createElement('span');
   state.className = 'overview-card-status';
   state.textContent = overviewStatusLabel(status, selected);
-  footer.append(kind, inputs, configure, open, state);
+  footer.append(kind, inputs, validationTag);
+  if (updatedTag) footer.appendChild(updatedTag);
+  footer.append(configure, open, state);
   card.append(header, description, footer);
 
   card.addEventListener('click', (event) => {
@@ -1550,7 +1614,14 @@ function renderOverviewQueueRow(rel: string, index: number): HTMLElement {
   const current = Boolean(overviewRun?.active && overviewRun.index === index);
   const locked = Boolean(overviewRun?.active);
   const row = document.createElement('div');
-  row.className = ['overview-queue-row', current ? 'current' : '', status ?? ''].filter(Boolean).join(' ');
+  row.className = ['overview-queue-row', current ? 'current' : '', status ?? '', rel === selectedQueueRel ? 'selected' : ''].filter(Boolean).join(' ');
+  row.dataset.queueRel = rel;
+  row.title = 'Delete 移出队列';
+  row.addEventListener('click', (event) => {
+    if ((event.target as Element).closest('button')) return;
+    selectOverviewQueueRow(rel);
+    deleteTarget = { kind: 'queue', rel };
+  });
   const order = document.createElement('span');
   order.className = 'overview-queue-index';
   order.textContent = String(index + 1);
@@ -2046,9 +2117,21 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
 
 function selectContentItem(button: HTMLButtonElement, item: ContentBrowserItem): void {
   selectedContentPath = item.path;
+  deleteTarget = { kind: 'content', path: item.path };
   contentBrowserItems.querySelectorAll('.content-item.selected').forEach((element) => element.classList.remove('selected'));
   button.classList.add('selected');
   document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = item.path;
+}
+
+/**
+ * 左侧目录树与面包屑里的文件夹也参与删除目标：写回统一的选中路径，
+ * 让底部选中信息与 Delete 的目标保持一致（根目录会在删除流程里被拦截）。
+ */
+function selectContentFolder(folder: string): void {
+  if (!folder) return;
+  selectedContentPath = folder;
+  deleteTarget = { kind: 'content', path: folder };
+  document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = folder;
 }
 
 function createContentItem(item: ContentBrowserItem, editing = false): HTMLButtonElement {
@@ -2157,8 +2240,11 @@ function renderContentBrowserTree(): void {
     button.style.setProperty('--depth', String(depth));
     button.innerHTML = `<i data-lucide="${folder === contentBrowserFolder ? 'folder-open' : 'folder'}"></i><span></span>`;
     button.querySelector('span')!.textContent = folder ? contentName(folder) : '项目内容';
-    button.title = folder || '项目内容';
-    button.addEventListener('click', () => navigateContentBrowser(folder));
+    button.title = folder ? `${folder}\nDelete 删除该文件夹` : '项目内容';
+    button.addEventListener('click', () => {
+      navigateContentBrowser(folder);
+      selectContentFolder(folder);
+    });
     button.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -2182,8 +2268,11 @@ function renderContentBrowserBreadcrumbs(): void {
     button.type = 'button';
     button.className = 'content-crumb';
     button.textContent = path ? contentName(path) : '项目内容';
-    button.title = path || '项目内容';
-    button.addEventListener('click', () => navigateContentBrowser(path));
+    button.title = path ? `${path}\nDelete 删除该文件夹` : '项目内容';
+    button.addEventListener('click', () => {
+      navigateContentBrowser(path);
+      selectContentFolder(path);
+    });
     button.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -2437,6 +2526,80 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
   } catch (error) {
     showToast(`删除失败：${errorMessage(error)}`, true);
   }
+}
+
+/** 正在输入的控件必须保留 Delete/Backspace 的文本编辑语义。 */
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]') !== null;
+}
+
+/**
+ * 把登记的路径解析成当前内容浏览器里的条目。
+ * 用路径而不是条目对象，重命名/移动后仍能命中最新数据；找不到时回退到当前选中项。
+ */
+function resolveContentDeleteTarget(path: string): ContentBrowserItem | undefined {
+  const candidates = [path, selectedContentPath].map((value) => (value ?? '').replace(/\\/g, '/')).filter(Boolean);
+  for (const candidate of candidates) {
+    const item = contentBrowserEntries().find((entry) => entry.path === candidate);
+    if (item) return item;
+    if (contentFolders().includes(candidate)) return contentFolderItem(candidate);
+  }
+  return undefined;
+}
+
+/** 执行已登记的删除目标；返回 true 表示这次按键已被消费。 */
+function performDeleteTarget(origin?: KeyboardEvent): boolean {
+  const target = deleteTarget;
+  if (!target) return false;
+  if (target.kind === 'editor') {
+    origin?.preventDefault();
+    editorCommand('deleteSelection');
+    return true;
+  }
+  if (target.kind === 'queue') {
+    if (!overviewSelection.includes(target.rel)) {
+      deleteTarget = undefined;
+      return false;
+    }
+    if (overviewRun?.active) {
+      showToast('队列运行中，无法移出脚本', true);
+      return true;
+    }
+    origin?.preventDefault();
+    deleteTarget = undefined;
+    selectOverviewQueueRow('');
+    updateOverviewSelection(target.rel, false);
+    return true;
+  }
+  const item = resolveContentDeleteTarget(target.path);
+  if (!item) {
+    deleteTarget = undefined;
+    return false;
+  }
+  if (item.kind === 'folder' && (!item.path || isContentRootFolder(item.path))) {
+    showToast('项目根目录不能删除', true);
+    return true;
+  }
+  origin?.preventDefault();
+  deleteTarget = undefined;
+  void deleteContentItem(item);
+  return true;
+}
+
+/** 桌面壳层的 Delete/Backspace 快捷键；没有登记目标时不拦截按键。 */
+function handleDeleteShortcut(event: KeyboardEvent): boolean {
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return false;
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (isTextEditingTarget(event.target)) return false;
+  if (roiPickerState || contentNameDialogState) return false;
+  return performDeleteTarget(event);
+}
+
+/** 新的点击先作废上一次的删除目标，再由具体行/项的点击处理器重新登记。 */
+function resetDeleteTargetOnPointerDown(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  deleteTarget = undefined;
 }
 
 function addContentContextSeparator(doc: Document, menu: HTMLElement): void {
@@ -2946,7 +3109,7 @@ function createTreeRows(): DocumentFragment {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `tree-row${node.id === selectedNode ? ' selected' : ''}`;
-    row.title = `${node.name}\n${node.meta}`;
+    row.title = `${node.name}\n${node.meta}\nDelete 删除该节点`;
     row.dataset.nodeId = node.id;
     if (hasChildren) row.setAttribute('aria-expanded', String(branchOpen));
 
@@ -2974,6 +3137,12 @@ function createTreeRows(): DocumentFragment {
 
     label.append(name, meta);
     row.append(chevron, icon, label);
+    const count = document.createElement('span');
+    count.className = 'tree-child-count';
+    const childCount = node.children.filter((childId) => byId.has(childId)).length;
+    count.textContent = childCount ? String(childCount) : '';
+    if (childCount) count.title = `${childCount} 个直接子节点`;
+    row.appendChild(count);
     row.addEventListener('click', (event) => {
       if (hasChildren && event.target instanceof Node && chevron.contains(event.target)) {
         toggleTreeNode(node.id, row, children);
@@ -2981,6 +3150,8 @@ function createTreeRows(): DocumentFragment {
       }
       docking?.showPanel('details');
       editorCommand('focusNode', node.id);
+      // 结构树选中即等价于画布选中：Delete 交由画布执行删除。
+      deleteTarget = { kind: 'editor' };
     });
     container.append(row, children);
     if (hasChildren) {
@@ -3072,36 +3243,47 @@ function syncVariableSelection(previousVariable: string, previousScope: 'inputs'
 
 /** 输入与状态列表内容指纹。 */
 function variableSignature(): string {
-  return sidebarVariables.map((variable) => `${variable.scope}\u0001${variable.name}\u0001${variable.type}`).join('\u0004');
+  return sidebarVariables.map((variable) => `${variable.scope}\u0001${variable.name}\u0001${variable.type}\u0001${variable.displayName || ''}\u0001${variable.group || ''}\u0001${variable.public ? '1' : '0'}`).join('\u0004');
 }
 
 function renderVariables(): void {
   const keepScroll = variablesView.scrollTop;
+  const groupView = variablesView as HTMLElement & { collapsedGroups?: Set<string> };
+  const collapsed = groupView.collapsedGroups ||= new Set<string>();
   variablesView.replaceChildren();
-  for (const scope of ['inputs', 'variables'] as const) {
-    const scoped = sidebarVariables.filter((variable) => variable.scope === scope);
-    const heading = document.createElement('h3');
-    heading.className = 'variable-group-heading';
-    const label = document.createElement('span');
-    label.textContent = scope === 'inputs' ? '工作流输入' : '运行变量';
-    const count = document.createElement('span');
-    count.className = 'variable-group-count'; count.textContent = String(scoped.length);
-    const hint = document.createElement('span');
-    hint.className = 'variable-group-hint'; hint.textContent = scope === 'inputs' ? '只读' : '可更新';
-    heading.append(label, count, hint);
-    variablesView.appendChild(heading);
-    if (scoped.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'variable-group-empty';
-      empty.textContent = scope === 'inputs' ? '暂无输入 · 点击上方「＋ 输入」添加' : '暂无运行变量 · 点击上方「＋ 变量」添加';
-      variablesView.appendChild(empty);
+  if (sidebarVariables.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'variable-group-empty';
+    empty.textContent = '暂无变量 · 点击上方「＋ 变量」添加';
+    variablesView.appendChild(empty);
+  }
+  const groups = new Map<string, SidebarVariable[]>();
+  for (const variable of sidebarVariables) {
+    const group = variable.group || '';
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push(variable);
+  }
+  for (const [group, members] of groups) {
+    const groupKey = group;
+    if (group || groups.size > 1) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button'; toggle.className = 'variable-category-toggle';
+      toggle.textContent = `${collapsed.has(groupKey) ? '▸' : '▾'} ${group || '未分组'} · ${members.length}`;
+      toggle.setAttribute('aria-expanded', String(!collapsed.has(groupKey)));
+      toggle.addEventListener('click', () => {
+        if (collapsed.has(groupKey)) collapsed.delete(groupKey); else collapsed.add(groupKey);
+        renderVariables();
+      });
+      variablesView.appendChild(toggle);
     }
-    for (const variable of scoped) {
+    for (const variable of members) {
+    const scope = variable.scope;
     const row = document.createElement('button');
     row.type = 'button';
+    row.hidden = collapsed.has(groupKey);
     row.className = `variable-row scope-${scope}${variable.name === selectedVariable && scope === selectedVariableScope ? ' selected' : ''}`;
     row.setAttribute('aria-pressed', String(variable.name === selectedVariable && scope === selectedVariableScope));
-    row.title = `${overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${scope === 'inputs' ? '调用方传入，只读' : '流程内状态，可更新'}\n拖到画布可创建引用卡片`;
+    row.title = `${variable.displayName || overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${variable.public ? '公开：引用此流程的节点可见' : '私有：仅流程内部使用'}\n拖到画布可创建引用卡片\nDelete 删除该变量`;
     row.dataset.variableName = variable.name;
     row.dataset.variableScope = scope;
     row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
@@ -3109,10 +3291,28 @@ function renderVariables(): void {
     const icon = row.querySelector<HTMLElement>('.variable-icon')!;
     icon.classList.add(variableGlyph.className);
     icon.appendChild(createTreeIcon(variableGlyph.icon, 'variable-icon-svg'));
-    row.querySelector<HTMLElement>('.variable-name')!.textContent = overviewInputDisplayName(variable.name);
+    row.querySelector<HTMLElement>('.variable-name')!.textContent = variable.displayName || overviewInputDisplayName(variable.name);
     const flags = row.querySelector<HTMLElement>('.variable-flags')!;
     flags.textContent = variableTypeLabels[variable.type.toLowerCase()] ?? variable.type;
     flags.title = variable.type;
+    const eye = document.createElement('span');
+    eye.className = `variable-eye${variable.public ? '' : ' off'}`;
+    eye.setAttribute('aria-hidden', 'true');
+    eye.appendChild(createTreeIcon(variable.public ? Eye : EyeOff, 'variable-eye-svg'));
+    if (scope === 'variables') {
+      eye.classList.add('toggle');
+      eye.title = variable.public
+        ? '公开：父流程可设置它的初始值（点击取消公开）'
+        : '私有：仅流程内部使用（点击公开并生成初始值输入）';
+      eye.addEventListener('click', (event) => {
+        event.stopPropagation();
+        editorCommand('setVariablePublic', { name: variable.name, scope, public: !variable.public });
+      });
+    } else {
+      eye.classList.add('fixed');
+      eye.title = '工作流输入默认公开，父流程可直接传值';
+    }
+    row.appendChild(eye);
     row.draggable = true;
     row.addEventListener('dragstart', (event) => {
       const transfer = event.dataTransfer;
@@ -3123,6 +3323,8 @@ function renderVariables(): void {
     row.addEventListener('click', () => {
       docking?.showPanel('details');
       editorCommand('selectVariable', { name: variable.name, scope });
+      // 变量行选中即等价于画布选中该变量：Delete 交由画布执行删除。
+      deleteTarget = { kind: 'editor' };
     });
     variablesView.appendChild(row);
     }
@@ -3199,6 +3401,11 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       if (sourceFrame === editorFrame) editorReady = true;
       if (currentEditorInit) postToFrame(sourceFrame, currentEditorInit as unknown as Record<string, unknown>);
       else if (sourceFrame === editorFrame && bootstrap?.defaultWorkflow) await loadWorkflow(currentUri || bootstrap.defaultWorkflow);
+      return;
+    }
+    if (type === 'createVariableNode') {
+      if (message.scope !== 'inputs' && message.scope !== 'variables') return;
+      postToFrame(editorFrame,{type:'editorCommand',command:'addVariableCard',value:{name:String(message.name || ''),scope:message.scope}});
       return;
     }
     if (type === 'documentStateChanged') {
@@ -3796,7 +4003,6 @@ function bindUi(): void {
   });
   document.querySelector('#structure-expand-all')!.addEventListener('click', () => setAllTreeBranches(true));
   document.querySelector('#structure-collapse-all')!.addEventListener('click', () => setAllTreeBranches(false));
-  document.querySelector('#add-input-button')!.addEventListener('click', () => editorCommand('addVariable', 'inputs'));
   document.querySelector('#add-variable-button')!.addEventListener('click', () => editorCommand('addVariable', 'variables'));
   document.querySelector('#new-workflow-button')!.addEventListener('click', () => void handleEditorMessage({ type: 'newWorkflow' }, editorFrame));
   document.querySelector('#run-button')!.addEventListener('click', () => desktopControl('run'));
@@ -3895,6 +4101,7 @@ function bindUi(): void {
   contentBrowserSearch.addEventListener('input', () => {
     contentBrowserQuery = contentBrowserSearch.value;
     selectedContentPath = '';
+    deleteTarget = undefined;
     renderContentBrowser();
   });
   document.querySelectorAll<HTMLButtonElement>('[data-content-view]').forEach((button) => {
@@ -3905,7 +4112,9 @@ function bindUi(): void {
     });
   });
   document.addEventListener('click', closeTitlebarMenus);
+  document.addEventListener('pointerdown', resetDeleteTargetOnPointerDown, true);
   document.addEventListener('keydown', (event) => {
+    if (handleDeleteShortcut(event)) return;
     if (event.key === 'Escape') {
       if (!roiPickerModal.classList.contains('hidden')) {
         event.preventDefault();
@@ -3944,6 +4153,17 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
     } else if (type === 'clear') {
       clearRuntimeLog();
     }
+    return;
+  }
+
+  // 面板被拖动到独立窗口后，DOM 仍在，但主窗口 document 收不到键盘事件；
+  // 独立窗口把删除键与指针事件转回来，复用同一套删除目标逻辑。
+  if (event.data?.source === 'dockview-popout' && event.data.type === 'shellShortcut') {
+    if (event.data.key === 'Delete' || event.data.key === 'Backspace') performDeleteTarget();
+    return;
+  }
+  if (event.data?.source === 'dockview-popout' && event.data.type === 'shellContextReset') {
+    deleteTarget = undefined;
     return;
   }
 

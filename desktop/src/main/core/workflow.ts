@@ -483,9 +483,12 @@ function validateDecorator(
   if (extras.length) issues.push(issue(path, `装饰器包含未知字段：${extras.join(', ')}`, 'invalid-decorator'));
   for (const key of required[type]) if (!(key in item)) issues.push(issue(path, `装饰器缺少 ${key}`, 'invalid-decorator'));
   if (type === 'condition') validateBindings(item.expression, context, [...path, 'expression'], issues, true, undefined, availableNodeIds, possiblyAvailableNodeIds);
-  if ((type === 'cooldown' || type === 'timeout') && (typeof item.seconds !== 'number' || item.seconds <= 0)) issues.push(issue([...path, 'seconds'], 'seconds 必须大于 0', 'invalid-decorator'));
-  if (type === 'retry' && (!Number.isInteger(item.attempts) || Number(item.attempts) < 1)) issues.push(issue([...path, 'attempts'], 'attempts 必须是正整数', 'invalid-decorator'));
-  if (type === 'retry' && item.delay_seconds !== undefined && (typeof item.delay_seconds !== 'number' || item.delay_seconds < 0)) issues.push(issue([...path, 'delay_seconds'], 'delay_seconds 不能小于 0', 'invalid-decorator'));
+  const schemas: Record<string, Record<string, unknown>> = {seconds:{type:'number',exclusiveMinimum:0},attempts:{type:'integer',minimum:1},delay_seconds:{type:'number',minimum:0},reset_on_failure:{type:'boolean'}};
+  for (const [key,schema] of Object.entries(schemas)) {
+    if (!(key in item)) continue;
+    validateBindings(item[key],context,[...path,key],issues,false,schema,availableNodeIds);
+    if (!workflowAjv.compile(allowBinding(schema))(item[key])) issues.push(issue([...path,key],`${key} 的值或引用无效`,'invalid-decorator'));
+  }
   if (type === 'repeat') {
     if (isObject(item.count) && typeof item.count.ref === 'string') {
       validateBindings(item.count, context, [...path, 'count'], issues, false, { type: 'integer' }, availableNodeIds);
@@ -493,7 +496,6 @@ function validateDecorator(
       issues.push(issue([...path, 'count'], 'count 必须是正整数或整数引用', 'invalid-decorator'));
     }
   }
-  if (type === 'do_once' && item.reset_on_failure !== undefined && typeof item.reset_on_failure !== 'boolean') issues.push(issue([...path, 'reset_on_failure'], 'reset_on_failure 必须是布尔值', 'invalid-decorator'));
 }
 
 function validateInstanceParallelInputs(value: unknown, path: (string | number)[], issues: ValidationIssue[]): void {
@@ -554,6 +556,27 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
   const context: RefContext = { info, catalog, nodeIds: ids };
   const parents = new Map<string, number>(info.nodeIds.map((id) => [id, 0]));
   const nodeMap = new Map(info.nodes.map((node) => [node.id, node]));
+  const descendants = (owner:string):Set<string> => {
+    const found=new Set<string>(),pending=[owner];
+    while(pending.length){const id=pending.pop()!;if(found.has(id))continue;found.add(id);pending.push(...(nodeMap.get(id)?.children||[]));}return found;
+  };
+  const references = (value:unknown,prefix:string):boolean => {
+    if(!value||typeof value!=='object')return false;
+    if(isObject(value)&&typeof value.ref==='string'&&(value.ref===prefix||value.ref.startsWith(prefix+'.')))return true;
+    return Object.values(value).some(child=>references(child,prefix));
+  };
+  for(const [name,definition] of Object.entries(isObject(root.variables)?root.variables:{})) {
+    if(!isObject(definition))continue;
+    if(definition.initial_from!==undefined) {
+      const input=typeof definition.initial_from==='string'?info.inputs[definition.initial_from]:undefined;
+      if(!input||!info.variables[name]||!bindingTypesCompatible(parameterToSchema(info.variables[name]),parameterToSchema(input)))issues.push(issue(['variables',name,'initial_from'],'初始化来源必须是兼容的工作流输入','variable-initializer'));
+    }
+    if(!definition.owner)continue;
+    const owner=typeof definition.owner==='string'?nodeMap.get(definition.owner):undefined;
+    if(!owner||['task','instance_parallel'].includes(owner.type)){issues.push(issue(['variables',name,'owner'],'局部作用域必须指向复合节点','variable-scope'));continue;}
+    const allowed=descendants(owner.id);
+    for(const node of info.nodes)if(!allowed.has(node.id)&&references(info.rawNodes[node.index],`variables.${name}`))issues.push(issue(['nodes',node.index],'节点越界访问局部变量：'+name,'variable-scope'));
+  }
 
   (root.nodes as unknown[] | undefined)?.forEach((rawNode, index) => {
     const path = ['nodes', index];
@@ -585,16 +608,13 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalog): Validati
           if (!isObject(params)) issues.push(issue([...path, 'params'], 'params 必须是对象', 'invalid-params'));
           else {
             validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema, availableNodeIds);
-            if (rawNode.action === 'variables.set' && (typeof params.name !== 'string' || !info.variableProps.includes(params.name))) {
-              issues.push(issue([...path, 'params', 'name'], 'name 必须是已声明的运行变量', 'unknown-variable'));
-            }
             const validate = workflowAjv.compile(bindingAwareParameterSchema(spec.inputSchema));
             const normalized = applyParameterDefaults(spec.parameters, params);
             if (!validate(normalized)) {
               const primary = validate.errors?.find((error) => ['required', 'additionalProperties', 'type', 'enum', 'minimum', 'maximum'].includes(error.keyword)) ?? validate.errors?.[0];
               issues.push(issue([...path, 'params'], `Action ${rawNode.action} 参数无效：${primary?.instancePath || '/'} ${primary?.message || 'validation failed'}`, 'invalid-params'));
             }
-            const retry = node.decorators.find((decorator) => decorator.type === 'retry' && Number(decorator.attempts) > 1);
+            const retry = node.decorators.find((decorator) => decorator.type === 'retry' && (isObject(decorator.raw.attempts) || Number(decorator.attempts) > 1));
             if (retry && !spec.retrySafe && root.retry_safe !== true) issues.push(issue([...path, 'decorators'], `Action ${rawNode.action} 不可安全重试`, 'unsafe-retry'));
           }
         }
@@ -703,7 +723,7 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalog):
             id: { type: 'string', minLength: 1 }, type: { enum: [...NODE_TYPES] }, name: { type: 'string', minLength: 1 },
             action: { type: 'string', enum: catalog.names() }, params: { type: 'object' },
             children: { type: 'array', items: { type: 'string', enum: info.nodeIds }, uniqueItems: true },
-            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, expression: {}, seconds: { type: 'number', exclusiveMinimum: 0 }, attempts: { type: 'integer', minimum: 1 }, delay_seconds: { type: 'number', minimum: 0 }, count: { type: 'integer', minimum: 1 }, reset_on_failure: { type: 'boolean' } }, additionalProperties: false } },
+            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, expression: {}, seconds: allowBinding({ type: 'number', exclusiveMinimum: 0 }), attempts: allowBinding({ type: 'integer', minimum: 1 }), delay_seconds: allowBinding({ type: 'number', minimum: 0 }), count: allowBinding({ type: 'integer', minimum: 1 }), reset_on_failure: allowBinding({ type: 'boolean' }) }, additionalProperties: false } },
             finish_mode: { enum: [...PARALLEL_FINISH_MODES] },
             runs: {
               type: 'array', minItems: 1,

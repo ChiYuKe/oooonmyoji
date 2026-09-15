@@ -65,7 +65,6 @@ import type {
   AssetImage,
   ParameterInfo,
   RuntimeInstance,
-  RuntimeOutputEvent,
   RuntimeStateEvent,
   WorkflowDescriptor,
   WorkflowEditorInit,
@@ -84,6 +83,7 @@ import {
   type WorkbenchPanelId,
 } from './docking';
 import { createReferenceViewer } from './reference-viewer';
+import { createRuntimeLog } from './runtime-log';
 import { createRoiPicker } from './roi-picker';
 import './styles.css';
 
@@ -113,14 +113,6 @@ interface EditorEnvelope {
   /** 独立窗口转发的壳层快捷键与指针事件。 */
   type?: 'shellShortcut' | 'shellContextReset';
   key?: string;
-}
-
-interface RuntimeLogDescriptor {
-  workflow: string;
-  instance: string;
-  startedAt: number;
-  status: string;
-  sources?: RuntimeStateEvent['sources'];
 }
 
 interface RuntimeLogEnvelope {
@@ -391,11 +383,6 @@ let selectedContentPath = '';
 let deleteTarget: DeleteTarget | undefined;
 /** 概览「执行顺序」里被点选的行，用于显示选中背景并作为队列删除目标。 */
 let selectedQueueRel = '';
-let runtimeLogReady = false;
-let runtimeLogDescriptor: RuntimeLogDescriptor | undefined;
-let runtimeLogEvents: Record<string, unknown>[] = [];
-let runtimeEngineOutput = '';
-let runtimeProcessResult: { code: number | null; signal: string | null; stopped: boolean } | undefined;
 let autoRefreshInstances = true;
 let loadDefaultWorkflowOnStart = true;
 let restoreSessionOnStart = true;
@@ -562,35 +549,9 @@ function postToAllEditors(payload: Record<string, unknown>): void {
   postToFrame(detailsFrame, payload);
 }
 
-function postToRuntimeLog(payload: Record<string, unknown>): void {
-  if (runtimeLogReady) runtimeLogFrame.contentWindow?.postMessage(payload, '*');
-}
-
-function sendRuntimeLogInit(): void {
-  postToRuntimeLog({
-    type: 'init',
-    descriptor: runtimeLogDescriptor ?? null,
-    events: runtimeLogEvents,
-    engineOutput: runtimeEngineOutput,
-    processResult: runtimeProcessResult,
-  });
-}
-
-function clearRuntimeLog(): void {
-  runtimeLogDescriptor = undefined;
-  runtimeLogEvents = [];
-  runtimeEngineOutput = '';
-  runtimeProcessResult = undefined;
-  postToRuntimeLog({ type: 'cleared' });
-}
-
-function markRuntimeLogReady(): void {
-  runtimeLogReady = true;
-  sendRuntimeLogInit();
-}
-
-runtimeLogFrame.addEventListener('load', markRuntimeLogReady);
-if (runtimeLogFrame.contentDocument?.readyState === 'complete') window.queueMicrotask(markRuntimeLogReady);
+const runtimeLog = createRuntimeLog({ frame: runtimeLogFrame });
+runtimeLogFrame.addEventListener('load', () => runtimeLog.markReady());
+if (runtimeLogFrame.contentDocument?.readyState === 'complete') window.queueMicrotask(() => runtimeLog.markReady());
 
 function editorCommand(command: string, value?: unknown): void {
   postToEditor({ type: 'editorCommand', command, value });
@@ -3803,12 +3764,6 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
   }
 }
 
-function appendOutput(event: RuntimeOutputEvent): void {
-  runtimeEngineOutput += event.text;
-  if (runtimeEngineOutput.length > 300_000) runtimeEngineOutput = runtimeEngineOutput.slice(-300_000);
-  postToRuntimeLog({ type: 'engineOutput', chunk: event.text, stream: event.stream });
-}
-
 function decodePathLabel(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -3821,24 +3776,19 @@ function updateRuntimeState(event: RuntimeStateEvent): void {
   runtimeBusy = event.state === 'running' || event.state === 'stopping';
   if (event.state === 'running') {
     const workflow = decodePathLabel(String(event.workflow || currentUri).replace(/\\/g, '/').split('/').pop() || '工作流');
-    runtimeLogDescriptor = {
+    runtimeLog.beginRun({
       workflow,
       instance: event.sources?.length ? `${event.sources.length} 个实例` : instanceLabelById(event.instance || selectedInstance),
       startedAt: event.startedAt ?? Date.now(),
       status: 'running',
       sources: event.sources,
-    };
-    runtimeLogEvents = [];
-    runtimeEngineOutput = '';
-    runtimeProcessResult = undefined;
-    sendRuntimeLogInit();
+    });
   } else if (event.state === 'succeeded' || event.state === 'failed' || event.state === 'idle') {
-    runtimeProcessResult = {
+    runtimeLog.finishRun({
       code: event.exitCode ?? (event.state === 'failed' ? -1 : 0),
       signal: null,
       stopped: event.state === 'idle',
-    };
-    postToRuntimeLog({ type: 'processFinished', ...runtimeProcessResult });
+    });
   }
   document.querySelector<HTMLButtonElement>('#run-button')!.disabled = runtimeBusy || Boolean(overviewRun?.active);
   document.querySelector<HTMLButtonElement>('#stop-button')!.disabled = !runtimeBusy && !overviewRun?.active;
@@ -4320,12 +4270,11 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
   if (event.source === runtimeLogFrame.contentWindow && runtimeEnvelope.source === 'desktop-run-log') {
     const type = runtimeEnvelope.message?.type;
     if (type === 'ready') {
-      runtimeLogReady = true;
-      sendRuntimeLogInit();
+      runtimeLog.markReady();
     } else if (type === 'stopWorkflow') {
       void api.stopWorkflow();
     } else if (type === 'clear') {
-      clearRuntimeLog();
+      runtimeLog.clear();
     }
     return;
   }
@@ -4392,12 +4341,10 @@ async function start(): Promise<void> {
   bindUi();
   refreshShortcutLabels();
   window.StudioShortcuts?.subscribe(refreshShortcutLabels);
-  api.onRuntimeOutput(appendOutput);
+  api.onRuntimeOutput((event) => runtimeLog.appendOutput(event));
   api.onRuntimeState(updateRuntimeState);
   api.onRunEvent((event) => {
-    runtimeLogEvents.push(event);
-    if (runtimeLogEvents.length > 5000) runtimeLogEvents = runtimeLogEvents.slice(-5000);
-    postToRuntimeLog({ type: 'runEvent', event });
+    runtimeLog.appendRunEvent(event);
     postToAllEditors({ type: 'runEvent', event });
   });
   api.onWindowMaximized(updateMaximizedState);

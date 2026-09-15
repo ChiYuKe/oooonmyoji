@@ -25,7 +25,7 @@ test('compact tree retains metadata, selection, collapse and missing-child handl
   const ctx=vm.createContext({document:{createElement:()=>new Element(),createDocumentFragment:()=>new Element()},Node:Element,
     sidebarNodes:[{id:'root',name:'工作流',meta:'root',type:'root',children:['task','missing']},{id:'task',name:'等待挑战按钮',meta:'vision.wait_template',type:'task',children:[]}],
     selectedNode:'task',collapsedTreeNodes:new Set(['root']),treeNodeGlyphs:{},treeNodeFallbackGlyph:{className:'type-default',icon:{}},ChevronRight:{},createTreeIcon:()=>new Element(),
-    toggleTreeNode:id=>toggles.push(id),docking:{showPanel(){}},editorCommand:(...args)=>commands.push(args)});
+    toggleTreeNode:id=>toggles.push(id),docking:{showPanel(){}},workspace:{editorCommand:(...args)=>commands.push(args)}});
   const source=fs.readFileSync(path.join(root,'src/renderer/main.ts'),'utf8'),start=source.indexOf('function createTreeRows(');
   vm.runInContext(stripTypeScriptTypes(source.slice(start,source.indexOf('\n}\n',start)+2)),ctx);
   const fragment=ctx.createTreeRows(), parent=fragment.children[0], children=fragment.children[1], task=children.children[0];

@@ -9,6 +9,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 test('workflow documents are real Dockview panels with per-document canvases', () => {
   const docking = read('src/renderer/docking.ts');
   const shell = read('src/renderer/main.ts');
+const workspace = read('src/renderer/workspace.ts');
   const styles = read('src/renderer/styles.css');
   const html = read('src/renderer/index.html');
 
@@ -29,10 +30,10 @@ test('workflow documents are real Dockview panels with per-document canvases', (
   assert.match(docking, /reference === 'editor'\)\s*return documentPanels\(\)\[0\]/);
 
   // 壳层按面板登记运行时并按 iframe 路由消息，不再共享单一画布。
-  assert.match(shell, /const documentRuntimes = new Map<string, DocumentRuntime>\(\)/);
-  assert.match(shell, /function registerDocumentFrame\(panelId: string, uri: string, frame: HTMLIFrameElement\): void/);
-  assert.match(shell, /function unregisterDocumentFrame\(panelId: string\): void/);
-  assert.match(shell, /function runtimeForFrame\(frame: HTMLIFrameElement\)/);
+  assert.match(workspace, /const documentRuntimes = new Map<string, DocumentRuntime>\(\)/);
+  assert.match(workspace, /function registerDocumentFrame\(panelId: string, uri: string, frame: HTMLIFrameElement\): void/);
+  assert.match(workspace, /function unregisterDocumentFrame\(panelId: string\): void/);
+  assert.match(workspace, /function runtimeForFrame\(frame: HTMLIFrameElement\)/);
   assert.match(shell, /function syncDocumentTabs\(\): void/);
   assert.match(shell, /function ensureDocument\(uri: string\): WorkflowDocumentTab/);
   assert.match(shell, /function applyDocumentState\(uri: string, tab: WorkflowDocumentTab, runtime: DocumentRuntime\): void/);
@@ -40,7 +41,7 @@ test('workflow documents are real Dockview panels with per-document canvases', (
   assert.match(shell, /docking\.onDidRemoveDocument\(\(uri\) => void handleDocumentRemoved\(uri\)\)/);
   assert.match(shell, /docking\.dockviewApi\.onDidActivePanelChange/);
   assert.match(shell, /documentUriForPanelId\(event\.panel\.api\.id\)/);
-  assert.match(shell, /onFrameCreated: \(panelId, uri, frame\) => registerDocumentFrame\(panelId, uri, frame\)/);
+  assert.match(shell, /onFrameCreated: \(panelId, uri, frame\) => workspace\.registerDocumentFrame\(panelId, uri, frame\)/);
   assert.match(shell, /onCloseRequested: \(uri\) => void closeWorkflowTab\(uri\)/);
   assert.match(shell, /function reconcileDocumentPanels\(\): void/);
   assert.match(shell, /async function closeWorkflowTab\(uri: string\): Promise<void>/);

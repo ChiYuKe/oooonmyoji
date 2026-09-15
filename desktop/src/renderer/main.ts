@@ -87,26 +87,9 @@ import { contentName, createContentBrowser, relativeToProject, type ContentBrows
 import { createOverview, overviewInputDisplayName } from './overview';
 import { createRuntimeLog } from './runtime-log';
 import { parseWorkflowSession, reconcileWorkflowSession, serializeWorkflowSession, type WorkflowDocumentTab, type WorkflowSession } from './workflow-session';
+import { createWorkspace, type DocumentRuntime, type InspectorSelection, type SidebarNode, type SidebarVariable } from './workspace';
 import { createRoiPicker } from './roi-picker';
 import './styles.css';
-
-interface SidebarNode {
-  id: string;
-  name: string;
-  type: string;
-  meta: string;
-  children: string[];
-}
-
-interface SidebarVariable {
-  name: string;
-  displayName?: string;
-  group?: string;
-  type: string;
-  scope: 'inputs' | 'variables';
-  public?: boolean;
-  onCard?: boolean;
-}
 
 interface EditorEnvelope {
   source?: string;
@@ -123,34 +106,8 @@ interface RuntimeLogEnvelope {
   message?: { type?: string };
 }
 
-interface InspectorSelection {
-  kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow';
-  nodeId?: string;
-  index?: number;
-  parent?: string;
-  child?: string;
-  name?: string;
-  scope?: 'inputs' | 'variables';
-}
 
 
-
-/** 一个工作流文档对应的画布运行时：各自的 iframe、初始化和侧栏状态。 */
-interface DocumentRuntime {
-  panelId: string;
-  frame: HTMLIFrameElement;
-  ready: boolean;
-  init?: WorkflowEditorInit;
-  sidebarNodes: SidebarNode[];
-  sidebarVariables: SidebarVariable[];
-  selectedNode: string;
-  selectedVariable: string;
-  selectedVariableScope: 'inputs' | 'variables';
-  collapsedTreeNodes: Set<string>;
-  inspectorSelection?: InspectorSelection;
-}
-
-/** 持久化的画布会话：启动时用于恢复上次打开的工作流与未保存内容。 */
 
 
 /**
@@ -224,7 +181,7 @@ function installCustomTooltips(): void {
     repositionOnResize: true,
     hideOnScroll: true,
     receiverFrames: () => [
-      ...[...documentRuntimes.values()].map((runtime) => runtime.frame),
+      ...[...workspace.getDocumentRuntimes().values()].map((runtime) => runtime.frame),
       detailsFrame,
       runtimeLogFrame,
     ],
@@ -268,8 +225,7 @@ let editorReady = false;
 let currentEditorInit: WorkflowEditorInit | undefined;
 let dirty = false;
 /** 已打开文档画布注册表：uri → 独立 iframe 与画布状态。 */
-const documentRuntimes = new Map<string, DocumentRuntime>();
-const documentFrameUris = new WeakMap<HTMLIFrameElement, string>();
+const workspace = createWorkspace({ detailsFrame, getCurrentUri: () => currentUri });
 /** 正在由壳层主动关闭的文档，避免 onDidRemoveDocument 重复走保存流程。 */
 const closingDocuments = new Set<string>();
 /** 会话恢复完成前忽略 Dockview 的激活事件，避免加载到错误的文档。 */
@@ -351,12 +307,12 @@ contentBrowser = createContentBrowser({
   getOverview: () => overview,
   getReferenceViewer: () => referenceViewer,
   getDocking: () => docking,
-  getDocumentRuntimes: () => documentRuntimes as Map<string, unknown>,
+  getDocumentRuntimes: () => workspace.getDocumentRuntimes() as Map<string, unknown>,
   getClosingDocuments: () => closingDocuments,
   workflowDescriptorForPath,
   relocateDocument,
   syncDocumentTabs,
-  displayFileUri,
+  displayFileUri: workspace.displayFileUri,
   renderWorkflowSelect,
   openWorkflowInNewTab,
   openWorkflowTab,
@@ -366,54 +322,16 @@ contentBrowser = createContentBrowser({
 
 const WORKFLOW_SESSION_KEY = 'onmyoji-studio.workflow-session.v1';
 
-function activeRuntime(): DocumentRuntime | undefined {
-  return documentRuntimes.get(currentUri);
-}
-
-function runtimeForUri(uri: string): DocumentRuntime | undefined {
-  return documentRuntimes.get(uri);
-}
-
-function runtimeForFrame(frame: HTMLIFrameElement): DocumentRuntime | undefined {
-  const uri = documentFrameUris.get(frame);
-  return uri ? documentRuntimes.get(uri) : undefined;
-}
-
-function postToFrame(frame: HTMLIFrameElement, payload: Record<string, unknown>): void {
-  frame.contentWindow?.postMessage({ source: 'desktop-shell', payload }, '*');
-}
-
-function postToEditor(payload: Record<string, unknown>): void {
-  const frame = activeRuntime()?.frame;
-  if (frame) postToFrame(frame, payload);
-}
-
-function postToEditors(payload: Record<string, unknown>): void {
-  const frame = activeRuntime()?.frame;
-  if (frame) postToFrame(frame, payload);
-  postToFrame(detailsFrame, payload);
-}
-
-/** 广播到所有画布（实例列表、运行事件、连通性探测等）。 */
-function postToAllEditors(payload: Record<string, unknown>): void {
-  for (const runtime of documentRuntimes.values()) postToFrame(runtime.frame, payload);
-  postToFrame(detailsFrame, payload);
-}
-
 const runtimeLog = createRuntimeLog({ frame: runtimeLogFrame });
 runtimeLogFrame.addEventListener('load', () => runtimeLog.markReady());
 if (runtimeLogFrame.contentDocument?.readyState === 'complete') window.queueMicrotask(() => runtimeLog.markReady());
-
-function editorCommand(command: string, value?: unknown): void {
-  postToEditor({ type: 'editorCommand', command, value });
-}
 
 function desktopControl(command: string, value?: unknown): void {
   if (command === 'switchWorkflow') {
     void switchWorkflow(String(value ?? ''));
     return;
   }
-  postToEditor({ type: 'desktopControl', command, value });
+  workspace.postToEditor({ type: 'desktopControl', command, value });
 }
 
 /** 顶栏选择或子流程跳转：打开/聚焦对应文档面板，并把导航栈重置为该文档自己的记录。 */
@@ -480,7 +398,7 @@ const roiPicker = createRoiPicker({
   cancelButton: roiPickerCancel,
   confirmButton: roiPickerConfirm,
   closeButton: roiPickerClose,
-  postToFrame,
+  postToFrame: workspace.postToFrame,
   showToast,
   errorMessage,
   saveTemplate: (request) => api.saveTemplate(request),
@@ -544,13 +462,13 @@ async function flushAutoSave(): Promise<void> {
       currentText = pending.text;
       if (currentEditorInit) currentEditorInit.document.text = pending.text;
       setDirty(false);
-      postToEditors({ type: 'workflowSaved' });
+      workspace.postToEditors({ type: 'workflowSaved' });
       setStatus('工作流已自动保存');
     }
   } catch (error) {
     if (uri === currentUri && pending.revision === autoSaveRevision) {
       setDirty(true);
-      postToEditors({ type: 'workflowSaveFailed' });
+      workspace.postToEditors({ type: 'workflowSaveFailed' });
       showToast(`自动保存失败：${errorMessage(error)}`, true);
       setStatus('自动保存失败');
     }
@@ -569,7 +487,7 @@ function workflowReference(file: WorkflowDescriptor): string {
 function workflowTabName(uri: string): string {
   const descriptor = bootstrap?.workflows.find((item) => item.uri === uri);
   if (descriptor) return (descriptor.id || descriptor.name).replace(/\.json$/i, '');
-  const file = displayFileUri(uri).split(/[\\/]/).pop() || uri;
+  const file = workspace.displayFileUri(uri).split(/[\\/]/).pop() || uri;
   return file.replace(/\.json$/i, '') || '工作流';
 }
 
@@ -637,37 +555,6 @@ function scheduleWorkflowSessionPersist(): void {
   }, 250);
 }
 
-/** Dockview 为文档面板创建独立画布时登记运行时，供消息路由与状态恢复使用。 */
-function registerDocumentFrame(panelId: string, uri: string, frame: HTMLIFrameElement): void {
-  const existing = documentRuntimes.get(uri);
-  if (existing && existing.frame === frame) {
-    existing.panelId = panelId;
-    return;
-  }
-  documentRuntimes.set(uri, {
-    panelId,
-    frame,
-    ready: false,
-    sidebarNodes: [],
-    sidebarVariables: [],
-    selectedNode: '',
-    selectedVariable: '',
-    selectedVariableScope: 'inputs',
-    collapsedTreeNodes: new Set(),
-  });
-  documentFrameUris.set(frame, uri);
-}
-
-function unregisterDocumentFrame(panelId: string): void {
-  for (const [uri, runtime] of documentRuntimes) {
-    if (runtime.panelId !== panelId) continue;
-    documentRuntimes.delete(uri);
-    documentFrameUris.delete(runtime.frame);
-    return;
-  }
-}
-
-/** 工作流文件被重命名或移动后，把文档面板从旧 URI 迁到新 URI。 */
 function relocateDocument(oldUri: string, newUri: string): void {
   if (!docking || !oldUri || oldUri === newUri) return;
   const wasActive = oldUri === currentUri;
@@ -676,7 +563,7 @@ function relocateDocument(oldUri: string, newUri: string): void {
     docking.closeDocument(oldUri);
     closingDocuments.delete(oldUri);
   }
-  documentRuntimes.delete(oldUri);
+  workspace.getDocumentRuntimes().delete(oldUri);
   if (!docking.isDocumentOpen(newUri)) docking.openDocument(newUri, workflowTabName(newUri));
   if (wasActive) currentUri = newUri;
   syncDocumentTabs();
@@ -691,7 +578,7 @@ function reconcileDocumentPanels(): void {
     closingDocuments.add(uri);
     docking.closeDocument(uri);
     closingDocuments.delete(uri);
-    documentRuntimes.delete(uri);
+    workspace.getDocumentRuntimes().delete(uri);
   }
   for (const tab of workflowTabs) {
     if (!docking.isDocumentOpen(tab.uri)) docking.openDocument(tab.uri, workflowTabName(tab.uri));
@@ -722,7 +609,7 @@ function resetDockLayout(): void {
 /** 把 workflowTabs 的未保存状态同步到原生 Dockview 标签。 */
 function syncDocumentTabs(): void {
   for (const tab of workflowTabs) {
-    const runtime = documentRuntimes.get(tab.uri);
+    const runtime = workspace.getDocumentRuntimes().get(tab.uri);
     if (!runtime) continue;
     setDocumentPanelDirty(runtime.panelId, tab.dirty);
     docking?.dockviewApi.getPanel(runtime.panelId)?.api.setTitle(workflowTabName(tab.uri));
@@ -732,7 +619,7 @@ function syncDocumentTabs(): void {
 
 /** 把当前激活画布的选中项/折叠状态写回运行时，切换文档时原样恢复。 */
 function rememberActiveRuntimeState(): void {
-  const runtime = activeRuntime();
+  const runtime = workspace.activeRuntime();
   if (!runtime) return;
   runtime.sidebarNodes = sidebarNodes;
   runtime.sidebarVariables = sidebarVariables;
@@ -760,41 +647,32 @@ function applyDocumentState(uri: string, tab: WorkflowDocumentTab, runtime: Docu
     runtime.init.workflowTrail = workflowTrail();
     renderWorkflowSelect(runtime.init.workflows);
     renderInstances(runtime.init.instances, runtime.init.selectedInstance);
-    postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
+    workspace.postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
   }
-  document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(uri);
+  document.querySelector<HTMLElement>('#document-path')!.textContent = workspace.displayFileUri(uri);
   setDirty(tab.dirty);
   overview.render();
   renderSidebar();
   if (runtime.inspectorSelection) {
-    postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: runtime.inspectorSelection });
+    workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: runtime.inspectorSelection });
   }
   syncDocumentTabs();
 }
 
 /** 画布握手完成后下发它自己的初始化数据；同一文档的多个面板互不影响。 */
 function sendDocumentInit(uri: string): void {
-  const runtime = documentRuntimes.get(uri);
+  const runtime = workspace.getDocumentRuntimes().get(uri);
   if (!runtime?.ready || !runtime.init) return;
   if (uri === currentUri) runtime.init.workflowTrail = workflowTrail();
-  postToFrame(runtime.frame, runtime.init as unknown as Record<string, unknown>);
-  if (uri === currentUri) postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
-}
-
-function displayFileUri(uri: string): string {
-  try {
-    const parsed = new URL(uri);
-    return decodeURIComponent(parsed.pathname).replace(/^\/(?:([A-Za-z]:))/, '$1');
-  } catch {
-    return uri;
-  }
+  workspace.postToFrame(runtime.frame, runtime.init as unknown as Record<string, unknown>);
+  if (uri === currentUri) workspace.postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
 }
 
 function workflowTrail(): Array<{ uri: string; name: string }> {
   const uris = [...backStack, currentUri].filter(Boolean);
   return uris.map((uri) => {
     const descriptor = bootstrap?.workflows.find((item) => item.uri === uri);
-    const file = displayFileUri(uri).split(/[\\/]/).pop() || '';
+    const file = workspace.displayFileUri(uri).split(/[\\/]/).pop() || '';
     return { uri, name: descriptor?.id || descriptor?.name?.replace(/\.json$/i, '') || file.replace(/\.json$/i, '') || '工作流' };
   });
 }
@@ -939,7 +817,7 @@ function performDeleteTarget(origin?: KeyboardEvent): boolean {
   if (!target) return false;
   if (target.kind === 'editor') {
     origin?.preventDefault();
-    editorCommand('deleteSelection');
+    workspace.editorCommand('deleteSelection');
     return true;
   }
   if (target.kind === 'queue') {
@@ -1081,7 +959,7 @@ function createTreeRows(): DocumentFragment {
         return;
       }
       docking?.showPanel('details');
-      editorCommand('focusNode', node.id);
+      workspace.editorCommand('focusNode', node.id);
       // 结构树选中即等价于画布选中：Delete 交由画布执行删除。
       deleteTarget = { kind: 'editor' };
     });
@@ -1247,7 +1125,7 @@ function renderVariables(): void {
         : '私有：仅流程内部使用（点击公开并生成初始值输入）';
       eye.addEventListener('click', (event) => {
         event.stopPropagation();
-        editorCommand('setVariablePublic', { name: variable.name, scope, public: !variable.public });
+        workspace.editorCommand('setVariablePublic', { name: variable.name, scope, public: !variable.public });
       });
     } else {
       eye.classList.add('fixed');
@@ -1263,7 +1141,7 @@ function renderVariables(): void {
     });
     row.addEventListener('click', () => {
       docking?.showPanel('details');
-      editorCommand('selectVariable', { name: variable.name, scope });
+      workspace.editorCommand('selectVariable', { name: variable.name, scope });
       // 变量行选中即等价于画布选中该变量：Delete 交由画布执行删除。
       deleteTarget = { kind: 'editor' };
     });
@@ -1324,7 +1202,7 @@ async function loadWorkflow(uri: string): Promise<void> {
       bootstrap.workflows = init.workflows;
       bootstrap.instances = init.instances;
     }
-    const runtime = documentRuntimes.get(uri);
+    const runtime = workspace.getDocumentRuntimes().get(uri);
     if (runtime) {
       runtime.init = init;
       runtime.sidebarNodes = [];
@@ -1344,10 +1222,10 @@ async function loadWorkflow(uri: string): Promise<void> {
     overview.reconcileSelection();
     overview.render();
     contentBrowser.render();
-    document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(init.document.uri);
+    document.querySelector<HTMLElement>('#document-path')!.textContent = workspace.displayFileUri(init.document.uri);
     setDirty(tab.dirty);
     renderSidebar();
-    postToFrame(detailsFrame, init as unknown as Record<string, unknown>);
+    workspace.postToFrame(detailsFrame, init as unknown as Record<string, unknown>);
     sendDocumentInit(uri);
     setStatus(init.issues.length > 0 ? `${init.issues.length} 个校验问题` : '工作流已载入');
   } catch (error) {
@@ -1387,7 +1265,7 @@ async function activateWorkflowTab(uri: string): Promise<void> {
     rememberActiveRuntimeState();
     cancelAutoSave();
     await waitForAutoSave();
-    const runtime = documentRuntimes.get(uri);
+    const runtime = workspace.getDocumentRuntimes().get(uri);
     if (runtime?.init) {
       applyDocumentState(uri, tab, runtime);
       sendDocumentInit(uri);
@@ -1410,15 +1288,15 @@ async function openWorkflowTab(uri: string): Promise<void> {
 async function handleDocumentRemoved(uri: string): Promise<void> {
   closingDocuments.delete(uri);
   if (suppressDocumentRemoval) {
-    documentRuntimes.delete(uri);
+    workspace.getDocumentRuntimes().delete(uri);
     return;
   }
   removingDocument = true;
   try {
     const tab = workflowTabs.find((item) => item.uri === uri);
     if (!tab) {
-      unregisterDocumentFrame(documentRuntimes.get(uri)?.panelId ?? '');
-      documentRuntimes.delete(uri);
+      workspace.unregisterDocumentFrame(workspace.getDocumentRuntimes().get(uri)?.panelId ?? '');
+      workspace.getDocumentRuntimes().delete(uri);
       return;
     }
     const index = workflowTabs.indexOf(tab);
@@ -1433,7 +1311,7 @@ async function handleDocumentRemoved(uri: string): Promise<void> {
     } catch (error) {
       showToast(`关闭工作流失败：${errorMessage(error)}`, true);
     }
-    documentRuntimes.delete(uri);
+    workspace.getDocumentRuntimes().delete(uri);
     workflowTabs.splice(index, 1);
     removingDocument = false;
     if (workflowTabs.length === 0) {
@@ -1469,7 +1347,7 @@ async function refreshInstances(): Promise<void> {
     const instances = await api.listInstances();
     renderInstances(instances, selectedInstance);
     overview.render();
-    postToAllEditors({ type: 'runtimeInstances', instances, selectedInstance });
+    workspace.postToAllEditors({ type: 'runtimeInstances', instances, selectedInstance });
   } catch {
     // Device discovery is best effort while the user edits offline.
   }
@@ -1477,13 +1355,13 @@ async function refreshInstances(): Promise<void> {
 
 async function handleEditorMessage(message: Record<string, unknown>, sourceFrame: HTMLIFrameElement): Promise<void> {
   const type = String(message.type ?? '');
-  const sourceUri = documentFrameUris.get(sourceFrame);
-  const runtime = sourceUri ? documentRuntimes.get(sourceUri) : undefined;
+  const sourceUri = workspace.frameUriForFrame(sourceFrame);
+  const runtime = sourceUri ? workspace.getDocumentRuntimes().get(sourceUri) : undefined;
   const isActiveSource = Boolean(sourceUri && sourceUri === currentUri);
   try {
     if (type === 'ready') {
       if (sourceFrame === detailsFrame) {
-        if (currentEditorInit) postToFrame(detailsFrame, currentEditorInit as unknown as Record<string, unknown>);
+        if (currentEditorInit) workspace.postToFrame(detailsFrame, currentEditorInit as unknown as Record<string, unknown>);
         return;
       }
       if (!runtime || !sourceUri) return;
@@ -1497,7 +1375,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     }
     if (type === 'createVariableNode') {
       if (message.scope !== 'inputs' && message.scope !== 'variables') return;
-      postToFrame(sourceFrame, { type: 'editorCommand', command: 'addVariableCard', value: { name: String(message.name || ''), scope: message.scope } });
+      workspace.postToFrame(sourceFrame, { type: 'editorCommand', command: 'addVariableCard', value: { name: String(message.name || ''), scope: message.scope } });
       return;
     }
     if (type === 'documentStateChanged') {
@@ -1511,7 +1389,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         if (currentEditorInit) currentEditorInit.document.text = text;
         setDirty(message.dirty !== false);
         scheduleAutoSave(text);
-        postToFrame(detailsFrame, { type: 'replaceDocument', text, recordHistory: true });
+        workspace.postToFrame(detailsFrame, { type: 'replaceDocument', text, recordHistory: true });
       } else if (tab) {
         tab.dirty = message.dirty !== false;
         syncDocumentTabs();
@@ -1523,7 +1401,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       const selection = message.inspectorSelection as unknown as InspectorSelection;
       if (runtime) runtime.inspectorSelection = selection;
       docking?.showPanel('details');
-      postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
+      workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
       return;
     }
     if (type === 'sidebarStateChanged') {
@@ -1555,9 +1433,9 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       }
       if (selection && selection.kind !== 'none') {
         docking?.showPanel('details');
-        postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
+        workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
       } else if (selection?.kind === 'none') {
-        postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
+        workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
       }
       return;
     }
@@ -1580,7 +1458,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       } else {
         syncDocumentTabs();
       }
-      postToEditors({ type: 'workflowSaved' });
+      workspace.postToEditors({ type: 'workflowSaved' });
       setStatus('工作流已保存');
       showToast('工作流已保存');
       return;
@@ -1658,7 +1536,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     }
     if (type === 'selectInstance') {
       selectRuntimeInstance(String(message.instanceId ?? selectedInstance), false);
-      postToAllEditors({ type: 'instanceSelected', instanceId: selectedInstance });
+      workspace.postToAllEditors({ type: 'instanceSelected', instanceId: selectedInstance });
       return;
     }
     if (type === 'pickRoi') {
@@ -1690,16 +1568,16 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         referenceResolution: Array.isArray(message.referenceResolution) ? message.referenceResolution as [number, number] : [1920, 1080],
         instanceId: String(message.instanceId ?? selectedInstance),
       });
-      postToFrame(sourceFrame, { type: 'templateCheckResult', requestId: message.requestId, ...result });
+      workspace.postToFrame(sourceFrame, { type: 'templateCheckResult', requestId: message.requestId, ...result });
       return;
     }
     if (type === 'listAssetImages') {
-      postToFrame(sourceFrame, { type: 'assetImages', requestId: message.requestId, images: await api.listAssets() });
+      workspace.postToFrame(sourceFrame, { type: 'assetImages', requestId: message.requestId, images: await api.listAssets() });
       return;
     }
     if (type === 'requestAssetData') {
       const paths = Array.isArray(message.paths) ? message.paths.map(String) : [];
-      postToFrame(sourceFrame, { type: 'assetData', requestId: message.requestId, items: await api.readAssetData(paths) });
+      workspace.postToFrame(sourceFrame, { type: 'assetData', requestId: message.requestId, items: await api.readAssetData(paths) });
       return;
     }
     if (type === 'saveTemplate') {
@@ -1708,12 +1586,12 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         filename: String(message.filename ?? 'template.png'),
         dataUrl: String(message.dataUrl ?? ''),
       });
-      postToFrame(sourceFrame, { type: 'templateSaved', requestId: message.requestId, nodeId: message.nodeId ?? message.stepId, key: message.key, path: savedPath });
+      workspace.postToFrame(sourceFrame, { type: 'templateSaved', requestId: message.requestId, nodeId: message.nodeId ?? message.stepId, key: message.key, path: savedPath });
       return;
     }
     if (type === 'saveCanvasImage') {
       const savedPath = await api.saveCanvas({ filename: String(message.filename ?? 'workflow-layout.png'), dataUrl: String(message.dataUrl ?? '') });
-      postToFrame(sourceFrame, savedPath ? { type: 'canvasImageSaved', path: savedPath } : { type: 'canvasImageCancelled' });
+      workspace.postToFrame(sourceFrame, savedPath ? { type: 'canvasImageSaved', path: savedPath } : { type: 'canvasImageCancelled' });
       return;
     }
     if (type === 'newWorkflow') {
@@ -1738,7 +1616,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         showToast('请先打开一个工作流再查看引用', true);
         return;
       }
-      const relative = relativeToProject(displayFileUri(currentUri));
+      const relative = relativeToProject(workspace.displayFileUri(currentUri));
       if (relative) referenceViewer.open(relative, document);
       else showToast('无法定位当前工作流的项目路径', true);
       return;
@@ -1746,12 +1624,12 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     if (type === 'error') throw new Error(String(message.message ?? '编辑器错误'));
   } catch (error) {
     const text = errorMessage(error);
-    if (type === 'save') postToEditors({ type: 'workflowSaveFailed' });
-    if (type === 'pickRoi' || type === 'saveTemplate') postToFrame(sourceFrame, { type: 'roiPickerError', requestId: message.requestId, message: text });
-    else if (type === 'checkTemplate') postToFrame(sourceFrame, { type: 'templateCheckError', requestId: message.requestId, message: text });
-    else if (type === 'listAssetImages') postToFrame(sourceFrame, { type: 'assetImagesError', requestId: message.requestId, message: text });
-    else if (type === 'requestAssetData') postToFrame(sourceFrame, { type: 'assetDataError', requestId: message.requestId, message: text });
-    else if (type === 'saveCanvasImage') postToFrame(sourceFrame, { type: 'canvasImageError', message: text });
+    if (type === 'save') workspace.postToEditors({ type: 'workflowSaveFailed' });
+    if (type === 'pickRoi' || type === 'saveTemplate') workspace.postToFrame(sourceFrame, { type: 'roiPickerError', requestId: message.requestId, message: text });
+    else if (type === 'checkTemplate') workspace.postToFrame(sourceFrame, { type: 'templateCheckError', requestId: message.requestId, message: text });
+    else if (type === 'listAssetImages') workspace.postToFrame(sourceFrame, { type: 'assetImagesError', requestId: message.requestId, message: text });
+    else if (type === 'requestAssetData') workspace.postToFrame(sourceFrame, { type: 'assetDataError', requestId: message.requestId, message: text });
+    else if (type === 'saveCanvasImage') workspace.postToFrame(sourceFrame, { type: 'canvasImageError', message: text });
     showToast(text, true);
     setStatus('操作失败');
   }
@@ -1844,7 +1722,7 @@ function showMoreMenu(button: HTMLButtonElement): void {
     entry.textContent = action.label;
     entry.addEventListener('click', () => {
       closeMoreMenu();
-      const frame = activeRuntime()?.frame;
+      const frame = workspace.activeRuntime()?.frame;
       if (frame) void handleEditorMessage({ type: action.type }, frame);
     });
     menu.appendChild(entry);
@@ -1992,9 +1870,9 @@ function bindUi(): void {
       if (command === 'workflowSettings') {
         docking?.showPanel('details');
         // 工作流设置属于详细信息面板自己的 inspector 状态，不能只发给画布 iframe。
-        postToFrame(detailsFrame, { type: 'editorCommand', command });
+        workspace.postToFrame(detailsFrame, { type: 'editorCommand', command });
       }
-      editorCommand(command);
+      workspace.editorCommand(command);
     });
   });
   document.querySelectorAll<HTMLElement>('[data-desktop-command]').forEach((button) => {
@@ -2056,7 +1934,7 @@ function bindUi(): void {
       else if (panelId === 'referenceViewer') {
         if (workbenchFrame?.isOpen('referenceViewer')) referenceViewer.close();
         else if (currentUri) {
-          const relative = relativeToProject(displayFileUri(currentUri));
+          const relative = relativeToProject(workspace.displayFileUri(currentUri));
           if (relative) referenceViewer.open(relative, document);
         }
       } else if (panelId === 'contentBrowser' || panelId === 'runtime') {
@@ -2111,7 +1989,7 @@ function bindUi(): void {
   });
   document.querySelector('#structure-expand-all')!.addEventListener('click', () => setAllTreeBranches(true));
   document.querySelector('#structure-collapse-all')!.addEventListener('click', () => setAllTreeBranches(false));
-  document.querySelector('#add-variable-button')!.addEventListener('click', () => editorCommand('addVariable', 'variables'));
+  document.querySelector('#add-variable-button')!.addEventListener('click', () => workspace.editorCommand('addVariable', 'variables'));
   document.querySelector('#new-workflow-button')!.addEventListener('click', () => void createNewWorkflow());
   document.querySelector('#run-button')!.addEventListener('click', () => desktopControl('run'));
   document.querySelector('#stop-button')!.addEventListener('click', () => {
@@ -2206,12 +2084,12 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
   const frameById = (id: string | undefined): HTMLIFrameElement | undefined => {
     if (!id) return undefined;
     if (id === detailsFrame.id) return detailsFrame;
-    for (const runtime of documentRuntimes.values()) if (runtime.frame.id === id) return runtime.frame;
+    for (const runtime of workspace.getDocumentRuntimes().values()) if (runtime.frame.id === id) return runtime.frame;
     return undefined;
   };
   const sourceFrame = event.data?.source === 'dockview-popout'
     ? frameById(event.data.frameId)
-    : [...documentRuntimes.values()].map((runtime) => runtime.frame).find((frame) => frame.contentWindow === event.source)
+    : [...workspace.getDocumentRuntimes().values()].map((runtime) => runtime.frame).find((frame) => frame.contentWindow === event.source)
       ?? (event.source === detailsFrame.contentWindow ? detailsFrame : undefined);
   if (!sourceFrame) return;
   if ((event.data?.source === 'legacy-editor' || event.data?.source === 'dockview-popout') && event.data.message) {
@@ -2219,7 +2097,7 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
   }
   if (event.data?.source === 'legacy-editor-state' || event.data?.source === 'dockview-popout' && event.data.state) {
     const frameDirty = Boolean(event.data.state?.dirty);
-    const frameUri = documentFrameUris.get(sourceFrame);
+    const frameUri = workspace.frameUriForFrame(sourceFrame);
     if (frameUri) {
       const tab = workflowTabs.find((item) => item.uri === frameUri);
       if (tab && tab.dirty !== frameDirty) {
@@ -2236,8 +2114,8 @@ async function start(): Promise<void> {
   installCustomTooltips();
   workbenchFrame = createWorkbenchFrame(updateDockMenuState, showPopoutFailure);
   docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure, {
-    onFrameCreated: (panelId, uri, frame) => registerDocumentFrame(panelId, uri, frame),
-    onFrameDisposed: (panelId) => unregisterDocumentFrame(panelId),
+    onFrameCreated: (panelId, uri, frame) => workspace.registerDocumentFrame(panelId, uri, frame),
+    onFrameDisposed: (panelId) => workspace.unregisterDocumentFrame(panelId),
     onCloseRequested: (uri) => void closeWorkflowTab(uri),
   });
   // 文档面板的激活统一走 Dockview 事件，标签点击与程序化切面板都不会漏。
@@ -2258,7 +2136,7 @@ async function start(): Promise<void> {
   api.onRuntimeState(updateRuntimeState);
   api.onRunEvent((event) => {
     runtimeLog.appendRunEvent(event);
-    postToAllEditors({ type: 'runEvent', event });
+    workspace.postToAllEditors({ type: 'runEvent', event });
   });
   api.onWindowMaximized(updateMaximizedState);
   updateMaximizedState(await api.isWindowMaximized());

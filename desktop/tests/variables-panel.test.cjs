@@ -26,7 +26,7 @@ function harness(variables) {
     selectedVariable:'shared',selectedVariableScope:'inputs',overviewInputDisplayName:name=>name,
     variableTypeGlyphs:{},variableTypeFallbackGlyph:{icon:{},className:'type-any'},createTreeIcon:()=>new Element('svg'),
     Eye:{},EyeOff:{},
-    docking:{showPanel:name=>panels.push(name)},editorCommand:(...args)=>commands.push(args),CSS:{escape:value=>value}});
+    docking:{showPanel:name=>panels.push(name)},workspace:{editorCommand:(...args)=>commands.push(args)},CSS:{escape:value=>value}});
   const start=source.indexOf('const variableTypeLabels:');
   vm.runInContext(stripTypeScriptTypes(source.slice(start,source.indexOf('\n};',start)+3)),ctx);
   for(const name of ['renderVariables','syncVariableSelection']) {

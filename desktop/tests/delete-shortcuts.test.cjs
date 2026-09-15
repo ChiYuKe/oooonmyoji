@@ -52,7 +52,7 @@ function shellHarness(options = {}) {
       deleteItem: (item) => calls.deleted.push(item),
       isNameDialogOpen: () => Boolean(options.contentNameDialogState),
     },
-    editorCommand: (...args) => calls.commands.push(args),
+    workspace: {editorCommand: (...args) => calls.commands.push(args)},
     showToast: (message, error) => calls.toasts.push([message, Boolean(error)]),
   });
   vm.runInContext(stripTypeScriptTypes(sliceBetween(shell, 'function isTextEditingTarget(', 'function resetDeleteTargetOnPointerDown(')), ctx);

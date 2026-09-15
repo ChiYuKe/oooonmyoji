@@ -553,6 +553,111 @@ select option:checked { color: #fff; }
 .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   padding-left: 0;
 }
+.workflow-document-header-action {
+  display: flex;
+  align-items: stretch;
+  flex: 0 1 clamp(240px, 46vw, 760px);
+  width: clamp(240px, 46vw, 760px);
+  min-width: 180px;
+  height: 100%;
+  min-height: 0;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+.workflow-editor-tab-header {
+  /* 让标题栏空白处也成为工作流拖放目标；Dockview 原生拖动仍使用其它数据类型。 */
+  position: relative;
+}
+.workflow-document-tab-host {
+  position: static;
+  z-index: auto;
+  inset: auto;
+  width: 100%;
+  height: 25px;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+  /* 空白区域也必须能接收拖放，不能只让已有标签接收事件。 */
+  pointer-events: auto;
+}
+.workflow-document-tab-host.drag-over {
+  outline: 1px solid var(--blue-strong);
+  outline-offset: -1px;
+  background: rgba(54, 148, 212, .13);
+}
+.workflow-document-tab-empty {
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  color: #68717b;
+  font-size: 11px;
+  pointer-events: none;
+}
+.workflow-document-tabs {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  pointer-events: auto;
+}
+.workflow-document-tabs::-webkit-scrollbar { height: 4px; }
+.workflow-document-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 220px;
+  min-width: 92px;
+  height: 25px;
+  padding: 0 7px 0 10px;
+  border: 0;
+  border-right: 1px solid #272a2e;
+  border-radius: 2px 2px 0 0;
+  background: #191a1c;
+  color: #8c9298;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.workflow-document-tab:hover { background: #282b2f; color: #d9dde1; }
+.workflow-document-tab.active {
+  background: #1b1b1b;
+  color: #d9dde1;
+  box-shadow: inset 0 -2px 0 var(--blue-strong);
+}
+.workflow-document-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-document-tab-dirty {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+.workflow-document-tab-close {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #788089;
+  font-size: 15px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.workflow-document-tab-close:hover { background: #3a3e43; color: #fff; }
 body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   -webkit-app-region: drag;
 }
@@ -749,14 +854,16 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 /* Settings composition is shared with popouts: public/settings/settings.css. */
 
 /* ---------- 脚本概览与顺序执行队列 ---------- */
-.overview-module { min-width: 0; min-height: 0; background: #191a1c; }
+.overview-module { min-width: 0; min-height: 0; background: #191919; container-type: inline-size; }
 .overview-toolbar {
-  flex: 0 0 52px;
+  flex: 0 0 auto;
+  min-height: 52px;
+  flex-wrap: wrap;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 8px 14px;
   border-bottom: 1px solid #303236;
   background: #202123;
 }
@@ -805,7 +912,7 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .overview-command.primary:hover:not(:disabled) { border-color: #3986b3; background: #2f769f; }
 .overview-command.danger { border-color: #614044; background: #412b2e; color: #e6b0b3; }
 .overview-command:disabled { opacity: .38; cursor: default; }
-.overview-layout { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+.overview-layout { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) clamp(260px, 23%, 320px); }
 .overview-library, .overview-queue-panel { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .overview-library { border-right: 1px solid #303236; }
 .overview-queue-panel { background: #1d1e20; }
@@ -840,32 +947,30 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  grid-auto-rows: 142px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  grid-auto-rows: minmax(168px, max-content);
   align-content: start;
-  gap: 8px;
+  gap: 12px;
   overflow: auto;
-  padding: 10px;
+  padding: 14px;
 }
 .overview-card {
   min-width: 0;
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 7px;
-  padding: 11px;
-  border: 1px solid #34363a;
+  grid-template-rows: auto minmax(32px, 1fr) auto auto;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #303030;
   border-radius: 5px;
-  background: #242527;
+  background: #242424;
   color: #cdd1d5;
   cursor: pointer;
   user-select: none;
 }
-.overview-card:hover { border-color: #464b50; background: #292b2e; }
-.overview-card.selected { border-color: #386d8c; background: #252d32; box-shadow: inset 3px 0 #3f8ab3; }
-.overview-card.running { border-color: #ba913d; box-shadow: inset 3px 0 #d1a23c; }
-.overview-card.succeeded { border-color: #477653; box-shadow: inset 3px 0 #65a875; }
-.overview-card.failed { border-color: #82484d; box-shadow: inset 3px 0 #c65f67; }
+.overview-card:hover { background: #292929; }
+.overview-card.selected { background: #303030; }
+.overview-card:focus-visible { outline: 1px solid #858585; outline-offset: 2px; }
 .overview-card.cancelled, .overview-card.skipped { opacity: .62; }
 .overview-card-header { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: start; gap: 7px; }
 .overview-card-check { width: 15px; height: 15px; margin: 1px 0 0; accent-color: #3184b4; cursor: pointer; }
@@ -874,20 +979,20 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .overview-card-title strong { color: #e1e4e7; font-size: 12px; font-weight: 600; }
 .overview-card-title span { color: #747d86; font: 9px/12px Consolas, monospace; }
 .overview-order-badge { min-width: 21px; height: 20px; display: grid; place-items: center; padding: 0 5px; border-radius: 10px; background: #315f78; color: #d8edf8; font-size: 9px; font-weight: 700; }
-.overview-card-description { overflow: hidden; color: #989fa6; font-size: 10px; line-height: 16px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.overview-card-footer { min-width: 0; display: flex; align-items: center; gap: 5px; }
-.overview-card-tag { height: 18px; display: inline-flex; align-items: center; padding: 0 6px; border-radius: 3px; background: #303236; color: #8f979f; font-size: 9px; }
+.overview-card-description { overflow: hidden; overflow-wrap: anywhere; color: #a0a0a0; font-size: 11px; line-height: 16px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.overview-card-metadata { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.overview-card-footer { min-width: 0; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; padding-top: 8px; border-top: 1px solid #303030; }
+.overview-card-actions { display: flex; flex: 0 0 auto; gap: 5px; margin-left: auto; }
+.overview-card-tag { min-height: 18px; flex: 0 0 auto; display: inline-flex; align-items: center; white-space: nowrap; color: #999; font-size: 10px; }
 .overview-card-tag.workflow-validation-valid { color: #83b891; }
 .overview-card-tag.workflow-validation-invalid { color: #e08a8f; }
 .overview-card-tag.workflow-validation-unknown { color: #b39a63; }
 .overview-card-tag.workflow-updated { color: #7f8992; }
-.overview-card-config, .overview-card-open { height: 20px; padding: 0 5px; border: 0; border-radius: 3px; background: transparent; color: #759bb0; font-size: 9px; cursor: pointer; }
-.overview-card-config { margin-left: auto; }
+.overview-card-config, .overview-card-open { height: 24px; flex: 0 0 auto; padding: 0 8px; white-space: nowrap; border: 0; border-radius: 3px; background: #303030; color: #c5c5c5; font-size: 11px; cursor: pointer; }
 .overview-card-config.configured { color: #d0a64b; }
-.overview-card-config:hover:not(:disabled), .overview-card-open:hover { background: #35414a; color: #a8d0e5; }
+.overview-card-config:hover:not(:disabled), .overview-card-open:hover { background: #393939; color: #eee; }
 .overview-card-config:disabled { opacity: .4; cursor: default; }
-.overview-card-status { margin-left: auto; color: #858d95; font-size: 9px; }
-.overview-card-open + .overview-card-status { margin-left: 0; }
+.overview-card-status { flex: 0 0 auto; white-space: nowrap; color: #999; font-size: 10px; }
 .overview-card.running .overview-card-status { color: #d8ae53; }
 .overview-card.succeeded .overview-card-status { color: #77ba85; }
 .overview-card.failed .overview-card-status { color: #db7a80; }
@@ -1108,14 +1213,14 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
   .roi-picker-footer { padding: 0 10px; }
 }
 
-@media (max-width: 980px) {
+@container (max-width: 980px) {
   .overview-title span, .overview-instance-field > span, .overview-command.secondary span { display: none; }
   .overview-title { min-width: 130px; }
   .overview-command.secondary { width: 31px; padding: 0; }
   .overview-layout { grid-template-columns: minmax(0, 1fr) 280px; }
 }
 
-@media (max-width: 760px) {
+@container (max-width: 760px) {
   .overview-toolbar { flex-wrap: wrap; height: auto; min-height: 84px; padding-block: 7px; }
   .overview-title { flex: 1 1 150px; }
   .overview-search { flex: 1 1 220px; width: auto; }

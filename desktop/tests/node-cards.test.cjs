@@ -21,11 +21,22 @@ function harness() {
     vm.runInContext(source.match(new RegExp(`  const ${name} = [^;]+;`))[0],ctx);
   }
   ctx.nodeVariablePins=node=>node.pins || [];
+  ctx.nodes=()=>Array.isArray(ctx.state?.raw?.nodes) ? ctx.state.raw.nodes : [];
+  ctx.instanceRunCards=()=>[];
+  const definitionDisplayStart=source.indexOf('  function displayNameOfDefinition(');
+  vm.runInContext(source.slice(definitionDisplayStart,source.indexOf('\n  }',definitionDisplayStart)+4),ctx);
+  const displayStart=source.indexOf('  function variableDisplayNameOf(');
+  vm.runInContext(source.slice(displayStart,source.indexOf('\n  }',displayStart)+4),ctx);
+  const refsStart=source.indexOf('  function collectNodeCardVariableRefs(');
+  vm.runInContext(source.slice(refsStart,source.indexOf('\n  }',refsStart)+4),ctx);
+  for(const name of ['instanceRunInputPosition','instanceRunInputTargetAt','connectVariableToInstanceInput','disconnectVariableFromPin','disconnectVariableFromInstanceInput','parentVariableRefs']) {
+    const start=source.indexOf(`  function ${name}(`); vm.runInContext(source.slice(start,source.indexOf('\n  }',start)+4),ctx);
+  }
   vm.runInContext(source.slice(source.indexOf('  const nodeHeight ='),source.indexOf(';',source.indexOf('  const nodeHeight ='))+1),ctx);
   for(const name of ['nodeCardSummary','compactValue','workflowInputVariableValue','variableValueSummary','renderNode','renderInstanceRunCard','renderVariableCard']) {
     const start=source.indexOf(`  function ${name}(`); vm.runInContext(source.slice(start,source.indexOf('\n  }',start)+4),ctx);
   }
-  Object.assign(ctx,{state:{run:new Map(),selected:new Set(),raw:{inputs:{count:{type:'integer',default:0}}}},position:()=>({x:0,y:0}),subWorkflowRef:()=>null,templatePreview:()=>null,assetPreviewForPath:()=>null,bindAssetPathPreview:()=>{},
+  Object.assign(ctx,{state:{run:new Map(),selected:new Set(),raw:{inputs:{count:{type:'integer',default:0}}}},position:()=>({x:0,y:0}),subWorkflowRef:()=>null,templatePreview:()=>null,assetPreviewForPath:()=>null,bindAssetPathPreview:()=>{},definitionSchema:value=>value,compatibleRefType:()=>true,
     TYPE_NAMES:{task:'任务',sequence:'顺序',root:'根节点'},TYPE_ICON:{task:'□',sequence:'→'},RUN_LABEL:{succeeded:'已完成'},compositeSubtitle:()=> '执行子节点',decoratorLabel:()=> 'Retry · 3 次'});
   return {ctx,Element,svgEl};
 }
@@ -56,10 +67,11 @@ test('running cards do not steal title space and retain node/variable port geome
 test('instance and variable cards retain dimensions, pins and unclipped value sources',()=>{
   const {ctx,Element}=harness();const layer=new Element('g');
   const full='a_very_long_input_variable_name_that_should_be_available_on_hover';
-  const variable={name:'运行轮数',definition:{type:'integer',default:0}};
-  ctx.renderInstanceRunCard(layer,{node:{id:'multi'},key:'multi:0',index:0,x:0,y:0,height:102,run:{instance:'mumu-1',workflow:'sample.json',inputs:{运行轮数:full}},variables:[variable]});
+  const variable={name:'v_internal_run_count',definition:{type:'integer',default:0,display_name:'运行轮数 · 初始值',_autoPublished:true}};
+  ctx.renderInstanceRunCard(layer,{node:{id:'multi'},key:'multi:0',index:0,x:0,y:0,height:102,run:{instance:'mumu-1',workflow:'sample.json',inputs:{v_internal_run_count:full}},variables:[variable]});
   const card=layer.children[0];assert.equal(byClass(card,'card-body')[0].attrs.width,'250');
   assert.equal(byClass(card,'instance-variable-pin')[0].attrs.cy,'90');
+  assert.equal(byClass(card,'instance-variable-name')[0].children[0].textContent,'运行轮数');
   assert.equal(byClass(card,'instance-variable-value')[0].children[0].textContent,full);
   ctx.renderVariableCard(layer,{name:'count',scope:'inputs',id:'count',x:0,y:0});const source=layer.children[1];
   assert.equal(byClass(source,'card-body')[0].attrs.width,'168');assert.equal(byClass(source,'card-body')[0].attrs.height,'58');
@@ -92,6 +104,50 @@ test('资源变量卡片的路径值支持图片悬浮预览',()=>{
   assert.equal(valueNode.events.mouseenter.length,1);
   valueNode.events.mouseenter[0]();
   assert.deepEqual(previews,['assets/templates/start/icon.png']);
+});
+test('节点卡片上的变量引用被收集起来用于变量列表标记',()=>{
+  const {ctx}=harness();
+  ctx.state.raw.nodes=[
+    {type:'task',pins:[{scope:'inputs',variable:'target'},{scope:'variables',variable:'retry.attempts'},{scope:'inputs',variable:''}]},
+    {type:'task',pins:[{scope:'inputs',variable:'target'}]},
+    {type:'sequence',pins:[]},
+  ];
+  assert.deepEqual([...ctx.collectNodeCardVariableRefs()].sort(),['inputs.target','variables.retry']);
+});
+test('变量卡片可以连接实例子工作流输入',()=>{
+  const {ctx}=harness();
+  const run={inputs:{}};
+  const node={id:'parallel',runs:[run]};
+  const card={node,index:0,x:100,y:200,run,variables:[{name:'input_id',definition:{type:'number',display_name:'计数'}}]};
+  ctx.state.zoom=1;ctx.state.raw.variables={count:{type:'number',default:0,display_name:'计数'}};
+  ctx.instanceRunCards=()=>[card];ctx.variableCompatibleWithInstanceInput=()=>true;
+  const inputY=200+vm.runInContext('RUN_CARD_BASE_H + RUN_VARIABLE_H / 2',ctx);
+  const target=ctx.instanceRunInputTargetAt({x:110,y:inputY},'variables','count');
+  assert.equal(target.kind,'instance-input');assert.equal(target.nodeId,'parallel');assert.equal(target.runIndex,0);
+  assert.equal(target.param,'input_id');assert.equal(target.x,110);assert.equal(target.y,inputY);
+  const links={};ctx.nodeById=()=>card.node;ctx.mutate=fn=>fn();ctx.variableLinks=()=>links;ctx.toast=()=>{};
+  ctx.connectVariableToInstanceInput('variables','count','parallel',0,'input_id','card_1');
+  assert.equal(run.inputs.input_id.ref,'variables.count');
+  assert.equal(links['parallel:runs.0.inputs.input_id'],'card_1');
+});
+test('实例子工作流输入的引用候选包含父级运行变量',()=>{
+  const {ctx}=harness();
+  ctx.state.raw.inputs={parent_input:{type:'number'}};
+  ctx.state.raw.variables={runtime_count:{type:'number'}};
+  assert.deepEqual([...ctx.parentVariableRefs({type:'number'},false)],['inputs.parent_input']);
+  assert.deepEqual([...ctx.parentVariableRefs({type:'number'},true)],['inputs.parent_input','variables.runtime_count']);
+});
+test('Alt 点击可以快速断开节点和实例输入的变量绑定',()=>{
+  const {ctx}=harness();
+  const run={inputs:{input_id:{ref:'variables.count'}}};
+  const node={id:'parallel',params:{value:{ref:'variables.count'}},runs:[run]};
+  const links={'parallel:value':'card_1','parallel:runs.0.inputs.input_id':'card_2'};
+  ctx.state.raw.variables={count:{type:'number',default:0,display_name:'计数'}};
+  ctx.nodeById=()=>node;ctx.mutate=fn=>fn();ctx.variableLinks=()=>links;ctx.toast=()=>{};
+  ctx.disconnectVariableFromPin('parallel','value');
+  assert.equal(node.params.value,undefined);assert.equal(links['parallel:value'],undefined);
+  ctx.disconnectVariableFromInstanceInput('parallel',0,'input_id');
+  assert.equal(run.inputs.input_id,undefined);assert.equal(links['parallel:runs.0.inputs.input_id'],undefined);
 });
 test('summary preserves zero settings; shared styling covers both themes without glow',()=>{
   const {ctx}=harness();assert.equal(ctx.nodeCardSummary({type:'task',params:{timeout_seconds:0,threshold:0,present:false}}),'等待消失 · 超时 0s · 阈值 0%');

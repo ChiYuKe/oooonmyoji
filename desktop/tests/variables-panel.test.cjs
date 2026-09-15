@@ -86,6 +86,19 @@ test('eye toggles public state for variables and stays fixed for inputs',()=>{
   assert.equal(eye(h.rows()[1]).events.click,undefined);
 });
 
+test('已连接画布的变量在列表里标记出来，未连接的没有标记',()=>{
+  const h=harness([{name:'超时',scope:'inputs',type:'number',onCard:true},{name:'未用',scope:'inputs',type:'string'}]);
+  h.ctx.renderVariables();
+  const nameNode=row=>row.querySelector('.variable-name');
+  const chip=nameNode(h.rows()[0]).children.find(x=>x.className==='variable-on-card');
+  assert(chip,'已连接的变量必须有标记');
+  assert.equal(chip.textContent,'已连接');
+  assert.equal(chip.title,'画布上的节点端口已经引用该变量');
+  assert(h.rows()[0].title.includes('已连接'));
+  assert.equal(nameNode(h.rows()[1]).children.filter(x=>x.className==='variable-on-card').length,0);
+  assert.equal(h.rows()[1].title.includes('已连接'),false);
+});
+
 test('custom categories collapse without losing rows or drag identity',()=>{
   const h=harness([{name:'a',scope:'inputs',type:'integer',group:'战斗'},{name:'b',scope:'inputs',type:'integer',group:'战斗'},{name:'c',scope:'inputs',type:'integer'}]);
   h.ctx.renderVariables();

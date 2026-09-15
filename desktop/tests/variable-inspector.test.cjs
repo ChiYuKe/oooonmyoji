@@ -118,7 +118,7 @@ test('公开变量的自动输入镜像同步名称/类型/说明/默认值',()=
   const h=harness(definition,'variables');
   h.raw.inputs={auto_input:{_autoPublished:true,type:'integer',default:1,display_name:'次数 · 初始值'}};
   h.ctx.syncExposedInput(definition,'value');
-  assert.equal(h.raw.inputs.auto_input.display_name,'次数 · 初始值');
+  assert.equal(h.raw.inputs.auto_input.display_name,'次数');
   definition.type='number';definition.description='次数说明';definition.group='战斗';
   h.ctx.syncExposedInput(definition,'value');
   assert.equal(h.raw.inputs.auto_input.type,'number');

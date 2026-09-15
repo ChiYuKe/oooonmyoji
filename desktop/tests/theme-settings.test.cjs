@@ -85,9 +85,9 @@ test('curated light surfaces have readable contrast and all dock tab states are 
   assert.match(source,/stroke-width: 1; filter: none/);
   assert.doesNotMatch(source,/filter:\s*(invert|brightness)/);
 });
-test('settings keeps original controls and separates all four categories',()=>{
+test('settings keeps original controls and separates all categories',()=>{
   const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
-  for(const category of ['appearance','interface','runtime','about']) {
+  for(const category of ['appearance','interface','runtime','shortcuts','about']) {
     assert.equal((html.match(new RegExp(`id="settings-page-${category}"`,'g')) || []).length,1);
     assert.match(html,new RegExp(`aria-controls="settings-page-${category}"`));
   }
@@ -103,7 +103,7 @@ test('settings navigation and theme events still work after the module is moved 
       classList:{toggle:(name,on)=>{if(on)classes.add(name);else classes.delete(name);}},setAttribute(name,value){this[name]=value;},
       addEventListener:(name,fn)=>{events[name]=fn;},fire(name,extra={}){events[name]?.({preventDefault(){},...extra});},focus(){this.focused=true;}};
   }
-  const categories=['appearance','interface','runtime','about'];
+  const categories=['appearance','interface','runtime','shortcuts','about'];
   const tabs=categories.map(settingsPage=>element({settingsPage})); const pages=Object.fromEntries(categories.map(key=>[`#settings-page-${key}`,element()]));
   const feedback={}; pages['#settings-theme-feedback']=feedback;
   const choices=['dark','light'].map(value=>({...element(),value}));
@@ -114,6 +114,6 @@ test('settings navigation and theme events still work after the module is moved 
   // The handlers retain the module, not the original document's selectors.
   ctx.document={...doc,getElementById:()=>null};
   tabs[1].fire('click'); assert.equal(tabs[1]['aria-selected'],'true'); assert.equal(pages['#settings-page-appearance'].classes.has('hidden'),true);
-  tabs[1].fire('keydown',{key:'End'}); assert.equal(tabs[3]['aria-selected'],'true'); assert.equal(tabs[3].focused,true);
+  tabs[1].fire('keydown',{key:'End'}); assert.equal(tabs[4]['aria-selected'],'true'); assert.equal(tabs[4].focused,true);
   choices[1].checked=true; choices[1].fire('change'); assert.equal(win.StudioTheme.get(),'light'); assert.match(feedback.textContent,/浅色/);
 });

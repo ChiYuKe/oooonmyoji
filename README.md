@@ -252,7 +252,8 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 
 工作流是 Behavior Tree v4（`schema_version: 4`）。`children` 表示有序父子关系，
 执行结果由 `Selector`、`Sequence` 与 `Simple Parallel` 组合节点解释，不再使用
-成功/失败跳转边。完整契约见 [docs/workflow-schema-v4.md](docs/workflow-schema-v4.md)。
+成功/失败跳转边。权威契约由 `src/oooonmyoji/workflows/validator.py` 中的 JSON
+Schema 强制，目录与入口约定见 [workflows/README.md](workflows/README.md)。
 
 ```json
 {
@@ -330,8 +331,8 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 
 修改 MCP 服务代码或依赖后，请重启 Codex，让客户端重新加载 STDIO 服务和新增工具。
 
-可用工具和生成示例见 [docs/mcp-template-factory-plan.md](docs/mcp-template-factory-plan.md)
-及 [docs/mcp-template-generation-example.md](docs/mcp-template-generation-example.md)。
+可用工具与生成流程见 [docs/README.md](docs/README.md)，工具定义在
+`src/oooonmyoji/mcp/service.py`。
 
 截图模板生成流程为：先调用 `capture_screen(instance_id)` 获取当前画面和临时
 `capture_id`，再调用 `select_roi(capture_id)` 打开项目自带的 ROI 框选窗口；用户确认
@@ -404,3 +405,19 @@ ADB 和 3 批性能基准）：
 ```powershell
 .\.venv\Scripts\python.exe -m mypy src
 ```
+
+## 代码质量与 CI
+
+开发依赖（不含 GPU 推理）安装一次即可获得 pytest、mypy 与 ruff：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pre-commit install
+```
+
+- `ruff check .`：Python 静态检查（配置见 `pyproject.toml`）。
+- `python -m mypy src`：类型检查，启用了 `disallow_untyped_defs`。
+- `python -m pytest -q`：单元测试。
+- 桌面端在 `desktop/` 下运行 `npm run typecheck` 与 `npm test`。
+
+`.github/workflows/ci.yml` 会在 push 和 PR 时自动执行以上检查。

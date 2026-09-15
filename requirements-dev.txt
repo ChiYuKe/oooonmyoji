@@ -1,0 +1,9 @@
+# CI / 本地开发用依赖：只包含运行默认测试与静态检查所需的最小集合。
+# OCR 与 GPU 推理（paddleocr / paddlepaddle-gpu）不在其中，相关测试会自动跳过。
+pytest>=8.0,<9
+mypy>=1.11,<2
+ruff>=0.16,<0.17
+numpy>=1.26,<3
+opencv-python-headless>=4.10,<5
+jsonschema>=4.20,<5
+tzdata>=2024.1

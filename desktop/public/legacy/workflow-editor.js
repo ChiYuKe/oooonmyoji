@@ -239,7 +239,25 @@
     return definition && typeof definition === 'object' && definition.type ? definition.type : 'any';
   }
 
-  /** 节点卡片左侧的变量端点：节点输入，以及子工作流的输入。 */
+  function displayNameOfDefinition(definition, fallback = '') {
+    const label = definition && typeof definition === 'object' && definition.display_name
+      ? String(definition.display_name)
+      : String(fallback || '');
+    return definition && definition._autoPublished === true
+      ? label.replace(/\s*·\s*初始值\s*$/, '')
+      : label;
+  }
+
+  function variableDisplayNameOf(scope, name, fallback = '') {
+    const rawName = String(name || '');
+    const topLevelName = rawName.split('.')[0];
+    const definition = state.raw[scope] && state.raw[scope][topLevelName];
+    const displayName = displayNameOfDefinition(definition);
+    if (!displayName) return rawName || fallback;
+    return rawName === topLevelName || !rawName ? displayName : `${displayName}.${rawName.slice(topLevelName.length + 1)}`;
+  }
+
+  /** 节点卡片左侧的变量端点：任务参数，以及子工作流的输入。 */
   function nodeVariablePins(node) {
     if (!node || node.type !== 'task') return [];
     const params = node.params && typeof node.params === 'object' && !Array.isArray(node.params) ? node.params : {};
@@ -253,7 +271,7 @@
       const scope = ref.startsWith('variables.') ? 'variables' : 'inputs';
       const variable = ref.startsWith(`${scope}.`) ? ref.slice(scope.length + 1) : '';
       const definition = spec && spec.parameters ? spec.parameters[param] : null;
-      pins.push({ param, variable, scope, type: variable ? variableTypeOf(scope, variable) : definition && definition.type || 'any', label: param });
+      pins.push({ param, variable, scope, type: variable ? variableTypeOf(scope, variable) : definition && definition.type || 'any', label: fieldLabel(param) });
     }
     for (const variable of workflowNodeInputs(node)) {
       const input = params.inputs && typeof params.inputs === 'object' ? params.inputs[variable.name] : null;
@@ -263,6 +281,30 @@
       pins.push({ param: `inputs.${variable.name}`, variable: ref, scope, type: variable.definition.type || 'any', label: variable.name });
     }
     return pins;
+  }
+
+  /** 收集已经连到节点卡片上的变量引用：变量列表用它给这些变量打“已连接”标记（不再隐藏它们）。 */
+  function collectNodeCardVariableRefs() {
+    const refs = new Set();
+    const addReference = (reference) => {
+      if (typeof reference !== 'string') return;
+      const match = /^(inputs|variables)\.([^\.]+)/.exec(reference);
+      if (match) refs.add(`${match[1]}.${match[2]}`);
+    };
+    for (const node of nodes()) {
+      for (const pin of nodeVariablePins(node)) {
+        if (!pin || !pin.variable || (pin.scope !== 'inputs' && pin.scope !== 'variables')) continue;
+        // 节点绑定可能指向嵌套字段，但左侧列表对应的是顶层变量定义。
+        addReference(`${pin.scope}.${pin.variable}`);
+      }
+    }
+    for (const card of instanceRunCards()) {
+      for (const variable of card.variables) {
+        const value = card.run && card.run.inputs && card.run.inputs[variable.name];
+        addReference(value && typeof value === 'object' && !Array.isArray(value) ? value.ref : '');
+      }
+    }
+    return refs;
   }
 
   function variableCardPosition(node, index = 0) {
@@ -282,15 +324,28 @@
     return state.raw._inputParams;
   }
 
+  /**
+   * 任务参数端点由参数定义自动产生：必填参数始终可接变量，已配置的可选参数也可接变量。
+   * _inputParams 仅用于兼容旧工作流中通过“输入”开关保存的端点元数据。
+   */
   function inputParameterNames(node) {
     const value = state.raw && state.raw._inputParams && state.raw._inputParams[node && node.id];
-    if (Array.isArray(value)) return value.filter((name) => typeof name === 'string' && name);
-    if (value && typeof value === 'object') return Object.keys(value).filter((name) => value[name] === true);
-    return [];
-  }
-
-  function isParameterInput(node, name) {
-    return inputParameterNames(node).includes(name);
+    const legacyNames = Array.isArray(value)
+      ? value.filter((name) => typeof name === 'string' && name)
+      : value && typeof value === 'object'
+        ? Object.keys(value).filter((name) => value[name] === true)
+        : [];
+    const spec = catalogByName(node && node.action);
+    const params = node && node.params && typeof node.params === 'object' && !Array.isArray(node.params) ? node.params : {};
+    const automaticNames = spec && spec.parameters
+      ? Object.entries(spec.parameters)
+        .filter(([name, definition]) => definition && (definition.required === true || Object.prototype.hasOwnProperty.call(params, name)))
+        .map(([name]) => name)
+      : [];
+    const names = [...new Set([...automaticNames, ...legacyNames])];
+    return spec && spec.parameters
+      ? names.filter((name) => Object.prototype.hasOwnProperty.call(spec.parameters, name))
+      : [];
   }
 
   /** 将旧版已有输入绑定迁移为编辑器输入端点元数据，并保留现有引用。 */
@@ -353,6 +408,14 @@
     return compatibleRefType(definitionSchema(definition), definitionSchema(variableDefinition));
   }
 
+  function variableCompatibleWithInstanceInput(scope, variableName, card, input) {
+    const node = card && card.node;
+    const variableDefinition = state.raw && state.raw[scope] && state.raw[scope][variableName];
+    if (!node || !input || !variableDefinition) return false;
+    if (scope === 'variables' && !VariableSystem.visible(state.raw, variableDefinition.owner, node.id)) return false;
+    return compatibleRefType(definitionSchema(input.definition), definitionSchema(variableDefinition));
+  }
+
   function workflowDescriptor(reference) {
     const normalized = String(reference || '').trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
     if (!normalized) return null;
@@ -396,6 +459,13 @@
       });
     }
     return cards;
+  }
+
+  function instanceRunInputPosition(card, index) {
+    return {
+      x: card.x + 10,
+      y: card.y + RUN_CARD_BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2,
+    };
   }
 
   function svgEl(tag, attrs, parent) {
@@ -447,19 +517,21 @@
     const inputs = state.raw && state.raw.inputs && typeof state.raw.inputs === 'object' && !Array.isArray(state.raw.inputs)
       ? state.raw.inputs
       : {};
+    const nodeCardVariableRefs = collectNodeCardVariableRefs();
     const workflowInputs = Object.entries(inputs)
-      .filter(([, rawDefinition]) => !(rawDefinition && rawDefinition._autoPublished))
+      .filter(([name, rawDefinition]) => !(rawDefinition && rawDefinition._autoPublished))
       .map(([name, rawDefinition]) => {
         const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
-        return { name, displayName: definition.display_name || name, group: definition.group || '', type: definition.type || 'any', scope: 'inputs', public: true };
+        return { name, displayName: definition.display_name || name, group: definition.group || '', type: definition.type || 'any', scope: 'inputs', public: true, onCard: nodeCardVariableRefs.has(`inputs.${name}`) };
       });
     const runtimeVariables = state.raw && state.raw.variables && typeof state.raw.variables === 'object' && !Array.isArray(state.raw.variables)
       ? state.raw.variables
       : {};
-    const variables = Object.entries(runtimeVariables).map(([name, rawDefinition]) => {
-      const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
-      return { name, displayName: definition.display_name || name, group: definition.group || '', type: definition.type || 'any', scope: 'variables', public: !!definition.initial_from };
-    });
+    const variables = Object.entries(runtimeVariables)
+      .map(([name, rawDefinition]) => {
+        const definition = rawDefinition && typeof rawDefinition === 'object' && !Array.isArray(rawDefinition) ? rawDefinition : {};
+        return { name, displayName: definition.display_name || name, group: definition.group || '', type: definition.type || 'any', scope: 'variables', public: !!definition.initial_from, onCard: nodeCardVariableRefs.has(`variables.${name}`) };
+      });
     const selectedDefinitions = state.selectedVariableScope === 'variables' ? runtimeVariables : inputs;
     const canvasVariableCardSelected = state.inspector === 'variables'
       && ((state.selectedVariableCardIds instanceof Set && state.selectedVariableCardIds.size > 0) || state.selectedVariableCardId);
@@ -641,7 +713,8 @@
     if (index >= 0 && parent.type === 'switch' && Array.isArray(parent.cases)) parent.cases = parent.cases.filter((item) => item && item.child !== childId);
   }
 
-  function addNode(type, at) {
+  /** 按类型构建一个尚未入图的新节点（addNode / 端口右键插入共用）。 */
+  function buildNode(type) {
     const prefix = type === 'simple_parallel' ? 'parallel' : type === 'instance_parallel' ? 'instances' : type;
     const node = { id: nextId(prefix), type, children: [] };
     if (type === 'task') {
@@ -669,7 +742,12 @@
       node.wait_for = 'all';
       node.cancel_on_failure = true;
     }
+    return node;
+  }
+
+  function addNode(type, at) {
     mutate(() => {
+      const node = buildNode(type);
       nodes().push(node);
       const point = at || worldPoint({ clientX: wrap.clientWidth / 2, clientY: wrap.clientHeight / 2 });
       layout()[node.id] = { x: Math.round(point.x - NODE_W / 2), y: Math.round(point.y - BASE_H / 2) };
@@ -884,6 +962,14 @@
     return `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
   }
 
+  function bindVariableEdgeQuickDisconnect(edge, disconnect) {
+    edge.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || !event.altKey) return;
+      event.preventDefault(); event.stopPropagation();
+      disconnect();
+    });
+  }
+
   function renderVariableEdges(layer) {
     const cards = new Map(variableCardList().map((card) => [card.id, card]));
     const byReference = new Map();
@@ -903,7 +989,28 @@
         const x2 = pos.x + VARIABLE_PIN_X;
         const y2 = pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2;
         const bend = Math.max(32, Math.abs(x2 - x1) * 0.42);
-        svgEl('path', { class: 'variable-edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}` }, layer);
+        const edge = svgEl('path', { class: 'variable-edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}` }, layer);
+        bindVariableEdgeQuickDisconnect(edge, () => disconnectVariableFromPin(node.id, pin.param));
+      });
+    }
+    for (const runCard of instanceRunCards()) {
+      const inputs = runCard.run && runCard.run.inputs && typeof runCard.run.inputs === 'object' && !Array.isArray(runCard.run.inputs)
+        ? runCard.run.inputs
+        : {};
+      runCard.variables.forEach((variable, index) => {
+        const value = inputs[variable.name];
+        const ref = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' ? value.ref : '';
+        const match = /^(inputs|variables)\.([^\.]+)/.exec(ref);
+        if (!match) return;
+        const card = cards.get(links[`${runCard.node.id}:runs.${runCard.index}.inputs.${variable.name}`])
+          || byReference.get(`${match[1]}.${match[2]}`);
+        if (!card) return;
+        const x1 = card.x + VARIABLE_CARD_W;
+        const y1 = card.y + VARIABLE_CARD_PORT_Y;
+        const target = instanceRunInputPosition(runCard, index);
+        const bend = Math.max(32, Math.abs(target.x - x1) * 0.42);
+        const edge = svgEl('path', { class: 'variable-edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${target.x - bend} ${target.y}, ${target.x} ${target.y}` }, layer);
+        bindVariableEdgeQuickDisconnect(edge, () => disconnectVariableFromInstanceInput(runCard.node.id, runCard.index, variable.name));
       });
     }
   }
@@ -1241,10 +1348,18 @@
       const y = BASE_H + index * RUN_VARIABLE_H;
       svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: NODE_W, y2: y }, group);
       svgEl('circle', { class: `port port-variable type-${pin.type}`, cx: VARIABLE_PIN_X, cy: y + RUN_VARIABLE_H / 2, r: 5.5 }, group);
-      NodeCards.text(group, {className:'pin-variable-name',x:22,y:y+16,value:pin.variable || pin.label || '未绑定',width:112,size:10});
+      NodeCards.text(group, {className:'pin-variable-name',x:22,y:y+16,value:variableDisplayNameOf(pin.scope, pin.variable, pin.label) || '未绑定',width:112,size:10});
       NodeCards.text(group, {className:'pin-variable-param',x:NODE_W-12,y:y+16,value:pin.label || pin.param,width:104,size:10,anchor:'end'});
       const hit = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_PIN_X, cy: y + RUN_VARIABLE_H / 2, r: 10, 'data-node': node.id, 'data-param': pin.param }, group);
-      hit.addEventListener('pointerdown', (event) => startVariableConnectionFromPin(event, node.id, pin.param));
+      hit.addEventListener('pointerdown', (event) => {
+        if (event.altKey) { disconnectVariableFromPin(node.id, pin.param); return; }
+        startVariableConnectionFromPin(event, node.id, pin.param);
+      });
+      hit.addEventListener('contextmenu', (event) => {
+        const point = openPortContextMenu(event);
+        if (!point) return;
+        showMenu(event.clientX, event.clientY, nodeVariablePinMenuItems(node.id, pin, point));
+      });
     });
     const decorators = Array.isArray(node.decorators) ? node.decorators : [];
     decorators.forEach((decorator, index) => {
@@ -1256,10 +1371,20 @@
     if (node.type !== 'root') {
       const input = svgEl('circle', { class: 'port port-in', cx: NODE_W / 2, cy: 0, r: PORT_R, 'data-node': node.id }, group);
       input.addEventListener('pointerdown', (event) => startConnectionFromInput(event, node.id));
+      input.addEventListener('contextmenu', (event) => {
+        const point = openPortContextMenu(event);
+        if (!point) return;
+        showMenu(event.clientX, event.clientY, nodeInputPortMenuItems(node.id, point));
+      });
     }
     if (node.type !== 'task') {
       const output = svgEl('circle', { class: 'port port-out', cx: NODE_W / 2, cy: height, r: PORT_R, 'data-node': node.id }, group);
       output.addEventListener('pointerdown', (event) => startConnection(event, node.id));
+      output.addEventListener('contextmenu', (event) => {
+        const point = openPortContextMenu(event);
+        if (!point) return;
+        showMenu(event.clientX, event.clientY, nodeOutputPortMenuItems(node.id, point));
+      });
     }
     const handleNodeMouseDown = (event) => {
       if (event.button !== 0) { startNodeDrag(event, node.id); return; }
@@ -1290,6 +1415,20 @@
           'separator',
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
+          { label: '删除节点', danger: true, run: () => deleteSelection() },
+        ]);
+      });
+    } else {
+      // 普通节点右键菜单（UE 风格）：复制 / 剪切 / 删除
+      group.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (contextMenuSuppressedByPan()) return;
+        state.selected = new Set([node.id]); state.selectedRun = null; render();
+        showMenu(event.clientX, event.clientY, [
+          { label: '复制 (Ctrl+C)', run: () => copySelection() },
+          { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
+          'separator',
           { label: '删除节点', danger: true, run: () => deleteSelection() },
         ]);
       });
@@ -1361,8 +1500,18 @@
       const y = RUN_CARD_BASE_H + variableIndex * RUN_VARIABLE_H;
       svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: RUN_CARD_W, y2: y }, group);
       svgEl('circle', { class: `instance-variable-pin type-${variable.definition.type || 'any'}`, cx: 10, cy: y + RUN_VARIABLE_H / 2, r: 5 }, group);
-      NodeCards.text(group, {className:'instance-variable-name',x:22,y:y+16,value:variable.name,width:104,size:10});
+      NodeCards.text(group, {className:'instance-variable-name',x:22,y:y+16,value:displayNameOfDefinition(variable.definition, variable.name),width:104,size:10});
       NodeCards.text(group, {className:'instance-variable-value',x:RUN_CARD_W-12,y:y+16,value:workflowInputVariableValue(card.run, variable),width:102,size:10,anchor:'end'});
+      const hit = svgEl('circle', { class: 'variable-port-hit', cx: 10, cy: y + RUN_VARIABLE_H / 2, r: 10, 'data-node': card.node.id, 'data-run-index': card.index, 'data-param': variable.name }, group);
+      hit.addEventListener('pointerdown', (event) => {
+        if (event.altKey) { disconnectVariableFromInstanceInput(card.node.id, card.index, variable.name); return; }
+        startVariableConnectionFromInstanceInput(event, card.node.id, card.index, variable.name);
+      });
+      hit.addEventListener('contextmenu', (event) => {
+        const point = openPortContextMenu(event);
+        if (!point) return;
+        showMenu(event.clientX, event.clientY, instanceRunPinMenuItems(card, variable, point));
+      });
     });
     const input = svgEl('circle', { class: 'port port-in instance-run-port', cx: RUN_CARD_W / 2, cy: 0, r: PORT_R }, group);
     input.style.pointerEvents = 'none';
@@ -1427,6 +1576,11 @@
     svgEl('circle', { class: `port port-variable-out type-${type}`, cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: PORT_R }, group);
     const port = svgEl('circle', { class: 'variable-port-hit', cx: VARIABLE_CARD_W, cy: VARIABLE_CARD_PORT_Y, r: 10, 'data-variable': card.name }, group);
     port.addEventListener('pointerdown', (event) => startVariableConnectionFromCard(event, card.scope, card.name, card.id));
+    port.addEventListener('contextmenu', (event) => {
+      const point = openPortContextMenu(event);
+      if (!point) return;
+      showMenu(event.clientX, event.clientY, variableCardPortMenuItems(card, point));
+    });
     group.addEventListener('mousedown', (event) => {
       if (!event.target.closest('.card-body, .card-head, text')) return;
       if (event.button !== 0) return;
@@ -1465,28 +1619,90 @@
     removeVariableCards([id]);
   }
 
+  /**
+   * 解除某个端口（键为 `nodeId:param`，实例子输入为 `nodeId:runs.N.inputs.param`）的变量绑定。
+   * 绑定前的字面量若已缓存则恢复，否则直接移除引用（参数回落到定义默认值）。
+   */
+  function releasePinBinding(key) {
+    const separator = typeof key === 'string' ? key.indexOf(':') : -1;
+    if (separator < 0) return;
+    const node = nodeById(key.slice(0, separator));
+    const param = key.slice(separator + 1);
+    if (!node) return;
+    const runMatch = /^runs\.(\d+)\.inputs\.(.+)$/.exec(param);
+    if (runMatch) {
+      const run = Array.isArray(node.runs) ? node.runs[Number(runMatch[1])] : null;
+      if (run && run.inputs && typeof run.inputs === 'object' && !Array.isArray(run.inputs)) delete run.inputs[runMatch[2]];
+      return;
+    }
+    const nested = param.startsWith('inputs.');
+    const name = nested ? param.slice('inputs.'.length) : param;
+    const holder = nested ? node.params && node.params.inputs : node.params;
+    if (!holder || typeof holder !== 'object' || Array.isArray(holder)) return;
+    const cache = parameterLiteralCache();
+    const cacheKey = parameterLiteralCacheKey(node, name);
+    if (Object.prototype.hasOwnProperty.call(cache, cacheKey)) holder[name] = clone(cache[cacheKey]);
+    else delete holder[name];
+    delete cache[cacheKey];
+  }
+
+  /**
+   * 删除变量卡片。画布连接优先：没有卡片再引用该变量的端口会同步解除绑定，
+   * 同一变量若还有别的卡片存活，则把连线改指到存活卡片上（绑定保留）。
+   */
   function removeVariableCards(ids) {
     const targets = [...new Set(Array.isArray(ids) ? ids : [])]
       .filter((id) => Object.prototype.hasOwnProperty.call(variableCards(), id));
     if (!targets.length) return;
+    const targetSet = new Set(targets);
+    const describe = (value) => ({
+      scope: value && value.scope === 'variables' ? 'variables' : 'inputs',
+      name: value && typeof value.name === 'string' ? value.name : '',
+    });
+    const released = [];
+    for (const [key, cardId] of Object.entries(variableLinks())) {
+      if (!targetSet.has(cardId)) continue;
+      const card = variableCards()[cardId];
+      if (card) released.push({ key, ...describe(card) });
+    }
+    const survivors = Object.entries(variableCards())
+      .filter(([id]) => !targetSet.has(id))
+      .map(([id, value]) => ({ id, ...describe(value) }));
+    const unbind = released.filter((item) => !survivors.some((card) => card.scope === item.scope && card.name === item.name));
     mutate(() => {
-      const targetSet = new Set(targets);
       for (const id of targets) delete variableCards()[id];
       for (const [key, cardId] of Object.entries(variableLinks())) if (targetSet.has(cardId)) delete variableLinks()[key];
+      for (const item of released) {
+        const survivor = survivors.find((card) => card.scope === item.scope && card.name === item.name);
+        if (survivor) variableLinks()[item.key] = survivor.id;
+        else releasePinBinding(item.key);
+      }
       const selected = state.selectedVariableCardIds instanceof Set ? state.selectedVariableCardIds : new Set();
       setVariableCardSelection([...selected].filter((id) => !targetSet.has(id)));
     });
+    toast(unbind.length
+      ? `已删除 ${targets.length} 个变量卡片，并解除 ${unbind.length} 处端口引用`
+      : `已删除 ${targets.length} 个变量卡片`);
   }
 
   /** 把变量卡片放到指定世界坐标；若附近有兼容端点则吸附到端点旁并建立绑定。 */
   function placeVariableCard(scope, name, point, options = {}) {
     if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) return;
     if (!Object.prototype.hasOwnProperty.call(state.raw[scope], name)) { toast(`${scope}.${name} 不存在`, true); return; }
-    const target = options.connect === false ? null : variablePinTargetAt(point, scope, name);
+    const target = options.connect === false ? null : variableInputTargetAt(point, scope, name);
     mutate(() => {
       const cards = variableCards();
       const cardId = nextVariableCardId();
-      if (target) {
+      if (target && target.kind === 'instance-input') {
+        const runCard = instanceRunCards().find((item) => item.node.id === target.nodeId && item.index === target.runIndex);
+        const run = runCard && runCard.run;
+        const left = runCard.x - VARIABLE_CARD_W - 56;
+        const x = left >= 24 ? left : runCard.x + RUN_CARD_W + 56;
+        cards[cardId] = { name, scope, x: Math.round(x / 8) * 8, y: Math.max(24, Math.round((target.y - VARIABLE_CARD_PORT_Y) / 8) * 8) };
+        if (!run.inputs || typeof run.inputs !== 'object' || Array.isArray(run.inputs)) run.inputs = {};
+        run.inputs[target.param] = { ref: `${scope}.${name}` };
+        variableLinks()[`${target.nodeId}:runs.${target.runIndex}.inputs.${target.param}`] = cardId;
+      } else if (target) {
         const node = nodeById(target.nodeId);
         const pos = position(node);
         const left = pos.x - VARIABLE_CARD_W - 56;
@@ -1501,7 +1717,8 @@
         cards[cardId] = { name, scope, x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
       }
     });
-    if (target) toast(`已连接 参数 ${target.param} ← 变量 ${name}`);
+    if (target && target.kind === 'instance-input') toast(`已连接 实例输入 ${target.param} ← 变量 ${displayNameOfDefinition(state.raw[scope][name], name)}`);
+    else if (target) toast(`已连接 参数 ${target.param} ← 变量 ${name}`);
     else toast(`已添加变量卡片 ${name}`);
   }
 
@@ -1575,20 +1792,20 @@
     return key ? key.toUpperCase() : '未配置';
   }
 
-  function startConnection(event, parentId) {
-    if (event.button !== 0) return;
-    event.preventDefault(); event.stopPropagation();
-    const point = worldPoint(event);
-    state.connect = { direction: 'from-output', parent: parentId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+  function startConnection(event, parentId, at) {
+    if (event && event.button !== 0) return;
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    const point = at || (event ? worldPoint(event) : { x: 0, y: 0 });
+    state.connect = { direction: 'from-output', parent: parentId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
     state.selectedEdge = null;
     render();
   }
 
-  function startConnectionFromInput(event, childId) {
-    if (event.button !== 0) return;
-    event.preventDefault(); event.stopPropagation();
-    const point = worldPoint(event);
-    state.connect = { direction: 'from-input', child: childId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+  function startConnectionFromInput(event, childId, at) {
+    if (event && event.button !== 0) return;
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    const point = at || (event ? worldPoint(event) : { x: 0, y: 0 });
+    state.connect = { direction: 'from-input', child: childId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
     state.selectedEdge = null;
     render();
   }
@@ -1680,6 +1897,40 @@
     return null;
   }
 
+  /** 变量连线拖拽中，光标附近的实例子工作流输入端点。 */
+  function instanceRunInputTargetAt(point, scope, variableName) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const maxDistance = Math.max(PORT_R + 8, 32 / state.zoom);
+    let best = null;
+    let bestDistance = maxDistance;
+    for (const card of instanceRunCards()) {
+      card.variables.forEach((input, index) => {
+        if (!variableCompatibleWithInstanceInput(scope, variableName, card, input)) return;
+        const target = instanceRunInputPosition(card, index);
+        const distance = Math.hypot(point.x - target.x, point.y - target.y);
+        if (distance <= bestDistance) {
+          best = { kind: 'instance-input', nodeId: card.node.id, runIndex: card.index, param: input.name, x: target.x, y: target.y };
+          bestDistance = distance;
+        }
+      });
+    }
+    if (best) return best;
+    // 落在输入行上时也视为连到该输入，避免必须精确捏住小圆点。
+    for (const card of instanceRunCards()) {
+      const index = card.variables.findIndex((input) => variableCompatibleWithInstanceInput(scope, variableName, card, input));
+      if (index < 0) continue;
+      const top = card.y + RUN_CARD_BASE_H + index * RUN_VARIABLE_H;
+      if (point.x < card.x || point.x > card.x + RUN_CARD_W || point.y < top || point.y > top + RUN_VARIABLE_H) continue;
+      const target = instanceRunInputPosition(card, index);
+      return { kind: 'instance-input', nodeId: card.node.id, runIndex: card.index, param: card.variables[index].name, x: target.x, y: target.y };
+    }
+    return null;
+  }
+
+  function variableInputTargetAt(point, scope, variableName) {
+    return variablePinTargetAt(point, scope, variableName) || instanceRunInputTargetAt(point, scope, variableName);
+  }
+
   /** 变量连线拖拽中，光标附近的变量卡片（节点端点 → 变量卡片）。 */
   function variableCardTargetAt(point, nodeId, param) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
@@ -1705,28 +1956,65 @@
     return null;
   }
 
+  /** 变量连线拖拽中，光标附近的实例子工作流输入对应的变量卡片。 */
+  function variableCardTargetAtInstanceInput(point, nodeId, runIndex, param) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const runCard = instanceRunCards().find((card) => card.node.id === nodeId && card.index === runIndex);
+    const input = runCard && runCard.variables.find((item) => item.name === param);
+    if (!runCard || !input) return null;
+    const maxDistance = Math.max(PORT_R + 8, 32 / state.zoom);
+    let best = null;
+    let bestDistance = maxDistance;
+    for (const card of variableCardList()) {
+      if (!variableCompatibleWithInstanceInput(card.scope, card.name, runCard, input)) continue;
+      const x = card.x + VARIABLE_CARD_W;
+      const y = card.y + VARIABLE_CARD_PORT_Y;
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance <= bestDistance) { best = { card: card.name, scope: card.scope, cardId: card.id, x, y }; bestDistance = distance; }
+    }
+    if (best) return best;
+    for (const card of variableCardList()) {
+      if (!variableCompatibleWithInstanceInput(card.scope, card.name, runCard, input)) continue;
+      if (point.x >= card.x && point.x <= card.x + VARIABLE_CARD_W && point.y >= card.y && point.y <= card.y + VARIABLE_CARD_H) {
+        return { card: card.name, scope: card.scope, cardId: card.id, x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
+      }
+    }
+    return null;
+  }
+
   function variableConnectionTargetAt(event) {
     if (!state.variableConnect || !event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
     const point = worldPoint(event);
-    return state.variableConnect.direction === 'from-card'
-      ? variablePinTargetAt(point, state.variableConnect.scope, state.variableConnect.variable)
-      : variableCardTargetAt(point, state.variableConnect.nodeId, state.variableConnect.param);
+    if (state.variableConnect.direction === 'from-card') return variableInputTargetAt(point, state.variableConnect.scope, state.variableConnect.variable);
+    if (state.variableConnect.direction === 'from-instance-input') {
+      return variableCardTargetAtInstanceInput(point, state.variableConnect.nodeId, state.variableConnect.runIndex, state.variableConnect.param);
+    }
+    return variableCardTargetAt(point, state.variableConnect.nodeId, state.variableConnect.param);
   }
 
-  function startVariableConnectionFromCard(event, scope, name, cardId) {
-    if (event.button !== 0) return;
-    event.preventDefault(); event.stopPropagation();
-    const point = worldPoint(event);
-    state.variableConnect = { direction: 'from-card', scope, variable: name, cardId, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+  function startVariableConnectionFromCard(event, scope, name, cardId, at) {
+    if (event && event.button !== 0) return;
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    const point = at || (event ? worldPoint(event) : { x: 0, y: 0 });
+    state.variableConnect = { direction: 'from-card', scope, variable: name, cardId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
     state.selectedEdge = null;
     render();
   }
 
-  function startVariableConnectionFromPin(event, nodeId, param) {
-    if (event.button !== 0) return;
-    event.preventDefault(); event.stopPropagation();
-    const point = worldPoint(event);
-    state.variableConnect = { direction: 'from-pin', nodeId, param, x: point.x, y: point.y, hover: null, pointerId: captureConnectionPointer(event) };
+  function startVariableConnectionFromPin(event, nodeId, param, at) {
+    if (event && event.button !== 0) return;
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    const point = at || (event ? worldPoint(event) : { x: 0, y: 0 });
+    state.variableConnect = { direction: 'from-pin', nodeId, param, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
+    state.selectedEdge = null;
+    render();
+  }
+
+  function startVariableConnectionFromInstanceInput(event, nodeId, runIndex, param, at) {
+    if (event && event.button !== 0) return;
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    const point = at || (event ? worldPoint(event) : { x: 0, y: 0 });
+    state.variableConnect = { direction: 'from-instance-input', nodeId, runIndex, param, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
     state.selectedEdge = null;
     render();
   }
@@ -1747,8 +2035,12 @@
     state.variableConnect = null;
     releaseConnectionPointer(connection.pointerId);
     if (!target) { render(); return; }
-    if (connection.direction === 'from-card') connectVariableToPin(connection.scope, connection.variable, target.nodeId, target.param, connection.cardId);
-    else connectVariableToPin(target.scope, target.card, connection.nodeId, connection.param, target.cardId);
+    if (connection.direction === 'from-card') {
+      if (target.kind === 'instance-input') connectVariableToInstanceInput(connection.scope, connection.variable, target.nodeId, target.runIndex, target.param, connection.cardId);
+      else connectVariableToPin(connection.scope, connection.variable, target.nodeId, target.param, connection.cardId);
+    } else if (connection.direction === 'from-instance-input') {
+      connectVariableToInstanceInput(target.scope, target.card, connection.nodeId, connection.runIndex, connection.param, target.cardId);
+    } else connectVariableToPin(target.scope, target.card, connection.nodeId, connection.param, target.cardId);
   }
 
   /** 用变量绑定节点参数端点（等价于把该参数接到对应变量）。 */
@@ -1766,6 +2058,47 @@
     toast(`参数 ${param} ← 变量 ${variable}`);
   }
 
+  function disconnectVariableFromPin(nodeId, param) {
+    const node = nodeById(nodeId);
+    if (!node || !node.params || typeof node.params !== 'object') return;
+    const current = param.startsWith('inputs.') ? node.params.inputs?.[param.slice('inputs.'.length)] : node.params[param];
+    if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.ref !== 'string') return;
+    mutate(() => {
+      if (param.startsWith('inputs.')) {
+        if (node.params.inputs && typeof node.params.inputs === 'object') delete node.params.inputs[param.slice('inputs.'.length)];
+      } else delete node.params[param];
+      delete variableLinks()[`${nodeId}:${param}`];
+    });
+    toast(`已断开参数 ${param}`);
+  }
+
+  function connectVariableToInstanceInput(scope, variable, nodeId, runIndex, param, cardId) {
+    const node = nodeById(nodeId);
+    const run = node && Array.isArray(node.runs) ? node.runs[runIndex] : null;
+    const card = instanceRunCards().find((item) => item.node.id === nodeId && item.index === runIndex);
+    const input = card && card.variables.find((item) => item.name === param);
+    if (!run || !input || !state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], variable)) return;
+    if (!variableCompatibleWithInstanceInput(scope, variable, card, input)) { toast('变量类型或作用范围与目标不兼容', true); return; }
+    mutate(() => {
+      if (!run.inputs || typeof run.inputs !== 'object' || Array.isArray(run.inputs)) run.inputs = {};
+      run.inputs[param] = { ref: `${scope}.${variable}` };
+      if (cardId) variableLinks()[`${nodeId}:runs.${runIndex}.inputs.${param}`] = cardId;
+    });
+    toast(`实例输入 ${displayNameOfDefinition(input.definition, param)} ← 变量 ${variableDisplayNameOf(scope, variable)}`);
+  }
+
+  function disconnectVariableFromInstanceInput(nodeId, runIndex, param) {
+    const node = nodeById(nodeId);
+    const run = node && Array.isArray(node.runs) ? node.runs[runIndex] : null;
+    const current = run && run.inputs && typeof run.inputs === 'object' ? run.inputs[param] : null;
+    if (!run || !current || typeof current !== 'object' || Array.isArray(current) || typeof current.ref !== 'string') return;
+    mutate(() => {
+      delete run.inputs[param];
+      delete variableLinks()[`${nodeId}:runs.${runIndex}.inputs.${param}`];
+    });
+    toast(`已断开实例输入 ${param}`);
+  }
+
   function renderVariableConnection(layer) {
     const connection = state.variableConnect;
     if (!connection) return;
@@ -1773,6 +2106,10 @@
     if (connection.direction === 'from-card') {
       const card = variableCardList().find((item) => item.id === connection.cardId) || variableCardList().find((item) => item.scope === connection.scope && item.name === connection.variable);
       if (card) origin = { x: card.x + VARIABLE_CARD_W, y: card.y + VARIABLE_CARD_PORT_Y };
+    } else if (connection.direction === 'from-instance-input') {
+      const card = instanceRunCards().find((item) => item.node.id === connection.nodeId && item.index === connection.runIndex);
+      const index = card ? card.variables.findIndex((input) => input.name === connection.param) : -1;
+      if (card && index >= 0) origin = instanceRunInputPosition(card, index);
     } else {
       const node = nodeById(connection.nodeId);
       const index = node ? nodeVariablePins(node).findIndex((pin) => pin.param === connection.param) : -1;
@@ -2002,16 +2339,282 @@
     return Boolean(state.drag && state.drag.kind === 'pan' && state.drag.moved);
   }
 
+  /** 端口右键：阻止冒泡并吞掉右键平移后的误触，返回端口处的世界坐标；被抑制时返回 null。 */
+  function openPortContextMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (contextMenuSuppressedByPan()) return null;
+    return worldPoint(event);
+  }
+
+  /** 把画布视野移到指定变量卡片并选中它（端口右键菜单的“定位”操作）。 */
+  function focusVariableCard(card) {
+    if (!card) return;
+    state.selected.clear();
+    state.selectedEdge = null;
+    state.selectedRun = null;
+    state.selectedVariable = card.name;
+    state.selectedVariableScope = card.scope;
+    setVariableCardSelection([card.id]);
+    state.inspector = 'variables';
+    const rect = wrap.getBoundingClientRect();
+    state.panX = rect.width / 2 - (card.x + VARIABLE_CARD_W / 2) * state.zoom;
+    state.panY = rect.height / 2 - (card.y + VARIABLE_CARD_H / 2) * state.zoom;
+    render();
+  }
+
+  /** 节点输入端口（顶部）右键菜单：UE 风格——连线、断开链接（Break Link）、插入节点（Reroute）。 */
+  function nodeInputPortMenuItems(nodeId, point) {
+    const items = [{ label: '从这里开始连线', run: () => startConnectionFromInput(null, nodeId, point) }];
+    const parent = parentOf(nodeId);
+    if (parent) {
+      items.push('separator', { label: `断开与「${parent.node.name || parent.node.id}」的链接`, danger: true, run: () => { mutate(() => disconnect(parent.node.id, nodeId)); } });
+      items.push('separator', {
+        label: '在上方插入节点',
+        children: [['sequence', 'Sequence'], ['selector', 'Selector'], ['simple_parallel', 'Simple Parallel'], ['parallel', 'Parallel'], ['repeat_until', 'Repeat Until'], ['branch', 'Branch'], ['switch', 'Switch']]
+          .map(([type, label]) => ({ label, run: () => insertNodeAbove(nodeId, type) })),
+      });
+    }
+    return items;
+  }
+
+  /** 节点输出端口（底部）右键菜单：UE 风格——连线、断开全部链接（Break All Links）、创建并连接节点。 */
+  function nodeOutputPortMenuItems(nodeId, point) {
+    const node = nodeById(nodeId);
+    const children = node && Array.isArray(node.children) ? node.children.filter((id) => nodeById(id)) : [];
+    const items = [{ label: '从这里开始连线', run: () => startConnection(null, nodeId, point) }];
+    if (children.length) {
+      items.push('separator', { label: `断开全部子链接（${children.length} 条）`, danger: true, run: () => { mutate(() => { for (const childId of [...children]) disconnect(nodeId, childId); }); } });
+    }
+    items.push('separator', {
+      label: '创建并连接节点',
+      children: [['task', 'Task'], ['sequence', 'Sequence'], ['selector', 'Selector'], ['simple_parallel', 'Simple Parallel'], ['parallel', 'Parallel'], ['repeat_until', 'Repeat Until'], ['branch', 'Branch'], ['switch', 'Switch'], ['instance_parallel', 'Instance Parallel']]
+        .map(([type, label]) => ({ label, run: () => addChildNode(nodeId, type, point) })),
+    });
+    return items;
+  }
+
+  /** 任务卡变量端口右键菜单：UE 风格——提升为变量（Promote to Variable）、创建 Get 卡片、断开链接。 */
+  function nodeVariablePinMenuItems(nodeId, pin, point) {
+    const items = [];
+    if (pin.variable) {
+      const topName = String(pin.variable).split('.')[0];
+      const card = variableCardList().find((item) => item.scope === pin.scope && item.name === topName);
+      if (card) items.push({ label: '定位到变量卡片', run: () => focusVariableCard(card) });
+      else items.push({ label: '创建变量卡片（Get）', run: () => placeVariableCard(pin.scope, topName, point, { connect: false }) });
+      items.push({ label: '复制变量引用', run: () => copyVariableReference(pin.scope, topName) });
+      items.push('separator', { label: '断开变量链接', danger: true, run: () => disconnectVariableFromPin(nodeId, pin.param) });
+    } else {
+      items.push({ label: '从这里开始连线（绑定变量）', run: () => startVariableConnectionFromPin(null, nodeId, pin.param, point) });
+      items.push('separator', { label: '提升为变量', run: () => promotePinToVariable(nodeId, pin.param, pin) });
+    }
+    return items;
+  }
+
+  /** 实例运行卡变量端口右键菜单：绑定时可定位/创建卡片/复制/断开，未绑定时开始连线。 */
+  function instanceRunPinMenuItems(card, variable, point) {
+    const raw = card.run && card.run.inputs && typeof card.run.inputs === 'object' ? card.run.inputs[variable.name] : null;
+    const ref = raw && typeof raw === 'object' && !Array.isArray(raw) && typeof raw.ref === 'string' ? raw.ref : '';
+    const match = /^(inputs|variables)\.([^.]+)/.exec(ref);
+    const items = [];
+    if (match) {
+      const cardItem = variableCardList().find((item) => item.scope === match[1] && item.name === match[2]);
+      if (cardItem) items.push({ label: '定位到变量卡片', run: () => focusVariableCard(cardItem) });
+      else items.push({ label: '创建变量卡片（Get）', run: () => placeVariableCard(match[1], match[2], point, { connect: false }) });
+      items.push({ label: '复制变量引用', run: () => copyVariableReference(match[1], match[2]) });
+      items.push('separator', { label: '断开变量链接', danger: true, run: () => disconnectVariableFromInstanceInput(card.node.id, card.index, variable.name) });
+    } else {
+      items.push({ label: '从这里开始连线（绑定变量）', run: () => startVariableConnectionFromInstanceInput(null, card.node.id, card.index, variable.name, point) });
+    }
+    return items;
+  }
+
+  /** 变量卡片输出端口右键菜单：开始连线、复制引用，或删除卡片。 */
+  function variableCardPortMenuItems(card, point) {
+    return [
+      { label: '从这里开始连线', run: () => startVariableConnectionFromCard(null, card.scope, card.name, card.id, point) },
+      { label: '复制变量引用', run: () => copyVariableReference(card.scope, card.name) },
+      'separator',
+      { label: '删除变量卡片', danger: true, run: () => removeVariableCard(card.id) },
+    ];
+  }
+
+  /** 在父节点与当前节点之间插入一个组合节点并保持原有连线（UE 风格）。 */
+  function insertNodeAbove(childId, type) {
+    const parent = parentOf(childId);
+    if (!parent) return;
+    const node = buildNode(type);
+    const parentError = canConnect(parent.node.id, node.id);
+    const childError = canConnect(node.id, childId);
+    if (parentError || childError) { toast(parentError || childError, true); return; }
+    const at = position(nodeById(childId));
+    const from = position(parent.node);
+    mutate(() => {
+      nodes().push(node);
+      layout()[node.id] = { x: Math.round((from.x + at.x) / 2), y: Math.round((from.y + at.y) / 2) - 24 };
+      connect(parent.node.id, node.id);
+      connect(node.id, childId);
+      state.selected = new Set([node.id]);
+      state.selectedRun = null;
+      state.inspector = 'node';
+    });
+    toast(`已在上方插入 ${TYPE_NAMES[type] || type}`);
+  }
+
+  /** 在输出端口附近创建节点并直接连为当前节点的子节点。 */
+  function addChildNode(parentId, type, point) {
+    const node = buildNode(type);
+    const error = canConnect(parentId, node.id);
+    if (error) { toast(error, true); return; }
+    mutate(() => {
+      nodes().push(node);
+      layout()[node.id] = { x: Math.round(point.x - NODE_W / 2), y: Math.round(point.y + 24) };
+      connect(parentId, node.id);
+      state.selected = new Set([node.id]);
+      state.selectedRun = null;
+      state.inspector = 'node';
+    });
+  }
+
+  /** UE 的 Promote to Variable：把参数字面量提升为工作流输入变量，绑定端口，并在画布创建变量卡片自动连上。 */
+  function promotePinToVariable(nodeId, param, pin) {
+    const node = nodeById(nodeId);
+    if (!node) return;
+    const current = param.startsWith('inputs.')
+      ? (node.params && node.params.inputs && typeof node.params.inputs === 'object' ? node.params.inputs[param.slice('inputs.'.length)] : undefined)
+      : (node.params ? node.params[param] : undefined);
+    if (current && typeof current === 'object' && !Array.isArray(current)) { toast('该端口已绑定变量，不能重复提取', true); return; }
+    const inputs = state.raw && state.raw.inputs;
+    if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) { toast('缺少工作流输入区', true); return; }
+    const base = String(fieldLabel(param) || param.replace(/^inputs\./, '') || '变量').replace(/[^\w\u4e00-\u9fa5]+/g, '_');
+    let name = base;
+    let index = 1;
+    while (Object.prototype.hasOwnProperty.call(inputs, name)) { name = `${base}_${index}`; index += 1; }
+    mutate(() => {
+      const definition = { type: pin.type || 'any' };
+      if (current !== undefined) definition.default = current;
+      const label = fieldLabel(param);
+      if (label && label !== param) definition.display_name = label;
+      inputs[name] = definition;
+      if (param.startsWith('inputs.')) {
+        if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
+        node.params.inputs[param.slice('inputs.'.length)] = { ref: `inputs.${name}` };
+      } else node.params[param] = { ref: `inputs.${name}` };
+      delete variableLinks()[`${nodeId}:${param}`];
+      // 创建变量卡片并登记连线：端口右键后即可看到“变量卡片 + 自动连线”
+      const pins = nodeVariablePins(node);
+      const pinIndex = Math.max(0, pins.findIndex((item) => item.param === param));
+      const at = variableCardPosition(node, pinIndex);
+      const cardId = nextVariableCardId();
+      variableCards()[cardId] = { name, scope: 'inputs', x: at.x, y: at.y };
+      variableLinks()[`${nodeId}:${param}`] = cardId;
+    });
+    toast(`已创建变量「${name}」并连接端口`);
+  }
+
+  /** 复制变量引用文本（如 inputs.模板）到剪贴板。 */
+  function copyVariableReference(scope, name) {
+    const text = `${scope}.${name}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => toast(`已复制 ${text}`)).catch(() => toast(`请手动复制：${text}`));
+    } else toast(`请手动复制：${text}`);
+  }
+
+  /** UE 风格右键菜单：顶部常驻搜索框（输入时打平子菜单过滤全部动作），支持 ▸ 子菜单与键盘导航。 */
   function showMenu(x, y, items, options = {}) {
     hideMenus();
     const menu = el('div', 'context-menu');
-    for (const item of items) {
-      if (item === 'separator') { menu.appendChild(el('div', 'menu-separator')); continue; }
-      const button = el('button', item.danger ? 'danger' : '', item.label);
-      button.addEventListener('click', () => { hideMenus(); item.run(); });
-      menu.appendChild(button);
-    }
+    const list = el('div', 'context-menu-list');
+    menu.appendChild(list);
+    const closeSubmenus = () => {
+      for (const sub of Array.from(menu.querySelectorAll('.context-menu-sub'))) sub.remove();
+    };
+    let highlightIndex = -1;
+    const visibleButtons = () => Array.from(list.querySelectorAll('button'));
+    const highlight = (index) => {
+      const buttons = visibleButtons();
+      if (!buttons.length) { highlightIndex = -1; return; }
+      highlightIndex = ((index % buttons.length) + buttons.length) % buttons.length;
+      buttons.forEach((button, i) => button.classList.toggle('menu-highlight', i === highlightIndex));
+      const active = buttons[highlightIndex];
+      if (active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+    };
+    const renderItems = (query) => {
+      list.innerHTML = '';
+      closeSubmenus();
+      const q = (query || '').trim().toLowerCase();
+      if (q) {
+        // 搜索时把子菜单打平，全部动作一起过滤（UE 的 Search 行为）
+        const walk = (item) => {
+          if (item === 'separator') return;
+          const label = String(item.label || '');
+          if (item.children && item.children.length) { for (const child of item.children) walk(child); return; }
+          if (!label.toLowerCase().includes(q)) return;
+          const button = el('button', item.danger ? 'danger' : '', label);
+          button.addEventListener('click', () => { hideMenus(); item.run(); });
+          button.addEventListener('mouseenter', () => highlight(visibleButtons().indexOf(button)));
+          list.appendChild(button);
+        };
+        for (const item of items) walk(item);
+      } else {
+        for (const item of items) {
+          if (item === 'separator') { list.appendChild(el('div', 'menu-separator')); continue; }
+          const label = String(item.label || '');
+          const button = el('button', item.danger ? 'danger' : '', label);
+          if (item.children && item.children.length) {
+            button.classList.add('has-submenu');
+            const chevron = document.createElement('span');
+            chevron.className = 'menu-chevron';
+            chevron.textContent = '▸';
+            button.appendChild(chevron);
+            const openSubmenu = () => {
+              closeSubmenus();
+              const sub = el('div', 'context-menu context-menu-sub');
+              for (const child of item.children) {
+                if (child === 'separator') { sub.appendChild(el('div', 'menu-separator')); continue; }
+                const childButton = el('button', child.danger ? 'danger' : '', child.label);
+                childButton.addEventListener('click', () => { hideMenus(); child.run(); });
+                sub.appendChild(childButton);
+              }
+              menu.appendChild(sub);
+              const rect = button.getBoundingClientRect();
+              const subRect = sub.getBoundingClientRect();
+              const left = rect.right + 2 + subRect.width > window.innerWidth ? rect.left - subRect.width - 2 : rect.right + 2;
+              sub.style.left = `${left}px`;
+              sub.style.top = `${Math.max(8, Math.min(rect.top, window.innerHeight - subRect.height - 8))}px`;
+            };
+            button.addEventListener('mouseenter', () => { openSubmenu(); });
+            button.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); openSubmenu(); });
+          } else {
+            button.addEventListener('click', () => { hideMenus(); item.run(); });
+            button.addEventListener('mouseenter', () => closeSubmenus());
+          }
+          button.addEventListener('mouseenter', () => highlight(visibleButtons().indexOf(button)));
+          list.appendChild(button);
+        }
+      }
+      highlight(0);
+    };
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.className = 'context-menu-search';
+    search.placeholder = '搜索操作…';
+    search.spellcheck = false;
+    search.addEventListener('input', () => renderItems(search.value));
+    search.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'ArrowDown') { event.preventDefault(); highlight(highlightIndex + 1); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); highlight(highlightIndex - 1); }
+      else if (event.key === 'Enter') {
+        const buttons = visibleButtons();
+        if (highlightIndex >= 0 && highlightIndex < buttons.length) buttons[highlightIndex].click();
+        else if (buttons.length) buttons[0].click();
+      } else if (event.key === 'Escape') hideMenus();
+    });
+    menu.prepend(search);
+    renderItems('');
     document.body.appendChild(menu);
+    search.focus(); search.select();
     const margin = 8;
     const rect = menu.getBoundingClientRect();
     const preferredLeft = options.align === 'end' ? x - rect.width : x;
@@ -2434,7 +3037,7 @@
       const definition = variable.definition || {};
       const block = el('div', 'run-variable-block');
       const heading = el('div', 'run-variable-heading');
-      const name = el('span', 'run-input-name', `${definition.display_name || variable.name}${definition.required ? ' *' : ''}`);
+      const name = el('span', 'run-input-name', `${displayNameOfDefinition(definition, variable.name)}${definition.required ? ' *' : ''}`);
       name.title = `${variable.name} · ${definition.type || 'any'}`;
       heading.appendChild(name);
       block.appendChild(heading);
@@ -2492,7 +3095,7 @@
       open.addEventListener('click', () => requestOpenWorkflowReference(run.workflow));
       body.appendChild(open);
     }
-    renderPublicWorkflowInputs(body, run, run.workflow, false, `${selection.nodeId}:${selection.index}:inputs:`);
+    renderPublicWorkflowInputs(body, run, run.workflow, true, `${selection.nodeId}:${selection.index}:inputs:`);
     const remove = el('button', 'danger full-command', '删除实例运行项');
     remove.addEventListener('click', () => removeInstanceRun(node, selection.index));
     body.appendChild(remove);
@@ -2692,26 +3295,6 @@
     return ref;
   }
 
-  function setParameterInput(node, name, definition, checked) {
-    const metadata = inputParameterMetadata();
-    const names = new Set(inputParameterNames(node));
-    if (checked) names.add(name);
-    else {
-      names.delete(name);
-      const value = node.params && node.params[name];
-      if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && value.ref.startsWith('inputs.')) {
-        const variableName = value.ref.slice('inputs.'.length);
-        const variableDefinition = state.raw.inputs && state.raw.inputs[variableName];
-        node.params[name] = variableDefinition && Object.prototype.hasOwnProperty.call(variableDefinition, 'default')
-          ? clone(variableDefinition.default)
-          : definition.default !== undefined ? clone(definition.default) : defaultValue(definition);
-      }
-      delete variableLinks()[`${node.id}:${name}`];
-    }
-    if (names.size) metadata[node.id] = [...names];
-    else delete metadata[node.id];
-  }
-
   const FIELD_LABELS = {
     value: '值', message: '提示信息', fields: '字段列表', name: '名称', seconds: '时长（秒）',
     match: '匹配配置', template: '模板', template_roi: '模板区域', done_texts: '完成文字',
@@ -2724,6 +3307,7 @@
     post_action_delay: '动作后延迟（秒）', max_return_attempts: '最大返回次数', max_overlay_clicks: '覆盖层点击上限',
     max_transitions: '最大转移次数', failure_frame_name: '失败现场图名', x1: '左', y1: '上', x2: '右', y2: '下',
     duration_ms: '时长（毫秒）', x: '坐标 X', y: '坐标 Y', revalidate: '重新校验',
+    verify_gone: '确认模板消失', verify_timeout_seconds: '确认消失超时（秒）',
     disappeared_states: '消失状态列表', disappeared_state_timeout_seconds: '消失超时（秒）', text: '文字',
     target_rois: '目标区域列表', page_roi: '页面区域', completed_texts: '完成文字列表',
     completed_templates: '完成模板列表', min_confidence: '最小置信度', target_limit: '目标数量上限',
@@ -2755,8 +3339,6 @@
     'input.dismiss_template_until_text': '点模板关闭至文字出现', 'input.key': '发送按键',
     'input.recover_state': '页面状态恢复', 'input.swipe': '滑动', 'input.tap': '坐标点击',
     'input.tap_match': '点击匹配项', 'input.type_text': '输入文本',
-    'realm.detect_progress': '结界进度检测', 'realm.read_pass_count': '读取结界券数',
-    'stats.enqueue_reward': '奖励统计',
     'vision.detect_state': '识别页面状态', 'vision.match_template': '模板匹配', 'vision.ocr': '文字识别',
     'vision.wait_any': '等待任一模板', 'vision.wait_any_text': '等待任一文字',
     'vision.wait_template': '等待模板', 'vision.wait_text': '等待文字',
@@ -2773,7 +3355,12 @@
         detail: ACTION_LABELS[spec.name] ? spec.name : '',
         title: spec.description || spec.name,
       })),
-      onChange: (value) => mutate(() => { node.action = value; node.params = {}; clearParameterLiteralCache(node.id); delete inputParameterMetadata()[node.id]; }),
+      onChange: (value) => mutate(() => {
+        node.action = value;
+        node.params = {};
+        clearParameterLiteralCache(node.id);
+        if (state.raw._inputParams && typeof state.raw._inputParams === 'object') delete state.raw._inputParams[node.id];
+      }),
       searchable: true,
       placeholder: '搜索动作…',
       emptyText: '没有匹配的动作',
@@ -2796,12 +3383,6 @@
       const toggleLabel = el('label', 'parameter-enable'); toggleLabel.appendChild(enabled); toggleLabel.appendChild(el('span', '', '启用'));
       headingActions.appendChild(toggleLabel);
     }
-    const exposed = isParameterInput(node, name);
-    const inputToggle = el('label', 'parameter-input');
-    inputToggle.title = exposed ? '显示节点输入端点；未连接变量时使用当前默认值' : '启用输入端点；不连接变量时保持当前默认值';
-    inputToggle.appendChild(checkbox(exposed, (checked) => mutate(() => setParameterInput(node, name, definition, checked))));
-    inputToggle.appendChild(el('span', '', '输入'));
-    headingActions.appendChild(inputToggle);
     if (name === 'template' && node.action === 'vision.wait_template') {
       const multi = el('button', 'parameter-check', '多模板');
       multi.type = 'button';
@@ -4095,7 +4676,7 @@
       if (definition[key] === undefined) delete twin[key]; else twin[key] = clone(definition[key]);
     }
     if (Object.prototype.hasOwnProperty.call(definition, 'default')) twin.default = clone(definition.default); else delete twin.default;
-    twin.display_name = `${VariableSystem.label(state.raw, 'variables', name)} · 初始值`;
+    twin.display_name = VariableSystem.label(state.raw, 'variables', name);
   }
 
   function valueBindingMenu(node, definition, getValue, assign, label) {
@@ -5129,6 +5710,22 @@
   window.addEventListener('mousemove', (event) => { if (state.drag || state.connect || state.variableConnect) onPointerMove(event); });
   window.addEventListener('mouseup', onPointerUp);
 
+  // 右键菜单全局收起（UE 行为）：菜单外的任何按下/右键都会先收起当前菜单，
+  // 避免端口密集时旧菜单盖住其它端口导致无法再次右键；菜单空白处右键也立即收起并抑制原生菜单。
+  document.addEventListener('mousedown', (event) => {
+    if (event.target && event.target.closest && event.target.closest('.context-menu')) return;
+    hideMenus();
+  }, true);
+  document.addEventListener('contextmenu', (event) => {
+    const inMenu = event.target && event.target.closest && event.target.closest('.context-menu');
+    if (inMenu) {
+      event.preventDefault();
+      if (!event.target.closest('.context-menu button')) hideMenus();
+      return;
+    }
+    hideMenus();
+  }, true);
+
   // 从桌面端变量面板拖入变量：允许放置时显示跟随光标的提示，落点吸附兼容端点。
   let dropGhost = null;
   const variableDragAccepted = (event) => Boolean(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes(VARIABLE_DRAG_MIME));
@@ -5300,6 +5897,6 @@
     if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
-  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw), collectExportTemplatePaths, applyInlineThumbnails, placeVariableCard, variableCardList, nodeVariablePins, connectVariableToPin };
+  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw), collectExportTemplatePaths, applyInlineThumbnails, placeVariableCard, variableCardList, nodeVariablePins, collectNodeCardVariableRefs, connectVariableToPin };
   vscode.postMessage({ type: 'ready' });
 })();

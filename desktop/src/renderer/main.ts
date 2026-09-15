@@ -59,14 +59,10 @@ import {
   createIcons,
   createElement,
 } from 'lucide';
-import { createCloseButton } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
 import type {
   BootstrapData,
   AssetImage,
-  ReferenceGraph,
-  ReferenceItem,
-  ReferenceNode,
   ParameterInfo,
   RuntimeInstance,
   RuntimeOutputEvent,
@@ -78,6 +74,8 @@ import {
   createDockingWorkspace,
   createWorkbenchFrame,
   connectSharedPanelDocking,
+  documentUriForPanelId,
+  setDocumentPanelDirty,
   type DockPanelId,
   type DockingController,
   type SharedDockPanelId,
@@ -85,6 +83,7 @@ import {
   type WorkbenchFrameController,
   type WorkbenchPanelId,
 } from './docking';
+import { createReferenceViewer } from './reference-viewer';
 import { createRoiPicker } from './roi-picker';
 import './styles.css';
 
@@ -141,6 +140,7 @@ interface InspectorSelection {
 
 type ContentBrowserView = 'grid' | 'list';
 type ContentBrowserItemKind = 'folder' | 'workflow' | 'asset';
+type ContentBrowserFilter = 'all' | ContentBrowserItemKind;
 type OverviewItemStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
 
 interface ContentBrowserItem {
@@ -166,6 +166,21 @@ interface WorkflowDocumentTab {
   text: string;
   dirty: boolean;
   backStack: string[];
+}
+
+/** 一个工作流文档对应的画布运行时：各自的 iframe、初始化和侧栏状态。 */
+interface DocumentRuntime {
+  panelId: string;
+  frame: HTMLIFrameElement;
+  ready: boolean;
+  init?: WorkflowEditorInit;
+  sidebarNodes: SidebarNode[];
+  sidebarVariables: SidebarVariable[];
+  selectedNode: string;
+  selectedVariable: string;
+  selectedVariableScope: 'inputs' | 'variables';
+  collapsedTreeNodes: Set<string>;
+  inspectorSelection?: InspectorSelection;
 }
 
 /** 持久化的画布会话：启动时用于恢复上次打开的工作流与未保存内容。 */
@@ -267,12 +282,15 @@ function installCustomTooltips(): void {
     trimText: true,
     repositionOnResize: true,
     hideOnScroll: true,
-    receiverFrames: () => [editorFrame, detailsFrame, runtimeLogFrame],
+    receiverFrames: () => [
+      ...[...documentRuntimes.values()].map((runtime) => runtime.frame),
+      detailsFrame,
+      runtimeLogFrame,
+    ],
   });
 }
 
 
-const editorFrame = document.querySelector<HTMLIFrameElement>('#editor-frame')!;
 const detailsFrame = document.querySelector<HTMLIFrameElement>('#details-frame')!;
 const instancePicker = document.querySelector<HTMLDivElement>('#instance-picker')!;
 const instanceSelect = document.querySelector<HTMLButtonElement>('#instance-select')!;
@@ -286,6 +304,8 @@ const contentBrowserTree = document.querySelector<HTMLElement>('#content-browser
 const contentBrowserItems = document.querySelector<HTMLElement>('#content-browser-items')!;
 const contentBrowserBreadcrumbs = document.querySelector<HTMLElement>('#content-browser-breadcrumbs')!;
 const contentBrowserSearch = document.querySelector<HTMLInputElement>('#content-browser-search')!;
+const contentBrowserFilters = document.querySelector<HTMLElement>('#content-browser-filters')!;
+const contentBrowserFolderSearch = document.querySelector<HTMLInputElement>('#content-browser-folder-search')!;
 const settingsContentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
 const settingsAutoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
 const settingsDefaultWorkflow = document.querySelector<HTMLInputElement>('#settings-default-workflow')!;
@@ -326,6 +346,17 @@ let backStack: string[] = [];
 let editorReady = false;
 let currentEditorInit: WorkflowEditorInit | undefined;
 let dirty = false;
+/** 已打开文档画布注册表：uri → 独立 iframe 与画布状态。 */
+const documentRuntimes = new Map<string, DocumentRuntime>();
+const documentFrameUris = new WeakMap<HTMLIFrameElement, string>();
+/** 正在由壳层主动关闭的文档，避免 onDidRemoveDocument 重复走保存流程。 */
+const closingDocuments = new Set<string>();
+/** 会话恢复完成前忽略 Dockview 的激活事件，避免加载到错误的文档。 */
+let documentsReady = false;
+/** 关闭文档期间抑制激活事件，避免邻居面板抢先把 currentUri 切走。 */
+let removingDocument = false;
+/** 布局重置/会话对账时批量移除面板，不应触发保存与标签删除。 */
+let suppressDocumentRemoval = false;
 const AUTO_SAVE_DELAY_MS = 700;
 let autoSaveTimer: number | undefined;
 let autoSaveInFlight = false;
@@ -344,13 +375,16 @@ let instanceRefreshTimer: number | undefined;
 let docking: DockingController | undefined;
 let workbenchFrame: WorkbenchFrameController | undefined;
 let sharedPanelDockBridge: SharedPanelDockBridge | undefined;
-let workflowTabHost: HTMLElement | undefined;
 let workflowTabs: WorkflowDocumentTab[] = [];
 let contentAssets: AssetImage[] = [];
 let contentFolderPaths: string[] = [];
 let contentBrowserFolder = '';
 let contentBrowserQuery = '';
 let contentBrowserView: ContentBrowserView = 'grid';
+let contentBrowserFilter: ContentBrowserFilter = 'all';
+let contentBrowserFolderQuery = '';
+/** 结构树手动收起的目录；重渲染时保持折叠状态。 */
+let collapsedContentFolders = new Set<string>();
 let contentFolderDraft: ContentFolderDraft | undefined;
 let selectedContentPath = '';
 /** 最近一次被点选的删除目标（内容项、队列行或画布选区）；Delete/Backspace 只作用于它。 */
@@ -494,16 +528,37 @@ function overviewInputDisplayName(name: string): string {
   return translated === name.replaceAll('_', '') ? name : translated;
 }
 
-function postToEditor(payload: Record<string, unknown>): void {
-  postToFrame(editorFrame, payload);
+function activeRuntime(): DocumentRuntime | undefined {
+  return documentRuntimes.get(currentUri);
+}
+
+function runtimeForUri(uri: string): DocumentRuntime | undefined {
+  return documentRuntimes.get(uri);
+}
+
+function runtimeForFrame(frame: HTMLIFrameElement): DocumentRuntime | undefined {
+  const uri = documentFrameUris.get(frame);
+  return uri ? documentRuntimes.get(uri) : undefined;
 }
 
 function postToFrame(frame: HTMLIFrameElement, payload: Record<string, unknown>): void {
   frame.contentWindow?.postMessage({ source: 'desktop-shell', payload }, '*');
 }
 
+function postToEditor(payload: Record<string, unknown>): void {
+  const frame = activeRuntime()?.frame;
+  if (frame) postToFrame(frame, payload);
+}
+
 function postToEditors(payload: Record<string, unknown>): void {
-  postToFrame(editorFrame, payload);
+  const frame = activeRuntime()?.frame;
+  if (frame) postToFrame(frame, payload);
+  postToFrame(detailsFrame, payload);
+}
+
+/** 广播到所有画布（实例列表、运行事件、连通性探测等）。 */
+function postToAllEditors(payload: Record<string, unknown>): void {
+  for (const runtime of documentRuntimes.values()) postToFrame(runtime.frame, payload);
   postToFrame(detailsFrame, payload);
 }
 
@@ -543,15 +598,30 @@ function editorCommand(command: string, value?: unknown): void {
 
 function desktopControl(command: string, value?: unknown): void {
   if (command === 'switchWorkflow') {
-    const uri = String(value ?? '');
-    if (!uri) return;
-    workbenchFrame?.show('workflow');
-    // 工作流切换属于桌面壳层状态，不能只更新 iframe 顶部的显示名称；
-    // 直接走主窗口的加载链路，确保画布、详情、结构树和输入状态一起刷新。
-    void handleEditorMessage({ type: 'switchWorkflow', uri }, editorFrame);
+    void switchWorkflow(String(value ?? ''));
     return;
   }
   postToEditor({ type: 'desktopControl', command, value });
+}
+
+/** 顶栏选择或子流程跳转：打开/聚焦对应文档面板，并把导航栈重置为该文档自己的记录。 */
+async function switchWorkflow(uri: string, resetStack = true): Promise<void> {
+  if (!uri) return;
+  workbenchFrame?.show('workflow');
+  cancelAutoSave();
+  await waitForAutoSave();
+  const tab = workflowTabs.find((item) => item.uri === uri);
+  if (tab && resetStack) tab.backStack = [];
+  await openWorkflowTab(uri);
+}
+
+async function createNewWorkflow(): Promise<void> {
+  const uri = await api.createWorkflow();
+  if (!uri) return;
+  if (bootstrap) bootstrap.workflows = (await api.bootstrap()).workflows;
+  reconcileOverviewSelection();
+  renderOverview();
+  await openWorkflowTab(uri);
 }
 
 function matchesShortcut(event: KeyboardEvent, id: string): boolean {
@@ -608,8 +678,7 @@ function setDirty(value: boolean): void {
   dirty = value;
   const activeTab = workflowTabs.find((tab) => tab.uri === currentUri);
   if (activeTab) activeTab.dirty = value;
-  renderWorkflowDocumentTabs();
-  scheduleWorkflowSessionPersist();
+  syncDocumentTabs();
 }
 
 function clearAutoSaveTimer(): void {
@@ -810,81 +879,148 @@ function scheduleWorkflowSessionPersist(): void {
   }, 250);
 }
 
-function renderWorkflowDocumentTabs(): void {
-  const host = workflowTabHost;
-  if (!host) return;
-  host.replaceChildren();
-  if (workflowTabs.length === 0) {
-    const empty = document.createElement('span');
-    empty.className = 'workflow-document-tab-empty';
-    empty.textContent = '拖入工作流以打开新画布';
-    host.appendChild(empty);
+/** Dockview 为文档面板创建独立画布时登记运行时，供消息路由与状态恢复使用。 */
+function registerDocumentFrame(panelId: string, uri: string, frame: HTMLIFrameElement): void {
+  const existing = documentRuntimes.get(uri);
+  if (existing && existing.frame === frame) {
+    existing.panelId = panelId;
     return;
   }
+  documentRuntimes.set(uri, {
+    panelId,
+    frame,
+    ready: false,
+    sidebarNodes: [],
+    sidebarVariables: [],
+    selectedNode: '',
+    selectedVariable: '',
+    selectedVariableScope: 'inputs',
+    collapsedTreeNodes: new Set(),
+  });
+  documentFrameUris.set(frame, uri);
+}
 
-  const tabs = document.createElement('div');
-  tabs.className = 'workflow-document-tabs';
-  tabs.setAttribute('role', 'tablist');
-  for (const item of workflowTabs) {
-    const tab = document.createElement('div');
-    const active = item.uri === currentUri;
-    tab.className = `dv-tab workflow-document-tab ${active ? 'dv-active-tab active' : 'dv-inactive-tab'}`;
-    tab.setAttribute('role', 'tab');
-    tab.setAttribute('aria-selected', String(active));
-    tab.tabIndex = active ? 0 : -1;
-    tab.title = displayFileUri(item.uri);
-
-    const body = document.createElement('div');
-    body.className = 'dv-default-tab';
-    const label = document.createElement('span');
-    label.className = 'dv-default-tab-content workflow-document-tab-label';
-    label.textContent = workflowTabName(item.uri);
-    body.appendChild(label);
-    if (item.dirty) {
-      const dirtyMark = document.createElement('span');
-      dirtyMark.className = 'workflow-document-tab-dirty';
-      dirtyMark.title = '未保存';
-      body.appendChild(dirtyMark);
-    }
-
-    const close = document.createElement('div');
-    close.className = 'dv-default-tab-action workflow-document-tab-close';
-    close.setAttribute('role', 'button');
-    close.tabIndex = -1;
-    close.title = '关闭工作流画布';
-    close.setAttribute('aria-label', `关闭 ${workflowTabName(item.uri)}`);
-    // 直接使用 Dockview 自己的关闭图标，避免克隆时因内部 data 属性变化而
-    // 回退成字号、描边均不一致的文本“×”。
-    close.appendChild(createCloseButton());
-    close.addEventListener('pointerdown', (event) => {
-      // Dockview 在父级标签容器上监听指针拖动；文档标签不是 Dockview panel，
-      // 必须隔离该手势，才能稳定收到 click。
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    close.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void closeWorkflowTab(item.uri);
-    });
-    body.appendChild(close);
-    tab.appendChild(body);
-    tab.addEventListener('pointerdown', (event) => event.stopPropagation());
-    tab.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void activateWorkflowTab(item.uri);
-    });
-    tab.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      event.stopPropagation();
-      void activateWorkflowTab(item.uri);
-    });
-    tabs.appendChild(tab);
+function unregisterDocumentFrame(panelId: string): void {
+  for (const [uri, runtime] of documentRuntimes) {
+    if (runtime.panelId !== panelId) continue;
+    documentRuntimes.delete(uri);
+    documentFrameUris.delete(runtime.frame);
+    return;
   }
-  host.appendChild(tabs);
+}
+
+/** 工作流文件被重命名或移动后，把文档面板从旧 URI 迁到新 URI。 */
+function relocateDocument(oldUri: string, newUri: string): void {
+  if (!docking || !oldUri || oldUri === newUri) return;
+  const wasActive = oldUri === currentUri;
+  if (docking.isDocumentOpen(oldUri)) {
+    closingDocuments.add(oldUri);
+    docking.closeDocument(oldUri);
+    closingDocuments.delete(oldUri);
+  }
+  documentRuntimes.delete(oldUri);
+  if (!docking.isDocumentOpen(newUri)) docking.openDocument(newUri, workflowTabName(newUri));
+  if (wasActive) currentUri = newUri;
+  syncDocumentTabs();
+}
+
+/** 恢复布局后：关掉不再存在的文档面板，并为会话里的文档补齐面板。 */
+function reconcileDocumentPanels(): void {
+  if (!docking) return;
+  const known = new Set(workflowTabs.map((tab) => tab.uri));
+  for (const uri of docking.documentUris()) {
+    if (known.has(uri)) continue;
+    closingDocuments.add(uri);
+    docking.closeDocument(uri);
+    closingDocuments.delete(uri);
+    documentRuntimes.delete(uri);
+  }
+  for (const tab of workflowTabs) {
+    if (!docking.isDocumentOpen(tab.uri)) docking.openDocument(tab.uri, workflowTabName(tab.uri));
+  }
+  syncDocumentTabs();
+}
+
+/** 没有任何可打开的默认工作流时，至少保证有一个画布。 */
+function ensureFallbackDocument(): void {
+  if (workflowTabs.length > 0) return;
+  const first = bootstrap?.workflows[0];
+  if (first) void openWorkflowTab(first.uri);
+}
+
+/** 恢复默认布局：批量重建面板时抑制移除回调，随后按当前标签重新同步。 */
+function resetDockLayout(): void {
+  suppressDocumentRemoval = true;
+  try {
+    docking?.resetLayout();
+    workbenchFrame?.resetLayout();
+    sharedPanelDockBridge?.resetSurfaces();
+  } finally {
+    suppressDocumentRemoval = false;
+  }
+  syncDocumentTabs();
+}
+
+/** 把 workflowTabs 的未保存状态同步到原生 Dockview 标签。 */
+function syncDocumentTabs(): void {
+  for (const tab of workflowTabs) {
+    const runtime = documentRuntimes.get(tab.uri);
+    if (!runtime) continue;
+    setDocumentPanelDirty(runtime.panelId, tab.dirty);
+    docking?.dockviewApi.getPanel(runtime.panelId)?.api.setTitle(workflowTabName(tab.uri));
+  }
   scheduleWorkflowSessionPersist();
+}
+
+/** 把当前激活画布的选中项/折叠状态写回运行时，切换文档时原样恢复。 */
+function rememberActiveRuntimeState(): void {
+  const runtime = activeRuntime();
+  if (!runtime) return;
+  runtime.sidebarNodes = sidebarNodes;
+  runtime.sidebarVariables = sidebarVariables;
+  runtime.selectedNode = selectedNode;
+  runtime.selectedVariable = selectedVariable;
+  runtime.selectedVariableScope = selectedVariableScope;
+  runtime.collapsedTreeNodes = collapsedTreeNodes;
+}
+
+/** 把运行时的画布状态恢复到壳层全局，重新驱动结构树与详细信息。 */
+function applyDocumentState(uri: string, tab: WorkflowDocumentTab, runtime: DocumentRuntime): void {
+  currentUri = uri;
+  currentText = tab.text;
+  currentEditorInit = runtime.init;
+  backStack = [...tab.backStack];
+  editorReady = runtime.ready;
+  sidebarNodes = runtime.sidebarNodes;
+  sidebarVariables = runtime.sidebarVariables;
+  selectedNode = runtime.selectedNode;
+  selectedVariable = runtime.selectedVariable;
+  selectedVariableScope = runtime.selectedVariableScope;
+  collapsedTreeNodes = runtime.collapsedTreeNodes;
+  if (runtime.init) {
+    selectedInstance = runtime.init.selectedInstance;
+    runtime.init.workflowTrail = workflowTrail();
+    renderWorkflowSelect(runtime.init.workflows);
+    renderInstances(runtime.init.instances, runtime.init.selectedInstance);
+    postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
+  }
+  document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(uri);
+  setDirty(tab.dirty);
+  renderOverview();
+  renderSidebar();
+  if (runtime.inspectorSelection) {
+    postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: runtime.inspectorSelection });
+  }
+  syncDocumentTabs();
+}
+
+/** 画布握手完成后下发它自己的初始化数据；同一文档的多个面板互不影响。 */
+function sendDocumentInit(uri: string): void {
+  const runtime = documentRuntimes.get(uri);
+  if (!runtime?.ready || !runtime.init) return;
+  if (uri === currentUri) runtime.init.workflowTrail = workflowTrail();
+  postToFrame(runtime.frame, runtime.init as unknown as Record<string, unknown>);
+  if (uri === currentUri) postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
 }
 
 function displayFileUri(uri: string): string {
@@ -1910,31 +2046,70 @@ function contentFolders(): string[] {
   return [...folders];
 }
 
-function contentBrowserEntries(): ContentBrowserItem[] {
-  const query = contentBrowserQuery.trim().toLocaleLowerCase('zh-CN');
-  const workflows: ContentBrowserItem[] = (bootstrap?.workflows ?? []).map((workflow) => ({
+function contentBrowserWorkflowItems(): ContentBrowserItem[] {
+  return (bootstrap?.workflows ?? []).map((workflow) => ({
     kind: 'workflow',
     path: workflow.rel.replace(/\\/g, '/'),
     name: workflow.name,
     workflow,
   }));
-  const assets: ContentBrowserItem[] = contentAssets.map((asset) => ({
+}
+
+function contentBrowserAssetItems(): ContentBrowserItem[] {
+  return contentAssets.map((asset) => ({
     kind: 'asset',
     path: asset.path.replace(/\\/g, '/'),
     name: contentName(asset.path),
     asset,
   }));
-  if (query) {
-    return [...workflows, ...assets].filter((item) => `${item.name} ${item.path}`.toLocaleLowerCase('zh-CN').includes(query));
-  }
-  const folders: ContentBrowserItem[] = contentFolders()
-    .filter((folder) => folder && contentParent(folder) === contentBrowserFolder)
-    .map((folder) => ({ kind: 'folder', path: folder, name: contentName(folder) }));
+}
+
+function isUnderContentFolder(path: string, folder: string): boolean {
+  if (!folder) return true;
+  return path === folder || path.startsWith(`${folder}/`);
+}
+
+/** 搜索框：跨整个项目匹配名称或路径。 */
+function contentBrowserSearchItems(): ContentBrowserItem[] {
+  const query = contentBrowserQuery.trim().toLocaleLowerCase('zh-CN');
+  return [...contentBrowserWorkflowItems(), ...contentBrowserAssetItems()]
+    .filter((item) => `${item.name} ${item.path}`.toLocaleLowerCase('zh-CN').includes(query));
+}
+
+/** 「全部」：当前目录的直接子项。 */
+function contentBrowserScopedItems(folder: string): ContentBrowserItem[] {
   return [
-    ...folders,
-    ...workflows.filter((item) => contentParent(item.path) === contentBrowserFolder),
-    ...assets.filter((item) => contentParent(item.path) === contentBrowserFolder),
-  ].sort((left, right) => {
+    ...contentFolders()
+      .filter((candidate) => candidate && contentParent(candidate) === folder)
+      .map((candidate): ContentBrowserItem => ({ kind: 'folder', path: candidate, name: contentName(candidate) })),
+    ...contentBrowserWorkflowItems().filter((item) => contentParent(item.path) === folder),
+    ...contentBrowserAssetItems().filter((item) => contentParent(item.path) === folder),
+  ];
+}
+
+/**
+ * 类型过滤：递归收集当前目录（含子目录）下的同类条目，
+ * 这样在项目根目录按类型过滤时也能看到深层资产。
+ */
+function contentBrowserRecursiveItems(kind: ContentBrowserItemKind): ContentBrowserItem[] {
+  const folder = contentBrowserFolder;
+  if (kind === 'folder') {
+    return contentFolders()
+      .filter((candidate) => candidate && candidate !== folder && isUnderContentFolder(candidate, folder))
+      .map((candidate): ContentBrowserItem => ({ kind: 'folder', path: candidate, name: contentName(candidate) }));
+  }
+  const pool = kind === 'workflow' ? contentBrowserWorkflowItems() : contentBrowserAssetItems();
+  return pool.filter((item) => isUnderContentFolder(item.path, folder));
+}
+
+function contentBrowserEntries(): ContentBrowserItem[] {
+  const base = contentBrowserQuery.trim()
+    ? contentBrowserSearchItems()
+    : contentBrowserFilter === 'all'
+      ? contentBrowserScopedItems(contentBrowserFolder)
+      : contentBrowserRecursiveItems(contentBrowserFilter);
+  const items = contentBrowserFilter === 'all' ? base : base.filter((item) => item.kind === contentBrowserFilter);
+  return items.sort((left, right) => {
     const order: Record<ContentBrowserItemKind, number> = { folder: 0, workflow: 1, asset: 2 };
     return order[left.kind] - order[right.kind] || left.name.localeCompare(right.name, 'zh-CN');
   });
@@ -1945,6 +2120,7 @@ function navigateContentBrowser(folder: string): void {
   contentBrowserQuery = '';
   contentBrowserSearch.value = '';
   selectedContentPath = '';
+  expandContentFolderPath(folder);
   renderContentBrowser();
 }
 
@@ -1974,17 +2150,8 @@ function workflowDragUri(event: DragEvent): string {
   return '';
 }
 
-function bindWorkflowTabDropTarget(element: HTMLElement, headerOnly = false): void {
-  const dropSurface = (event: DragEvent): HTMLElement | undefined => {
-    if (!headerOnly) return element;
-    const target = event.target;
-    if (!(target instanceof Element)) return undefined;
-    // Dockview 可能在自己的标题栏监听器中拦截拖放；不依赖我们在
-    // renderer 挂载时补的类名，直接用 Dockview 的实际标题栏并校验其容器。
-    const header = target.closest<HTMLElement>('.dv-tabs-and-actions-container');
-    return header && workflowTabHost && header.contains(workflowTabHost) ? header : undefined;
-  };
-  const feedbackTarget = (): HTMLElement => workflowTabHost ?? element;
+/** 把工作流文件拖到工作流编辑器区域即在新面板打开。 */
+function bindWorkflowTabDropTarget(element: HTMLElement): void {
   const acceptsWorkflow = (event: DragEvent): boolean => {
     const types = event.dataTransfer?.types;
     return Boolean(types && (
@@ -1994,30 +2161,26 @@ function bindWorkflowTabDropTarget(element: HTMLElement, headerOnly = false): vo
       || types.includes('Files')
     ));
   };
-  const listenerOptions = headerOnly ? { capture: true } : undefined;
   element.addEventListener('dragover', (event) => {
-    if (!dropSurface(event) || !acceptsWorkflow(event)) return;
+    if (!acceptsWorkflow(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    feedbackTarget().classList.add('drag-over');
-  }, listenerOptions);
+    element.classList.add('workflow-drop-active');
+  });
   element.addEventListener('dragleave', (event) => {
-    const surface = dropSurface(event);
-    if (!surface) return;
-    event.stopPropagation();
     const related = event.relatedTarget;
-    if (!(related instanceof Node) || !surface.contains(related)) feedbackTarget().classList.remove('drag-over');
-  }, listenerOptions);
+    if (!(related instanceof Node) || !element.contains(related)) element.classList.remove('workflow-drop-active');
+  });
   element.addEventListener('drop', (event) => {
-    if (!dropSurface(event) || !acceptsWorkflow(event)) return;
+    if (!acceptsWorkflow(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    feedbackTarget().classList.remove('drag-over');
+    element.classList.remove('workflow-drop-active');
     const uri = workflowDragUri(event);
     if (uri) void openWorkflowTab(uri);
     else showToast('这里只能打开项目内的工作流文件', true);
-  }, listenerOptions);
+  });
 }
 
 function bindContentDropTarget(element: HTMLElement, folder: string | (() => string)): void {
@@ -2087,11 +2250,19 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
 
     if (movingCurrentWorkflow) {
       const moved = bootstrap.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
-      if (moved) await loadWorkflow(moved.uri);
+      if (moved) {
+        const tab = workflowTabs.find((item) => item.uri === currentUri);
+        if (tab) tab.uri = moved.uri;
+        relocateDocument(currentUri, moved.uri);
+        await loadWorkflow(moved.uri);
+      }
     } else if (sourceWorkflowTab) {
       const moved = bootstrap.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
-      if (moved) sourceWorkflowTab.uri = moved.uri;
-      renderWorkflowDocumentTabs();
+      if (moved) {
+        const oldUri = sourceWorkflowTab.uri;
+        sourceWorkflowTab.uri = moved.uri;
+        relocateDocument(oldUri, moved.uri);
+      }
       if (result.updatedFiles > 0 && currentUri) await loadWorkflow(currentUri);
     } else if (result.updatedFiles > 0 && currentUri) {
       // 移动模板后，当前工作流的磁盘引用可能已被重写；重新载入以同步编辑器内存状态。
@@ -2142,6 +2313,10 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
   } else {
     preview.innerHTML = `<i data-lucide="${item.kind === 'folder' ? 'folder' : 'file-json-2'}"></i>`;
   }
+  const kind = document.createElement('span');
+  kind.className = 'content-item-kind';
+  kind.textContent = item.kind === 'folder' ? '文件夹' : item.kind === 'workflow' ? '工作流' : '模板图片';
+  preview.appendChild(kind);
   const label = editing ? document.createElement('input') : document.createElement('span');
   label.className = editing ? 'content-item-name-edit' : 'content-item-name';
   if (editing) {
@@ -2224,33 +2399,118 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
   return button;
 }
 
+function createContentFolderRow(folder: string, depth: number, hasChildren: boolean): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  const collapsed = collapsedContentFolders.has(folder);
+  button.className = `content-folder-row${folder === contentBrowserFolder ? ' selected' : ''}`;
+  button.style.setProperty('--depth', String(depth));
+  const chevron = document.createElement('span');
+  chevron.className = `content-folder-chevron${hasChildren ? '' : ' leaf'}${collapsed ? ' collapsed' : ''}`;
+  if (hasChildren) chevron.innerHTML = '<i data-lucide="chevron-right"></i>';
+  const icon = document.createElement('i');
+  icon.setAttribute('data-lucide', folder === contentBrowserFolder ? 'folder-open' : 'folder');
+  const label = document.createElement('span');
+  label.textContent = folder ? contentName(folder) : '项目内容';
+  button.append(chevron, icon, label);
+  button.title = folder ? `${folder}\nDelete 删除该文件夹` : '项目内容';
+  if (hasChildren) {
+    chevron.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (collapsedContentFolders.has(folder)) collapsedContentFolders.delete(folder);
+      else collapsedContentFolders.add(folder);
+      renderContentBrowserTree();
+    });
+  }
+  button.addEventListener('click', () => {
+    navigateContentBrowser(folder);
+    selectContentFolder(folder);
+  });
+  button.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showContentContextMenu(event, contentFolderItem(folder), button);
+  });
+  bindContentDropTarget(button, folder);
+  return button;
+}
+
+/** 让目标目录及其所有上级保持展开，避免跳转后行被折叠隐藏。 */
+function expandContentFolderPath(folder: string): void {
+  collapsedContentFolders.delete('');
+  let current = folder;
+  while (current) {
+    collapsedContentFolders.delete(current);
+    current = contentParent(current);
+  }
+}
+
 function renderContentBrowserTree(): void {
   contentBrowserTree.replaceChildren();
   const folders = contentFolders();
-  const appendFolder = (folder: string, depth: number): void => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `content-folder-row${folder === contentBrowserFolder ? ' selected' : ''}`;
-    button.style.setProperty('--depth', String(depth));
-    button.innerHTML = `<i data-lucide="${folder === contentBrowserFolder ? 'folder-open' : 'folder'}"></i><span></span>`;
-    button.querySelector('span')!.textContent = folder ? contentName(folder) : '项目内容';
-    button.title = folder ? `${folder}\nDelete 删除该文件夹` : '项目内容';
-    button.addEventListener('click', () => {
-      navigateContentBrowser(folder);
-      selectContentFolder(folder);
-    });
-    button.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      showContentContextMenu(event, contentFolderItem(folder), button);
-    });
-    bindContentDropTarget(button, folder);
-    contentBrowserTree.appendChild(button);
-    for (const child of folders.filter((candidate) => candidate && contentParent(candidate) === folder).sort((left, right) => left.localeCompare(right, 'zh-CN'))) {
-      appendFolder(child, depth + 1);
+  const childrenOf = (folder: string): string[] => folders
+    .filter((candidate) => candidate && contentParent(candidate) === folder)
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'));
+  const query = contentBrowserFolderQuery.trim().toLocaleLowerCase('zh-CN');
+  if (query) {
+    const matches = folders
+      .filter((folder) => folder && folder.toLocaleLowerCase('zh-CN').includes(query))
+      .sort((left, right) => left.localeCompare(right, 'zh-CN'));
+    if (matches.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'content-folder-empty';
+      empty.textContent = '没有匹配的文件夹';
+      contentBrowserTree.appendChild(empty);
+      createIcons({ icons: desktopIcons, root: contentBrowserTree });
+      return;
     }
+    for (const folder of matches) contentBrowserTree.appendChild(createContentFolderRow(folder, 0, false));
+    createIcons({ icons: desktopIcons, root: contentBrowserTree });
+    return;
+  }
+  const appendFolder = (folder: string, depth: number): void => {
+    const children = childrenOf(folder);
+    contentBrowserTree.appendChild(createContentFolderRow(folder, depth, children.length > 0));
+    if (collapsedContentFolders.has(folder)) return;
+    for (const child of children) appendFolder(child, depth + 1);
   };
   appendFolder('', 0);
+  createIcons({ icons: desktopIcons, root: contentBrowserTree });
+}
+
+const CONTENT_BROWSER_FILTERS: Array<{ id: ContentBrowserFilter; label: string }> = [
+  { id: 'all', label: '全部' },
+  { id: 'folder', label: '文件夹' },
+  { id: 'workflow', label: '工作流' },
+  { id: 'asset', label: '模板图片' },
+];
+
+function renderContentBrowserFilters(): void {
+  const count = (kind: ContentBrowserItemKind): number => contentBrowserRecursiveItems(kind).length;
+  const counts: Record<ContentBrowserFilter, number> = {
+    all: contentBrowserScopedItems(contentBrowserFolder).length,
+    folder: count('folder'),
+    workflow: count('workflow'),
+    asset: count('asset'),
+  };
+  contentBrowserFilters.replaceChildren(...CONTENT_BROWSER_FILTERS.map((filter) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `content-facet${contentBrowserFilter === filter.id ? ' active' : ''}`;
+    button.dataset.contentFilter = filter.id;
+    const label = document.createElement('span');
+    label.textContent = filter.label;
+    const countEl = document.createElement('em');
+    countEl.textContent = String(counts[filter.id]);
+    button.append(label, countEl);
+    button.addEventListener('click', () => {
+      if (contentBrowserFilter === filter.id) return;
+      contentBrowserFilter = filter.id;
+      selectedContentPath = '';
+      renderContentBrowser();
+    });
+    return button;
+  }));
 }
 
 function renderContentBrowserBreadcrumbs(): void {
@@ -2282,6 +2542,7 @@ function renderContentBrowser(): void {
   if (!folders.has(contentBrowserFolder)) contentBrowserFolder = '';
   renderContentBrowserTree();
   renderContentBrowserBreadcrumbs();
+  renderContentBrowserFilters();
   const entries = contentBrowserEntries();
   if (contentFolderDraft && contentFolderDraft.parentPath === contentBrowserFolder && !contentBrowserQuery) {
     entries.unshift({
@@ -2292,20 +2553,10 @@ function renderContentBrowser(): void {
   }
   contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
   const renderedEntries = entries.map((item, index) => ({ item, element: createContentItem(item, Boolean(contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder'))) }));
-  if (contentBrowserView === 'list') contentBrowserItems.replaceChildren(...renderedEntries.map(entry => entry.element));
-  else {
-    contentBrowserItems.replaceChildren();
-    for (const [kind, label] of [['folder', '文件夹'], ['workflow', '工作流'], ['asset', '模板图片']]) {
-      const matches = renderedEntries.filter(entry => entry.item.kind === kind);
-      if (!matches.length) continue;
-      const group = document.createElement('div'); group.className = 'content-kind-group'; group.setAttribute('role', 'presentation');
-      const heading = document.createElement('h3'); heading.className = 'content-kind-heading'; heading.textContent = `${label} · ${matches.length}`;
-      const items = document.createElement('div'); items.className = 'content-kind-items'; items.setAttribute('role', 'presentation');
-      items.append(...matches.map(entry => entry.element)); group.append(heading, items); contentBrowserItems.appendChild(group);
-    }
-  }
+  contentBrowserItems.replaceChildren(...renderedEntries.map((entry) => entry.element));
   document.querySelector<HTMLElement>('#content-browser-empty')!.classList.toggle('hidden', entries.length > 0);
   document.querySelector<HTMLElement>('#content-browser-summary')!.textContent = `${entries.length} 项`;
+  document.querySelector<HTMLElement>('#content-browser-folder-count')!.textContent = `${contentFolders().filter(Boolean).length} 个文件夹`;
   document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = selectedContentPath;
   document.querySelector<HTMLButtonElement>('#content-browser-up')!.disabled = contentBrowserFolder === '';
   document.querySelectorAll<HTMLButtonElement>('[data-content-view]').forEach((button) => {
@@ -2342,23 +2593,82 @@ async function refreshContentBrowser(): Promise<void> {
   }
 }
 
-/* ---------- 内容浏览器右键菜单 + 引用查看器 ---------- */
+/* ---------- 内容浏览器列宽拖拽 ---------- */
 
+interface ContentResizerConfig {
+  name: 'sources' | 'filters';
+  variable: string;
+  key: string;
+  fallback: number;
+  min: number;
+}
+
+const CONTENT_BROWSER_RESIZERS: ContentResizerConfig[] = [
+  { name: 'sources', variable: '--cb-sources-width', key: 'onmyoji-studio.content-browser.sources-width', fallback: 198, min: 150 },
+  { name: 'filters', variable: '--cb-filters-width', key: 'onmyoji-studio.content-browser.filters-width', fallback: 132, min: 96 },
+];
+
+function setupContentBrowserResizers(): void {
+  const module = document.querySelector<HTMLElement>('#module-content-browser');
+  if (!module) return;
+  const readWidth = (config: ContentResizerConfig): number => {
+    const inline = parseFloat(module.style.getPropertyValue(config.variable));
+    if (Number.isFinite(inline) && inline > 0) return inline;
+    const stored = parseFloat(window.localStorage.getItem(config.key) ?? '');
+    return Number.isFinite(stored) && stored > 0 ? stored : config.fallback;
+  };
+  for (const config of CONTENT_BROWSER_RESIZERS) {
+    const stored = window.localStorage.getItem(config.key);
+    if (stored) module.style.setProperty(config.variable, stored);
+  }
+  for (const config of CONTENT_BROWSER_RESIZERS) {
+    const resizer = module.querySelector<HTMLElement>(`[data-content-resizer="${config.name}"]`);
+    if (!resizer) continue;
+    const apply = (width: number): void => {
+      const max = Math.max(config.min, (module.clientWidth || 0) - 240);
+      module.style.setProperty(config.variable, `${Math.min(max, Math.max(config.min, width))}px`);
+    };
+    const persist = (): void => {
+      window.localStorage.setItem(config.key, module.style.getPropertyValue(config.variable));
+    };
+    resizer.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      resizer.setPointerCapture(event.pointerId);
+      resizer.classList.add('dragging');
+      const startX = event.clientX;
+      const startWidth = readWidth(config);
+      const move = (moveEvent: PointerEvent): void => apply(startWidth + (moveEvent.clientX - startX));
+      const finish = (): void => {
+        resizer.classList.remove('dragging');
+        resizer.removeEventListener('pointermove', move);
+        resizer.removeEventListener('pointerup', finish);
+        resizer.removeEventListener('pointercancel', finish);
+        persist();
+      };
+      resizer.addEventListener('pointermove', move);
+      resizer.addEventListener('pointerup', finish);
+      resizer.addEventListener('pointercancel', finish);
+    });
+    resizer.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      apply(readWidth(config) + (event.key === 'ArrowLeft' ? -12 : 12));
+      persist();
+    });
+  }
+}
+
+/* ---------- 内容浏览器右键菜单 + 引用查看器 ---------- */
 let contentContextMenu: { owner: Document; menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
-let referenceViewerDocument: Document | undefined;
-let referenceViewerPanel: HTMLElement | undefined;
-let referenceViewerBody: HTMLElement | undefined;
-let referenceViewerTrailEl: HTMLElement | undefined;
-let referenceViewerKeyHandler: ((event: KeyboardEvent) => void) | undefined;
-let referenceTrail: string[] = [];
-let referenceViewerToken = 0;
-let referenceViewerGraph: ReferenceGraph | undefined;
-let referenceViewerCanvas: HTMLElement | undefined;
-let referenceViewerZoom = 1;
-let referenceViewerQuery = '';
-let referenceViewerPan = { x: 0, y: 0 };
-let referenceViewerResizeObserver: ResizeObserver | undefined;
-let referenceViewerLocationDisposable: { dispose(): void } | undefined;
+
+const referenceViewer = createReferenceViewer({
+  getWorkbenchFrame: () => workbenchFrame,
+  getReferenceGraph: (path) => api.getReferenceGraph(path),
+  contentName,
+  showToast,
+  errorMessage,
+});
 
 /** 把绝对路径转成项目相对路径（正斜杠）；不在项目内时原样返回。 */
 function relativeToProject(absolutePath: string): string {
@@ -2497,11 +2807,19 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
     await refreshContentBrowser();
     if (renamingCurrentWorkflow) {
       const renamed = bootstrap?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
-      if (renamed) await loadWorkflow(renamed.uri);
+      if (renamed) {
+        const tab = workflowTabs.find((item) => item.uri === currentUri);
+        if (tab) tab.uri = renamed.uri;
+        relocateDocument(currentUri, renamed.uri);
+        await loadWorkflow(renamed.uri);
+      }
     } else if (sourceWorkflowTab) {
       const renamed = bootstrap?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
-      if (renamed) sourceWorkflowTab.uri = renamed.uri;
-      renderWorkflowDocumentTabs();
+      if (renamed) {
+        const oldUri = sourceWorkflowTab.uri;
+        sourceWorkflowTab.uri = renamed.uri;
+        relocateDocument(oldUri, renamed.uri);
+      }
       if (result.updatedFiles > 0 && currentUri) await loadWorkflow(currentUri);
     } else if (result.updatedFiles > 0 && currentUri) {
       await loadWorkflow(currentUri);
@@ -2535,17 +2853,29 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
     await refreshContentBrowser();
     if (deletingCurrentWorkflow) {
       const deletedIndex = workflowTabs.findIndex((tab) => tab.uri === currentUri);
-      if (deletedIndex >= 0) workflowTabs.splice(deletedIndex, 1);
-      const next = workflowTabs[Math.min(deletedIndex < 0 ? 0 : deletedIndex, workflowTabs.length - 1)];
-      if (next) await loadWorkflow(next.uri, false, 'activate');
-      else {
-        const fallback = bootstrap?.workflows.find((workflow) => workflow.uri !== currentUri);
-        if (fallback) await loadWorkflow(fallback.uri);
+      if (deletedIndex >= 0) {
+        const oldUri = workflowTabs[deletedIndex].uri;
+        closingDocuments.add(oldUri);
+        docking?.closeDocument(oldUri);
+        closingDocuments.delete(oldUri);
+        documentRuntimes.delete(oldUri);
+        workflowTabs.splice(deletedIndex, 1);
       }
+      const remaining = workflowTabs[Math.min(deletedIndex < 0 ? 0 : deletedIndex, workflowTabs.length - 1)];
+      const next = remaining ?? bootstrap?.workflows.find((workflow) => workflow.uri !== currentUri);
+      if (next) await openWorkflowTab(next.uri);
+      else syncDocumentTabs();
     } else if (sourceWorkflowTab) {
       const deletedIndex = workflowTabs.indexOf(sourceWorkflowTab);
-      if (deletedIndex >= 0) workflowTabs.splice(deletedIndex, 1);
-      renderWorkflowDocumentTabs();
+      if (deletedIndex >= 0) {
+        const oldUri = sourceWorkflowTab.uri;
+        closingDocuments.add(oldUri);
+        docking?.closeDocument(oldUri);
+        closingDocuments.delete(oldUri);
+        documentRuntimes.delete(oldUri);
+        workflowTabs.splice(deletedIndex, 1);
+      }
+      syncDocumentTabs();
     }
     showToast(`已删除 ${item.path}`);
   } catch (error) {
@@ -2669,7 +2999,7 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     }
     if (item.path) addEntry('复制路径', Copy, () => void copyContentPath(item.path));
   } else {
-    addEntry('引用查看器', Network, () => openReferenceViewer(item.path, doc));
+    addEntry('引用查看器', Network, () => referenceViewer.open(item.path, doc));
     addContentContextSeparator(doc, menu);
     if (item.workflow) {
       addEntry('在编辑器中打开', FileJson2, () => openWorkflowInNewTab(item.workflow!.uri));
@@ -2701,383 +3031,6 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
   doc.addEventListener('pointerdown', dismiss, true);
   doc.addEventListener('keydown', keyHandler, true);
   contentContextMenu = { owner: doc, menu, dismiss, keyHandler };
-}
-
-function closeReferenceViewer(): void {
-  referenceViewerToken += 1;
-  if (referenceViewerPanel && referenceViewerKeyHandler) {
-    referenceViewerPanel.removeEventListener('keydown', referenceViewerKeyHandler, true);
-  }
-  workbenchFrame?.dockviewApi.getPanel('referenceViewer')?.api.close();
-  referenceViewerPanel?.remove();
-  referenceViewerResizeObserver?.disconnect();
-  referenceViewerLocationDisposable?.dispose();
-  referenceViewerPanel = undefined;
-  referenceViewerBody = undefined;
-  referenceViewerTrailEl = undefined;
-  referenceViewerKeyHandler = undefined;
-  referenceViewerDocument = undefined;
-  referenceViewerGraph = undefined;
-  referenceViewerCanvas = undefined;
-  referenceViewerZoom = 1;
-  referenceViewerQuery = '';
-  referenceViewerPan = { x: 0, y: 0 };
-  referenceViewerResizeObserver = undefined;
-  referenceViewerLocationDisposable = undefined;
-  referenceTrail = [];
-}
-
-function referenceKindIcon(kind: ReferenceNode['kind']): SVGSVGElement {
-  const icon = kind === 'workflow' ? FileJson2 : kind === 'asset' ? Image : kind === 'catalog' ? Box : Waypoints;
-  return createElement(icon, { width: '15', height: '15', 'aria-hidden': 'true' }) as SVGSVGElement;
-}
-
-function referenceKindLabel(kind: ReferenceNode['kind']): string {
-  if (kind === 'workflow') return '工作流';
-  if (kind === 'asset') return '模板图片';
-  if (kind === 'catalog') return '奖励目录';
-  return '其他';
-}
-
-function renderReferenceTrail(doc: Document): void {
-  if (!referenceViewerTrailEl) return;
-  const backButton = doc.querySelector<HTMLButtonElement>('.reference-viewer-nav button');
-  if (backButton) backButton.disabled = referenceTrail.length <= 1;
-  referenceViewerTrailEl.replaceChildren();
-  referenceTrail.forEach((path, index) => {
-    const crumb = doc.createElement('button');
-    crumb.type = 'button';
-    crumb.className = `reference-trail-crumb${index === referenceTrail.length - 1 ? ' current' : ''}`;
-    crumb.textContent = contentName(path);
-    crumb.title = path;
-    crumb.addEventListener('click', () => {
-      referenceTrail = referenceTrail.slice(0, index + 1);
-      void renderReferenceViewer();
-    });
-    referenceViewerTrailEl!.appendChild(crumb);
-    if (index < referenceTrail.length - 1) {
-      const sep = doc.createElement('span');
-      sep.className = 'reference-trail-sep';
-      sep.textContent = '/';
-      referenceViewerTrailEl!.appendChild(sep);
-    }
-  });
-}
-
-function referenceNodeMatches(node: ReferenceNode, query: string): boolean {
-  if (!query) return true;
-  const haystack = `${node.name} ${node.path} ${node.workflowId ?? ''}`.toLocaleLowerCase();
-  return haystack.includes(query.toLocaleLowerCase());
-}
-
-function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceItem | undefined, node: ReferenceNode, side: 'target' | 'incoming' | 'outgoing', x: number, y: number, width: number): void {
-  const button = doc.createElement('button');
-  button.type = 'button';
-  button.className = `reference-graph-node ${side} kind-${node.kind}${node.exists ? '' : ' missing'}`;
-  button.style.left = `${x}px`;
-  button.style.top = `${y}px`;
-  button.style.width = `${width}px`;
-  button.setAttribute('aria-label', `${referenceKindLabel(node.kind)} ${node.name}`);
-  if (side !== 'target') {
-    button.title = '点击查看该内容的引用';
-    button.addEventListener('click', () => navigateReferenceViewer(node.path));
-  }
-  const icon = doc.createElement('span');
-  icon.className = 'reference-graph-node-icon';
-  icon.appendChild(referenceKindIcon(node.kind));
-  const text = doc.createElement('span');
-  text.className = 'reference-graph-node-text';
-  const name = doc.createElement('strong');
-  name.textContent = node.name;
-  const pathEl = doc.createElement('small');
-  pathEl.textContent = node.path;
-  text.append(name, pathEl);
-  if (item && item.contexts.length) {
-    const count = doc.createElement('em');
-    count.textContent = `${item.contexts.length} 处引用`;
-    text.appendChild(count);
-  }
-  button.append(icon, text);
-  layer.appendChild(button);
-}
-
-function renderReferenceGraph(doc: Document, graph: ReferenceGraph): void {
-  const canvas = referenceViewerCanvas;
-  if (!canvas) return;
-  const zoomControls = canvas.querySelector<HTMLElement>('.reference-zoom-controls');
-  canvas.replaceChildren();
-  const edges = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  edges.classList.add('reference-graph-edges');
-  edges.setAttribute('aria-hidden', 'true');
-  const layer = doc.createElement('div');
-  layer.className = 'reference-graph-nodes';
-  canvas.append(edges, layer);
-  const width = Math.max(canvas.clientWidth, 320);
-  const height = Math.max(canvas.clientHeight, 440);
-  const hasBothSides = graph.referencedBy.length > 0 && graph.references.length > 0;
-  const nodeWidth = hasBothSides
-    ? Math.min(188, Math.max(108, (width - 80) / 3))
-    : Math.min(188, Math.max(142, (width - 64) / 2));
-  const nodeHeight = 70;
-  const filteredIncoming = graph.referencedBy.filter((item) => referenceNodeMatches(item.target, referenceViewerQuery));
-  const filteredOutgoing = graph.references.filter((item) => referenceNodeMatches(item.target, referenceViewerQuery));
-  const centerX = hasBothSides
-    ? width / 2 - nodeWidth / 2
-    : filteredIncoming.length > 0
-      ? width * .7 - nodeWidth / 2
-      : filteredOutgoing.length > 0
-        ? width * .3 - nodeWidth / 2
-        : width / 2 - nodeWidth / 2;
-  const centerY = height / 2 - nodeHeight / 2;
-  const sideMargin = width >= 720 ? 70 : 18;
-  const incomingX = sideMargin;
-  const outgoingX = width - nodeWidth - sideMargin;
-  const placeY = (index: number, total: number): number => Math.max(26, height / 2 - (total - 1) * 48 + index * 96 - nodeHeight / 2);
-  const paths: string[] = [];
-  filteredIncoming.forEach((item, index) => {
-    const y = placeY(index, filteredIncoming.length);
-    appendReferenceNode(doc, layer, item, item.target, 'incoming', incomingX, y, nodeWidth);
-    const sy = y + nodeHeight / 2;
-    paths.push(`M ${incomingX + nodeWidth} ${sy} C ${incomingX + nodeWidth + 80} ${sy}, ${centerX - 80} ${centerY + nodeHeight / 2}, ${centerX} ${centerY + nodeHeight / 2}`);
-  });
-  filteredOutgoing.forEach((item, index) => {
-    const y = placeY(index, filteredOutgoing.length);
-    appendReferenceNode(doc, layer, item, item.target, 'outgoing', outgoingX, y, nodeWidth);
-    const sy = y + nodeHeight / 2;
-    paths.push(`M ${centerX + nodeWidth} ${centerY + nodeHeight / 2} C ${centerX + nodeWidth + 80} ${centerY + nodeHeight / 2}, ${outgoingX - 80} ${sy}, ${outgoingX} ${sy}`);
-  });
-  appendReferenceNode(doc, layer, undefined, graph.target, 'target', centerX, centerY, nodeWidth);
-  edges.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  edges.setAttribute('preserveAspectRatio', 'none');
-  for (const pathData of paths) {
-    const edge = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
-    edge.setAttribute('d', pathData);
-    edge.classList.add('reference-graph-edge');
-    edges.appendChild(edge);
-  }
-  if (zoomControls) canvas.appendChild(zoomControls);
-  canvas.style.setProperty('--reference-zoom', String(referenceViewerZoom));
-  canvas.style.setProperty('--reference-pan-x', `${referenceViewerPan.x}px`);
-  canvas.style.setProperty('--reference-pan-y', `${referenceViewerPan.y}px`);
-}
-
-function observeReferenceCanvas(): void {
-  const canvas = referenceViewerCanvas;
-  if (!canvas) return;
-  referenceViewerResizeObserver?.disconnect();
-  const ownerWindow = canvas.ownerDocument.defaultView;
-  const ResizeObserverCtor = ownerWindow?.ResizeObserver;
-  if (!ownerWindow || !ResizeObserverCtor) return;
-  let frameId: number | undefined;
-  referenceViewerResizeObserver = new ResizeObserverCtor(() => {
-    if (frameId !== undefined) ownerWindow.cancelAnimationFrame(frameId);
-    frameId = ownerWindow.requestAnimationFrame(() => {
-      frameId = undefined;
-      const graph = referenceViewerGraph;
-      if (graph && referenceViewerCanvas === canvas) renderReferenceGraph(canvas.ownerDocument, graph);
-    });
-  });
-  referenceViewerResizeObserver.observe(canvas);
-}
-
-function createReferenceControl(doc: Document, label: string, value: string, type: 'number' | 'checkbox' = 'number'): HTMLElement {
-  const row = doc.createElement('label');
-  row.className = 'reference-filter-row';
-  row.appendChild(doc.createTextNode(label));
-  const input = doc.createElement('input');
-  input.type = type;
-  if (type === 'checkbox') input.checked = true;
-  else { input.value = value; input.min = '1'; input.max = '20'; }
-  row.appendChild(input);
-  return row;
-}
-
-async function renderReferenceViewer(): Promise<void> {
-  const doc = referenceViewerDocument;
-  const body = referenceViewerBody;
-  if (!doc || !body || referenceTrail.length === 0) return;
-  const current = referenceTrail[referenceTrail.length - 1];
-  const token = ++referenceViewerToken;
-
-  renderReferenceTrail(doc);
-  body.replaceChildren();
-  const loading = doc.createElement('div');
-  loading.className = 'reference-loading';
-  const spinner = doc.createElement('span');
-  spinner.className = 'loading-spinner';
-  loading.append(spinner, doc.createTextNode('正在分析引用…'));
-  body.appendChild(loading);
-
-  let graph: ReferenceGraph;
-  try {
-    graph = await api.getReferenceGraph(current);
-  } catch (error) {
-    if (referenceViewerDocument !== doc || referenceViewerToken !== token || referenceTrail[referenceTrail.length - 1] !== current) return;
-    body.replaceChildren();
-    const failure = doc.createElement('div');
-    failure.className = 'reference-section-empty';
-    failure.textContent = `引用分析失败：${errorMessage(error)}`;
-    body.appendChild(failure);
-    showToast(errorMessage(error), true);
-    return;
-  }
-  if (referenceViewerDocument !== doc || referenceViewerToken !== token || referenceTrail[referenceTrail.length - 1] !== current) return;
-
-  referenceViewerGraph = graph;
-  body.replaceChildren();
-  const workspace = doc.createElement('div');
-  workspace.className = 'reference-workspace';
-  const sidebar = doc.createElement('aside');
-  sidebar.className = 'reference-sidebar';
-  const search = doc.createElement('label');
-  search.className = 'reference-search';
-  search.appendChild(createElement(Search, { width: '15', height: '15', 'aria-hidden': 'true' }));
-  const searchInput = doc.createElement('input');
-  searchInput.type = 'search';
-  searchInput.placeholder = '搜索...';
-  searchInput.value = referenceViewerQuery;
-  searchInput.addEventListener('input', () => { referenceViewerQuery = searchInput.value.trim(); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
-  search.appendChild(searchInput);
-  sidebar.appendChild(search);
-  sidebar.appendChild(createReferenceControl(doc, '搜索引用者深度', '1'));
-  sidebar.appendChild(createReferenceControl(doc, '搜索依赖性深度', '1'));
-  sidebar.appendChild(createReferenceControl(doc, '搜索宽度限制', '20', 'checkbox'));
-  const filter = doc.createElement('label');
-  filter.className = 'reference-filter-row';
-  filter.appendChild(doc.createTextNode('集过滤器'));
-  const select = doc.createElement('select');
-  select.innerHTML = '<option>None</option><option>工作流</option><option>模板图片</option><option>奖励目录</option>';
-  filter.appendChild(select);
-  sidebar.appendChild(filter);
-  const summary = doc.createElement('div');
-  summary.className = 'reference-sidebar-summary';
-  summary.innerHTML = `<strong>${graph.target.name}</strong><span>${graph.target.path}</span><span>${graph.referencedBy.length} 个引用者 · ${graph.references.length} 个依赖</span>`;
-  sidebar.appendChild(summary);
-  const canvas = doc.createElement('div');
-  canvas.className = 'reference-graph-canvas';
-  referenceViewerCanvas = canvas;
-  let dragOrigin: { x: number; y: number; panX: number; panY: number } | undefined;
-  canvas.addEventListener('pointerdown', (event) => {
-    if ((event.target as HTMLElement).closest('button')) return;
-    dragOrigin = { x: event.clientX, y: event.clientY, panX: referenceViewerPan.x, panY: referenceViewerPan.y };
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener('pointermove', (event) => {
-    if (!dragOrigin) return;
-    referenceViewerPan = { x: dragOrigin.panX + event.clientX - dragOrigin.x, y: dragOrigin.panY + event.clientY - dragOrigin.y };
-    canvas.style.setProperty('--reference-pan-x', `${referenceViewerPan.x}px`);
-    canvas.style.setProperty('--reference-pan-y', `${referenceViewerPan.y}px`);
-  });
-  const stopGraphDrag = (event: PointerEvent): void => {
-    if (!dragOrigin) return;
-    dragOrigin = undefined;
-    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-  };
-  canvas.addEventListener('pointerup', stopGraphDrag);
-  canvas.addEventListener('pointercancel', stopGraphDrag);
-  const zoom = doc.createElement('div');
-  zoom.className = 'reference-zoom-controls';
-  const zoomOut = doc.createElement('button');
-  zoomOut.type = 'button'; zoomOut.title = '缩小'; zoomOut.appendChild(createElement(Minus, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  zoomOut.addEventListener('click', () => { referenceViewerZoom = Math.max(.6, referenceViewerZoom - .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
-  const zoomIn = doc.createElement('button');
-  zoomIn.type = 'button'; zoomIn.title = '放大'; zoomIn.appendChild(createElement(Plus, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  zoomIn.addEventListener('click', () => { referenceViewerZoom = Math.min(1.6, referenceViewerZoom + .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
-  zoom.append(zoomOut, zoomIn);
-  canvas.appendChild(zoom);
-  workspace.append(sidebar, canvas);
-  body.appendChild(workspace);
-  observeReferenceCanvas();
-  window.requestAnimationFrame(() => renderReferenceGraph(doc, graph));
-}
-
-function openReferenceViewer(path: string, _sourceDocument: Document): void {
-  closeReferenceViewer();
-  const doc = document;
-  referenceViewerDocument = doc;
-  referenceTrail = [path];
-
-  workbenchFrame?.show('referenceViewer');
-  const host = doc.querySelector<HTMLElement>('#module-reference-viewer');
-  if (!host) return;
-
-  const panel = doc.createElement('div');
-  panel.className = 'reference-viewer';
-  panel.tabIndex = -1;
-
-  const header = doc.createElement('div');
-  header.className = 'reference-viewer-header';
-  const trailEl = doc.createElement('div');
-  trailEl.className = 'reference-viewer-trail';
-  const nav = doc.createElement('div');
-  nav.className = 'reference-viewer-nav';
-  const backButton = doc.createElement('button');
-  backButton.type = 'button'; backButton.className = 'panel-action'; backButton.title = '后退';
-  backButton.disabled = true;
-  backButton.appendChild(createElement(ArrowLeft, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  backButton.addEventListener('click', () => { if (referenceTrail.length > 1) { referenceTrail.pop(); void renderReferenceViewer(); } });
-  nav.appendChild(backButton);
-  const refreshButton = doc.createElement('button');
-  refreshButton.type = 'button'; refreshButton.className = 'panel-action'; refreshButton.title = '刷新';
-  refreshButton.appendChild(createElement(RefreshCw, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  refreshButton.addEventListener('click', () => void renderReferenceViewer());
-  nav.appendChild(refreshButton);
-  const closeButton = doc.createElement('button');
-  closeButton.type = 'button';
-  closeButton.className = 'panel-action';
-  closeButton.title = '关闭 (Esc)';
-  closeButton.setAttribute('aria-label', '关闭');
-  closeButton.appendChild(createElement(X, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  closeButton.addEventListener('click', closeReferenceViewer);
-  header.append(nav, trailEl, closeButton);
-
-  const body = doc.createElement('div');
-  body.className = 'reference-viewer-body';
-
-  const footer = doc.createElement('div');
-  footer.className = 'reference-viewer-footer';
-  footer.textContent = '拖动画布可浏览引用关系 · 点击节点逐层跳转 · Esc 关闭';
-
-  panel.append(header, body, footer);
-  host.replaceChildren(panel);
-
-  const keyHandler = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    closeReferenceViewer();
-  };
-  panel.addEventListener('keydown', keyHandler, true);
-
-  referenceViewerPanel = panel;
-  referenceViewerBody = body;
-  referenceViewerTrailEl = trailEl;
-  referenceViewerKeyHandler = keyHandler;
-
-  const dockPanel = workbenchFrame?.dockviewApi.getPanel('referenceViewer');
-  referenceViewerLocationDisposable = dockPanel?.api.onDidLocationChange(() => {
-    window.setTimeout(() => {
-      const ownerDocument = referenceViewerPanel?.ownerDocument;
-      if (dockPanel.api.location.type === 'popout' && ownerDocument && ownerDocument !== document) {
-        ownerDocument.title = '引用查看器 - Onmyoji Studio';
-        const popoutTitle = ownerDocument.querySelector<HTMLElement>('.popout-title');
-        if (popoutTitle) popoutTitle.textContent = '引用查看器';
-      }
-      observeReferenceCanvas();
-      if (referenceViewerGraph && referenceViewerCanvas) renderReferenceGraph(referenceViewerCanvas.ownerDocument, referenceViewerGraph);
-    }, 0);
-  });
-
-  void renderReferenceViewer();
-  window.setTimeout(() => workbenchFrame?.popout('referenceViewer'), 0);
-}
-
-/** 跳转到引用图中的另一个节点（层层跳转）。 */
-function navigateReferenceViewer(path: string): void {
-  referenceTrail.push(path);
-  referenceViewerQuery = '';
-  referenceViewerPan = { x: 0, y: 0 };
-  void renderReferenceViewer();
 }
 
 type IconComponent = typeof Box;
@@ -3382,57 +3335,66 @@ function renderSidebar(): void {
   createIcons({ icons: desktopIcons, root: structureView });
 }
 
-async function loadWorkflow(uri: string, addToBackStack = false, mode: 'reuse' | 'activate' = 'reuse'): Promise<void> {
+/** 确保工作流文档存在标签与 Dockview 面板，新面板默认成为激活项。 */
+function ensureDocument(uri: string): WorkflowDocumentTab {
+  let tab = workflowTabs.find((item) => item.uri === uri);
+  if (!tab) {
+    tab = { uri, text: '', dirty: false, backStack: [] };
+    workflowTabs.push(tab);
+  }
+  if (docking && !docking.isDocumentOpen(uri)) docking.openDocument(uri, workflowTabName(uri));
+  syncDocumentTabs();
+  return tab;
+}
+
+async function loadWorkflow(uri: string): Promise<void> {
   if (!uri) return;
-  const previousUri = currentUri;
-  const previousTab = workflowTabs.find((tab) => tab.uri === previousUri);
+  const tab = ensureDocument(uri);
   rememberCurrentWorkflowTab();
+  rememberActiveRuntimeState();
   cancelAutoSave();
   await waitForAutoSave();
-  if (mode === 'activate') {
-    const targetTab = workflowTabs.find((tab) => tab.uri === uri);
-    backStack = targetTab ? [...targetTab.backStack] : [];
-  }
+  backStack = [...tab.backStack];
   loadingMask.classList.remove('hidden');
   try {
-    if (addToBackStack && currentUri && currentUri !== uri) backStack.push(currentUri);
     const init = await api.getWorkflowInit(uri, selectedInstance, backStack.length > 0);
-    if (mode === 'reuse' && previousTab && previousUri && init.document.uri !== previousUri) {
-      const existingTarget = workflowTabs.find((tab) => tab.uri === init.document.uri && tab !== previousTab);
-      if (existingTarget) workflowTabs = workflowTabs.filter((tab) => tab !== previousTab);
-      else {
-        previousTab.uri = init.document.uri;
-        previousTab.text = '';
-        previousTab.dirty = false;
-        previousTab.backStack = [];
-      }
-    }
-    if (!workflowTabs.some((tab) => tab.uri === init.document.uri)) {
-      workflowTabs.push({ uri: init.document.uri, text: '', dirty: false, backStack: [] });
-    }
-    const cachedTab = workflowTabs.find((tab) => tab.uri === init.document.uri);
-    const documentText = cachedTab?.text || init.document.text;
+    const documentText = tab.text || init.document.text;
     init.document.text = documentText;
-    currentEditorInit = init;
     if (init.document.uri !== currentUri) collapsedTreeNodes = new Set();
     currentUri = init.document.uri;
-    init.workflowTrail = workflowTrail();
     currentText = documentText;
-    if (cachedTab) cachedTab.backStack = [...backStack];
+    currentEditorInit = init;
+    tab.backStack = [...backStack];
     selectedInstance = init.selectedInstance;
     if (bootstrap) {
       bootstrap.workflows = init.workflows;
       bootstrap.instances = init.instances;
     }
+    const runtime = documentRuntimes.get(uri);
+    if (runtime) {
+      runtime.init = init;
+      runtime.sidebarNodes = [];
+      runtime.sidebarVariables = [];
+      runtime.selectedNode = '';
+      runtime.selectedVariable = '';
+      runtime.collapsedTreeNodes = collapsedTreeNodes;
+      runtime.inspectorSelection = undefined;
+    }
+    editorReady = runtime?.ready ?? false;
+    sidebarNodes = [];
+    sidebarVariables = [];
+    selectedNode = '';
+    selectedVariable = '';
     renderWorkflowSelect(init.workflows);
     renderInstances(init.instances, init.selectedInstance);
     reconcileOverviewSelection();
     renderOverview();
     renderContentBrowser();
     document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(init.document.uri);
-    setDirty(cachedTab?.dirty ?? false);
-    renderWorkflowDocumentTabs();
-    postToEditors(init as unknown as Record<string, unknown>);
+    setDirty(tab.dirty);
+    renderSidebar();
+    postToFrame(detailsFrame, init as unknown as Record<string, unknown>);
+    sendDocumentInit(uri);
     setStatus(init.issues.length > 0 ? `${init.issues.length} 个校验问题` : '工作流已载入');
   } catch (error) {
     showToast(errorMessage(error), true);
@@ -3442,33 +3404,95 @@ async function loadWorkflow(uri: string, addToBackStack = false, mode: 'reuse' |
   }
 }
 
+const documentLoads = new Map<string, Promise<void>>();
+
+/** 同一文档的加载只跑一次，标签激活与显式打开共享同一个 Promise。 */
+function loadDocumentOnce(uri: string): Promise<void> {
+  const pending = documentLoads.get(uri);
+  if (pending) return pending;
+  const load = loadWorkflow(uri).finally(() => documentLoads.delete(uri));
+  documentLoads.set(uri, load);
+  return load;
+}
+
+let activatingUri: string | undefined;
+
 async function activateWorkflowTab(uri: string): Promise<void> {
-  if (!uri || uri === currentUri) {
-    renderWorkflowDocumentTabs();
+  if (!uri) return;
+  const tab = workflowTabs.find((item) => item.uri === uri);
+  if (!tab) return;
+  if (uri === currentUri) {
+    syncDocumentTabs();
     return;
   }
-  if (!workflowTabs.some((tab) => tab.uri === uri)) return;
-  await loadWorkflow(uri, false, 'activate');
+  if (activatingUri === uri) return;
+  activatingUri = uri;
+  try {
+    docking?.focusDocument(uri);
+    rememberCurrentWorkflowTab();
+    rememberActiveRuntimeState();
+    cancelAutoSave();
+    await waitForAutoSave();
+    const runtime = documentRuntimes.get(uri);
+    if (runtime?.init) {
+      applyDocumentState(uri, tab, runtime);
+      sendDocumentInit(uri);
+      return;
+    }
+    await loadDocumentOnce(uri);
+  } finally {
+    activatingUri = undefined;
+  }
 }
 
 async function openWorkflowTab(uri: string): Promise<void> {
   if (!uri) return;
-  if (!workflowTabs.some((tab) => tab.uri === uri)) {
-    workflowTabs.push({ uri, text: '', dirty: false, backStack: [] });
-    renderWorkflowDocumentTabs();
-  }
+  ensureDocument(uri);
+  docking?.focusDocument(uri);
   await activateWorkflowTab(uri);
 }
 
-async function saveCurrentWorkflowBeforeClose(): Promise<void> {
-  rememberCurrentWorkflowTab();
-  cancelAutoSave();
-  await waitForAutoSave();
-  if (!currentUri || !dirty || !currentText) return;
-  await api.saveWorkflow(currentUri, currentText);
-  if (currentEditorInit) currentEditorInit.document.text = currentText;
-  setDirty(false);
-  postToEditors({ type: 'workflowSaved' });
+/** Dockview 面板被移除（关闭按钮、右键菜单或快捷键）后的收尾：保存、清状态、补默认画布。 */
+async function handleDocumentRemoved(uri: string): Promise<void> {
+  closingDocuments.delete(uri);
+  if (suppressDocumentRemoval) {
+    documentRuntimes.delete(uri);
+    return;
+  }
+  removingDocument = true;
+  try {
+    const tab = workflowTabs.find((item) => item.uri === uri);
+    if (!tab) {
+      unregisterDocumentFrame(documentRuntimes.get(uri)?.panelId ?? '');
+      documentRuntimes.delete(uri);
+      return;
+    }
+    const index = workflowTabs.indexOf(tab);
+    const wasActive = uri === currentUri;
+    // 关闭的是当前文档时先把全局最新内容写回它自己的记录，避免受邻居激活影响。
+    if (wasActive) rememberCurrentWorkflowTab();
+    try {
+      if (tab.dirty && tab.text) {
+        await api.saveWorkflow(uri, tab.text);
+        tab.dirty = false;
+      }
+    } catch (error) {
+      showToast(`关闭工作流失败：${errorMessage(error)}`, true);
+    }
+    documentRuntimes.delete(uri);
+    workflowTabs.splice(index, 1);
+    removingDocument = false;
+    if (workflowTabs.length === 0) {
+      const fallback = bootstrap?.defaultWorkflow;
+      if (fallback) await openWorkflowTab(fallback);
+      else syncDocumentTabs();
+      return;
+    }
+    if (wasActive) await activateWorkflowTab(workflowTabs[Math.min(index, workflowTabs.length - 1)].uri);
+    else syncDocumentTabs();
+  } finally {
+    removingDocument = false;
+  }
 }
 
 async function closeWorkflowTab(uri: string): Promise<void> {
@@ -3476,25 +3500,13 @@ async function closeWorkflowTab(uri: string): Promise<void> {
     showToast('至少保留一个工作流画布');
     return;
   }
-  const index = workflowTabs.findIndex((tab) => tab.uri === uri);
-  if (index < 0) return;
-  const closingTab = workflowTabs[index];
-  const closingActive = uri === currentUri;
-  try {
-    if (closingActive) await saveCurrentWorkflowBeforeClose();
-    else if (closingTab.dirty && closingTab.text) {
-      await api.saveWorkflow(closingTab.uri, closingTab.text);
-      closingTab.dirty = false;
-    }
-    workflowTabs.splice(index, 1);
-    if (closingActive) {
-      const next = workflowTabs[Math.min(index, workflowTabs.length - 1)];
-      await loadWorkflow(next.uri, false, 'activate');
-    } else {
-      renderWorkflowDocumentTabs();
-    }
-  } catch (error) {
-    showToast(`关闭工作流失败：${errorMessage(error)}`, true);
+  if (!workflowTabs.some((tab) => tab.uri === uri)) return;
+  closingDocuments.add(uri);
+  docking?.closeDocument(uri);
+  if (closingDocuments.has(uri)) {
+    // 面板没有同步触发移除（例如还未渲染），退回到手动收尾。
+    closingDocuments.delete(uri);
+    await handleDocumentRemoved(uri);
   }
 }
 
@@ -3503,7 +3515,7 @@ async function refreshInstances(): Promise<void> {
     const instances = await api.listInstances();
     renderInstances(instances, selectedInstance);
     renderOverview();
-    postToEditors({ type: 'runtimeInstances', instances, selectedInstance });
+    postToAllEditors({ type: 'runtimeInstances', instances, selectedInstance });
   } catch {
     // Device discovery is best effort while the user edits offline.
   }
@@ -3511,46 +3523,57 @@ async function refreshInstances(): Promise<void> {
 
 async function handleEditorMessage(message: Record<string, unknown>, sourceFrame: HTMLIFrameElement): Promise<void> {
   const type = String(message.type ?? '');
+  const sourceUri = documentFrameUris.get(sourceFrame);
+  const runtime = sourceUri ? documentRuntimes.get(sourceUri) : undefined;
+  const isActiveSource = Boolean(sourceUri && sourceUri === currentUri);
   try {
     if (type === 'ready') {
-      if (sourceFrame === editorFrame) editorReady = true;
-      if (currentEditorInit) postToFrame(sourceFrame, currentEditorInit as unknown as Record<string, unknown>);
-      else if (sourceFrame === editorFrame) {
-        if (restoreWorkflowUri && !currentUri) {
-          const uri = restoreWorkflowUri;
-          await loadWorkflow(uri, false, 'activate');
-          if (restoreWorkflowUri === uri) restoreWorkflowUri = '';
-        } else if (currentUri || bootstrap?.defaultWorkflow) {
-          await loadWorkflow(currentUri || bootstrap!.defaultWorkflow!);
-        }
+      if (sourceFrame === detailsFrame) {
+        if (currentEditorInit) postToFrame(detailsFrame, currentEditorInit as unknown as Record<string, unknown>);
+        return;
       }
+      if (!runtime || !sourceUri) return;
+      runtime.ready = true;
+      if (runtime.init) {
+        sendDocumentInit(sourceUri);
+        return;
+      }
+      if (sourceUri === currentUri || (!currentUri && sourceUri === restoreWorkflowUri)) await loadDocumentOnce(sourceUri);
       return;
     }
     if (type === 'createVariableNode') {
       if (message.scope !== 'inputs' && message.scope !== 'variables') return;
-      postToFrame(editorFrame,{type:'editorCommand',command:'addVariableCard',value:{name:String(message.name || ''),scope:message.scope}});
+      postToFrame(sourceFrame, { type: 'editorCommand', command: 'addVariableCard', value: { name: String(message.name || ''), scope: message.scope } });
       return;
     }
     if (type === 'documentStateChanged') {
       const text = String(message.text ?? '');
       if (!text) return;
-      currentText = text;
-      if (currentEditorInit) currentEditorInit.document.text = text;
-      setDirty(message.dirty !== false);
-      scheduleAutoSave(text);
-      const targetFrame = sourceFrame === editorFrame ? detailsFrame : editorFrame;
-      postToFrame(targetFrame, { type: 'replaceDocument', text, recordHistory: true });
+      const tab = workflowTabs.find((item) => item.uri === (sourceUri ?? currentUri));
+      if (tab) tab.text = text;
+      if (runtime?.init) runtime.init.document.text = text;
+      if (isActiveSource || !sourceUri) {
+        currentText = text;
+        if (currentEditorInit) currentEditorInit.document.text = text;
+        setDirty(message.dirty !== false);
+        scheduleAutoSave(text);
+        postToFrame(detailsFrame, { type: 'replaceDocument', text, recordHistory: true });
+      } else if (tab) {
+        tab.dirty = message.dirty !== false;
+        syncDocumentTabs();
+      }
       return;
     }
     if (type === 'inspectorRequested') {
-      if (sourceFrame !== editorFrame) return;
+      if (!isActiveSource && sourceUri) return;
       const selection = message.inspectorSelection as unknown as InspectorSelection;
+      if (runtime) runtime.inspectorSelection = selection;
       docking?.showPanel('details');
       postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
       return;
     }
     if (type === 'sidebarStateChanged') {
-      if (sourceFrame !== editorFrame) return;
+      if (!runtime || (!isActiveSource && sourceUri)) return;
       const previousTreeSignature = treeSignature();
       const previousVariableSignature = variableSignature();
       const previousSelectedNode = selectedNode;
@@ -3561,6 +3584,8 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       selectedVariable = typeof message.selectedVariable === 'string' ? message.selectedVariable : '';
       selectedVariableScope = message.selectedVariableScope === 'variables' ? 'variables' : 'inputs';
       selectedNode = typeof message.selectedNode === 'string' ? message.selectedNode : '';
+      const selection = message.inspectorSelection as unknown as InspectorSelection | undefined;
+      if (selection) runtime.inspectorSelection = selection;
       const treeUnchanged = sidebarNodes.length > 0 && treeSignature() === previousTreeSignature;
       const variablesUnchanged = variableSignature() === previousVariableSignature;
       if (treeUnchanged && variablesUnchanged) {
@@ -3574,7 +3599,6 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       } else {
         renderSidebar();
       }
-      const selection = message.inspectorSelection as unknown as InspectorSelection | undefined;
       if (selection && selection.kind !== 'none') {
         docking?.showPanel('details');
         postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
@@ -3584,27 +3608,35 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       return;
     }
     if (type === 'save') {
-      const text = String(message.text ?? '');
+      const targetUri = sourceUri ?? currentUri;
+      const tab = workflowTabs.find((item) => item.uri === targetUri);
+      const text = String(message.text ?? tab?.text ?? '');
       cancelAutoSave();
       await waitForAutoSave();
-      await api.saveWorkflow(currentUri, text);
-      currentText = text;
-      if (currentEditorInit) currentEditorInit.document.text = text;
-      setDirty(false);
+      await api.saveWorkflow(targetUri, text);
+      if (tab) {
+        tab.text = text;
+        tab.dirty = false;
+      }
+      if (runtime?.init) runtime.init.document.text = text;
+      if (targetUri === currentUri) {
+        currentText = text;
+        if (currentEditorInit) currentEditorInit.document.text = text;
+        setDirty(false);
+      } else {
+        syncDocumentTabs();
+      }
       postToEditors({ type: 'workflowSaved' });
       setStatus('工作流已保存');
       showToast('工作流已保存');
       return;
     }
     if (type === 'switchWorkflow') {
-      cancelAutoSave();
-      await waitForAutoSave();
       if (typeof message.saveText === 'string') {
         await api.saveWorkflow(currentUri, message.saveText);
         currentText = message.saveText;
       }
-      backStack = [];
-      await loadWorkflow(String(message.uri ?? ''));
+      await switchWorkflow(String(message.uri ?? ''));
       return;
     }
     if (type === 'openSubWorkflow') {
@@ -3622,7 +3654,10 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         if (node?.params?.workflow) resolved = resolveWorkflow(node.params.workflow);
       }
       if (!resolved) throw new Error(`未找到子工作流：${reference || message.nodeId || ''}`);
-      await loadWorkflow(resolved.uri, true);
+      const parent = workflowTabs.find((item) => item.uri === currentUri);
+      const target = ensureDocument(resolved.uri);
+      target.backStack = [...(parent?.backStack ?? []), currentUri];
+      await openWorkflowTab(resolved.uri);
       return;
     }
     if (type === 'goBackWorkflow') {
@@ -3633,7 +3668,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         currentText = message.saveText;
       }
       const previous = backStack.pop();
-      if (previous) await loadWorkflow(previous);
+      if (previous) await openWorkflowTab(previous);
       return;
     }
     if (type === 'navigateWorkflowTrail') {
@@ -3646,12 +3681,13 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         await api.saveWorkflow(currentUri, message.saveText);
         currentText = message.saveText;
       }
-      backStack = trail.slice(0, index);
-      await loadWorkflow(trail[index]);
+      const target = ensureDocument(trail[index]);
+      target.backStack = trail.slice(0, index);
+      await openWorkflowTab(trail[index]);
       return;
     }
     if (type === 'reloadRequest') {
-      await loadWorkflow(currentUri);
+      if (currentUri) await loadWorkflow(currentUri);
       return;
     }
     if (type === 'runWorkflow') {
@@ -3668,7 +3704,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     }
     if (type === 'selectInstance') {
       selectRuntimeInstance(String(message.instanceId ?? selectedInstance), false);
-      postToEditors({ type: 'instanceSelected', instanceId: selectedInstance });
+      postToAllEditors({ type: 'instanceSelected', instanceId: selectedInstance });
       return;
     }
     if (type === 'pickRoi') {
@@ -3727,14 +3763,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
       return;
     }
     if (type === 'newWorkflow') {
-      const uri = await api.createWorkflow();
-      if (uri) {
-        bootstrap!.workflows = (await api.bootstrap()).workflows;
-        reconcileOverviewSelection();
-        renderOverview();
-        backStack = [];
-        await loadWorkflow(uri);
-      }
+      await createNewWorkflow();
       return;
     }
     if (type === 'openFile') {
@@ -3756,7 +3785,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         return;
       }
       const relative = relativeToProject(displayFileUri(currentUri));
-      if (relative) openReferenceViewer(relative, document);
+      if (relative) referenceViewer.open(relative, document);
       else showToast('无法定位当前工作流的项目路径', true);
       return;
     }
@@ -3872,7 +3901,8 @@ function showMoreMenu(button: HTMLButtonElement): void {
     entry.textContent = action.label;
     entry.addEventListener('click', () => {
       closeMoreMenu();
-      void handleEditorMessage({ type: action.type }, editorFrame);
+      const frame = activeRuntime()?.frame;
+      if (frame) void handleEditorMessage({ type: action.type }, frame);
     });
     menu.appendChild(entry);
   }
@@ -3959,7 +3989,6 @@ function openSettingsPanel(): void {
   settingsRestoreSession.checked = restoreSessionOnStart;
   void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
   workbenchFrame?.show('settings');
-  window.setTimeout(() => workbenchFrame?.popout('settings'), 0);
 }
 
 /** 打开独立窗口的模拟器画面测试工具（实时画面 / 模板匹配 / ROI / 点击位置测试）。 */
@@ -4014,6 +4043,7 @@ function restartInstanceRefresh(): void {
 
 function bindUi(): void {
   roiPicker.bind();
+  setupContentBrowserResizers();
   document.querySelectorAll<HTMLElement>('[data-editor-command]').forEach((button) => {
     button.addEventListener('click', () => {
       const command = button.dataset.editorCommand ?? '';
@@ -4086,10 +4116,10 @@ function bindUi(): void {
         else openSettingsPanel();
       }
       else if (panelId === 'referenceViewer') {
-        if (workbenchFrame?.isOpen('referenceViewer')) closeReferenceViewer();
+        if (workbenchFrame?.isOpen('referenceViewer')) referenceViewer.close();
         else if (currentUri) {
           const relative = relativeToProject(displayFileUri(currentUri));
-          if (relative) openReferenceViewer(relative, document);
+          if (relative) referenceViewer.open(relative, document);
         }
       } else if (panelId === 'contentBrowser' || panelId === 'runtime') {
         toggleSharedPanel(panelId);
@@ -4105,9 +4135,7 @@ function bindUi(): void {
   });
   document.querySelectorAll<HTMLButtonElement>('[data-layout-command]').forEach((button) => {
     button.addEventListener('click', () => {
-      if (button.dataset.layoutCommand === 'reset') docking?.resetLayout();
-      if (button.dataset.layoutCommand === 'reset') workbenchFrame?.resetLayout();
-      if (button.dataset.layoutCommand === 'reset') sharedPanelDockBridge?.resetSurfaces();
+      if (button.dataset.layoutCommand === 'reset') resetDockLayout();
     });
   });
   document.querySelectorAll<HTMLButtonElement>('.menu-trigger').forEach((trigger) => {
@@ -4146,7 +4174,7 @@ function bindUi(): void {
   document.querySelector('#structure-expand-all')!.addEventListener('click', () => setAllTreeBranches(true));
   document.querySelector('#structure-collapse-all')!.addEventListener('click', () => setAllTreeBranches(false));
   document.querySelector('#add-variable-button')!.addEventListener('click', () => editorCommand('addVariable', 'variables'));
-  document.querySelector('#new-workflow-button')!.addEventListener('click', () => void handleEditorMessage({ type: 'newWorkflow' }, editorFrame));
+  document.querySelector('#new-workflow-button')!.addEventListener('click', () => void createNewWorkflow());
   document.querySelector('#run-button')!.addEventListener('click', () => desktopControl('run'));
   document.querySelector('#stop-button')!.addEventListener('click', () => {
     if (overviewRun?.active) void stopOverviewQueue();
@@ -4246,6 +4274,10 @@ function bindUi(): void {
     deleteTarget = undefined;
     renderContentBrowser();
   });
+  contentBrowserFolderSearch.addEventListener('input', () => {
+    contentBrowserFolderQuery = contentBrowserFolderSearch.value;
+    renderContentBrowserTree();
+  });
   document.querySelectorAll<HTMLButtonElement>('[data-content-view]').forEach((button) => {
     button.addEventListener('click', () => {
       contentBrowserView = button.dataset.contentView === 'list' ? 'list' : 'grid';
@@ -4309,24 +4341,31 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
     return;
   }
 
+  const frameById = (id: string | undefined): HTMLIFrameElement | undefined => {
+    if (!id) return undefined;
+    if (id === detailsFrame.id) return detailsFrame;
+    for (const runtime of documentRuntimes.values()) if (runtime.frame.id === id) return runtime.frame;
+    return undefined;
+  };
   const sourceFrame = event.data?.source === 'dockview-popout'
-    ? event.data.frameId === editorFrame.id
-      ? editorFrame
-      : event.data.frameId === detailsFrame.id
-        ? detailsFrame
-        : undefined
-    : event.source === editorFrame.contentWindow
-      ? editorFrame
-      : event.source === detailsFrame.contentWindow
-        ? detailsFrame
-        : undefined;
+    ? frameById(event.data.frameId)
+    : [...documentRuntimes.values()].map((runtime) => runtime.frame).find((frame) => frame.contentWindow === event.source)
+      ?? (event.source === detailsFrame.contentWindow ? detailsFrame : undefined);
   if (!sourceFrame) return;
   if ((event.data?.source === 'legacy-editor' || event.data?.source === 'dockview-popout') && event.data.message) {
     void handleEditorMessage(event.data.message, sourceFrame);
   }
   if (event.data?.source === 'legacy-editor-state' || event.data?.source === 'dockview-popout' && event.data.state) {
     const frameDirty = Boolean(event.data.state?.dirty);
-    if (sourceFrame === editorFrame || frameDirty) setDirty(frameDirty);
+    const frameUri = documentFrameUris.get(sourceFrame);
+    if (frameUri) {
+      const tab = workflowTabs.find((item) => item.uri === frameUri);
+      if (tab && tab.dirty !== frameDirty) {
+        tab.dirty = frameDirty;
+        syncDocumentTabs();
+      }
+      if (frameUri === currentUri) setDirty(frameDirty);
+    }
   }
 });
 
@@ -4334,11 +4373,19 @@ async function start(): Promise<void> {
   const showPopoutFailure = (): void => showToast('无法打开独立模块窗口', true);
   installCustomTooltips();
   workbenchFrame = createWorkbenchFrame(updateDockMenuState, showPopoutFailure);
-  docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure);
-  workflowTabHost = docking.workflowTabHost;
-  bindWorkflowTabDropTarget(workflowTabHost);
-  if (docking.workflowTabDropTarget !== workflowTabHost) bindWorkflowTabDropTarget(docking.workflowTabDropTarget, true);
-  renderWorkflowDocumentTabs();
+  docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure, {
+    onFrameCreated: (panelId, uri, frame) => registerDocumentFrame(panelId, uri, frame),
+    onFrameDisposed: (panelId) => unregisterDocumentFrame(panelId),
+    onCloseRequested: (uri) => void closeWorkflowTab(uri),
+  });
+  // 文档面板的激活统一走 Dockview 事件，标签点击与程序化切面板都不会漏。
+  docking.dockviewApi.onDidActivePanelChange((event) => {
+    if (!documentsReady || removingDocument || closingDocuments.size > 0) return;
+    const uri = event.panel ? documentUriForPanelId(event.panel.api.id) : undefined;
+    if (uri) void activateWorkflowTab(uri);
+  });
+  docking.onDidRemoveDocument((uri) => void handleDocumentRemoved(uri));
+  bindWorkflowTabDropTarget(document.querySelector<HTMLElement>('#dock-workspace')!);
   sharedPanelDockBridge = connectSharedPanelDocking(docking, workbenchFrame, updateDockMenuState);
   updateDockMenuState();
   createIcons({ icons: desktopIcons });
@@ -4351,7 +4398,7 @@ async function start(): Promise<void> {
     runtimeLogEvents.push(event);
     if (runtimeLogEvents.length > 5000) runtimeLogEvents = runtimeLogEvents.slice(-5000);
     postToRuntimeLog({ type: 'runEvent', event });
-    postToEditors({ type: 'runEvent', event });
+    postToAllEditors({ type: 'runEvent', event });
   });
   api.onWindowMaximized(updateMaximizedState);
   updateMaximizedState(await api.isWindowMaximized());
@@ -4376,17 +4423,19 @@ async function start(): Promise<void> {
       applyWorkflowSession(session);
       // 上次退出时的未保存内容先落盘，避免恢复后标记变干净却丢失改动。
       void flushRestoredEdits();
-      if (editorReady) {
-        await loadWorkflow(session.activeUri, false, 'activate');
-        restoreWorkflowUri = '';
-      } else {
-        postToEditors({ type: 'desktopPing' });
-      }
+    }
+    reconcileDocumentPanels();
+    documentsReady = true;
+    if (session) {
+      docking.ensureLayout();
+      await activateWorkflowTab(session.activeUri);
+      restoreWorkflowUri = '';
       showToast(`已恢复上次的 ${session.tabs.length} 个画布`);
-    } else if (loadDefaultWorkflowOnStart && editorReady && bootstrap.defaultWorkflow) {
-      await loadWorkflow(bootstrap.defaultWorkflow);
     } else {
-      postToEditors({ type: 'desktopPing' });
+      const fallback = loadDefaultWorkflowOnStart ? bootstrap.defaultWorkflow : undefined;
+      if (fallback) await openWorkflowTab(fallback);
+      else ensureFallbackDocument();
+      docking.ensureLayout();
     }
     restartInstanceRefresh();
   } catch (error) {
@@ -4400,6 +4449,7 @@ window.addEventListener('beforeunload', () => {
   persistWorkflowSessionNow();
   clearAutoSaveTimer();
   if (instanceRefreshTimer !== undefined) window.clearInterval(instanceRefreshTimer);
+  suppressDocumentRemoval = true;
   sharedPanelDockBridge?.dispose();
   docking?.dispose();
   workbenchFrame?.dispose();

@@ -8,6 +8,7 @@ const root = path.join(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
 const popout = fs.readFileSync(path.join(root, 'src/renderer/popout.ts'), 'utf8');
 const editor = fs.readFileSync(path.join(root, 'public/legacy/workflow-editor.js'), 'utf8');
+const overviewSrc = fs.readFileSync(path.join(root, 'src/renderer/overview.ts'), 'utf8');
 
 /** 与其它渲染层测试一致：切片执行生产代码，不打开桌面窗口，也不操控鼠标键盘。 */
 function sliceBetween(source, from, to) {
@@ -38,8 +39,12 @@ function shellHarness(options = {}) {
     },
     deleteTarget: options.deleteTarget,
     selectedContentPath: options.selectedContentPath ?? '',
-    overviewSelection: options.overviewSelection ?? [],
-    overviewRun: options.overviewRun,
+    overview: {
+      isSelected: (rel) => (options.overviewSelection ?? []).includes(rel),
+      isRunning: () => Boolean(options.overviewRun?.active),
+      updateSelection: (rel, checked) => calls.queue.push([rel, checked]),
+      selectQueueRow: (rel) => calls.queueRows.push(rel),
+    },
     roiPicker: {isOpen: () => Boolean(options.roiPickerState)},
     contentNameDialogState: options.contentNameDialogState,
     contentBrowserEntries: () => options.entries ?? [],
@@ -47,8 +52,6 @@ function shellHarness(options = {}) {
     contentFolderItem: (folder) => ({kind: 'folder', path: folder, name: folder}),
     isContentRootFolder: (folder) => folder === 'assets' || folder === 'workflows',
     deleteContentItem: (item) => calls.deleted.push(item),
-    updateOverviewSelection: (rel, checked) => calls.queue.push([rel, checked]),
-    selectOverviewQueueRow: (rel) => calls.queueRows.push(rel),
     editorCommand: (...args) => calls.commands.push(args),
     showToast: (message, error) => calls.toasts.push([message, Boolean(error)]),
   });
@@ -223,7 +226,7 @@ test('画布、标题栏命令与独立窗口共用同一个删除入口', () =>
   assert.match(editor, /command === 'deleteSelection'\) deleteCurrentSelection\(\)/);
   assert.match(shell, /if \(handleDeleteShortcut\(event\)\) return;/);
   assert.match(shell, /document\.addEventListener\('pointerdown', resetDeleteTargetOnPointerDown, true\)/);
-  assert.match(shell, /deleteTarget = \{ kind: 'queue', rel \};/);
+  assert.match(overviewSrc, /setDeleteTarget\(\{ kind: 'queue', rel \}\);/);
   assert.match(shell, /deleteTarget = \{ kind: 'editor' \};/);
   assert.match(popout, /sendToOpener\(\{ type: 'shellShortcut', key: event\.key \}\)/);
   assert.match(shell, /event\.data\.type === 'shellShortcut'/);
@@ -234,5 +237,5 @@ test('队列选中态有深色与浅色语义样式', () => {
   const theme = fs.readFileSync(path.join(root, 'public/theme/theme.css'), 'utf8');
   assert.match(styles, /\.overview-queue-row\.selected \{ background: #[0-9a-f]{6}; \}/);
   assert.match(theme, /:root\[data-theme="light"\] :is\([^)]*\.overview-queue-row\.selected[^)]*\)/);
-  assert.match(shell, /rel === selectedQueueRel \? 'selected' : ''/);
+  assert.match(overviewSrc, /rel === selectedQueueRel \? 'selected' : ''/);
 });

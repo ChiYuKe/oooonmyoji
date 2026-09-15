@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const {stripTypeScriptTypes}=require('node:module');
-const source=fs.readFileSync(path.join(__dirname,'../src/renderer/main.ts'),'utf8');
+const source=fs.readFileSync(path.join(__dirname,'../src/renderer/overview.ts'),'utf8');
 function setup(locked=false){
  class E {
   constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.events={};this.attrs={};}

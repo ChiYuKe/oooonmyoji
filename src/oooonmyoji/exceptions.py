@@ -36,20 +36,12 @@ class ConfigError(AutomationError):
     category = ErrorCategory.CONFIG
 
 
-class PluginError(AutomationError):
-    category = ErrorCategory.PLUGIN
-
-
 class WorkflowError(AutomationError):
     category = ErrorCategory.WORKFLOW
 
 
 class WorkflowTimeoutError(WorkflowError):
     category = ErrorCategory.WORKFLOW_TIMEOUT
-
-
-class ActionTimeoutError(WorkflowError):
-    category = ErrorCategory.ACTION_TIMEOUT
 
 
 class ActionError(AutomationError):
@@ -87,7 +79,6 @@ class CancelledError(AutomationError):
 __all__ = [
     "AutomationError",
     "ActionError",
-    "ActionTimeoutError",
     "CancelledError",
     "ConfigError",
     "DeviceCaptureError",
@@ -96,7 +87,6 @@ __all__ = [
     "DeviceInputError",
     "ErrorCategory",
     "OcrError",
-    "PluginError",
     "WorkflowError",
     "WorkflowTimeoutError",
     "VisionError",

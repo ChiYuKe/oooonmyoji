@@ -298,7 +298,9 @@ class MumuDevice:
         self._capture_width_ref: Any | None = None
         self._capture_height_ref: Any | None = None
 
-    def _function(self, name: str, restype: object, argtypes: list[object]):
+    def _function(self, name: str, restype: object, argtypes: list[object]) -> Any:
+        """绑定 DLL 导出函数并设置 ctypes 签名。"""
+
         try:
             function = getattr(self.dll, name)
         except AttributeError as exc:

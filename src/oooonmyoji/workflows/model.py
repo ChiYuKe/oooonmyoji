@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "task")
-COMPOSITE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel")
 DECORATOR_TYPES = ("condition", "cooldown", "timeout", "retry", "repeat", "do_once")
 PARALLEL_FINISH_MODES = ("abort_background", "wait_for_background")
 INSTANCE_PARALLEL_WAIT_MODES = ("all", "any")
@@ -58,14 +57,6 @@ class WorkflowNode:
     def is_task(self) -> bool:
         return self.type == "task"
 
-    @property
-    def is_composite(self) -> bool:
-        return self.type in COMPOSITE_TYPES
-
-    @property
-    def is_orchestration(self) -> bool:
-        return self.type == "instance_parallel"
-
 
 @dataclass(frozen=True)
 class WorkflowSpec:
@@ -114,7 +105,6 @@ class WorkflowSpec:
 
 
 __all__ = [
-    "COMPOSITE_TYPES",
     "DECORATOR_TYPES",
     "INSTANCE_PARALLEL_WAIT_MODES",
     "InstanceParallelRun",

@@ -30,11 +30,9 @@ def parse_schedule_time(value: str, timezone_name: str) -> datetime:
 class ScheduleCalculator:
     @staticmethod
     def interval_next(last_finished: datetime, seconds: float) -> datetime:
-        return last_finished + timedelta(seconds=seconds)
+        """按「上次结束时间 + 间隔」计算下一次运行时间，避免任务耗时导致重叠。"""
 
-    @staticmethod
-    def once_due(scheduled_at: datetime, now: datetime, *, consumed: bool) -> bool:
-        return not consumed and now >= scheduled_at
+        return last_finished + timedelta(seconds=seconds)
 
 
 @dataclass(frozen=True)

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-from ..devices.protocol import DeviceFrame, frame_from_backend
+from ..devices.protocol import frame_from_backend
 from ..exceptions import VisionError
 
 
-def frame_to_bgr(frame: object):
-    """Convert a backend frame to a visible-orientation BGR ndarray."""
+def frame_to_bgr(frame: object) -> Any:
+    """把后端帧转换成可见方向的 BGR ndarray。"""
 
     try:
         import cv2
@@ -50,7 +51,9 @@ def frame_to_bgr(frame: object):
     return image
 
 
-def crop_frame(frame: object, roi: tuple[int, int, int, int] | None = None):
+def crop_frame(frame: object, roi: tuple[int, int, int, int] | None = None) -> Any:
+    """按 ROI 裁剪帧；ROI 越界时抛出 VisionError。"""
+
     image = frame_to_bgr(frame)
     if roi is None:
         return image

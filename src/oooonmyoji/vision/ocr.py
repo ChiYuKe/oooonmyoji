@@ -8,7 +8,7 @@ import threading
 import time
 from concurrent.futures import TimeoutError
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from ..exceptions import OcrError
 

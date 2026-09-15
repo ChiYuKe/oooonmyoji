@@ -418,7 +418,9 @@ class TapMatchAction(Action):
                     "verify_timeout_seconds must be non-negative",
                     category="workflow",
                 )
-            verify_threshold = float(selected.get("threshold", match.get("threshold", 0.85)))
+            # 优先使用匹配结果自带的阈值，其次回退到入参阈值，最后用默认值。
+            verify_threshold_raw = selected.get("threshold", match.get("threshold", 0.85))
+            verify_threshold = float(verify_threshold_raw) if verify_threshold_raw is not None else 0.85
             if not 0.0 <= verify_threshold <= 1.0:
                 return ActionResult.failed(
                     "match threshold must be between 0 and 1",
@@ -1113,19 +1115,23 @@ __all__ = [
     "AssertAction",
     "CaptureAction",
     "DetectStateAction",
+    "DismissTemplateUntilTextAction",
+    "KeyAction",
     "LogAction",
     "MatchTemplateAction",
     "OcrAction",
+    "RecoverStateAction",
     "RunWorkflowAction",
     "SaveFrameAction",
     "SelectWorkflowAction",
     "SequenceWorkflowAction",
     "SleepAction",
+    "SwipeAction",
     "TapAction",
     "TapMatchAction",
+    "TypeTextAction",
+    "WaitAnyAction",
+    "WaitAnyTextAction",
     "WaitTemplateAction",
     "WaitTextAction",
-    "WaitAnyTextAction",
-    "DismissTemplateUntilTextAction",
-    "RecoverStateAction",
 ]

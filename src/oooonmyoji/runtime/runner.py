@@ -18,6 +18,7 @@ from ..devices.coordinates import CoordinateMapper
 from ..devices.factory import connect_at_task_boundary
 from ..devices.lock import InstanceLock
 from ..exceptions import CancelledError, OcrError, WorkflowError
+from ..naming import safe_name
 from ..vision.image import make_thumbnail_base64
 from ..vision.ocr import OcrEngine
 from ..vision.template import TemplateMatcher
@@ -88,15 +89,8 @@ class RunEventWriter:
             self._started = True
 
 
-def _safe_artifact_name(value: str) -> str:
-    import re
-
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value) or "unknown"
-
-
 def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, save_screenshots: bool = False) -> dict[str, Any]:
-    """Build a run-event line for one step, optionally attaching frame data."""
-    import time
+    """构造单步运行事件，按需附带截图数据。"""
 
     payload: dict[str, Any] = {
         "type": "step",
@@ -107,7 +101,7 @@ def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, sav
     }
     if save_screenshots and context is not None and context.last_frame is not None:
         try:
-            saved = context.save_frame(context.last_frame, f"step-{_safe_artifact_name(payload['step_id'] or 'unknown')}.png")
+            saved = context.save_frame(context.last_frame, f"step-{safe_name(payload['step_id'] or 'unknown')}.png")
             payload["screenshot"] = str(saved)
         except Exception as artifact_error:
             payload["screenshot_error"] = str(artifact_error)

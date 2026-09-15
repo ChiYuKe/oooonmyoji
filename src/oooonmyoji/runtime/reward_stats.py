@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..devices.protocol import DeviceFrame
+from ..naming import safe_name
 from ..vision.template import TemplateMatcher
 
 
@@ -381,8 +382,8 @@ class RewardStatsProcessor:
         return localized
 
     def _write_record(self, request: dict[str, Any], *, status: str, **fields: Any) -> dict[str, Any]:
-        instance_id = _safe_name(str(request.get("instance_id") or "unknown"))
-        category = _safe_name(str(request.get("category") or "reward"))
+        instance_id = safe_name(str(request.get("instance_id") or "unknown"))
+        category = safe_name(str(request.get("category") or "reward"))
         destination = self.artifact_dir / "reward-stats" / category / instance_id / f"rewards-{date.today().isoformat()}.jsonl"
         destination.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -734,7 +735,9 @@ def _quantity_distance(center: tuple[float, float], detection: dict[str, Any]) -
     return ((center_x - icon_center_x) / max(width, 1.0)) ** 2 + ((center_y - icon_center_y) / max(height, 1.0)) ** 2
 
 
-def _read_image(path: Path):
+def _read_image(path: Path) -> Any:
+    """通过字节解码图片，兼容中文 Windows 路径。"""
+
     try:
         import cv2
         import numpy as np
@@ -768,10 +771,6 @@ def _item_x(item: dict[str, Any]) -> int:
 def _item_y(item: dict[str, Any]) -> int:
     box = item.get("box")
     return min((int(point[1]) for point in box if isinstance(point, (list, tuple)) and len(point) >= 2), default=0) if isinstance(box, list) else 0
-
-
-def _safe_name(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value) or "unknown"
 
 
 __all__ = ["RewardStatsProcessor"]

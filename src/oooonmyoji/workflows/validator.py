@@ -571,15 +571,13 @@ def _validate_child_inputs(workflow_dir: Path, reference: str, inputs: dict[str,
         raise ConfigError(f"{path} passes undeclared child inputs: {', '.join(undeclared)}")
 
 
-def validate_workflow(
+def _validate_scope_definitions(
     raw: dict[str, Any],
-    path: Path,
-    registry: ActionRegistry,
-    *,
-    project_root: Path,
-    workflow_dir: Path | None = None,
-) -> WorkflowSpec:
-    _validate_json_schema(raw, WORKFLOW_SCHEMA, f"workflow {path}")
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """校验顶层 inputs/variables 定义并编译 schema。
+
+    返回 ``(input_schema, variable_schema, reference_schema, variable_defaults, variables_raw)``。
+    """
 
     inputs_raw = raw.get("inputs", {})
     variables_raw = raw.get("variables", {})
@@ -612,21 +610,28 @@ def validate_workflow(
     variable_defaults = apply_parameter_defaults(variable_definitions, {})
     for name, definition in variables_raw.items():
         initial_from = definition.get("initial_from")
-        if initial_from is not None:
-            if not isinstance(initial_from, str) or initial_from not in input_definitions:
-                raise ConfigError(f"variables.{name}.initial_from must name a declared input")
-            _validate_value({"ref": f"inputs.{initial_from}"}, node_ids=set(), reference_schema=reference_schema,
-                            output_schemas={}, available_node_ids=set(), possibly_available_node_ids=set(),
-                            path=f"variables.{name}.initial_from", expected_schema=variable_schema["properties"][name])
+        if initial_from is None:
+            continue
+        if not isinstance(initial_from, str) or initial_from not in input_definitions:
+            raise ConfigError(f"variables.{name}.initial_from must name a declared input")
+        _validate_value(
+            {"ref": f"inputs.{initial_from}"},
+            node_ids=set(),
+            reference_schema=reference_schema,
+            output_schemas={},
+            available_node_ids=set(),
+            possibly_available_node_ids=set(),
+            path=f"variables.{name}.initial_from",
+            expected_schema=variable_schema["properties"][name],
+        )
+    return input_schema, variable_schema, reference_schema, variable_defaults, variables_raw
 
-    nodes_raw = raw["nodes"]
-    assert isinstance(nodes_raw, list)
-    node_ids = [str(item["id"]) for item in nodes_raw]
-    if len(node_ids) != len(set(node_ids)):
-        raise ConfigError(f"workflow {path} contains duplicate node IDs")
-    node_id_set = set(node_ids)
-    owners = {name: definition.get("owner") for name, definition in variables_raw.items() if definition.get("owner")}
+
+def _validate_variable_scopes(nodes_raw: list[Any], variables_raw: dict[str, Any]) -> None:
+    """校验局部变量的 owner 是复合节点，且只能在 owner 子树内被引用。"""
+
     node_map = {item["id"]: item for item in nodes_raw}
+    owners = {name: definition.get("owner") for name, definition in variables_raw.items() if definition.get("owner")}
     for name, owner in owners.items():
         if not isinstance(owner, str) or owner not in node_map or node_map[owner]["type"] in {"task", "instance_parallel"}:
             raise ConfigError(f"variables.{name}.owner must name a composite node")
@@ -638,6 +643,7 @@ def validate_workflow(
                 continue
             descendants.add(current)
             pending.extend(node_map.get(current, {}).get("children", []))
+
         def check_scope(value: Any, caller: str) -> None:
             if isinstance(value, dict):
                 ref = value.get("ref")
@@ -648,10 +654,16 @@ def validate_workflow(
             elif isinstance(value, list):
                 for child in value:
                     check_scope(child, caller)
+
         for item in nodes_raw:
             check_scope(item, item["id"])
-    if raw["root"] not in node_id_set:
-        raise ConfigError(f"workflow {path} root does not name a node: {raw['root']}")
+
+
+def _build_output_schemas(
+    nodes_raw: list[Any],
+    registry: ActionRegistry,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any] | None]]:
+    """预取每个 task 节点的 Action 定义及其输出 schema。"""
 
     output_schemas: dict[str, dict[str, Any] | None] = {}
     action_specs: dict[str, Any] = {}
@@ -664,6 +676,107 @@ def validate_workflow(
             output_schemas[item["id"]] = action_specs[item["id"]].output_schema
         else:
             output_schemas[item["id"]] = None
+    return action_specs, output_schemas
+
+
+def _validate_graph_structure(
+    parsed: list[WorkflowNode],
+    raw: dict[str, Any],
+    node_id_set: set[str],
+) -> WorkflowNode:
+    """校验父子关系、环与可达性，并返回根节点。"""
+
+    node_map = {node.id: node for node in parsed}
+    root = node_map[str(raw["root"])]
+    if root.type != "root":
+        raise ConfigError("workflow root must reference a node of type root")
+    parent_counts = {node.id: 0 for node in parsed}
+    for node in parsed:
+        for child_id in node.children:
+            if child_id not in node_map:
+                raise ConfigError(f"node {node.id} references unknown child: {child_id}")
+            parent_counts[child_id] += 1
+        if node.type == "root" and len(node.children) != 1:
+            raise ConfigError(f"root node {node.id} must contain exactly one child")
+        if node.type in {"selector", "sequence"} and not node.children:
+            raise ConfigError(f"{node.type} node {node.id} must contain at least one child")
+        if node.type == "simple_parallel":
+            if len(node.children) != 2:
+                raise ConfigError(f"simple_parallel node {node.id} must contain exactly two children")
+            elif node_map[node.children[0]].type != "task":
+                raise ConfigError(f"simple_parallel node {node.id} requires a task as its first (main) child")
+        if node.type == "switch":
+            case_children = [child for _, child in node.cases]
+            if any(child not in node_map for child in case_children):
+                raise ConfigError(f"switch node {node.id} references an unknown case child")
+            if node.default_child is not None and node.default_child not in node_map:
+                raise ConfigError(f"switch node {node.id} references an unknown default child")
+            expected_children = set(case_children)
+            if node.default_child is not None:
+                expected_children.add(node.default_child)
+            if set(node.children) != expected_children:
+                raise ConfigError(f"switch node {node.id} children must list every case/default child exactly once")
+        if node.type == "instance_parallel":
+            if node.children:
+                raise ConfigError(f"instance_parallel node {node.id} cannot contain children")
+            if not node.runs:
+                raise ConfigError(f"instance_parallel node {node.id} must contain at least one run")
+        if node.type == "task" and node.children:
+            raise ConfigError(f"task node {node.id} cannot contain children")
+    if parent_counts[root.id] != 0:
+        raise ConfigError("root node cannot have a parent")
+    for node in parsed:
+        if node.type != "instance_parallel":
+            continue
+        if root.children != (node.id,) or parent_counts[node.id] != 1:
+            raise ConfigError("instance_parallel must be the Root's only direct child")
+    for node in parsed:
+        if node.id != root.id and parent_counts[node.id] != 1:
+            raise ConfigError(f"node {node.id} must have exactly one parent (found {parent_counts[node.id]})")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in visiting:
+            raise ConfigError(f"workflow contains a cycle at node {node_id}")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for child_id in node_map[node_id].children:
+            visit(child_id)
+        visiting.remove(node_id)
+        visited.add(node_id)
+
+    visit(root.id)
+    if visited != node_id_set:
+        raise ConfigError(f"workflow contains unreachable nodes: {', '.join(sorted(node_id_set - visited))}")
+    return root
+
+
+def validate_workflow(
+    raw: dict[str, Any],
+    path: Path,
+    registry: ActionRegistry,
+    *,
+    project_root: Path,
+    workflow_dir: Path | None = None,
+) -> WorkflowSpec:
+    _validate_json_schema(raw, WORKFLOW_SCHEMA, f"workflow {path}")
+
+    input_schema, variable_schema, reference_schema, variable_defaults, variables_raw = _validate_scope_definitions(raw)
+
+    nodes_raw = raw["nodes"]
+    assert isinstance(nodes_raw, list)
+    node_ids = [str(item["id"]) for item in nodes_raw]
+    if len(node_ids) != len(set(node_ids)):
+        raise ConfigError(f"workflow {path} contains duplicate node IDs")
+    node_id_set = set(node_ids)
+    _validate_variable_scopes(nodes_raw, variables_raw)
+    if raw["root"] not in node_id_set:
+        raise ConfigError(f"workflow {path} root does not name a node: {raw['root']}")
+
+    action_specs, output_schemas = _build_output_schemas(nodes_raw, registry)
 
     parsed: list[WorkflowNode] = []
     for index, item in enumerate(nodes_raw):
@@ -821,71 +934,7 @@ def validate_workflow(
             default_child=str(item["default_child"]) if isinstance(item.get("default_child"), str) else None,
         ))
 
-    node_map = {node.id: node for node in parsed}
-    root = node_map[str(raw["root"])]
-    if root.type != "root":
-        raise ConfigError("workflow root must reference a node of type root")
-    parent_counts = {node.id: 0 for node in parsed}
-    for node in parsed:
-        for child_id in node.children:
-            if child_id not in node_map:
-                raise ConfigError(f"node {node.id} references unknown child: {child_id}")
-            parent_counts[child_id] += 1
-        if node.type == "root" and len(node.children) != 1:
-            raise ConfigError(f"root node {node.id} must contain exactly one child")
-        if node.type in {"selector", "sequence"} and not node.children:
-            raise ConfigError(f"{node.type} node {node.id} must contain at least one child")
-        if node.type == "simple_parallel":
-            if len(node.children) != 2:
-                raise ConfigError(f"simple_parallel node {node.id} must contain exactly two children")
-            elif node_map[node.children[0]].type != "task":
-                raise ConfigError(f"simple_parallel node {node.id} requires a task as its first (main) child")
-        if node.type == "switch":
-            case_children = [child for _, child in node.cases]
-            if any(child not in node_map for child in case_children):
-                raise ConfigError(f"switch node {node.id} references an unknown case child")
-            if node.default_child is not None and node.default_child not in node_map:
-                raise ConfigError(f"switch node {node.id} references an unknown default child")
-            expected_children = set(case_children)
-            if node.default_child is not None:
-                expected_children.add(node.default_child)
-            if set(node.children) != expected_children:
-                raise ConfigError(f"switch node {node.id} children must list every case/default child exactly once")
-        if node.type == "instance_parallel":
-            if node.children:
-                raise ConfigError(f"instance_parallel node {node.id} cannot contain children")
-            if not node.runs:
-                raise ConfigError(f"instance_parallel node {node.id} must contain at least one run")
-        if node.type == "task" and node.children:
-            raise ConfigError(f"task node {node.id} cannot contain children")
-    if parent_counts[root.id] != 0:
-        raise ConfigError("root node cannot have a parent")
-    for node in parsed:
-        if node.type != "instance_parallel":
-            continue
-        if root.children != (node.id,) or parent_counts[node.id] != 1:
-            raise ConfigError("instance_parallel must be the Root's only direct child")
-    for node in parsed:
-        if node.id != root.id and parent_counts[node.id] != 1:
-            raise ConfigError(f"node {node.id} must have exactly one parent (found {parent_counts[node.id]})")
-
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(node_id: str) -> None:
-        if node_id in visiting:
-            raise ConfigError(f"workflow contains a cycle at node {node_id}")
-        if node_id in visited:
-            return
-        visiting.add(node_id)
-        for child_id in node_map[node_id].children:
-            visit(child_id)
-        visiting.remove(node_id)
-        visited.add(node_id)
-
-    visit(root.id)
-    if visited != node_id_set:
-        raise ConfigError(f"workflow contains unreachable nodes: {', '.join(sorted(node_id_set - visited))}")
+    root = _validate_graph_structure(parsed, raw, node_id_set)
 
     limits = raw.get("limits", {})
     assert isinstance(limits, dict)

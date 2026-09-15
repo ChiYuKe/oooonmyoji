@@ -1,15 +1,14 @@
-"""The device contract consumed by Actions and the runtime."""
+"""Action 与运行时消费的设备契约。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol, Self, runtime_checkable
 
 
 @dataclass(frozen=True)
 class DeviceFrame:
-    """A frame with raw BGRA/RGBA pixels or an encoded PNG payload."""
+    """一帧画面：既可以是 BGRA/RGBA 原始像素，也可以是编码后的 PNG。"""
 
     width: int
     height: int
@@ -18,6 +17,8 @@ class DeviceFrame:
 
     @property
     def byte_count(self) -> int:
+        """返回该帧占用的字节数，PNG 按实际载荷长度计算。"""
+
         if self.format == "png" and isinstance(self.pixels, (bytes, bytearray, memoryview)):
             return len(self.pixels)
         return self.width * self.height * 4
@@ -25,7 +26,7 @@ class DeviceFrame:
 
 @runtime_checkable
 class DeviceBackend(Protocol):
-    """Minimal device API available to trusted Actions."""
+    """可信 Action 可以使用的最小设备接口。"""
 
     width: int
     height: int
@@ -49,7 +50,7 @@ class DeviceBackend(Protocol):
 
 
 def frame_from_backend(frame: object) -> DeviceFrame:
-    """Adapt the legacy MuMu Frame without coupling the protocol to it."""
+    """把后端返回的帧适配成 DeviceFrame，避免协议依赖具体后端。"""
 
     if isinstance(frame, DeviceFrame):
         return frame

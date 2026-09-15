@@ -314,8 +314,10 @@ def load_config(path: Path | str) -> AppConfig:
         schedule_type = schedule.get("type", "manual")
         if schedule_type not in {"manual", "once", "interval"}:
             raise ConfigError(f"tasks[{index}].schedule.type is invalid")
-        if schedule_type == "interval" and _float(schedule.get("seconds"), f"tasks[{index}].schedule.seconds", 0, minimum=0.001) <= 0:
-            raise ConfigError(f"tasks[{index}].schedule.seconds must be positive")
+        if schedule_type == "interval":
+            # 缺省值 0 会在下面的正数校验中被拒绝，因此必须显式提供秒数。
+            if _float(schedule.get("seconds"), f"tasks[{index}].schedule.seconds", 0, minimum=0.001) <= 0:
+                raise ConfigError(f"tasks[{index}].schedule.seconds must be positive")
         if schedule_type == "once" and not isinstance(schedule.get("at"), str):
             raise ConfigError(f"tasks[{index}].schedule.at is required for one-shot tasks")
         for schedule_key in ("at", "start_at"):

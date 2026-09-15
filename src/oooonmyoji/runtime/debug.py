@@ -1,13 +1,13 @@
-"""Annotated per-action screenshots for workflow diagnostics."""
+"""带标注的逐步截图，用于工作流排查。"""
 
 from __future__ import annotations
 
-import re
 import threading
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from ..devices.coordinates import Rect
+from ..naming import safe_name
 from ..vision.image import frame_to_bgr
 
 
@@ -86,10 +86,6 @@ def _clicks(event: dict[str, Any]) -> Iterable[tuple[tuple[float, float], tuple[
             yield (origin[0], origin[1]), (actual[0], actual[1])
 
 
-def _safe_name(value: object) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "unknown")) or "unknown"
-
-
 def _write_bgr(path: Path, image: Any) -> None:
     try:
         import cv2
@@ -140,9 +136,9 @@ class DebugStepRecorder:
             self._counter = next(self._sequence) if self._sequence is not None else self._counter + 1
             name = (
                 f"{self._counter:06d}-"
-                f"{_safe_name(event.get('workflow_id'))}-"
-                f"{_safe_name(event.get('step_id'))}-"
-                f"{_safe_name(event.get('status'))}.png"
+                f"{safe_name(event.get('workflow_id'))}-"
+                f"{safe_name(event.get('step_id'))}-"
+                f"{safe_name(event.get('status'))}.png"
             )
             destination = self.context.artifact_dir / "debug" / name
             if self.annotate:

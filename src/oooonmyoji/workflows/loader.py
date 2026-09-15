@@ -69,12 +69,6 @@ class WorkflowLoader:
             return None
         return stat.st_mtime_ns, stat.st_size, stat.st_ctime_ns
 
-    def clear_cache(self) -> None:
-        """Drop in-process snapshots after an Action catalog refresh."""
-
-        with self._cache_lock:
-            self._cache.clear()
-
     def validate_inputs(self, workflow: WorkflowSpec, inputs: dict[str, Any]) -> None:
         try:
             from jsonschema import Draft202012Validator

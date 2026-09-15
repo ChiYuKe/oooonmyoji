@@ -1,4 +1,4 @@
-"""Command line control for the automation runtime."""
+"""自动化运行时的命令行入口。"""
 
 from __future__ import annotations
 
@@ -29,6 +29,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "config.json"
 PARTY_SOULS_LEADER_WORKFLOW = "entrypoints/mumu_0_souls_party_leader.json"
 PARTY_SOULS_MEMBER_WORKFLOW = "entrypoints/mumu_1_souls_party_member.json"
+# 组队御魂按长时运行设计，等待上限约 14 天，避免正常挂机被误判超时。
+PARTY_SOULS_RUN_TIMEOUT_SECONDS = 1209700
+MAX_PARTY_ROUNDS = 9999
 
 
 def _party_rounds(value: object) -> int:
@@ -38,8 +41,8 @@ def _party_rounds(value: object) -> int:
         rounds = int(value)
     except (TypeError, ValueError) as exc:
         raise ConfigError("party rounds must be an integer between 1 and 9999") from exc
-    if not 1 <= rounds <= 9999:
-        raise ConfigError("party rounds must be between 1 and 9999")
+    if not 1 <= rounds <= MAX_PARTY_ROUNDS:
+        raise ConfigError(f"party rounds must be between 1 and {MAX_PARTY_ROUNDS}")
     return rounds
 
 
@@ -173,6 +176,8 @@ def _print(value: Any) -> None:
 
 
 def command_validate(args: argparse.Namespace) -> int:
+    """校验配置、工作流、Action 与资源路径，输出摘要。"""
+
     config, registry, _, workflows = _load_validated(_config_path(args.config))
     _print({
         "valid": True,
@@ -186,6 +191,8 @@ def command_validate(args: argparse.Namespace) -> int:
 
 
 def command_list_workflows(args: argparse.Namespace) -> int:
+    """列出可发现的工作流及其版本、节点。"""
+
     _, _, _, workflows = _load_validated(_config_path(args.config))
     _print({workflow_id: {
         "version": spec.version,
@@ -199,6 +206,8 @@ def command_list_workflows(args: argparse.Namespace) -> int:
 
 
 def command_show_workflow(args: argparse.Namespace) -> int:
+    """按 ID 打印指定工作流的原始 JSON。"""
+
     _, _, _, workflows = _load_validated(_config_path(args.config))
     try:
         spec = workflows[args.workflow]
@@ -209,6 +218,8 @@ def command_show_workflow(args: argparse.Namespace) -> int:
 
 
 def command_list_actions(args: argparse.Namespace) -> int:
+    """列出所有已注册 Action 及其 schema。"""
+
     _, registry, _, _ = _load_validated(_config_path(args.config))
     _print({spec.name: {
         "version": spec.version,
@@ -222,6 +233,8 @@ def command_list_actions(args: argparse.Namespace) -> int:
 
 
 def command_list_instances(args: argparse.Namespace) -> int:
+    """列出自动发现与配置合并后的运行实例。"""
+
     config = load_config(_config_path(args.config))
     instances = discover_runtime_instances(config)
     _print({"instances": [{
@@ -235,6 +248,8 @@ def command_list_instances(args: argparse.Namespace) -> int:
 
 
 def command_doctor(args: argparse.Namespace) -> int:
+    """检查运行环境：配置、工作流、Action、依赖与本机设备路径。"""
+
     checks: dict[str, Any] = {
         "config": "failed",
         "workflows": "failed",
@@ -286,6 +301,8 @@ def command_doctor(args: argparse.Namespace) -> int:
 
 
 def _run_local(config_path: Path, job_id: str) -> int:
+    """在没有监督器时一次性本地执行指定任务。"""
+
     config, _, _, _ = _load_validated(config_path)
     supervisor = Supervisor(config)
     try:
@@ -304,6 +321,8 @@ def _run_workflow_local(
     inputs: dict[str, Any],
     events_file: Path | None = None,
 ) -> int:
+    """在本地监督器中运行单个工作流，并在结束后打印运行记录。"""
+
     config = expand_runtime_instances(load_config(config_path))
     registry = build_action_registry(config.action_dir)
     loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
@@ -344,6 +363,8 @@ def _run_party_souls_local(
     leader_events_file: Path | None = None,
     member_events_file: Path | None = None,
 ) -> int:
+    """在本地同时拉起队长与队员，组成双开御魂循环并等待结束。"""
+
     config = expand_runtime_instances(load_config(config_path))
     config = ensure_runtime_instance(config, leader_instance)
     config = ensure_runtime_instance(config, member_instance)
@@ -378,7 +399,7 @@ def _run_party_souls_local(
         )
         records = supervisor.wait_for_all(
             [member_run_id, leader_run_id],
-            timeout_seconds=1209700,
+            timeout_seconds=PARTY_SOULS_RUN_TIMEOUT_SECONDS,
             cancel_on_failure=True,
         )
         member_record = records.get(member_run_id)
@@ -397,6 +418,8 @@ def _run_party_souls_local(
 
 
 def command_run(args: argparse.Namespace) -> int:
+    """运行配置中已注册的任务；无监督器时回退到本地一次性执行。"""
+
     path = _config_path(args.config)
     try:
         response = send_control({"command": "run", "job_id": args.job})
@@ -407,6 +430,8 @@ def command_run(args: argparse.Namespace) -> int:
 
 
 def command_run_workflow(args: argparse.Namespace) -> int:
+    """直接按 JSON 节点图运行指定工作流。"""
+
     path = _config_path(args.config)
     workflow, inputs = _prepare_workflow_run(path, args.workflow, args.instance, args.inputs)
     event_file_value = str(args.events_file) if args.events_file is not None else None
@@ -425,6 +450,8 @@ def command_run_workflow(args: argparse.Namespace) -> int:
 
 
 def command_run_party_souls(args: argparse.Namespace) -> int:
+    """按配置启动组队御魂的队长与队员实例。"""
+
     path = _config_path(args.config)
     rounds = _party_rounds(args.rounds)
     realm_threshold = _realm_threshold(args.realm_threshold)
@@ -461,6 +488,8 @@ def command_run_party_souls(args: argparse.Namespace) -> int:
 
 
 def command_cancel(args: argparse.Namespace) -> int:
+    """请求取消指定运行。"""
+
     try:
         response = send_control({"command": "cancel", "run_id": args.run_id})
         _print(response)
@@ -471,6 +500,8 @@ def command_cancel(args: argparse.Namespace) -> int:
 
 
 def command_status(args: argparse.Namespace) -> int:
+    """查询监督器运行状态；未运行时返回本地调度状态。"""
+
     try:
         response = send_control({"command": "status"})
         _print(response)
@@ -483,6 +514,8 @@ def command_status(args: argparse.Namespace) -> int:
 
 
 def command_serve(args: argparse.Namespace) -> int:
+    """启动常驻监督器，通过命名管道接收其他 CLI 命令。"""
+
     config, _, loader, _ = _load_validated(_config_path(args.config))
     safe_retry_jobs = {
         job.id for job in config.jobs
@@ -602,6 +635,8 @@ def command_serve(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """构建命令行解析器，注册全部子命令。"""
+
     parser = argparse.ArgumentParser(prog="oooonmyoji", description=__doc__)
     parser.add_argument("--config", default=None, help=f"JSON configuration path (default: {DEFAULT_CONFIG.name}, then config.example.json)")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -628,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_party_souls.add_argument(
         "--rounds",
         type=_party_rounds_argument,
-        default=9999,
+        default=MAX_PARTY_ROUNDS,
         metavar="1..9999",
         help="运行轮数，范围 1..9999（默认 9999）",
     )
@@ -670,6 +705,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI 主入口：解析参数并执行对应子命令。"""
+
     args = build_parser().parse_args(argv)
     try:
         return int(args.function(args))

@@ -809,10 +809,4 @@ class ProjectContextService:
         }
 
 
-def as_json(value: Any) -> str:
-    """Serialize a context value for the guide/resource boundary."""
-
-    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
-
-
-__all__ = ["PROJECT_GUIDE", "ProjectContextService", "as_json"]
+__all__ = ["PROJECT_GUIDE", "ProjectContextService"]

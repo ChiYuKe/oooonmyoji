@@ -108,12 +108,6 @@ class AppConfig:
         except KeyError as exc:
             raise StopIteration from exc
 
-    def workflow_path(self, workflow: str) -> Path:
-        candidate = Path(workflow)
-        if candidate.suffix.lower() != ".json":
-            candidate = candidate.with_suffix(".json")
-        return (self.workflow_dir / candidate).resolve()
-
 
 __all__ = [
     "AppConfig",

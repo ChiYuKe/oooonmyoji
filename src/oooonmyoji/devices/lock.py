@@ -1,4 +1,4 @@
-"""Cross-process instance locks."""
+"""跨进程的实例锁。"""
 
 from __future__ import annotations
 
@@ -6,17 +6,18 @@ import os
 from pathlib import Path
 from typing import BinaryIO
 
+from ..naming import safe_name
+
 
 class InstanceLockError(RuntimeError):
-    """The instance is already controlled by another process."""
+    """实例已被另一个进程占用。"""
 
 
 class InstanceLock:
-    """A small advisory lock held for the lifetime of a controller process."""
+    """控制器进程生命周期内持有的轻量建议锁。"""
 
     def __init__(self, lock_dir: Path | str, instance_id: str) -> None:
-        safe_id = "".join(char if char.isalnum() or char in "._-" else "_" for char in instance_id)
-        self.path = Path(lock_dir) / f"{safe_id}.lock"
+        self.path = Path(lock_dir) / f"{safe_name(instance_id)}.lock"
         self._handle: BinaryIO | None = None
 
     def acquire(self) -> None:

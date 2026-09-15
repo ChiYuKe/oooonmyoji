@@ -335,16 +335,6 @@ class ActionDefinition:
     def retry_safe(self) -> bool:
         return self.retry == "safe"
 
-    @property
-    def output_fields(self) -> tuple[str, ...]:
-        properties = self.output_schema.get("properties")
-        if (
-            self.output_schema.get("type") == "object"
-            and isinstance(properties, dict)
-        ):
-            return tuple(properties.keys())
-        return ()
-
     @classmethod
     def parse(cls, manifest: dict[str, Any]) -> "ActionDefinition":
         if manifest.get("schema_version") != 2:

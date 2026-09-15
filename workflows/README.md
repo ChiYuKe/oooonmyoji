@@ -97,7 +97,6 @@ python -m src.oooonmyoji.cli --config .\config\config.json run-workflow three_mu
 ## 结界突破
 
 - `realm/shared/realm_raid_loop.json`：结界突破主循环。每页固定处理 9 个目标，前 8 个正常挑战；第 9 个目标按“进入战斗、返回列表”重复 4 次，第 5 次正式击败。券读到 0 后结束，输入 `resume_souls=true` 时会按配置模板恢复御魂。
-- 结界页每轮开始会通过 `realm.detect_progress` 扫描 9 个目标区域，输出 `completed_count`、`completed[]` 和 `next_index`。完成态可用 OCR 文本（默认“已挑战/已击败/胜利/占领”）或 `completed_templates` 配置；识别不到完成标记时会安全回退为从第 1 个目标执行。
 - `souls/shared/reward_statistics.json`：每轮奖励照常统计；启用券追踪后，首次命中突破券会点击并读取“已拥有”作为基准，后续只累计奖励数量，预计达到阈值时再次点击复核。
 - `realm/shared/schedule_from_souls.json`：只消费奖励页已经复核的 `should_enter_realm` 信号，不再从庭院或其他非结界页面读取券数。
 - `run-party-souls --realm-threshold 30`：默认只让队员执行上述调度。队长会在房间内按最新画面重新发送邀请，每次发送后确认队员入房；最长等待两小时，超时后停止并保留失败现场。可用 `--disable-member-realm-raid` 临时关闭。

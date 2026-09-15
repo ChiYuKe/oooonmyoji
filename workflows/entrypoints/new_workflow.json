@@ -1,0 +1,85 @@
+{
+  "schema_version": 4,
+  "id": "new_workflow",
+  "version": "4.0.0",
+  "description": "",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "inputs": {
+    "子工作流": {
+      "type": "string",
+      "default": "活动副本.json",
+      "display_name": "子工作流"
+    }
+  },
+  "variables": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "capture"
+      ]
+    },
+    {
+      "id": "capture",
+      "type": "task",
+      "action": "workflow.run",
+      "params": {
+        "inputs": {},
+        "workflow": {
+          "ref": "inputs.子工作流"
+        }
+      }
+    },
+    {
+      "id": "task_1",
+      "type": "task",
+      "action": "core.assert",
+      "params": {}
+    },
+    {
+      "id": "task_2",
+      "type": "task",
+      "action": "core.assert",
+      "params": {}
+    }
+  ],
+  "_layout": {
+    "capture": {
+      "x": 0,
+      "y": 208
+    },
+    "root": {
+      "x": 0,
+      "y": 0
+    },
+    "task_1": {
+      "x": -132,
+      "y": 236
+    },
+    "task_2": {
+      "x": -132,
+      "y": 236
+    }
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "子工作流",
+      "scope": "inputs",
+      "x": -264,
+      "y": 296
+    }
+  },
+  "_variableLinks": {
+    "capture:workflow": "card_1"
+  },
+  "_inputParams": {
+    "capture": [
+      "workflow"
+    ]
+  }
+}

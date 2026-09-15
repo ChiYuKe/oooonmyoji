@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const source=fs.readFileSync(require('node:path').join(__dirname,'../public/legacy/workflow-editor.js'),'utf8');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../public/legacy/editor-composite-inspector.js'),'utf8');
 function harness(){
   const ctx=vm.createContext({state:{raw:{inputs:{},variables:{}}},clone:v=>JSON.parse(JSON.stringify(v)),
     VariableSystem:require('../public/legacy/variable-system.js'),valueBindingMenu:()=>({label:'绑定'}),

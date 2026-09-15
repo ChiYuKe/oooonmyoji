@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const source=fs.readFileSync(path.join(__dirname,'../public/legacy/workflow-editor.js'),'utf8');
+const source=fs.readFileSync(path.join(__dirname,'../public/legacy/editor-composite-inspector.js'),'utf8');
 function harness() {
   const el=(tag,className='',textContent='')=>({tag,className,textContent,children:[],events:{},setAttribute(){},appendChild(child){this.children.push(child);},addEventListener(name,fn){this.events[name]=fn;}});
   const ctx=vm.createContext({el,mutate:fn=>fn(),section:(body,title)=>body.appendChild(el('h3','section-header',title)),

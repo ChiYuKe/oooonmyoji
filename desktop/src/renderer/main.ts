@@ -128,24 +128,6 @@ interface RuntimeLogEnvelope {
   message?: { type?: string };
 }
 
-interface TooltipRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  width: number;
-  height: number;
-}
-
-interface TooltipMessage {
-  source?: string;
-  type?: 'show' | 'showAsset' | 'hide';
-  text?: string;
-  preview?: { uri?: string; path?: string };
-  rect?: TooltipRect;
-  frameId?: string;
-}
-
 interface InspectorSelection {
   kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow';
   nodeId?: string;
@@ -294,158 +276,19 @@ const desktopIcons = {
   X,
 };
 
-/** 将浏览器原生 title 提示迁移为工作台统一的自定义 tooltip。 */
+/** 将浏览器原生 title 提示迁移为工作台统一的自定义 tooltip（宿主侧，接收子页面消息）。 */
 function installCustomTooltips(): void {
-  const htmlNamespace = 'http://www.w3.org/1999/xhtml';
-  const tooltip = document.createElement('div');
-  tooltip.className = 'app-tooltip hidden';
-  tooltip.setAttribute('role', 'tooltip');
-  document.body.appendChild(tooltip);
-  let activeTarget: HTMLElement | undefined;
-  let activeRect: TooltipRect | undefined;
-
-  const rectFromDomRect = (rect: DOMRect): TooltipRect => ({
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-    width: rect.width,
-    height: rect.height,
-  });
-  const position = (rect: TooltipRect): void => {
-    const margin = 8;
-    const gap = 7;
-    tooltip.style.left = '0px';
-    tooltip.style.top = '0px';
-    const width = tooltip.offsetWidth;
-    const height = tooltip.offsetHeight;
-    const x = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
-    let y = rect.bottom + gap;
-    if (y + height > window.innerHeight - margin) y = rect.top - height - gap;
-    y = Math.max(margin, Math.min(y, window.innerHeight - height - margin));
-    tooltip.style.left = `${Math.round(x)}px`;
-    tooltip.style.top = `${Math.round(y)}px`;
-  };
-  const hide = (): void => {
-    activeTarget = undefined;
-    activeRect = undefined;
-    tooltip.classList.add('hidden');
-  };
-  const show = (text: string, rect: TooltipRect, target?: HTMLElement): void => {
-    if (!text.trim()) return hide();
-    activeTarget = target;
-    activeRect = rect;
-    tooltip.classList.remove('asset-preview');
-    tooltip.textContent = text;
-    tooltip.classList.remove('hidden');
-    position(rect);
-  };
-  const showAsset = (preview: { uri?: string; path?: string }, rect: TooltipRect): void => {
-    const uri = typeof preview.uri === 'string' ? preview.uri.trim() : '';
-    if (!uri) return hide();
-    activeTarget = undefined;
-    activeRect = rect;
-    tooltip.replaceChildren();
-    tooltip.classList.add('asset-preview');
-    const image = document.createElement('img');
-    image.src = uri;
-    image.alt = '';
-    image.decoding = 'async';
-    const path = document.createElement('span');
-    path.className = 'app-tooltip-preview-path';
-    path.textContent = typeof preview.path === 'string' ? preview.path : '';
-    tooltip.append(image, path);
-    tooltip.classList.remove('hidden');
-    position(rect);
-    image.addEventListener('load', () => {
-      if (activeRect === rect && tooltip.classList.contains('asset-preview')) position(rect);
-    }, { once: true });
-    image.addEventListener('error', () => {
-      if (activeRect !== rect || !tooltip.classList.contains('asset-preview')) return;
-      image.remove();
-      const missing = document.createElement('div');
-      missing.className = 'app-tooltip-preview-missing';
-      missing.textContent = '图片无法预览';
-      tooltip.insertBefore(missing, path);
-      position(rect);
-    }, { once: true });
-  };
-  const targetForEvent = (event: Event): HTMLElement | undefined => {
-    const target = event.target;
-    return target instanceof Element ? target.closest<HTMLElement>('[data-tooltip]') ?? undefined : undefined;
-  };
-  const scan = (): void => {
-    document.querySelectorAll<HTMLElement>('[title]').forEach((element) => {
-      if (element.namespaceURI !== htmlNamespace || element.tagName === 'IFRAME') return;
-      const label = element.getAttribute('title')?.trim();
-      if (!label) return;
-      element.dataset.tooltip = label;
-      element.removeAttribute('title');
-      if (!element.getAttribute('aria-label') && /^(BUTTON|INPUT|SELECT)$/.test(element.tagName)) {
-        element.setAttribute('aria-label', label.replace(/\s+/g, ' '));
-      }
-    });
-  };
-
-  scan();
-  const observer = new MutationObserver(scan);
-  observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
-  document.addEventListener('mouseover', (event) => {
-    const target = targetForEvent(event);
-    if (!target) return hide();
-    show(target.dataset.tooltip || '', rectFromDomRect(target.getBoundingClientRect()), target);
-  });
-  document.addEventListener('mouseout', (event) => {
-    if (!activeTarget || event.target !== activeTarget) return;
-    const related = event.relatedTarget;
-    if (!(related instanceof Node) || !activeTarget.contains(related)) hide();
-  });
-  document.addEventListener('focusin', (event) => {
-    const target = targetForEvent(event);
-    if (target) show(target.dataset.tooltip || '', rectFromDomRect(target.getBoundingClientRect()), target);
-  });
-  document.addEventListener('focusout', (event) => {
-    if (activeTarget && event.target === activeTarget) hide();
-  });
-  document.addEventListener('pointerdown', hide, true);
-  window.addEventListener('blur', hide);
-  window.addEventListener('resize', () => {
-    if (activeRect && !tooltip.classList.contains('hidden')) position(activeRect);
-  });
-  window.addEventListener('scroll', hide, true);
-
-  window.addEventListener('message', (event: MessageEvent<TooltipMessage>) => {
-    const message = event.data;
-    if (message?.source !== 'onmyoji-tooltip') return;
-    if (message.type === 'hide') {
-      hide();
-      return;
-    }
-    if ((message.type !== 'show' && message.type !== 'showAsset') || !message.rect) return;
-    const sourceFrame = event.source === editorFrame.contentWindow
-      ? editorFrame
-      : event.source === detailsFrame.contentWindow
-        ? detailsFrame
-        : event.source === runtimeLogFrame.contentWindow
-          ? runtimeLogFrame
-          : undefined;
-    if (!sourceFrame) return;
-    const frameRect = sourceFrame.getBoundingClientRect();
-    const rect = {
-      left: frameRect.left + message.rect.left,
-      top: frameRect.top + message.rect.top,
-      right: frameRect.left + message.rect.right,
-      bottom: frameRect.top + message.rect.bottom,
-      width: message.rect.width,
-      height: message.rect.height,
-    };
-    if (message.type === 'showAsset' && message.preview) {
-      showAsset(message.preview, rect);
-    } else if (message.type === 'show') {
-      show(message.text || '', rect);
-    }
+  window.StudioTooltip?.install({
+    bridge: 'receive',
+    assetPreview: true,
+    ariaLabelTags: /^(BUTTON|INPUT|SELECT)$/,
+    trimText: true,
+    repositionOnResize: true,
+    hideOnScroll: true,
+    receiverFrames: () => [editorFrame, detailsFrame, runtimeLogFrame],
   });
 }
+
 
 const editorFrame = document.querySelector<HTMLIFrameElement>('#editor-frame')!;
 const detailsFrame = document.querySelector<HTMLIFrameElement>('#details-frame')!;

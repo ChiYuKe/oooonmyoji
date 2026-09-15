@@ -32,10 +32,35 @@ export interface StudioShortcutsApi {
   subscribe(listener: () => void): () => void;
 }
 
+export interface StudioTooltipInstallOptions {
+  attribute?: string;
+  scanTitles?: boolean;
+  ariaLabelTags?: RegExp | null;
+  assetPreview?: boolean;
+  bridge?: 'none' | 'send' | 'receive';
+  embedded?: 'auto' | 'host' | 'embedded';
+  repositionOnResize?: boolean;
+  hideOnScroll?: boolean;
+  suppressSelector?: string | null;
+  trimText?: boolean;
+  receiverFrames?: () => HTMLIFrameElement[];
+}
+
+export interface StudioTooltipHandle {
+  show(text: string, rect: DOMRectReadOnly, target?: HTMLElement): void;
+  hide(): void;
+  scan(): void;
+}
+
+export interface StudioTooltipApi {
+  install(options?: StudioTooltipInstallOptions): StudioTooltipHandle;
+}
+
 declare global {
   interface Window {
     onmyoji: OnmyojiDesktopApi;
     StudioShortcuts: StudioShortcutsApi;
+    StudioTooltip?: StudioTooltipApi;
   }
 }
 

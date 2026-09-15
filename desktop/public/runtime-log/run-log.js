@@ -24,93 +24,15 @@
 
   const $ = (id) => document.getElementById(id);
 
-  // 工作台统一接管 HTML 控件的 title，避免出现浏览器原生提示框。
-  function installCustomTooltips() {
-    const embedded = window.parent !== window;
-    let tooltipNode = null;
-    let activeTarget = null;
-    const ensureTooltip = () => {
-      if (!tooltipNode) {
-        tooltipNode = document.createElement('div');
-        tooltipNode.className = 'app-tooltip hidden';
-        tooltipNode.setAttribute('role', 'tooltip');
-        document.body.appendChild(tooltipNode);
-      }
-      return tooltipNode;
-    };
-    const sendToParent = (message) => window.parent.postMessage({ source: 'onmyoji-tooltip', ...message }, '*');
-    const show = (target) => {
-      const text = target.dataset.tooltip || '';
-      if (!text) return hide();
-      const rect = target.getBoundingClientRect();
-      activeTarget = target;
-      if (embedded) {
-        sendToParent({ type: 'show', text, rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } });
-        return;
-      }
-      const node = ensureTooltip();
-      node.textContent = text;
-      node.classList.remove('hidden');
-      position(node, rect);
-    };
-    const hide = () => {
-      activeTarget = null;
-      if (embedded) sendToParent({ type: 'hide' });
-      else if (tooltipNode) tooltipNode.classList.add('hidden');
-    };
-    const position = (node, rect) => {
-      const margin = 8;
-      const gap = 7;
-      node.style.left = '0px';
-      node.style.top = '0px';
-      const width = node.offsetWidth;
-      const height = node.offsetHeight;
-      const x = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
-      let y = rect.bottom + gap;
-      if (y + height > window.innerHeight - margin) y = rect.top - height - gap;
-      y = Math.max(margin, Math.min(y, window.innerHeight - height - margin));
-      node.style.left = `${Math.round(x)}px`;
-      node.style.top = `${Math.round(y)}px`;
-    };
-    const targetForEvent = (event) => {
-      const target = event.target;
-      return target instanceof Element ? target.closest('[data-tooltip]') : null;
-    };
-    const scan = () => {
-      document.querySelectorAll('[title]').forEach((element) => {
-        if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || element.tagName === 'IFRAME') return;
-        const label = element.getAttribute('title') && element.getAttribute('title').trim();
-        if (!label) return;
-        element.dataset.tooltip = label;
-        element.removeAttribute('title');
-        if (!element.getAttribute('aria-label') && /^(BUTTON|INPUT|SELECT)$/.test(element.tagName)) {
-          element.setAttribute('aria-label', label.replace(/\s+/g, ' '));
-        }
-      });
-    };
-    scan();
-    const observer = new MutationObserver(scan);
-    observer.observe(document.body, { attributes: true, attributeFilter: ['title'], childList: true, subtree: true });
-    document.addEventListener('mouseover', (event) => {
-      const target = targetForEvent(event);
-      if (target) show(target); else hide();
+  // 统一 tooltip 由 public/shared/tooltip.js 提供；嵌入时把提示位置转发给父窗口。
+  if (window.StudioTooltip) {
+    window.StudioTooltip.install({
+      bridge: 'send',
+      embedded: 'auto',
+      ariaLabelTags: /^(BUTTON|INPUT|SELECT)$/,
     });
-    document.addEventListener('mouseout', (event) => {
-      if (!activeTarget || event.target !== activeTarget) return;
-      const related = event.relatedTarget;
-      if (!(related instanceof Node) || !activeTarget.contains(related)) hide();
-    });
-    document.addEventListener('focusin', (event) => {
-      const target = targetForEvent(event);
-      if (target) show(target);
-    });
-    document.addEventListener('focusout', (event) => {
-      if (activeTarget && event.target === activeTarget) hide();
-    });
-    document.addEventListener('pointerdown', hide, true);
-    window.addEventListener('blur', hide);
   }
-  installCustomTooltips();
+
 
   /** 时间线最多渲染的行数：超出时只显示最新的这一数量，统计数据仍按全部行计算。 */
   const MAX_VISIBLE_ROWS = 300;

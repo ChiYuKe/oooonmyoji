@@ -370,14 +370,18 @@
       const match = asObject(params.match);
       const point = formatPoint(outputObject.x ?? params.x, outputObject.y ?? params.y);
       const template = match.template;
+      const verifiesGone = row.action === 'input.tap_match' && params.verify_gone === true;
       operation = row.action === 'input.tap'
         ? `点击坐标${point ? `：${point}` : ''}`
-        : `点击匹配位置${template ? `：${fileLabel(template)}` : (point ? `：${point}` : '')}`;
+        : `${verifiesGone ? '点击并确认模板消失' : '点击匹配位置'}${template ? `：${fileLabel(template)}` : (point ? `：${point}` : '')}`;
       if (row.action === 'input.tap_match' && point && template) facts.push(`实际坐标 ${point}`);
       if (Number(outputObject.offset_x) || Number(outputObject.offset_y)) facts.push(`实际偏移 ${formatPoint(outputObject.offset_x, outputObject.offset_y)}`);
       if (Number.isFinite(Number(outputObject.interval_seconds)) && Number(outputObject.interval_seconds) > 0) facts.push(`点击前等待 ${formatNumber(outputObject.interval_seconds)} s`);
       if (Number.isFinite(Number(params.hold_ms)) && Number(params.hold_ms) > 0) facts.push(`按住 ${formatNumber(params.hold_ms)} ms`);
       if (hasOwn(outputObject, 'revalidated')) facts.push(outputObject.revalidated ? '已重新校验' : '未重新校验');
+      if (row.action === 'input.tap_match' && hasOwn(outputObject, 'verified_gone')) {
+        facts.push(outputObject.verified_gone ? '点击后已确认模板消失' : '点击后模板仍存在');
+      }
     } else if (row.action === 'core.log') {
       const message = params.message ?? outputObject.message;
       operation = `输出日志${message !== undefined ? `：${String(message)}` : ''}`;
@@ -402,10 +406,6 @@
       operation = '识别屏幕文字';
       if (params.roi) facts.push(`ROI ${formatRect(params.roi)}`);
       if (Array.isArray(output)) facts.push(`识别 ${output.length} 项`);
-    } else if (row.action === 'stats.enqueue_reward') {
-      operation = `提交奖励识别${params.layer ? `：第 ${params.layer} 层` : ''}`;
-      if (params.roi) facts.push(`ROI ${formatRect(params.roi)}`);
-      if (hasOwn(outputObject, 'accepted')) facts.push(outputObject.accepted ? '后台已接收' : '后台未接收');
     } else if (row.action === 'workflow.run') {
       const workflow = params.workflow || outputObject.workflow;
       operation = `运行子工作流${workflow ? `：${fileLabel(workflow).replace(/\.json$/i, '')}` : ''}`;

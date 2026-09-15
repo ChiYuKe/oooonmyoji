@@ -3,7 +3,7 @@
   "name": "input.tap_match",
   "version": "1.0.0",
   "entry": "builtin:TapMatchAction",
-  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。有输入副作用，默认不可自动重试。输出实际点击坐标、偏移量和等待间隔。",
+  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。开启重新校验后，每次执行都会先重新确认模板仍在画面中；开启 verify_gone 后，点击节点会在自身内部确认原模板消失，确认失败时由 Retry 只重试当前点击节点。输出实际点击坐标、偏移量和等待间隔。",
   "parameters": {
     "match": {
       "type": "object",
@@ -54,6 +54,17 @@
       "max_items": 2,
       "default": [0, 0],
       "description": "点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]"
+    },
+    "verify_gone": {
+      "type": "boolean",
+      "default": false,
+      "description": "点击后在当前节点内部确认原模板消失；失败时当前节点可由 Retry 重试"
+    },
+    "verify_timeout_seconds": {
+      "type": "number",
+      "default": 8,
+      "min": 0,
+      "description": "确认原模板消失的最长等待时间，默认 8 秒"
     }
   },
   "outputs": {
@@ -68,9 +79,10 @@
       "interval_seconds": { "type": "number" },
       "revalidated": { "type": "boolean" },
       "skipped": { "type": "boolean" },
-      "final_state": { "type": "string" }
+      "final_state": { "type": "string" },
+      "verified_gone": { "type": "boolean" }
     },
     "additionalProperties": false
   },
-  "effects": { "side_effect": true, "retry": "unsafe" }
+  "effects": { "side_effect": true, "retry": "safe" }
 }

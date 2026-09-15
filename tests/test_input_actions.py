@@ -93,8 +93,42 @@ def test_tap_match_applies_variation_to_match_center(monkeypatch: pytest.MonkeyP
         "revalidated": False,
         "skipped": False,
         "final_state": "",
+        "verified_gone": False,
     }
     assert context.taps == [(122, 211, 0)]
+
+
+def test_tap_match_can_confirm_template_disappeared_inside_the_same_node() -> None:
+    context = StateContext("realm")
+    result = TapMatchAction().execute(context, {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png", "threshold": 0.9},
+        "revalidate": True,
+        "verify_gone": True,
+        "verify_timeout_seconds": 0.1,
+    })
+
+    assert result.status.value == "succeeded"
+    assert result.output["verified_gone"] is True
+    assert context.taps == [(120, 210, 0)]
+
+
+def test_tap_match_fails_when_template_does_not_disappear() -> None:
+    class NoEffectContext(StateContext):
+        def tap(self, x: int, y: int, *, hold_ms: int = 0) -> None:
+            TapContext.tap(self, x, y, hold_ms=hold_ms)
+
+    context = NoEffectContext("realm")
+    result = TapMatchAction().execute(context, {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png", "threshold": 0.9},
+        "revalidate": True,
+        "verify_gone": True,
+        "verify_timeout_seconds": 0,
+    })
+
+    assert result.status.value == "failed"
+    assert result.error_category == "vision"
+    assert result.output["verified_gone"] is False
+    assert context.taps == [(120, 210, 0)]
 
 
 def test_tap_match_accepts_confirmed_next_state_when_transient_match_disappears() -> None:

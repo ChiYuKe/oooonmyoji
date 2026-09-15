@@ -223,25 +223,8 @@
 :root[data-theme="light"] .workflow-document-tab-empty {
     color: #696969
 }
-:root[data-theme="light"] .workflow-document-tab {
-    border-right: 1px solid #e1e1e1;
-    background: #f2f2f2;
-    color: #696969
-}
-:root[data-theme="light"] .workflow-document-tab:hover {
-    background: #eaeaea;
-    color: #272727
-}
-:root[data-theme="light"] .workflow-document-tab.active {
-    background: #f2f2f2;
-    color: #272727
-}
-:root[data-theme="light"] .workflow-document-tab-close {
-    color: #696969
-}
-:root[data-theme="light"] .workflow-document-tab-close:hover {
-    background: #e0e0e0;
-    color: #232323
+:root[data-theme="light"] .onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container .workflow-document-tab.dv-inactive-tab:hover {
+    background-color: #eaeaea
 }
 :root[data-theme="light"] .dockview-popout-host .popout-titlebar {
     border-bottom: 1px solid #dfdfdf;

@@ -23,15 +23,15 @@
         <div class="menu-root">
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">编辑</button>
           <div class="titlebar-dropdown" role="menu">
-            <button type="button" role="menuitem" data-editor-command="undo"><span>撤销</span><kbd>Ctrl+Z</kbd></button>
-            <button type="button" role="menuitem" data-editor-command="redo"><span>重做</span><kbd>Ctrl+Y</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="undo" data-shortcut="editor.undo"><span>撤销</span><kbd>Ctrl+Z</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="redo" data-shortcut="editor.redo"><span>重做</span><kbd>Ctrl+Shift+Z / Ctrl+Y</kbd></button>
             <div class="menu-separator" role="separator"></div>
-            <button type="button" role="menuitem" data-editor-command="cut"><span>剪切</span><kbd>Ctrl+X</kbd></button>
-            <button type="button" role="menuitem" data-editor-command="copy"><span>复制</span><kbd>Ctrl+C</kbd></button>
-            <button type="button" role="menuitem" data-editor-command="paste"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
-            <button type="button" role="menuitem" data-editor-command="deleteSelection"><span>删除所选</span><kbd>Delete</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="cut" data-shortcut="editor.cut"><span>剪切</span><kbd>Ctrl+X</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="copy" data-shortcut="editor.copy"><span>复制</span><kbd>Ctrl+C</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="paste" data-shortcut="editor.paste"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="deleteSelection" data-shortcut="editor.delete"><span>删除所选</span><kbd>Delete</kbd></button>
             <div class="menu-separator" role="separator"></div>
-            <button type="button" role="menuitem" data-desktop-command="save"><span>保存工作流</span><kbd>Ctrl+S</kbd></button>
+            <button type="button" role="menuitem" data-desktop-command="save" data-shortcut="editor.save"><span>保存工作流</span><kbd>Ctrl+S</kbd></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-app-command="settings"><span>设置</span></button>
           </div>
@@ -52,9 +52,9 @@
             <button type="button" role="menuitemcheckbox" data-dock-panel="details" aria-checked="true"><span>详细信息</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="runtime" aria-checked="true"><span>运行日志</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
-            <button type="button" role="menuitem" data-dock-command="popoutActive"><span>当前模块移到独立窗口</span><kbd>Shift+F6</kbd></button>
+            <button type="button" role="menuitem" data-dock-command="popoutActive" data-shortcut="global.popout"><span>当前模块移到独立窗口</span><kbd>Shift+F6</kbd></button>
             <div class="menu-separator" role="separator"></div>
-            <button type="button" role="menuitem" data-editor-command="fitView"><span>适应画布</span><kbd>Home</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="fitView" data-shortcut="editor.fitView"><span>适应画布</span><kbd>Home</kbd></button>
             <button type="button" role="menuitem" data-layout-command="reset"><span>恢复默认布局</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-window-command="minimize"><span>最小化</span></button>
@@ -75,7 +75,7 @@
         <div class="menu-root">
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">选择</button>
           <div class="titlebar-dropdown" role="menu">
-            <button type="button" role="menuitem" data-editor-command="selectAll"><span>全选节点</span><kbd>Ctrl+A</kbd></button>
+            <button type="button" role="menuitem" data-editor-command="selectAll" data-shortcut="editor.selectAll"><span>全选节点</span><kbd>Ctrl+A</kbd></button>
             <button type="button" role="menuitem" data-editor-command="clearSelection"><span>取消选择</span></button>
           </div>
         </div>
@@ -266,7 +266,11 @@
               <h2>运行</h2><p class="settings-intro">配置启动行为与调试记录。</p>
               <h3 class="settings-section-title">启动</h3>
               <label class="settings-row">
-                <span class="settings-row-copy"><strong>启动时加载默认工作流</strong><small>打开应用后自动加载，不会自动执行。</small></span>
+                <span class="settings-row-copy"><strong>启动时恢复上次画布</strong><small>重新打开应用后回到上次的工作流与未保存内容。</small></span>
+                <input id="settings-restore-session" class="ui-checkbox" type="checkbox" aria-label="启动时恢复上次画布">
+              </label>
+              <label class="settings-row">
+                <span class="settings-row-copy"><strong>启动时加载默认工作流</strong><small>没有可恢复的画布时自动加载，不会自动执行。</small></span>
                 <input id="settings-default-workflow" class="ui-checkbox" type="checkbox" aria-label="启动时加载默认工作流">
               </label>
               <h3 class="settings-section-title">调试截图</h3>
@@ -280,43 +284,24 @@
               </label>
             </section>
             <section id="settings-page-shortcuts" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-shortcuts">
-              <h2>快捷键</h2><p class="settings-intro">工作台当前生效的键盘操作，按使用区域分组。</p>
-              <h3 class="settings-section-title">全局</h3>
+              <h2>快捷键</h2><p class="settings-intro">点击按键组合后按下新快捷键即可修改，修改立即生效并自动保存。</p>
+              <div id="settings-shortcuts-list" class="shortcut-groups"></div>
+              <p id="settings-shortcuts-feedback" class="shortcut-feedback" role="status"></p>
+              <div class="shortcut-actions">
+                <button id="settings-shortcuts-reset-all" type="button">全部恢复默认</button>
+              </div>
+              <h3 class="settings-section-title">固定操作</h3>
               <ul class="shortcut-list">
-                <li class="shortcut-row"><span class="shortcut-action">删除当前选中项</span><span class="shortcut-keys"><kbd>Delete</kbd><kbd>Backspace</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">将当前模块移到独立窗口</span><span class="shortcut-keys"><kbd>Shift+F6</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">关闭菜单或弹窗、取消当前操作</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
-              </ul>
-              <h3 class="settings-section-title">工作流画布</h3>
-              <ul class="shortcut-list">
-                <li class="shortcut-row"><span class="shortcut-action">撤销</span><span class="shortcut-keys"><kbd>Ctrl+Z</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">重做</span><span class="shortcut-keys"><kbd>Ctrl+Shift+Z</kbd><kbd>Ctrl+Y</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">剪切所选节点</span><span class="shortcut-keys"><kbd>Ctrl+X</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">复制所选节点</span><span class="shortcut-keys"><kbd>Ctrl+C</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">在光标处粘贴节点</span><span class="shortcut-keys"><kbd>Ctrl+V</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">全选节点</span><span class="shortcut-keys"><kbd>Ctrl+A</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">保存工作流</span><span class="shortcut-keys"><kbd>Ctrl+S</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">删除所选节点、连线或变量</span><span class="shortcut-keys"><kbd>Delete</kbd><kbd>Backspace</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">适应画布</span><span class="shortcut-keys"><kbd>Home</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">聚焦到唯一选中的节点</span><span class="shortcut-keys"><kbd>F</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">追加选择节点</span><span class="shortcut-keys"><kbd>Shift+点击</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">框选并追加选择</span><span class="shortcut-keys"><kbd>Shift+拖拽空白</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">平移画布</span><span class="shortcut-keys"><kbd>中键/右键拖拽</kbd><kbd>Alt+拖拽</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">缩放画布</span><span class="shortcut-keys"><kbd>滚轮</kbd></span></li>
+                <li class="shortcut-row"><span class="shortcut-action">追加选择节点 / 框选</span><span class="shortcut-keys"><kbd>Shift+点击</kbd><kbd>Shift+拖拽</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">断开变量连接</span><span class="shortcut-keys"><kbd>Alt+点击连线</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">取消连线、拖拽或框选</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
-              </ul>
-              <h3 class="settings-section-title">运行日志</h3>
-              <ul class="shortcut-list">
+                <li class="shortcut-row"><span class="shortcut-action">取消连线、拖拽或关闭弹层</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">关闭截图大图预览</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
-              </ul>
-              <h3 class="settings-section-title">菜单与对话框</h3>
-              <ul class="shortcut-list">
                 <li class="shortcut-row"><span class="shortcut-action">在菜单或下拉列表中移动</span><span class="shortcut-keys"><kbd>↑</kbd><kbd>↓</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">在运行日志等标签页间移动</span><span class="shortcut-keys"><kbd>←</kbd><kbd>→</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">跳到第一个或最后一个选项</span><span class="shortcut-keys"><kbd>Home</kbd><kbd>End</kbd></span></li>
                 <li class="shortcut-row"><span class="shortcut-action">激活当前选项或提交输入</span><span class="shortcut-keys"><kbd>Enter</kbd><kbd>空格</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">取消输入或关闭弹层</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
               </ul>
             </section>
             <section id="settings-page-about" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-about">
@@ -449,6 +434,7 @@
     </div>
     <div id="app-toast" class="app-toast hidden"></div>
   </div>
+  <script src="/shortcuts/shortcuts.js"></script>
   <script src="/settings/settings.js"></script>
   <script src="/workbench/workbench.js"></script>
   <script type="module" src="./main.ts"></script>

@@ -30,6 +30,12 @@ function shellHarness(options = {}) {
   const calls = {deleted: [], queue: [], queueRows: [], commands: [], toasts: []};
   const ctx = vm.createContext({
     Element,
+    window: {
+      StudioShortcuts: {
+        matchesById: (event) => (event.key === 'Delete' || event.key === 'Backspace')
+          && !event.ctrlKey && !event.metaKey && !event.altKey,
+      },
+    },
     deleteTarget: options.deleteTarget,
     selectedContentPath: options.selectedContentPath ?? '',
     overviewSelection: options.overviewSelection ?? [],
@@ -162,7 +168,7 @@ test('画布删除入口覆盖实例运行项、变量与节点/连线', () => {
       deleteSelection: () => { calls.selections += 1; },
       render: () => { calls.renders += 1; },
     });
-    vm.runInContext(sliceBetween(editor, 'function deleteCurrentSelection() {', '/** Delete 与 Backspace 等价'), ctx);
+    vm.runInContext(sliceBetween(editor, 'function deleteCurrentSelection() {', 'function executeEditorCommand'), ctx);
     return {ctx, calls};
   };
 
@@ -202,12 +208,18 @@ test('画布删除入口覆盖实例运行项、变量与节点/连线', () => {
 });
 
 test('画布、标题栏命令与独立窗口共用同一个删除入口', () => {
-  const h = vm.createContext({});
-  vm.runInContext(sliceBetween(editor, 'function isDeleteKey(event) {', 'function executeEditorCommand'), h);
-  assert.equal(h.isDeleteKey({key: 'Delete'}), true);
-  assert.equal(h.isDeleteKey({key: 'Backspace'}), true);
-  assert.equal(h.isDeleteKey({key: 'x'}), false);
-  assert.match(editor, /if \(!editing && isDeleteKey\(event\)\) \{/);
+  const h = vm.createContext({
+    window: {
+      StudioShortcuts: {
+        matchesById: (event, id) => id === 'editor.delete' && (event.key === 'Delete' || event.key === 'Backspace'),
+      },
+    },
+  });
+  vm.runInContext(sliceBetween(editor, 'function matchesShortcut(event, id) {', "window.addEventListener('keydown'"), h);
+  assert.equal(h.matchesShortcut({key: 'Delete'}, 'editor.delete'), true);
+  assert.equal(h.matchesShortcut({key: 'Backspace'}, 'editor.delete'), true);
+  assert.equal(h.matchesShortcut({key: 'x'}, 'editor.delete'), false);
+  assert.match(editor, /if \(!editing && matchesShortcut\(event, 'editor\.delete'\)\) \{/);
   assert.match(editor, /command === 'deleteSelection'\) deleteCurrentSelection\(\)/);
   assert.match(shell, /if \(handleDeleteShortcut\(event\)\) return;/);
   assert.match(shell, /document\.addEventListener\('pointerdown', resetDeleteTargetOnPointerDown, true\)/);

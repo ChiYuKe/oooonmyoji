@@ -14,7 +14,6 @@ import {
   type ITabRenderer,
   type PanelTransfer,
   type Position,
-  type PositionResolver,
   type TabPartInitParameters,
   positionToDirection,
 } from 'dockview';
@@ -40,9 +39,9 @@ interface DockPanelDefinition {
 
 export interface DockingController {
   readonly dockviewApi: DockviewApi;
-  /** 工作流文档标签所在的内层画布标签行右侧区域。 */
+  /** 紧跟在原生“工作流画布”后的文档标签宿主。 */
   readonly workflowTabHost: HTMLElement;
-  /** 工作流画布分组的整个标题栏，用于接收落在空白处的工作流拖放。 */
+  /** 内层画布根节点；由壳层动态命中工作流标题栏的拖放。 */
   readonly workflowTabDropTarget: HTMLElement;
   isOpen(panelId: DockPanelId): boolean;
   showPanel(panelId: DockPanelId): void;
@@ -211,12 +210,6 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
 
 const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow', 'overview'];
 
-// Dropping over panel content means "join this tab group" everywhere. Layout
-// splits are created by the application defaults, not by ambiguous edge zones.
-const MERGE_ONLY_DROP_POSITION_RESOLVER: PositionResolver = {
-  resolve: ({ zones }) => zones.has('center') ? { position: 'center' } : null,
-};
-
 // A tab is one merge target. Dockview still uses the cursor's left/right half
 // internally to decide the insertion order, but a half-width preview makes it
 // look as though the tab itself can be split into two panes.
@@ -347,14 +340,19 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
 
   init(params: IGroupHeaderProps): void {
     this.params = params;
-    const isEditorGroup = Boolean(this.workflowTabHost && groupContainsEditor(params.group));
-    this.element.classList.toggle('workflow-document-header-action', isEditorGroup);
-    if (isEditorGroup && this.workflowTabHost && this.workflowTabHost.parentElement !== this.element) {
-      this.element.prepend(this.workflowTabHost);
-    }
-    const header = this.element.closest<HTMLElement>('.dv-tabs-and-actions-container');
-    header?.classList.toggle('workflow-editor-tab-header', isEditorGroup);
     const update = (): void => {
+      // init() 可能在 panel 真正进入 group 之前执行，因此必须在每次布局
+      // 变化时重新判断 editor 归属，否则文档标签宿主永远不会挂载。
+      const isEditorGroup = Boolean(this.workflowTabHost && groupContainsEditor(params.group));
+      const header = this.element.closest<HTMLElement>('.dv-tabs-and-actions-container');
+      const nativeTabs = header?.querySelector<HTMLElement>('.dv-tabs-container');
+      if (isEditorGroup && nativeTabs && this.workflowTabHost && this.workflowTabHost.parentElement !== nativeTabs) {
+        // 放入 Dockview 自己的可滚动标签列表，而不是右侧 actions 区。
+        nativeTabs.appendChild(this.workflowTabHost);
+      } else if (!isEditorGroup && this.workflowTabHost && header?.contains(this.workflowTabHost)) {
+        this.workflowTabHost.remove();
+      }
+      header?.classList.toggle('workflow-editor-tab-header', isEditorGroup);
       const isPopout = params.api.location.type === 'popout';
       const isFixed = !this.canPopout(params.group);
       this.button.disabled = isPopout || isFixed;
@@ -370,8 +368,9 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
   }
 
   dispose(): void {
-    this.element.closest<HTMLElement>('.dv-tabs-and-actions-container')?.classList.remove('workflow-editor-tab-header');
-    if (this.workflowTabHost?.parentElement === this.element) this.element.removeChild(this.workflowTabHost);
+    const header = this.element.closest<HTMLElement>('.dv-tabs-and-actions-container');
+    header?.classList.remove('workflow-editor-tab-header');
+    if (this.workflowTabHost && header?.contains(this.workflowTabHost)) this.workflowTabHost.remove();
     this.locationDisposable?.dispose();
     this.layoutDisposable?.dispose();
     this.locationDisposable = undefined;
@@ -625,14 +624,14 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     dndEdges: false,
     // 关闭 dockview 的 tab 溢出下拉（组头部右侧的“∨ 数量”角标）。
     disableTabsOverflowList: true,
-    dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
     dropOverlayModel: ({ location }) => resolveDropOverlayModel(location),
     createRightHeaderActionComponent: () => new PopoutHeaderAction(() => true, workflowTabHost),
     createComponent: () => new ExistingModuleRenderer(modules, moduleStore),
   });
 
-  const workflowTabDropTarget = workflowTabHost.closest<HTMLElement>('.workflow-editor-tab-header')
-    ?? workflowTabHost;
+  // 标题栏是在布局恢复/创建 panel 时由 Dockview 动态产生的，不能在此处
+  // 缓存 closest() 结果。返回稳定的内层根节点，拖放处理时再判断当前标题栏。
+  const workflowTabDropTarget = container;
 
   let suspendPersistence = true;
   let temporaryDragLayout = false;
@@ -801,7 +800,6 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     dndEdges: false,
     // 关闭 dockview 的 tab 溢出下拉（组头部右侧的“∨ 数量”角标）。
     disableTabsOverflowList: true,
-    dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
     dropOverlayModel: ({ location }) => resolveDropOverlayModel(location),
     createRightHeaderActionComponent: () => new PopoutHeaderAction((group) => !groupContainsWorkflow(group)),
     createTabComponent: ({ name }) => name === 'fixed-workbench' ? new FixedWorkbenchTab() : undefined,

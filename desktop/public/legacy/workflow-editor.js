@@ -56,7 +56,6 @@
     dirty: false,
     inspector: 'node',
     run: new Map(),
-    activeRun: null,
     roi: null,
     assetBrowser: null,
     assetPaths: null,
@@ -4520,13 +4519,6 @@
     return textInput(value ?? '', set);
   }
 
-  function nextVariableName(scope) {
-    let index = 1;
-    const prefix = scope === 'inputs' ? 'new_input' : 'new_state';
-    while ((state.raw.inputs && state.raw.inputs[`${prefix}_${index}`]) || (state.raw.variables && state.raw.variables[`${prefix}_${index}`])) index += 1;
-    return `${prefix}_${index}`;
-  }
-
   function variableReferenceCount(scope, name) {
     return VariableSystem.references(state.raw,scope,name).length;
   }
@@ -5445,7 +5437,7 @@
     if (!event || typeof event !== 'object') return;
     if (event.type === 'run_started') {
       state.variableSnapshots ||= {}; delete state.variableSnapshots[event.instance_id || 'default'];
-      if(!event.instance_id || !state.instanceId || event.instance_id===state.instanceId){state.activeRun = event.run_id; state.run.clear(); state.variableValues = null;}
+      if(!event.instance_id || !state.instanceId || event.instance_id===state.instanceId){state.run.clear(); state.variableValues = null;}
     }
     if (event.type === 'step' && event.step_id) {
       const step = event.step || {};
@@ -5467,7 +5459,6 @@
         screenshot: event.screenshot,
       });
     }
-    if (event.type === 'run_finished') state.activeRun = null;
     render();
   }
 
@@ -5573,11 +5564,6 @@
       return;
     }
     deleteSelection();
-  }
-
-  /** Delete 与 Backspace 等价：部分键盘（含小键盘/紧凑键盘）只发送 Backspace。 */
-  function isDeleteKey(event) {
-    return event.key === 'Delete' || event.key === 'Backspace';
   }
 
   function executeEditorCommand(command, value) {
@@ -5763,23 +5749,29 @@
     placeVariableCard(scope,name,point);
   });
   wrap.addEventListener('pointerdown', hideVariableDropGhost);
+  /** 读取当前配置的绑定；由桌面壳层通过 StudioShortcuts 共享。 */
+  function matchesShortcut(event, id) {
+    const api = window.StudioShortcuts;
+    if (!api || typeof api.matchesById !== 'function') return false;
+    return api.matchesById(event, id);
+  }
   window.addEventListener('keydown', (event) => {
     const tag = event.target && event.target.tagName;
     const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     if (event.key === 'Escape') { if (state.connect) cancelConnection(); if (state.variableConnect) cancelVariableConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
-    if (!editing && isDeleteKey(event)) {
+    if (!editing && matchesShortcut(event, 'editor.delete')) {
       event.preventDefault();
       deleteCurrentSelection();
     }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection(); }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteClipboard(); }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'a') { event.preventDefault(); executeEditorCommand('selectAll'); }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); $('btn-save')?.click(); }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
-    if (!editing && event.ctrlKey && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); }
-    if (!editing && event.key === 'Home') { event.preventDefault(); fitView(); }
-    if (!editing && event.key.toLowerCase() === 'f' && state.selected.size === 1) {
+    if (!editing && matchesShortcut(event, 'editor.copy')) { event.preventDefault(); copySelection(); }
+    if (!editing && matchesShortcut(event, 'editor.cut')) { event.preventDefault(); cutSelection(); }
+    if (!editing && matchesShortcut(event, 'editor.paste')) { event.preventDefault(); pasteClipboard(); }
+    if (!editing && matchesShortcut(event, 'editor.selectAll')) { event.preventDefault(); executeEditorCommand('selectAll'); }
+    if (!editing && matchesShortcut(event, 'editor.save')) { event.preventDefault(); $('btn-save')?.click(); }
+    if (!editing && matchesShortcut(event, 'editor.undo')) { event.preventDefault(); undo(); }
+    if (!editing && matchesShortcut(event, 'editor.redo')) { event.preventDefault(); redo(); }
+    if (!editing && matchesShortcut(event, 'editor.fitView')) { event.preventDefault(); fitView(); }
+    if (!editing && matchesShortcut(event, 'editor.focusNode') && state.selected.size === 1) {
       const node = nodeById([...state.selected][0]); const pos = position(node); const rect = wrap.getBoundingClientRect();
       state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom; state.panY = rect.height / 2 - (pos.y + nodeHeight(node) / 2) * state.zoom; render();
     }

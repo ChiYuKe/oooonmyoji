@@ -180,8 +180,7 @@ document.addEventListener('pointerdown', () => {
   sendToOpener({ type: 'shellContextReset' });
 }, true);
 document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!window.StudioShortcuts?.matchesById(event, 'global.delete')) return;
   const target = event.target;
   if (target instanceof Element && target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
   event.preventDefault();

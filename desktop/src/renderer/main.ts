@@ -59,6 +59,7 @@ import {
   createIcons,
   createElement,
 } from 'lucide';
+import { createCloseButton } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
 import type {
   BootstrapData,
@@ -182,6 +183,20 @@ interface WorkflowDocumentTab {
   text: string;
   dirty: boolean;
   backStack: string[];
+}
+
+/** 持久化的画布会话：启动时用于恢复上次打开的工作流与未保存内容。 */
+interface PersistedWorkflowTab {
+  uri: string;
+  text: string;
+  dirty: boolean;
+  backStack: string[];
+}
+
+interface WorkflowSession {
+  version: number;
+  tabs: PersistedWorkflowTab[];
+  activeUri: string;
 }
 
 interface OverviewRunState {
@@ -449,6 +464,7 @@ const contentBrowserSearch = document.querySelector<HTMLInputElement>('#content-
 const settingsContentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
 const settingsAutoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
 const settingsDefaultWorkflow = document.querySelector<HTMLInputElement>('#settings-default-workflow')!;
+const settingsRestoreSession = document.querySelector<HTMLInputElement>('#settings-restore-session')!;
 const settingsDebugEnabled = document.querySelector<HTMLInputElement>('#settings-debug-enabled')!;
 const settingsDebugAnnotate = document.querySelector<HTMLInputElement>('#settings-debug-annotate')!;
 const overviewSearch = document.querySelector<HTMLInputElement>('#overview-search')!;
@@ -523,6 +539,10 @@ let runtimeEngineOutput = '';
 let runtimeProcessResult: { code: number | null; signal: string | null; stopped: boolean } | undefined;
 let autoRefreshInstances = true;
 let loadDefaultWorkflowOnStart = true;
+let restoreSessionOnStart = true;
+/** 编辑器就绪前暂存的待恢复画布 URI。 */
+let restoreWorkflowUri = '';
+let workflowSessionTimer: number | undefined;
 let moreMenu: { menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
 let overviewSelection: string[] = [];
 let overviewQuery = '';
@@ -537,6 +557,8 @@ let contentNameDialogState: ContentNameDialogState | undefined;
 
 const OVERVIEW_SELECTION_KEY = 'onmyoji-studio.overview-selection.v1';
 const OVERVIEW_CONFIG_KEY = 'onmyoji-studio.overview-inputs.v1';
+const WORKFLOW_SESSION_KEY = 'onmyoji-studio.workflow-session.v1';
+const WORKFLOW_SESSION_VERSION = 1;
 const OVERVIEW_INPUT_LABELS: Record<string, string> = {
   attack_point: '攻击点击位置',
   attack_points: '攻击目标位置列表',
@@ -706,6 +728,22 @@ function desktopControl(command: string, value?: unknown): void {
     return;
   }
   postToEditor({ type: 'desktopControl', command, value });
+}
+
+function matchesShortcut(event: KeyboardEvent, id: string): boolean {
+  return window.StudioShortcuts?.matchesById(event, id) ?? false;
+}
+
+/** 用当前配置刷新标题栏菜单里展示的快捷键提示。 */
+function refreshShortcutLabels(): void {
+  const shortcuts = window.StudioShortcuts;
+  if (!shortcuts) return;
+  document.querySelectorAll<HTMLElement>('[data-shortcut]').forEach((element) => {
+    const slot = element.querySelector('kbd');
+    if (!slot) return;
+    const binding = shortcuts.get(element.dataset.shortcut ?? '');
+    slot.textContent = binding ? shortcuts.format(binding) : '';
+  });
 }
 
 function setStatus(message: string): void {
@@ -928,6 +966,7 @@ function setDirty(value: boolean): void {
   const activeTab = workflowTabs.find((tab) => tab.uri === currentUri);
   if (activeTab) activeTab.dirty = value;
   renderWorkflowDocumentTabs();
+  scheduleWorkflowSessionPersist();
 }
 
 function clearAutoSaveTimer(): void {
@@ -1024,6 +1063,110 @@ function rememberCurrentWorkflowTab(): void {
   tab.backStack = [...backStack];
 }
 
+function serializeWorkflowSession(tabs: WorkflowDocumentTab[], activeUri: string): string {
+  const payload: WorkflowSession = {
+    version: WORKFLOW_SESSION_VERSION,
+    activeUri,
+    // 只为未保存的标签保留正文，避免把整个项目写进会话文件。
+    tabs: tabs.map((tab) => ({
+      uri: tab.uri,
+      text: tab.dirty ? tab.text : '',
+      dirty: tab.dirty,
+      backStack: [...tab.backStack],
+    })),
+  };
+  return JSON.stringify(payload);
+}
+
+function parseWorkflowSession(raw: string | null | undefined): WorkflowSession | undefined {
+  if (typeof raw !== 'string' || raw === '') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const value = parsed as { tabs?: unknown; activeUri?: unknown };
+  if (!Array.isArray(value.tabs)) return undefined;
+  const tabs: PersistedWorkflowTab[] = [];
+  for (const entry of value.tabs) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const tab = entry as { uri?: unknown; text?: unknown; dirty?: unknown; backStack?: unknown };
+    const uri = typeof tab.uri === 'string' ? tab.uri : '';
+    if (!uri) continue;
+    const text = typeof tab.text === 'string' ? tab.text : '';
+    const dirty = tab.dirty === true && text !== '';
+    const backStack = Array.isArray(tab.backStack)
+      ? tab.backStack.filter((item): item is string => typeof item === 'string')
+      : [];
+    tabs.push({ uri, text, dirty, backStack });
+  }
+  if (tabs.length === 0) return undefined;
+  const requested = typeof value.activeUri === 'string' ? value.activeUri : '';
+  const activeUri = tabs.some((tab) => tab.uri === requested) ? requested : tabs[0].uri;
+  return { version: WORKFLOW_SESSION_VERSION, tabs, activeUri };
+}
+
+function reconcileWorkflowSession(session: WorkflowSession | undefined, knownUris: string[]): WorkflowSession | undefined {
+  if (!session) return undefined;
+  const known = new Set(knownUris);
+  const tabs = session.tabs.filter((tab) => known.has(tab.uri));
+  if (tabs.length === 0) return undefined;
+  const activeUri = tabs.some((tab) => tab.uri === session.activeUri) ? session.activeUri : tabs[0].uri;
+  return { version: session.version, tabs, activeUri };
+}
+
+function readWorkflowSession(): WorkflowSession | undefined {
+  const known = bootstrap?.workflows.map((workflow) => workflow.uri) ?? [];
+  return reconcileWorkflowSession(parseWorkflowSession(window.onmyoji.readLayout(WORKFLOW_SESSION_KEY)), known);
+}
+
+function applyWorkflowSession(session: WorkflowSession): void {
+  workflowTabs = session.tabs.map((tab) => ({
+    uri: tab.uri,
+    text: tab.text,
+    dirty: tab.dirty,
+    backStack: [...tab.backStack],
+  }));
+  restoreWorkflowUri = session.activeUri;
+}
+
+/** 把上次退出时的未保存内容先写盘，避免恢复后标记变干净却丢失改动。 */
+async function flushRestoredEdits(): Promise<void> {
+  for (const tab of workflowTabs) {
+    if (!tab.dirty || !tab.text) continue;
+    try {
+      await api.saveWorkflow(tab.uri, tab.text);
+      tab.dirty = false;
+    } catch {
+      // 写盘失败时保留脏标记，下一次会话仍会带上这段内容。
+    }
+  }
+}
+
+function persistWorkflowSessionNow(): void {
+  if (workflowSessionTimer !== undefined) {
+    window.clearTimeout(workflowSessionTimer);
+    workflowSessionTimer = undefined;
+  }
+  if (workflowTabs.length === 0) return;
+  rememberCurrentWorkflowTab();
+  try {
+    window.onmyoji.writeLayout(WORKFLOW_SESSION_KEY, serializeWorkflowSession(workflowTabs, currentUri || restoreWorkflowUri));
+  } catch {
+    // 会话持久化尽力而为，不能影响编辑。
+  }
+}
+
+function scheduleWorkflowSessionPersist(): void {
+  if (workflowSessionTimer !== undefined) window.clearTimeout(workflowSessionTimer);
+  workflowSessionTimer = window.setTimeout(() => {
+    workflowSessionTimer = undefined;
+    persistWorkflowSessionNow();
+  }, 250);
+}
+
 function renderWorkflowDocumentTabs(): void {
   const host = workflowTabHost;
   if (!host) return;
@@ -1041,37 +1184,64 @@ function renderWorkflowDocumentTabs(): void {
   tabs.setAttribute('role', 'tablist');
   for (const item of workflowTabs) {
     const tab = document.createElement('div');
-    tab.className = `workflow-document-tab${item.uri === currentUri ? ' active' : ''}`;
+    const active = item.uri === currentUri;
+    tab.className = `dv-tab workflow-document-tab ${active ? 'dv-active-tab active' : 'dv-inactive-tab'}`;
     tab.setAttribute('role', 'tab');
-    tab.setAttribute('aria-selected', String(item.uri === currentUri));
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
     tab.title = displayFileUri(item.uri);
 
+    const body = document.createElement('div');
+    body.className = 'dv-default-tab';
     const label = document.createElement('span');
-    label.className = 'workflow-document-tab-label';
+    label.className = 'dv-default-tab-content workflow-document-tab-label';
     label.textContent = workflowTabName(item.uri);
-    tab.appendChild(label);
+    body.appendChild(label);
     if (item.dirty) {
       const dirtyMark = document.createElement('span');
       dirtyMark.className = 'workflow-document-tab-dirty';
       dirtyMark.title = '未保存';
-      tab.appendChild(dirtyMark);
+      body.appendChild(dirtyMark);
     }
 
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'workflow-document-tab-close';
-    close.textContent = '×';
+    const close = document.createElement('div');
+    close.className = 'dv-default-tab-action workflow-document-tab-close';
+    close.setAttribute('role', 'button');
+    close.tabIndex = -1;
     close.title = '关闭工作流画布';
     close.setAttribute('aria-label', `关闭 ${workflowTabName(item.uri)}`);
+    // 直接使用 Dockview 自己的关闭图标，避免克隆时因内部 data 属性变化而
+    // 回退成字号、描边均不一致的文本“×”。
+    close.appendChild(createCloseButton());
+    close.addEventListener('pointerdown', (event) => {
+      // Dockview 在父级标签容器上监听指针拖动；文档标签不是 Dockview panel，
+      // 必须隔离该手势，才能稳定收到 click。
+      event.preventDefault();
+      event.stopPropagation();
+    });
     close.addEventListener('click', (event) => {
+      event.preventDefault();
       event.stopPropagation();
       void closeWorkflowTab(item.uri);
     });
-    tab.appendChild(close);
-    tab.addEventListener('click', () => void activateWorkflowTab(item.uri));
+    body.appendChild(close);
+    tab.appendChild(body);
+    tab.addEventListener('pointerdown', (event) => event.stopPropagation());
+    tab.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void activateWorkflowTab(item.uri);
+    });
+    tab.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      void activateWorkflowTab(item.uri);
+    });
     tabs.appendChild(tab);
   }
   host.appendChild(tabs);
+  scheduleWorkflowSessionPersist();
 }
 
 function displayFileUri(uri: string): string {
@@ -1564,6 +1734,11 @@ function moveOverviewSelection(index: number, offset: number): void {
 function openOverviewWorkflow(workflow: WorkflowDescriptor): void {
   workbenchFrame?.show('workflow');
   desktopControl('switchWorkflow', workflow.uri);
+}
+
+function openWorkflowInNewTab(uri: string): void {
+  workbenchFrame?.show('workflow');
+  void openWorkflowTab(uri);
 }
 
 function renderOverviewInstances(): void {
@@ -2156,7 +2331,17 @@ function workflowDragUri(event: DragEvent): string {
   return '';
 }
 
-function bindWorkflowTabDropTarget(element: HTMLElement): void {
+function bindWorkflowTabDropTarget(element: HTMLElement, headerOnly = false): void {
+  const dropSurface = (event: DragEvent): HTMLElement | undefined => {
+    if (!headerOnly) return element;
+    const target = event.target;
+    if (!(target instanceof Element)) return undefined;
+    // Dockview 可能在自己的标题栏监听器中拦截拖放；不依赖我们在
+    // renderer 挂载时补的类名，直接用 Dockview 的实际标题栏并校验其容器。
+    const header = target.closest<HTMLElement>('.dv-tabs-and-actions-container');
+    return header && workflowTabHost && header.contains(workflowTabHost) ? header : undefined;
+  };
+  const feedbackTarget = (): HTMLElement => workflowTabHost ?? element;
   const acceptsWorkflow = (event: DragEvent): boolean => {
     const types = event.dataTransfer?.types;
     return Boolean(types && (
@@ -2166,27 +2351,30 @@ function bindWorkflowTabDropTarget(element: HTMLElement): void {
       || types.includes('Files')
     ));
   };
+  const listenerOptions = headerOnly ? { capture: true } : undefined;
   element.addEventListener('dragover', (event) => {
-    if (!acceptsWorkflow(event)) return;
+    if (!dropSurface(event) || !acceptsWorkflow(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    element.classList.add('drag-over');
-  });
+    feedbackTarget().classList.add('drag-over');
+  }, listenerOptions);
   element.addEventListener('dragleave', (event) => {
+    const surface = dropSurface(event);
+    if (!surface) return;
     event.stopPropagation();
     const related = event.relatedTarget;
-    if (!(related instanceof Node) || !element.contains(related)) element.classList.remove('drag-over');
-  });
+    if (!(related instanceof Node) || !surface.contains(related)) feedbackTarget().classList.remove('drag-over');
+  }, listenerOptions);
   element.addEventListener('drop', (event) => {
-    if (!acceptsWorkflow(event)) return;
+    if (!dropSurface(event) || !acceptsWorkflow(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    element.classList.remove('drag-over');
+    feedbackTarget().classList.remove('drag-over');
     const uri = workflowDragUri(event);
     if (uri) void openWorkflowTab(uri);
     else showToast('这里只能打开项目内的工作流文件', true);
-  });
+  }, listenerOptions);
 }
 
 function bindContentDropTarget(element: HTMLElement, folder: string | (() => string)): void {
@@ -2381,7 +2569,7 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
   button.addEventListener('dblclick', () => {
     if (editing) return;
     if (item.kind === 'folder') navigateContentBrowser(item.path);
-    else if (item.workflow) desktopControl('switchWorkflow', item.workflow.uri);
+    else if (item.workflow) openWorkflowInNewTab(item.workflow.uri);
     else if (item.asset) void api.openContentItem(item.asset.path).catch((error) => showToast(errorMessage(error), true));
   });
   if (!editing) button.addEventListener('contextmenu', (event) => {
@@ -2781,10 +2969,10 @@ function performDeleteTarget(origin?: KeyboardEvent): boolean {
   return true;
 }
 
-/** 桌面壳层的 Delete/Backspace 快捷键；没有登记目标时不拦截按键。 */
+/** 桌面壳层的删除快捷键；没有登记目标时不拦截按键。 */
 function handleDeleteShortcut(event: KeyboardEvent): boolean {
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return false;
-  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (!window.StudioShortcuts?.matchesById(event, 'global.delete')) return false;
+  if (event.defaultPrevented) return false;
   if (isTextEditingTarget(event.target)) return false;
   if (roiPickerState || contentNameDialogState) return false;
   return performDeleteTarget(event);
@@ -2841,7 +3029,7 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     addEntry('引用查看器', Network, () => openReferenceViewer(item.path, doc));
     addContentContextSeparator(doc, menu);
     if (item.workflow) {
-      addEntry('在编辑器中打开', FileJson2, () => desktopControl('switchWorkflow', item.workflow!.uri));
+      addEntry('在编辑器中打开', FileJson2, () => openWorkflowInNewTab(item.workflow!.uri));
     } else if (item.asset) {
       addEntry('打开图片', Image, () => void api.openContentItem(item.asset!.path).catch((error) => showToast(errorMessage(error), true)));
     }
@@ -3684,7 +3872,15 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
     if (type === 'ready') {
       if (sourceFrame === editorFrame) editorReady = true;
       if (currentEditorInit) postToFrame(sourceFrame, currentEditorInit as unknown as Record<string, unknown>);
-      else if (sourceFrame === editorFrame && bootstrap?.defaultWorkflow) await loadWorkflow(currentUri || bootstrap.defaultWorkflow);
+      else if (sourceFrame === editorFrame) {
+        if (restoreWorkflowUri && !currentUri) {
+          const uri = restoreWorkflowUri;
+          await loadWorkflow(uri, false, 'activate');
+          if (restoreWorkflowUri === uri) restoreWorkflowUri = '';
+        } else if (currentUri || bootstrap?.defaultWorkflow) {
+          await loadWorkflow(currentUri || bootstrap!.defaultWorkflow!);
+        }
+      }
       return;
     }
     if (type === 'createVariableNode') {
@@ -4123,6 +4319,7 @@ function openSettingsPanel(): void {
   settingsContentView.value = contentBrowserView;
   settingsAutoRefresh.checked = autoRefreshInstances;
   settingsDefaultWorkflow.checked = loadDefaultWorkflowOnStart;
+  settingsRestoreSession.checked = restoreSessionOnStart;
   void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
   workbenchFrame?.show('settings');
   window.setTimeout(() => workbenchFrame?.popout('settings'), 0);
@@ -4165,6 +4362,7 @@ function openAboutPage(): void {
 function readSettings(): void {
   autoRefreshInstances = window.localStorage.getItem('onmyoji-studio.settings.auto-refresh') !== 'false';
   loadDefaultWorkflowOnStart = window.localStorage.getItem('onmyoji-studio.settings.default-workflow') !== 'false';
+  restoreSessionOnStart = window.localStorage.getItem('onmyoji-studio.settings.restore-session') !== 'false';
 }
 
 function restartInstanceRefresh(): void {
@@ -4214,6 +4412,10 @@ function bindUi(): void {
   settingsDefaultWorkflow.addEventListener('change', () => {
     loadDefaultWorkflowOnStart = settingsDefaultWorkflow.checked;
     window.localStorage.setItem('onmyoji-studio.settings.default-workflow', String(loadDefaultWorkflowOnStart));
+  });
+  settingsRestoreSession.addEventListener('change', () => {
+    restoreSessionOnStart = settingsRestoreSession.checked;
+    window.localStorage.setItem('onmyoji-studio.settings.restore-session', String(restoreSessionOnStart));
   });
   const saveDebugSettings = async (): Promise<void> => {
     settingsDebugEnabled.disabled = true;
@@ -4433,7 +4635,7 @@ function bindUi(): void {
       closeTitlebarMenus();
       closeInstancePicker(true);
     }
-    if (event.shiftKey && event.key === 'F6') {
+    if (matchesShortcut(event, 'global.popout')) {
       event.preventDefault();
       popoutActivePanel();
     }
@@ -4462,7 +4664,7 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
   // 面板被拖动到独立窗口后，DOM 仍在，但主窗口 document 收不到键盘事件；
   // 独立窗口把删除键与指针事件转回来，复用同一套删除目标逻辑。
   if (event.data?.source === 'dockview-popout' && event.data.type === 'shellShortcut') {
-    if (event.data.key === 'Delete' || event.data.key === 'Backspace') performDeleteTarget();
+    performDeleteTarget();
     return;
   }
   if (event.data?.source === 'dockview-popout' && event.data.type === 'shellContextReset') {
@@ -4498,12 +4700,14 @@ async function start(): Promise<void> {
   docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure);
   workflowTabHost = docking.workflowTabHost;
   bindWorkflowTabDropTarget(workflowTabHost);
-  if (docking.workflowTabDropTarget !== workflowTabHost) bindWorkflowTabDropTarget(docking.workflowTabDropTarget);
+  if (docking.workflowTabDropTarget !== workflowTabHost) bindWorkflowTabDropTarget(docking.workflowTabDropTarget, true);
   renderWorkflowDocumentTabs();
   sharedPanelDockBridge = connectSharedPanelDocking(docking, workbenchFrame, updateDockMenuState);
   updateDockMenuState();
   createIcons({ icons: desktopIcons });
   bindUi();
+  refreshShortcutLabels();
+  window.StudioShortcuts?.subscribe(refreshShortcutLabels);
   api.onRuntimeOutput(appendOutput);
   api.onRuntimeState(updateRuntimeState);
   api.onRunEvent((event) => {
@@ -4530,8 +4734,23 @@ async function start(): Promise<void> {
     renderContentBrowser();
     document.querySelector<HTMLElement>('#settings-project-root')!.textContent = bootstrap.projectRoot;
     setStatus('桌面端已连接');
-    if (loadDefaultWorkflowOnStart && editorReady && bootstrap.defaultWorkflow) await loadWorkflow(bootstrap.defaultWorkflow);
-    else postToEditors({ type: 'desktopPing' });
+    const session = restoreSessionOnStart ? readWorkflowSession() : undefined;
+    if (session) {
+      applyWorkflowSession(session);
+      // 上次退出时的未保存内容先落盘，避免恢复后标记变干净却丢失改动。
+      void flushRestoredEdits();
+      if (editorReady) {
+        await loadWorkflow(session.activeUri, false, 'activate');
+        restoreWorkflowUri = '';
+      } else {
+        postToEditors({ type: 'desktopPing' });
+      }
+      showToast(`已恢复上次的 ${session.tabs.length} 个画布`);
+    } else if (loadDefaultWorkflowOnStart && editorReady && bootstrap.defaultWorkflow) {
+      await loadWorkflow(bootstrap.defaultWorkflow);
+    } else {
+      postToEditors({ type: 'desktopPing' });
+    }
     restartInstanceRefresh();
   } catch (error) {
     loadingMask.classList.add('hidden');
@@ -4541,6 +4760,7 @@ async function start(): Promise<void> {
 }
 
 window.addEventListener('beforeunload', () => {
+  persistWorkflowSessionNow();
   clearAutoSaveTimer();
   if (instanceRefreshTimer !== undefined) window.clearInterval(instanceRefreshTimer);
   sharedPanelDockBridge?.dispose();

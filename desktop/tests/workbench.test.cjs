@@ -91,6 +91,14 @@ test('toolbar keeps existing commands and shared compositions parse', () => {
   assert(read('src/renderer/popout.html').includes('/workbench/workbench.css'));
 });
 
+test('dock panel content keeps quadrant docking for split layouts', () => {
+  const docking = read('src/renderer/docking.ts');
+  assert.equal(docking.includes('dropPositionResolver:'), false,
+    'panel content must use Dockview quadrant docking so top/bottom/left/right splits remain available');
+  assert.equal(docking.match(/dndEdges: false/g)?.length, 2,
+    'whole-workspace edge overlays stay disabled independently of panel split docking');
+});
+
 test('content browser grouping preserves item instances, draft editing and flat list mode', () => {
   const source = read('src/renderer/main.ts');
   const start = source.indexOf('function renderContentBrowser(): void {');

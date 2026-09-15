@@ -43,8 +43,23 @@
 .shortcut-list { margin: 4px 0 0; padding: 0; list-style: none; }
 .shortcut-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 34px; padding: 7px 0; border-bottom: 1px solid var(--ui-line); }
 .shortcut-action { min-width: 0; color: var(--ui-text); font-size: 11px; }
-.shortcut-keys { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.shortcut-keys { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; }
 .shortcut-keys kbd { display: inline-block; padding: 2px 6px; border-radius: 3px; background: var(--ui-surface); color: var(--ui-muted); font: 10px/1.4 var(--ui-font); white-space: nowrap; }
+.shortcut-groups > .settings-section-title:first-child { margin-top: 0; }
+.shortcut-capture { display: inline-block; min-width: 46px; min-height: 22px; padding: 2px 7px; border: 0; border-radius: 3px; background: var(--ui-surface); color: var(--ui-text); font: 10px/1.4 var(--ui-font); text-align: center; white-space: nowrap; cursor: pointer; }
+.shortcut-capture:hover { background: var(--ui-hover); }
+.shortcut-capture:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
+.shortcut-capture.recording { color: var(--ui-focus); }
+.shortcut-reset { width: 20px; min-width: 20px; height: 20px; min-height: 20px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--ui-muted); font: 12px/1 var(--ui-font); cursor: pointer; }
+.shortcut-reset:not(:disabled):hover { background: var(--ui-hover); color: var(--ui-text); }
+.shortcut-reset:disabled { opacity: .3; cursor: default; }
+.shortcut-reset:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
+.shortcut-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.shortcut-actions button { min-height: 26px; padding: 0 10px; border: 0; border-radius: 3px; background: var(--ui-surface); color: var(--ui-text); font: inherit; cursor: pointer; }
+.shortcut-actions button:hover { background: var(--ui-hover); }
+.shortcut-actions button:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
+.shortcut-feedback { min-height: 15px; margin: 8px 0 0; color: var(--ui-danger); font-size: 10px; }
+.shortcut-feedback:empty { min-height: 0; margin: 0; }
 @container settings (max-width: 470px) {
   .shortcut-row { flex-wrap: wrap; gap: 5px; }
   .shortcut-keys { justify-content: flex-start; }

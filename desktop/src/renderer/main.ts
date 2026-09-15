@@ -85,6 +85,7 @@ import {
   type WorkbenchFrameController,
   type WorkbenchPanelId,
 } from './docking';
+import { createRoiPicker } from './roi-picker';
 import './styles.css';
 
 interface SidebarNode {
@@ -204,25 +205,6 @@ type DeleteTarget =
   | { kind: 'content'; path: string }
   | { kind: 'queue'; rel: string }
   | { kind: 'editor' };
-
-interface RoiPickerState {
-  requestId: string;
-  nodeId: string;
-  key: string;
-  mode: 'asset' | 'rect';
-  targetPath?: string;
-  sourceFrame: HTMLIFrameElement;
-  referenceResolution: [number, number];
-  imageWidth: number;
-  imageHeight: number;
-  dataUrl: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  dragging: boolean;
-  busy: boolean;
-}
 
 const api = window.onmyoji;
 const desktopIcons = {
@@ -395,7 +377,6 @@ let overviewConfigurations: Record<string, Record<string, unknown>> = {};
 let overviewConfigWorkflow: WorkflowDescriptor | undefined;
 let overviewConfigReaders: OverviewConfigReader[] = [];
 let visionTestOpening = false;
-let roiPickerState: RoiPickerState | undefined;
 let contentNameDialogState: ContentNameDialogState | undefined;
 
 const OVERVIEW_SELECTION_KEY = 'onmyoji-studio.overview-selection.v1';
@@ -606,203 +587,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function hideRoiPicker(): void {
-  roiPickerModal.classList.add('hidden');
-  roiPickerModal.setAttribute('aria-hidden', 'true');
-  roiPickerImage.removeAttribute('src');
-  roiPickerSelection.style.display = 'none';
-  roiPickerConfirm.disabled = false;
-  roiPickerCancel.disabled = false;
-  roiPickerClose.disabled = false;
-  roiPickerHint.textContent = '拖动鼠标框选区域';
-}
-
-function cancelRoiPicker(): void {
-  const request = roiPickerState;
-  if (!request || request.busy) return;
-  roiPickerState = undefined;
-  hideRoiPicker();
-  postToFrame(request.sourceFrame, { type: 'roiPickerCancelled', requestId: request.requestId });
-}
-
-function roiPickerImageBounds(): { image: DOMRect; stage: DOMRect } | undefined {
-  const image = roiPickerImage.getBoundingClientRect();
-  const stage = roiPickerStage.getBoundingClientRect();
-  if (image.width < 1 || image.height < 1 || stage.width < 1 || stage.height < 1) return undefined;
-  return { image, stage };
-}
-
-function roiPickerPoint(event: PointerEvent): { x: number; y: number } | undefined {
-  const bounds = roiPickerImageBounds();
-  if (!bounds) return undefined;
-  return {
-    x: Math.max(0, Math.min(bounds.image.width, event.clientX - bounds.image.left)),
-    y: Math.max(0, Math.min(bounds.image.height, event.clientY - bounds.image.top)),
-  };
-}
-
-function renderRoiPickerSelection(): void {
-  const state = roiPickerState;
-  const bounds = roiPickerImageBounds();
-  if (!state || !bounds) return;
-  const left = bounds.image.left - bounds.stage.left;
-  const top = bounds.image.top - bounds.stage.top;
-  const x = Math.min(state.x1, state.x2);
-  const y = Math.min(state.y1, state.y2);
-  const width = Math.abs(state.x2 - state.x1);
-  const height = Math.abs(state.y2 - state.y1);
-  roiPickerSelection.style.display = width > 0 && height > 0 ? 'block' : 'none';
-  roiPickerSelection.style.left = `${left + x}px`;
-  roiPickerSelection.style.top = `${top + y}px`;
-  roiPickerSelection.style.width = `${width}px`;
-  roiPickerSelection.style.height = `${height}px`;
-}
-
-function selectedRoi(): [number, number, number, number] | undefined {
-  const state = roiPickerState;
-  const bounds = roiPickerImageBounds();
-  if (!state || !bounds) return undefined;
-  const [referenceWidth, referenceHeight] = state.referenceResolution;
-  if (referenceWidth < 1 || referenceHeight < 1) return undefined;
-  const x = Math.round(Math.min(state.x1, state.x2) * referenceWidth / bounds.image.width);
-  const y = Math.round(Math.min(state.y1, state.y2) * referenceHeight / bounds.image.height);
-  const width = Math.round(Math.abs(state.x2 - state.x1) * referenceWidth / bounds.image.width);
-  const height = Math.round(Math.abs(state.y2 - state.y1) * referenceHeight / bounds.image.height);
-  const safeX = Math.max(0, Math.min(referenceWidth - 1, x));
-  const safeY = Math.max(0, Math.min(referenceHeight - 1, y));
-  const safeWidth = Math.max(0, Math.min(referenceWidth - safeX, width));
-  const safeHeight = Math.max(0, Math.min(referenceHeight - safeY, height));
-  if (safeWidth < 1 || safeHeight < 1) return undefined;
-  return [safeX, safeY, safeWidth, safeHeight];
-}
-
-function roiPickerMime(targetPath: string): string {
-  const extension = targetPath.slice(targetPath.lastIndexOf('.')).toLocaleLowerCase();
-  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
-  if (extension === '.webp') return 'image/webp';
-  return 'image/png';
-}
-
-async function confirmRoiPicker(): Promise<void> {
-  const state = roiPickerState;
-  if (!state || state.busy) return;
-  const roi = selectedRoi();
-  if (!roi) {
-    showToast('请选择有效区域', true);
-    return;
-  }
-
-  const request = state;
-  if (request.mode === 'rect') {
-    roiPickerState = undefined;
-    hideRoiPicker();
-    postToFrame(request.sourceFrame, {
-      type: 'roiPickerResult',
-      requestId: request.requestId,
-      nodeId: request.nodeId,
-      key: request.key,
-      roi,
-    });
-    return;
-  }
-
-  const bounds = roiPickerImageBounds();
-  if (!bounds) return;
-  const sourceWidth = roiPickerImage.naturalWidth || request.imageWidth;
-  const sourceHeight = roiPickerImage.naturalHeight || request.imageHeight;
-  const sourceX = Math.min(request.x1, request.x2) * sourceWidth / bounds.image.width;
-  const sourceY = Math.min(request.y1, request.y2) * sourceHeight / bounds.image.height;
-  const sourceW = Math.abs(request.x2 - request.x1) * sourceWidth / bounds.image.width;
-  const sourceH = Math.abs(request.y2 - request.y1) * sourceHeight / bounds.image.height;
-  const canvas = document.createElement('canvas');
-  canvas.width = roi[2];
-  canvas.height = roi[3];
-  try {
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('无法创建截图画布');
-    context.drawImage(roiPickerImage, sourceX, sourceY, sourceW, sourceH, 0, 0, canvas.width, canvas.height);
-    state.busy = true;
-    roiPickerConfirm.disabled = true;
-    roiPickerCancel.disabled = true;
-    roiPickerClose.disabled = true;
-    roiPickerHint.textContent = '正在保存模板…';
-    const savedPath = await api.saveTemplate({
-      targetPath: request.targetPath,
-      filename: `${request.nodeId}-${request.key}.png`,
-      dataUrl: canvas.toDataURL(roiPickerMime(request.targetPath || '')),
-    });
-    if (roiPickerState?.requestId !== request.requestId) return;
-    roiPickerState = undefined;
-    hideRoiPicker();
-    postToFrame(request.sourceFrame, {
-      type: 'templateSaved',
-      requestId: request.requestId,
-      nodeId: request.nodeId,
-      key: request.key,
-      path: savedPath,
-    });
-  } catch (error) {
-    if (roiPickerState?.requestId === request.requestId) {
-      roiPickerState = undefined;
-      hideRoiPicker();
-      postToFrame(request.sourceFrame, { type: 'roiPickerError', requestId: request.requestId, message: errorMessage(error) });
-    }
-    showToast(errorMessage(error), true);
-  }
-}
-
-function openRoiPickerModal(request: RoiPickerState): void {
-  if (roiPickerState) cancelRoiPicker();
-  roiPickerState = request;
-  roiPickerTitle.textContent = request.targetPath ? '重新截取模板' : request.mode === 'asset' ? '截取模板' : '选择区域';
-  roiPickerSubtitle.textContent = request.mode === 'asset' ? '从当前画面框选需要保存的区域' : '从当前画面框选识别区域';
-  roiPickerHint.textContent = '拖动鼠标框选区域';
-  roiPickerConfirm.disabled = false;
-  roiPickerSelection.style.display = 'none';
-  roiPickerModal.classList.remove('hidden');
-  roiPickerModal.setAttribute('aria-hidden', 'false');
-  roiPickerImage.onload = () => renderRoiPickerSelection();
-  roiPickerImage.src = request.dataUrl;
-  window.requestAnimationFrame(() => renderRoiPickerSelection());
-}
-
-function bindRoiPicker(): void {
-  roiPickerStage.addEventListener('pointerdown', (event) => {
-    const state = roiPickerState;
-    const point = roiPickerPoint(event);
-    if (!state || state.busy || !point) return;
-    event.preventDefault();
-    state.x1 = point.x;
-    state.y1 = point.y;
-    state.x2 = point.x;
-    state.y2 = point.y;
-    state.dragging = true;
-    roiPickerStage.setPointerCapture?.(event.pointerId);
-    renderRoiPickerSelection();
-  });
-  roiPickerStage.addEventListener('pointermove', (event) => {
-    const state = roiPickerState;
-    if (!state?.dragging || state.busy) return;
-    const point = roiPickerPoint(event);
-    if (!point) return;
-    state.x2 = point.x;
-    state.y2 = point.y;
-    renderRoiPickerSelection();
-  });
-  const finishDrag = (event: PointerEvent) => {
-    if (!roiPickerState?.dragging) return;
-    roiPickerState.dragging = false;
-    if (roiPickerStage.hasPointerCapture?.(event.pointerId)) roiPickerStage.releasePointerCapture(event.pointerId);
-  };
-  roiPickerStage.addEventListener('pointerup', finishDrag);
-  roiPickerStage.addEventListener('pointercancel', finishDrag);
-  roiPickerCancel.addEventListener('click', cancelRoiPicker);
-  roiPickerClose.addEventListener('click', cancelRoiPicker);
-  roiPickerConfirm.addEventListener('click', () => void confirmRoiPicker());
-  roiPickerModal.addEventListener('pointerdown', (event) => {
-    if (event.target === roiPickerModal) cancelRoiPicker();
-  });
-}
+const roiPicker = createRoiPicker({
+  modal: roiPickerModal,
+  title: roiPickerTitle,
+  subtitle: roiPickerSubtitle,
+  stage: roiPickerStage,
+  image: roiPickerImage,
+  selection: roiPickerSelection,
+  hint: roiPickerHint,
+  cancelButton: roiPickerCancel,
+  confirmButton: roiPickerConfirm,
+  closeButton: roiPickerClose,
+  postToFrame,
+  showToast,
+  errorMessage,
+  saveTemplate: (request) => api.saveTemplate(request),
+});
 
 function setDirty(value: boolean): void {
   dirty = value;
@@ -2817,7 +2617,7 @@ function handleDeleteShortcut(event: KeyboardEvent): boolean {
   if (!window.StudioShortcuts?.matchesById(event, 'global.delete')) return false;
   if (event.defaultPrevented) return false;
   if (isTextEditingTarget(event.target)) return false;
-  if (roiPickerState || contentNameDialogState) return false;
+  if (roiPicker.isOpen() || contentNameDialogState) return false;
   return performDeleteTarget(event);
 }
 
@@ -3876,7 +3676,7 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         ? message.referenceResolution as [number, number]
         : [1920, 1080];
       const result = await api.captureRoi({ instanceId: String(message.instanceId ?? selectedInstance), referenceResolution });
-      openRoiPickerModal({
+      roiPicker.open({
         requestId: String(message.requestId ?? ''),
         nodeId: String(message.nodeId ?? message.stepId ?? ''),
         key: String(message.key ?? ''),
@@ -3887,12 +3687,6 @@ async function handleEditorMessage(message: Record<string, unknown>, sourceFrame
         imageWidth: result.width,
         imageHeight: result.height,
         dataUrl: result.dataUrl,
-        x1: 0,
-        y1: 0,
-        x2: 0,
-        y2: 0,
-        dragging: false,
-        busy: false,
       });
       return;
     }
@@ -4219,7 +4013,7 @@ function restartInstanceRefresh(): void {
 }
 
 function bindUi(): void {
-  bindRoiPicker();
+  roiPicker.bind();
   document.querySelectorAll<HTMLElement>('[data-editor-command]').forEach((button) => {
     button.addEventListener('click', () => {
       const command = button.dataset.editorCommand ?? '';
@@ -4464,9 +4258,9 @@ function bindUi(): void {
   document.addEventListener('keydown', (event) => {
     if (handleDeleteShortcut(event)) return;
     if (event.key === 'Escape') {
-      if (!roiPickerModal.classList.contains('hidden')) {
+      if (roiPicker.isOpen()) {
         event.preventDefault();
-        cancelRoiPicker();
+        roiPicker.cancel();
         return;
       }
       if (!contentNameModal.classList.contains('hidden')) {

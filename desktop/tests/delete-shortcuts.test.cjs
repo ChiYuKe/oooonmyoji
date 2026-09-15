@@ -40,7 +40,7 @@ function shellHarness(options = {}) {
     selectedContentPath: options.selectedContentPath ?? '',
     overviewSelection: options.overviewSelection ?? [],
     overviewRun: options.overviewRun,
-    roiPickerState: options.roiPickerState,
+    roiPicker: {isOpen: () => Boolean(options.roiPickerState)},
     contentNameDialogState: options.contentNameDialogState,
     contentBrowserEntries: () => options.entries ?? [],
     contentFolders: () => options.folders ?? [],

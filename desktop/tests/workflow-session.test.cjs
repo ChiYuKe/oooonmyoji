@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const {stripTypeScriptTypes} = require('node:module');
 const root = path.join(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'src/renderer/workflow-session.ts'), 'utf8');
 
 /** 与其它渲染层测试一致：切片执行生产函数，不打开桌面窗口。 */
 function extract(name) {

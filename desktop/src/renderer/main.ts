@@ -86,6 +86,7 @@ import { createReferenceViewer } from './reference-viewer';
 import { contentName, createContentBrowser, relativeToProject, type ContentBrowser } from './content-browser';
 import { createOverview, overviewInputDisplayName } from './overview';
 import { createRuntimeLog } from './runtime-log';
+import { parseWorkflowSession, reconcileWorkflowSession, serializeWorkflowSession, type WorkflowDocumentTab, type WorkflowSession } from './workflow-session';
 import { createRoiPicker } from './roi-picker';
 import './styles.css';
 
@@ -132,12 +133,7 @@ interface InspectorSelection {
   scope?: 'inputs' | 'variables';
 }
 
-interface WorkflowDocumentTab {
-  uri: string;
-  text: string;
-  dirty: boolean;
-  backStack: string[];
-}
+
 
 /** 一个工作流文档对应的画布运行时：各自的 iframe、初始化和侧栏状态。 */
 interface DocumentRuntime {
@@ -155,18 +151,7 @@ interface DocumentRuntime {
 }
 
 /** 持久化的画布会话：启动时用于恢复上次打开的工作流与未保存内容。 */
-interface PersistedWorkflowTab {
-  uri: string;
-  text: string;
-  dirty: boolean;
-  backStack: string[];
-}
 
-interface WorkflowSession {
-  version: number;
-  tabs: PersistedWorkflowTab[];
-  activeUri: string;
-}
 
 /**
  * 桌面壳层的删除键目标：由各面板的点击处理器登记，新的一次点击会先作废上一次登记。
@@ -380,7 +365,6 @@ contentBrowser = createContentBrowser({
 });
 
 const WORKFLOW_SESSION_KEY = 'onmyoji-studio.workflow-session.v1';
-const WORKFLOW_SESSION_VERSION = 1;
 
 function activeRuntime(): DocumentRuntime | undefined {
   return documentRuntimes.get(currentUri);
@@ -601,60 +585,6 @@ function rememberCurrentWorkflowTab(): void {
   tab.text = currentText;
   tab.dirty = dirty;
   tab.backStack = [...backStack];
-}
-
-function serializeWorkflowSession(tabs: WorkflowDocumentTab[], activeUri: string): string {
-  const payload: WorkflowSession = {
-    version: WORKFLOW_SESSION_VERSION,
-    activeUri,
-    // 只为未保存的标签保留正文，避免把整个项目写进会话文件。
-    tabs: tabs.map((tab) => ({
-      uri: tab.uri,
-      text: tab.dirty ? tab.text : '',
-      dirty: tab.dirty,
-      backStack: [...tab.backStack],
-    })),
-  };
-  return JSON.stringify(payload);
-}
-
-function parseWorkflowSession(raw: string | null | undefined): WorkflowSession | undefined {
-  if (typeof raw !== 'string' || raw === '') return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-  const value = parsed as { tabs?: unknown; activeUri?: unknown };
-  if (!Array.isArray(value.tabs)) return undefined;
-  const tabs: PersistedWorkflowTab[] = [];
-  for (const entry of value.tabs) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const tab = entry as { uri?: unknown; text?: unknown; dirty?: unknown; backStack?: unknown };
-    const uri = typeof tab.uri === 'string' ? tab.uri : '';
-    if (!uri) continue;
-    const text = typeof tab.text === 'string' ? tab.text : '';
-    const dirty = tab.dirty === true && text !== '';
-    const backStack = Array.isArray(tab.backStack)
-      ? tab.backStack.filter((item): item is string => typeof item === 'string')
-      : [];
-    tabs.push({ uri, text, dirty, backStack });
-  }
-  if (tabs.length === 0) return undefined;
-  const requested = typeof value.activeUri === 'string' ? value.activeUri : '';
-  const activeUri = tabs.some((tab) => tab.uri === requested) ? requested : tabs[0].uri;
-  return { version: WORKFLOW_SESSION_VERSION, tabs, activeUri };
-}
-
-function reconcileWorkflowSession(session: WorkflowSession | undefined, knownUris: string[]): WorkflowSession | undefined {
-  if (!session) return undefined;
-  const known = new Set(knownUris);
-  const tabs = session.tabs.filter((tab) => known.has(tab.uri));
-  if (tabs.length === 0) return undefined;
-  const activeUri = tabs.some((tab) => tab.uri === session.activeUri) ? session.activeUri : tabs[0].uri;
-  return { version: session.version, tabs, activeUri };
 }
 
 function readWorkflowSession(): WorkflowSession | undefined {

@@ -170,7 +170,7 @@
               <button id="instance-select" class="instance-select" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="运行实例">
                 <i class="instance-select-icon" data-lucide="monitor-up"></i>
                 <span id="instance-select-label" class="instance-select-label">未检测到运行实例</span>
-                <span class="instance-picker-chevron" aria-hidden="true"></span>
+                <i class="instance-picker-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
               </button>
               <div id="instance-menu" class="instance-menu" role="listbox" hidden></div>
             </div>
@@ -197,22 +197,39 @@
         </section>
 
         <section id="module-content-browser" class="dock-module content-browser-module">
-          <div class="content-browser-toolbar">
-            <button id="content-browser-up" class="panel-action compact-action" title="上一级" disabled><i data-lucide="arrow-left"></i></button>
-            <div id="content-browser-breadcrumbs" class="content-browser-breadcrumbs" aria-label="内容路径"></div>
-            <label class="content-browser-search">
-              <i data-lucide="search"></i>
-              <input id="content-browser-search" type="search" placeholder="搜索内容" aria-label="搜索内容">
-            </label>
-            <div class="content-browser-view-controls" aria-label="显示方式">
-              <button class="panel-action compact-action active" data-content-view="grid" title="缩略图"><i data-lucide="layout-grid"></i></button>
-              <button class="panel-action compact-action" data-content-view="list" title="列表"><i data-lucide="list"></i></button>
-              <button id="content-browser-refresh" class="panel-action compact-action" title="刷新内容"><i data-lucide="refresh-cw"></i></button>
-            </div>
-          </div>
           <div class="content-browser-body">
-            <aside id="content-browser-tree" class="content-browser-tree" aria-label="内容目录"></aside>
+            <aside class="content-browser-sources" aria-label="内容源">
+              <div class="content-browser-pane-header">
+                <span class="content-browser-pane-title">项目内容</span>
+                <label class="content-browser-pane-search">
+                  <i data-lucide="search"></i>
+                  <input id="content-browser-folder-search" type="search" placeholder="搜索文件夹" aria-label="搜索文件夹" autocomplete="off" spellcheck="false">
+                </label>
+              </div>
+              <div id="content-browser-tree" class="content-browser-tree" aria-label="内容目录"></div>
+              <div class="content-browser-collections">
+                <span>集合</span>
+                <em id="content-browser-folder-count">0 个文件夹</em>
+              </div>
+            </aside>
+            <div class="content-browser-resizer" data-content-resizer="sources" role="separator" aria-orientation="vertical" aria-label="调整内容源宽度" tabindex="0"></div>
+            <aside id="content-browser-filters" class="content-browser-filters" aria-label="类型过滤器"></aside>
+            <div class="content-browser-resizer" data-content-resizer="filters" role="separator" aria-orientation="vertical" aria-label="调整类型过滤宽度" tabindex="0"></div>
             <div class="content-browser-results">
+              <div class="content-browser-toolbar">
+                <div class="content-browser-view-controls" aria-label="显示方式">
+                  <button class="panel-action compact-action active" data-content-view="grid" title="缩略图"><i data-lucide="layout-grid"></i></button>
+                  <button class="panel-action compact-action" data-content-view="list" title="列表"><i data-lucide="list"></i></button>
+                </div>
+                <button id="content-browser-up" class="panel-action compact-action" title="上一级" disabled><i data-lucide="arrow-left"></i></button>
+                <div id="content-browser-breadcrumbs" class="content-browser-breadcrumbs" aria-label="内容路径"></div>
+                <label class="content-browser-search">
+                  <i data-lucide="search"></i>
+                  <input id="content-browser-search" type="search" placeholder="搜索资产" aria-label="搜索内容">
+                  <i class="content-browser-search-caret" data-lucide="chevron-down"></i>
+                </label>
+                <button id="content-browser-refresh" class="panel-action compact-action" title="刷新内容"><i data-lucide="refresh-cw"></i></button>
+              </div>
               <div id="content-browser-items" class="content-browser-items grid" role="list"></div>
               <div id="content-browser-empty" class="empty-panel hidden">没有匹配的内容</div>
               <div class="content-browser-footer">
@@ -359,14 +376,6 @@
           <div id="variables-view" class="panel-content variables-content"></div>
         </section>
 
-        <section id="module-editor" class="dock-module editor-surface">
-          <iframe id="editor-frame" title="工作流节点画布" src="./legacy/editor-frame.html?mode=canvas"></iframe>
-          <div id="loading-mask" class="loading-mask">
-            <span class="loading-spinner"></span>
-            <span>正在载入工作流</span>
-          </div>
-        </section>
-
         <section id="module-details" class="dock-module details-module">
           <iframe id="details-frame" title="节点详细信息" src="./legacy/editor-frame.html?mode=details"></iframe>
         </section>
@@ -431,6 +440,10 @@
           <button id="content-name-submit" class="overview-config-button primary" type="button">创建</button>
         </footer>
       </section>
+    </div>
+    <div id="loading-mask" class="loading-mask hidden">
+      <span class="loading-spinner"></span>
+      <span>正在载入工作流</span>
     </div>
     <div id="app-toast" class="app-toast hidden"></div>
   </div>

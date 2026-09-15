@@ -17,30 +17,13 @@
 #module-workbench .instance-select-label { color: inherit; text-align: left; font-size: 11px; line-height: 16px; }
 #module-workbench .instance-select:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
 #module-workbench .instance-select-icon { width: 14px; height: 14px; }
+#module-workbench .instance-picker-chevron { top: 50%; right: 6px; bottom: auto; width: 12px; height: 12px; transform: translateY(-50%); }
+#module-workbench .instance-picker.open .instance-picker-chevron { transform: translateY(-50%) rotate(180deg); }
 .tool-overflow { position: relative; flex: 0 0 auto; }
 .tool-menu-trigger { list-style: none; user-select: none; }
 .tool-menu-trigger::-webkit-details-marker { display: none; }
 .tool-menu { position: absolute; z-index: 1100; top: calc(100% + 5px); left: 0; display: grid; min-width: 154px; padding: 4px; border: 1px solid var(--ui-line); border-radius: 4px; background: var(--ui-panel); box-shadow: 0 8px 20px #0004; }
 #module-workbench .tool-menu .tool-command { width: 100%; justify-content: flex-start; height: 28px; }
-
-#content-browser-items.grid { display: flex; flex-direction: column; gap: 14px; padding: 10px; }
-.content-kind-heading { margin: 0 0 7px; color: var(--ui-muted); font-size: 10px; font-weight: 400; }
-.content-kind-items { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(144px,100%),1fr)); gap: 5px; }
-#content-browser-items.grid .content-item { width: 100%; border-radius: 3px; color: var(--ui-text); }
-#content-browser-items.grid :is(.content-item.folder,.content-item.workflow) { height: 48px; display: grid; grid-template-columns: 28px minmax(0,1fr); grid-template-rows: 18px 14px; column-gap: 7px; align-content: center; justify-items: start; padding: 6px 8px; }
-#content-browser-items.grid :is(.folder,.workflow) .content-item-preview { grid-column: 1; grid-row: 1 / 3; width: 28px; height: 28px; background: transparent; }
-#content-browser-items.grid :is(.folder,.workflow) .content-item-preview svg { width: 23px; height: 23px; }
-#content-browser-items.grid :is(.folder,.workflow) :is(.content-item-name,.content-item-path) { grid-column: 2; max-width: 100%; text-align: left; }
-#content-browser-items.grid .content-item-name-edit { grid-column: 2; width: 100%; text-align: left; }
-#content-browser-items.grid .content-item.asset { height: 116px; grid-template-rows: 76px 18px 13px; padding: 4px; }
-#content-browser-items.grid .asset .content-item-preview { height: 72px; background: var(--ui-bg); border-radius: 2px; }
-#content-browser-items .content-item:hover { background: var(--ui-hover); }
-#content-browser-items .content-item.selected { background: var(--ui-selected); }
-#content-browser-items .content-item.editing { background: var(--ui-selected); box-shadow: none; }
-#content-browser-items .content-item-name-edit { border-color: var(--ui-line); background: var(--ui-bg); color: var(--ui-text); }
-#content-browser-items .content-item-name-edit:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
-#content-browser-items .content-item-path { color: var(--ui-muted); }
-.content-kind-group { min-width: 0; }
 
 /* Variable library: one aligned name/type row, scope explained once per group. */
 /* Palette and hierarchy use the same flat sidebar rhythm. */

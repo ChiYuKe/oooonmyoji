@@ -99,25 +99,27 @@ test('dock panel content keeps quadrant docking for split layouts', () => {
     'whole-workspace edge overlays stay disabled independently of panel split docking');
 });
 
-test('content browser grouping preserves item instances, draft editing and flat list mode', () => {
+test('content browser keeps item instances, draft editing and flat grid/list rendering', () => {
   const source = read('src/renderer/main.ts');
   const start = source.indexOf('function renderContentBrowser(): void {');
   const js = require('node:module').stripTypeScriptTypes(source.slice(start, source.indexOf('\n}\n', start) + 2));
-  const element = () => ({children: [], classList: {toggle() {}}, setAttribute() {},
+  const element = () => ({children: [], classList: {toggle() {}}, setAttribute() {}, textContent: '',
     append(...children) {this.children.push(...children);}, appendChild(child) {this.children.push(child);},
     replaceChildren(...children) {this.children = children;}});
   const container = element(), created = [];
   const entries = [{kind:'asset',name:'template',path:'template.png'}, {kind:'workflow',name:'main',path:'main.json'}, {kind:'folder',name:'assets',path:'assets'}];
   const ctx = vm.createContext({contentFolders: () => [''], contentBrowserFolder: '', contentBrowserQuery: '',
-    renderContentBrowserTree() {}, renderContentBrowserBreadcrumbs() {}, contentBrowserEntries: () => [...entries],
+    renderContentBrowserTree() {}, renderContentBrowserBreadcrumbs() {}, renderContentBrowserFilters() {},
+    contentBrowserEntries: () => [...entries],
     contentFolderDraft: {parentPath:'',name:'新建文件夹'}, contentBrowserItems:container, contentBrowserView:'grid', selectedContentPath:'',
     createContentItem(item, draft) { const result = {...element(), item, draft}; created.push(result); return result; },
     document: {createElement: element, querySelector: element, querySelectorAll: () => []}, createIcons() {}, desktopIcons: {}});
   vm.runInContext(js, ctx); ctx.renderContentBrowser();
-  assert.deepEqual(container.children.map(group => group.children[0].textContent), ['文件夹 · 2','工作流 · 1','模板图片 · 1']);
-  assert.equal(container.children[0].children[1].children[0], created[0]);
+  // UE 风格：过滤交给左侧类型列，主区直接平铺条目；新建草稿排在最前。
+  assert.equal(container.children.length, 4);
+  assert.equal(container.children[0], created[0]);
   assert.equal(created[0].draft, true);
-  assert.equal(container.children[2].children[1].children[0], created[1]);
+  assert.deepEqual(container.children.map(item => item.item.kind), ['folder', 'asset', 'workflow', 'folder']);
   ctx.contentBrowserView = 'list'; ctx.contentFolderDraft = null; created.length = 0;
   ctx.renderContentBrowser(); assert.deepEqual(container.children, created); assert.equal(container.children.length, 3);
 });

@@ -328,16 +328,16 @@ select option:checked { color: #fff; }
 .instance-select-label { width: 100%; min-width: 0; overflow: hidden; color: #9299a1; font-size: 9px; line-height: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .instance-picker-chevron {
   position: absolute;
-  right: 7px;
-  bottom: 7px;
-  width: 7px;
-  height: 7px;
-  border-right: 1px solid #9aa3ad;
-  border-bottom: 1px solid #9aa3ad;
-  transform: rotate(45deg) translateY(-2px);
+  right: 6px;
+  bottom: 5px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  color: #9aa3ad;
+  stroke-width: 2;
   transition: transform 120ms ease;
 }
-.instance-picker.open .instance-picker-chevron { transform: rotate(225deg) translate(-1px, -1px); }
+.instance-picker.open .instance-picker-chevron { transform: rotate(180deg); }
 .instance-menu {
   position: fixed;
   z-index: 1600;
@@ -553,67 +553,12 @@ select option:checked { color: #fff; }
 .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   padding-left: 0;
 }
-.workflow-editor-tab-header {
-  /* 让标题栏空白处也成为工作流拖放目标；Dockview 原生拖动仍使用其它数据类型。 */
-  position: relative;
-}
-/* editor panel 的原生标签只是 Dockview 容器入口，不对应任何文档。隐藏它，
-   避免与真正可切换的工作流文件标签并列后形成一个“点了没反应”的假标签。 */
-.workflow-editor-tab-header .dv-tabs-container > .dv-tab[data-tab-panel-id="editor"] {
-  display: none;
-}
-.workflow-document-tab-host {
-  position: static;
-  z-index: auto;
-  inset: auto;
-  width: auto;
-  height: 100%;
-  display: flex;
-  align-items: stretch;
-  flex: 0 0 auto;
-  min-width: 0;
-  overflow: visible;
-  -webkit-app-region: no-drag;
-  /* 空白区域也必须能接收拖放，不能只让已有标签接收事件。 */
-  pointer-events: auto;
-}
-.workflow-document-tab-host.drag-over {
-  outline: 1px solid var(--blue-strong);
-  outline-offset: -1px;
-  background: rgba(54, 148, 212, .13);
-}
-.workflow-document-tab-empty {
-  display: flex;
-  align-items: center;
-  padding: 0 9px;
-  color: #68717b;
-  font-size: 11px;
-  pointer-events: none;
-}
-.workflow-document-tabs {
-  display: flex;
-  align-items: stretch;
-  flex: 0 0 auto;
-  height: 100%;
-  min-width: 0;
-  overflow: visible;
-  pointer-events: auto;
-}
+/* 工作流文档标签由真正的 Dockview 面板渲染；这里只补充文字省略、未保存圆点与关闭按钮。 */
 .workflow-document-tab {
-  flex: 0 0 auto;
-  max-width: 220px;
   min-width: 0;
-  height: 25px;
-  cursor: pointer;
-  pointer-events: auto;
-}
-.workflow-document-tab .dv-default-tab {
-  width: 100%;
+  max-width: 220px;
 }
 .workflow-document-tab .dv-default-tab-content {
-  min-width: 0;
-}
-.workflow-document-tab-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -623,33 +568,17 @@ select option:checked { color: #fff; }
   width: 6px;
   height: 6px;
   flex: 0 0 auto;
+  margin-right: 2px;
   border-radius: 50%;
   background: var(--yellow);
 }
-.workflow-document-tab-close {
-  flex: 0 0 auto;
-  cursor: pointer;
-}
-/* 文档标签嵌在标签宿主内，并非 Dockview 直属 panel；补齐原生主题仅对
-   .dv-tabs-container 直属子元素生效的状态色，所有值均复用同组原生变量。 */
-.onmyoji-dockview .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .workflow-document-tab.dv-active-tab {
-  background-color: var(--dock-panel-header-background);
-  color: var(--dv-activegroup-visiblepanel-tab-color);
-}
-.onmyoji-dockview .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .workflow-document-tab.dv-inactive-tab {
-  background-color: var(--dv-activegroup-hiddenpanel-tab-background-color);
-  color: var(--dv-activegroup-hiddenpanel-tab-color);
-}
-.onmyoji-dockview .dv-groupview.dv-inactive-group > .dv-tabs-and-actions-container .workflow-document-tab.dv-active-tab {
-  background-color: var(--dv-inactivegroup-visiblepanel-tab-background-color);
-  color: var(--dv-inactivegroup-visiblepanel-tab-color);
-}
-.onmyoji-dockview .dv-groupview.dv-inactive-group > .dv-tabs-and-actions-container .workflow-document-tab.dv-inactive-tab {
-  background-color: var(--dv-inactivegroup-hiddenpanel-tab-background-color);
-  color: var(--dv-inactivegroup-hiddenpanel-tab-color);
-}
-.onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container .workflow-document-tab.dv-inactive-tab:hover {
-  background-color: #2b2b2b;
+.workflow-document-tab-dirty.hidden { display: none; }
+.workflow-document-tab-close { flex: 0 0 auto; cursor: pointer; }
+/* 把工作流拖到编辑器区域时的落点提示。 */
+#dock-workspace.workflow-drop-active {
+  outline: 1px solid var(--blue-strong);
+  outline-offset: -1px;
+  background: rgba(54, 148, 212, .08);
 }
 body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   -webkit-app-region: drag;
@@ -765,17 +694,41 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .variable-row.selected .variable-eye.toggle:hover { background: rgba(255, 255, 255, 0.14); }
 
 .editor-surface { position: relative; min-width: 0; min-height: 0; background: #1b1b1b; }
-#editor-frame, #details-frame, #runtime-log-frame { width: 100%; height: 100%; display: block; border: 0; background: #1b1b1b; }
+.workflow-canvas-frame, #details-frame, #runtime-log-frame { width: 100%; height: 100%; display: block; border: 0; background: #1b1b1b; }
 .details-module { background: var(--dock-panel-background, #242424); }
-.loading-mask { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; background: #1b1b1b; color: var(--muted); }
+.loading-mask { position: fixed; inset: 0; z-index: 4000; display: grid; place-content: center; justify-items: center; gap: 10px; background: rgba(20, 20, 20, .72); color: var(--muted); }
+.loading-mask.hidden { display: none; }
 .loading-spinner { width: 22px; height: 22px; border: 2px solid #333a43; border-top-color: var(--blue-strong); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .runtime-module { background: var(--dock-panel-background, #242424); }
 
-.content-browser-module { background: var(--dock-panel-background, #242424); }
+.content-browser-module { background: var(--dock-panel-background, #242424); container: content-browser / inline-size; }
+.content-browser-body { min-height: 0; flex: 1; display: flex; }
+.content-browser-sources { flex: 0 0 var(--cb-sources-width, 198px); min-width: 0; min-height: 0; display: grid; grid-template-rows: 30px minmax(0, 1fr) 22px; background: var(--dock-panel-background, #242424); }
+.content-browser-pane-header { display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.content-browser-pane-title { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+.content-browser-pane-search { flex: 1; min-width: 0; height: 21px; display: flex; align-items: center; gap: 5px; padding: 0 6px; border: 1px solid var(--border); background: #181818; }
+.content-browser-pane-search:focus-within { border-color: #526875; }
+.content-browser-pane-search svg { width: 12px; height: 12px; flex: 0 0 12px; color: var(--muted); }
+.content-browser-pane-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 11px; }
+.content-browser-pane-search input::placeholder { color: #6f7781; }
+.content-browser-tree { min-width: 0; min-height: 0; overflow: auto; padding: 4px 0; }
+.content-browser-collections { display: flex; align-items: center; gap: 8px; padding: 0 9px; border-top: 1px solid var(--border-soft); background: var(--dock-panel-background, #242424); color: var(--muted); font-size: 9px; }
+.content-browser-collections span { color: var(--text); }
+.content-browser-collections em { margin-left: auto; color: var(--muted); font-style: normal; font-variant-numeric: tabular-nums; }
+.content-folder-empty { padding: 10px 12px; color: var(--muted); font-size: 10px; }
+.content-browser-filters { flex: 0 0 var(--cb-filters-width, 132px); min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding: 7px 6px; background: var(--dock-panel-background, #242424); }
+.content-browser-resizer { position: relative; flex: 0 0 5px; cursor: col-resize; touch-action: none; }
+.content-browser-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); background: var(--border-soft); }
+.content-browser-resizer:hover::before, .content-browser-resizer.dragging::before, .content-browser-resizer:focus-visible::before { background: var(--ui-focus, #999999); }
+.content-browser-resizer:focus-visible { outline: 0; }
+.content-facet { width: 100%; height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; border: 0; border-radius: 2px; background: var(--ui-surface, #2d2d2d); color: var(--ui-muted, #a0a0a0); text-align: left; cursor: pointer; font: inherit; }
+.content-facet:hover { background: var(--ui-hover, #363636); color: var(--ui-text, #dddddd); }
+.content-facet.active { background: var(--ui-selected, #424242); color: var(--ui-text, #dddddd); }
+.content-facet span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.content-facet em { flex: 0 0 auto; color: var(--ui-muted, #a0a0a0); font-size: 9px; font-style: normal; }
 .content-browser-toolbar {
-  flex: 0 0 30px;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -787,29 +740,31 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .compact-action { width: 25px; height: 24px; flex: 0 0 25px; margin-left: 0; }
 .compact-action.active { background: #30363d; color: #fff; }
 .compact-action.refreshing svg { animation: spin .8s linear infinite; }
-.content-browser-breadcrumbs { min-width: 120px; display: flex; align-items: center; overflow: hidden; }
+.content-browser-breadcrumbs { min-width: 60px; flex: 0 1 auto; display: flex; align-items: center; overflow: hidden; }
 .content-crumb { height: 25px; flex: 0 1 auto; min-width: 0; display: flex; align-items: center; padding: 0 5px; border: 0; background: transparent; color: #bbc1c8; cursor: pointer; white-space: nowrap; }
 .content-crumb:hover { background: var(--surface-hover); color: #fff; }
 .content-crumb + .content-crumb::before { content: "/"; margin-right: 8px; color: #626a74; }
-.content-browser-search { width: clamp(150px, 18vw, 260px); height: 26px; margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 0 7px; border: 1px solid var(--border); background: #181818; }
+.content-browser-search { flex: 1 1 auto; min-width: 120px; max-width: 720px; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 7px; border: 1px solid var(--border); border-radius: 3px; background: #181818; }
 .content-browser-search:focus-within { border-color: #526875; }
 .content-browser-search svg { width: 13px; height: 13px; flex: 0 0 13px; color: var(--muted); }
 .content-browser-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 11px; }
 .content-browser-search input::placeholder { color: #6f7781; }
 .content-browser-view-controls { display: flex; align-items: center; gap: 2px; }
-.content-browser-body { min-height: 0; flex: 1; display: grid; grid-template-columns: 210px minmax(0, 1fr); }
-.content-browser-tree { min-width: 0; overflow: auto; padding: 5px 0; border-right: 1px solid var(--border-soft); background: var(--dock-panel-background, #242424); }
-.content-folder-row { width: 100%; height: 27px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 calc(8px + var(--depth, 0) * 14px); border: 0; background: transparent; color: #bbc1c8; text-align: left; cursor: pointer; white-space: nowrap; }
+.content-folder-row { width: 100%; height: 24px; display: flex; align-items: center; gap: 5px; padding: 0 8px 0 calc(6px + var(--depth, 0) * 13px); border: 0; background: transparent; color: #bbc1c8; text-align: left; cursor: pointer; white-space: nowrap; }
 .content-folder-row:hover { background: var(--surface-hover); }
 .content-folder-row.selected { background: #2b5674; color: #fff; }
-.content-folder-row svg { width: 14px; height: 14px; flex: 0 0 14px; color: #c1a35e; }
-.content-folder-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.content-browser-results { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) 22px; position: relative; }
+.content-folder-chevron { width: 12px; height: 12px; flex: 0 0 12px; display: grid; place-items: center; color: #8a939c; }
+.content-folder-chevron.leaf { visibility: hidden; }
+.content-folder-chevron svg { width: 11px; height: 11px; transition: transform .12s ease; }
+.content-folder-chevron:not(.collapsed) svg { transform: rotate(90deg); }
+.content-folder-row > svg { width: 14px; height: 14px; flex: 0 0 14px; color: #c1a35e; }
+.content-folder-row > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.content-browser-results { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; grid-template-rows: 30px minmax(0, 1fr) 22px; position: relative; }
 .content-browser-items { min-width: 0; min-height: 0; overflow: auto; align-content: start; }
-.content-browser-items.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 1px; padding: 5px; }
+.content-browser-items.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 5px; padding: 8px; align-content: start; }
 .content-browser-items.list { display: block; padding: 2px 0; }
 .content-item { min-width: 0; border: 0; background: transparent; color: #c9ced4; cursor: default; text-align: left; }
-.content-browser-items.grid .content-item { height: 112px; display: grid; grid-template-rows: 76px 18px 13px; align-items: center; justify-items: center; padding: 4px; }
+.content-browser-items.grid .content-item { height: 108px; display: grid; grid-template-rows: minmax(0, 1fr) 18px; gap: 3px; align-items: center; justify-items: center; padding: 4px; }
 .content-browser-items.list .content-item { width: 100%; height: 30px; display: grid; grid-template-columns: 24px minmax(160px, .8fr) minmax(180px, 1.2fr); align-items: center; gap: 6px; padding: 0 9px; border-bottom: 1px solid #20252a; }
 .content-item:hover { background: #303030; }
 .content-item.selected { background: #2b5674; }
@@ -821,23 +776,29 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-crumb.drop-target,
 .content-browser-items.drop-target { border-color: #65b7df; background: #244d63; box-shadow: inset 0 0 0 1px rgba(101,183,223,.35); }
 .content-item.current .content-item-name { color: #8fc8e7; }
-.content-item-preview { width: 100%; height: 72px; display: grid; place-items: center; overflow: hidden; background: #171717; }
+.content-item-preview { position: relative; width: 100%; height: 72px; display: grid; place-items: center; overflow: hidden; border-radius: 2px; background: #171717; }
+.content-browser-items.grid .content-item.folder .content-item-preview { background: transparent; }
+.content-browser-items.grid .content-item.folder .content-item-preview svg { width: 54px; height: 54px; }
+.content-browser-items.grid .content-item.selected .content-item-preview { box-shadow: inset 0 0 0 1px #35617d; }
 .content-browser-items.list .content-item-preview { width: 22px; height: 22px; background: transparent; }
 .content-item-preview img { width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
 .content-item-preview svg { width: 31px; height: 31px; color: #7aa6bf; stroke-width: 1.4; }
 .content-item.folder .content-item-preview svg { color: #c1a35e; fill: rgba(193, 163, 94, .12); }
 .content-browser-items.list .content-item-preview svg { width: 17px; height: 17px; }
+.content-item-kind { display: none; }
+.content-browser-items.grid .content-item-kind { display: block; position: absolute; left: 3px; bottom: 3px; max-width: calc(100% - 6px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 4px; border-radius: 2px; background: rgba(12, 12, 12, .82); color: #cfd6dc; font-size: 9px; }
 .content-item-name, .content-item-path { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .content-item-name { font-size: 11px; }
 .content-item-name-edit { width: 100%; max-width: 100%; height: 23px; min-width: 0; padding: 2px 4px; border: 1px solid #4c9bc5; border-radius: 3px; outline: 0; background: #171b1f; color: #f1f4f6; font-size: 11px; text-align: center; }
 .content-item-name-edit:disabled { opacity: .65; }
 .content-item-path { color: #707985; font-size: 9px; }
-.content-browser-items.grid .content-item-name, .content-browser-items.grid .content-item-path { text-align: center; }
+.content-browser-items.grid .content-item-name { text-align: center; }
+.content-browser-items.grid .content-item-path { display: none; }
 .content-browser-items.list .content-item-path { font-size: 10px; }
 .content-browser-items.list .content-item-name-edit { height: 24px; text-align: left; }
-.content-browser-footer { grid-column: 1; display: flex; align-items: center; gap: 12px; padding: 0 8px; border-top: 1px solid var(--border-soft); background: var(--dock-panel-background, #242424); color: var(--muted); font-size: 9px; }
+.content-browser-footer { display: flex; align-items: center; gap: 12px; padding: 0 8px; border-top: 1px solid var(--border-soft); background: var(--dock-panel-background, #242424); color: var(--muted); font-size: 9px; }
 .content-browser-selection { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.content-browser-results > .empty-panel { position: absolute; inset: 0 0 22px; display: grid; place-items: center; padding: 0; pointer-events: none; }
+.content-browser-results > .empty-panel { position: absolute; inset: 30px 0 22px; display: grid; place-items: center; padding: 0; pointer-events: none; }
 
 .status-bar { gap: 18px; padding: 0 9px; border-top: 3px solid #2e2e2e; background: var(--status); color: #cfcfcf; font-size: 10px; }
 .status-spacer { flex: 1; }
@@ -1271,7 +1232,14 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
   .command-button { width: 30px; padding: 0; justify-content: center; }
   .document-path { display: none; }
   .tree-children { margin-left: 5px; padding-left: 5px; }
-  .content-browser-body { grid-template-columns: 160px minmax(0, 1fr); }
+}
+
+/* 内容浏览器按面板宽度自适应：先收起类型过滤列，再收起来源目录列。 */
+@container content-browser (max-width: 720px) {
+  .content-browser-filters, .content-browser-resizer[data-content-resizer="filters"] { display: none; }
+}
+@container content-browser (max-width: 480px) {
+  .content-browser-sources, .content-browser-resizer[data-content-resizer="sources"] { display: none; }
   .content-browser-breadcrumbs { display: none; }
 }
 

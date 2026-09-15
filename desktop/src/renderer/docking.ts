@@ -1,5 +1,6 @@
 import {
   createDockview,
+  createCloseButton,
   DockviewGroupPanel,
   themeVisualStudio,
   type DockviewApi,
@@ -19,16 +20,19 @@ import {
 } from 'dockview';
 import { createElement, ExternalLink } from 'lucide';
 
-export type DockPanelId = 'structure' | 'palette' | 'variables' | 'editor' | 'details' | 'runtime' | 'contentBrowser';
+export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime';
 export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
+/** “工作流画布”面板的引用占位符：实际指向当前打开的第一个文档面板。 */
+type PanelReference = DockPanelId | WorkbenchPanelId | 'editor';
+
 interface DockPanelDefinition {
   title: string;
   moduleElementId: string;
-  reference?: DockPanelId | WorkbenchPanelId;
+  reference?: PanelReference;
   direction?: 'within' | 'left' | 'right' | 'above' | 'below';
   initialWidth?: number;
   initialHeight?: number;
@@ -37,12 +41,25 @@ interface DockPanelDefinition {
   inactive?: boolean;
 }
 
+/** 壳层为每个工作流文档建立画布时注入的宿主回调。 */
+export interface DocumentPanelHooks {
+  onFrameCreated(panelId: string, uri: string, frame: HTMLIFrameElement): void;
+  onFrameDisposed(panelId: string): void;
+  onCloseRequested(uri: string): void;
+}
+
 export interface DockingController {
   readonly dockviewApi: DockviewApi;
-  /** 紧跟在原生“工作流画布”后的文档标签宿主。 */
-  readonly workflowTabHost: HTMLElement;
-  /** 内层画布根节点；由壳层动态命中工作流标题栏的拖放。 */
-  readonly workflowTabDropTarget: HTMLElement;
+  /** 补齐缺失的固定面板；有传参时顺带保证至少有一个文档面板。 */
+  ensureLayout(fallbackDocument?: { uri: string; title: string }): void;
+  openDocument(uri: string, title: string): void;
+  closeDocument(uri: string): void;
+  /** 把已打开的文档面板设为激活项（不存在时返回 false）。 */
+  focusDocument(uri: string): boolean;
+  isDocumentOpen(uri: string): boolean;
+  documentUris(): string[];
+  activeDocumentUri(): string | undefined;
+  onDidRemoveDocument(listener: (uri: string) => void): { dispose(): void };
   isOpen(panelId: DockPanelId): boolean;
   showPanel(panelId: DockPanelId): void;
   togglePanel(panelId: DockPanelId): void;
@@ -103,12 +120,6 @@ const SHARED_PANEL_DEFINITIONS: Record<SharedDockPanelId, DockPanelDefinition> =
 };
 
 const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
-  editor: {
-    title: '工作流画布',
-    moduleElementId: 'module-editor',
-    minimumWidth: 420,
-    minimumHeight: 260,
-  },
   details: {
     title: '详细信息',
     moduleElementId: 'module-details',
@@ -158,7 +169,25 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
   },
 };
 
-const DEFAULT_PANEL_ORDER: DockPanelId[] = ['editor', 'structure', 'palette', 'variables', 'runtime', 'contentBrowser', 'details'];
+const DEFAULT_PANEL_ORDER: DockPanelId[] = ['structure', 'palette', 'variables', 'runtime', 'contentBrowser', 'details'];
+
+/** 文档面板的组件名与 id 前缀；一个工作流文档对应一个 Dockview 面板。 */
+const DOCUMENT_COMPONENT = 'workflow-canvas';
+const DOCUMENT_TAB_COMPONENT = 'workflow-document-tab';
+const DOCUMENT_PANEL_PREFIX = 'workflow:';
+
+function documentPanelId(uri: string): string {
+  return `${DOCUMENT_PANEL_PREFIX}${uri}`;
+}
+
+/** 从面板 id 还原工作流 URI；非文档面板返回 undefined。 */
+export function documentUriForPanelId(panelId: string): string | undefined {
+  return panelId.startsWith(DOCUMENT_PANEL_PREFIX) ? panelId.slice(DOCUMENT_PANEL_PREFIX.length) : undefined;
+}
+
+function documentUriFromPanelId(panelId: string): string | undefined {
+  return documentUriForPanelId(panelId);
+}
 
 const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition> = {
   workflow: {
@@ -180,8 +209,7 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     title: '设置',
     moduleElementId: 'module-settings',
     reference: 'workflow',
-    direction: 'right',
-    initialWidth: 340,
+    direction: 'within',
     minimumWidth: 300,
     minimumHeight: 220,
   },
@@ -303,12 +331,100 @@ class FixedWorkbenchTab implements ITabRenderer {
   }
 }
 
-function groupContainsWorkflow(group: IDockviewGroupPanel): boolean {
-  return group.panels.some((panel) => panel.api.id === 'workflow');
+/** 每个工作流文档面板的独立画布容器；iframe 由壳层注册后接管消息路由。 */
+class WorkflowCanvasRenderer implements IContentRenderer {
+  readonly element = document.createElement('section');
+  private readonly frame = document.createElement('iframe');
+  private panelId = '';
+  private uri = '';
+  private attached = false;
+
+  constructor(private readonly hooks: DocumentPanelHooks) {
+    this.element.className = 'dock-module editor-surface';
+    this.frame.className = 'workflow-canvas-frame';
+    this.frame.title = '工作流节点画布';
+  }
+
+  init(parameters: GroupPanelPartInitParameters): void {
+    this.panelId = parameters.api.id;
+    this.uri = String(parameters.params?.uri ?? '');
+    if (!this.attached) {
+      this.attached = true;
+      this.frame.id = this.panelId;
+      this.frame.src = './legacy/editor-frame.html?mode=canvas';
+      this.element.appendChild(this.frame);
+    }
+    this.hooks.onFrameCreated(this.panelId, this.uri, this.frame);
+  }
+
+  dispose(): void {
+    this.hooks.onFrameDisposed(this.panelId);
+    if (this.frame.parentElement === this.element) this.element.removeChild(this.frame);
+    this.attached = false;
+  }
 }
 
-function groupContainsEditor(group: IDockviewGroupPanel): boolean {
-  return group.panels.some((panel) => panel.api.id === 'editor');
+const documentTabRenderers = new Map<string, WorkflowDocumentTab>();
+
+/** 供壳层更新文档标签的未保存圆点。 */
+export function setDocumentPanelDirty(panelId: string, dirty: boolean): void {
+  documentTabRenderers.get(panelId)?.setDirty(dirty);
+}
+
+class WorkflowDocumentTab implements ITabRenderer {
+  readonly element = document.createElement('div');
+  private label = document.createElement('div');
+  private dirtyMark = document.createElement('div');
+  private closeButton = document.createElement('div');
+  private titleDisposable?: { dispose(): void };
+  private panelId = '';
+
+  constructor(private readonly onClose: (panelId: string) => void) {
+    this.element.className = 'dv-default-tab workflow-document-tab';
+    this.label.className = 'dv-default-tab-content workflow-document-tab-label';
+    this.dirtyMark.className = 'workflow-document-tab-dirty hidden';
+    this.dirtyMark.title = '未保存';
+    this.closeButton.className = 'dv-default-tab-action workflow-document-tab-close';
+    this.closeButton.setAttribute('role', 'button');
+    this.closeButton.tabIndex = -1;
+    this.closeButton.title = '关闭工作流画布';
+    this.closeButton.appendChild(createCloseButton());
+    // Dockview 在标签容器上监听指针拖动，关闭按钮必须隔离该手势才能稳定收到 click。
+    this.closeButton.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    this.closeButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onClose(this.panelId);
+    });
+    this.element.append(this.label, this.dirtyMark, this.closeButton);
+  }
+
+  init(params: TabPartInitParameters): void {
+    this.panelId = params.api.id;
+    documentTabRenderers.set(this.panelId, this);
+    this.label.textContent = params.title;
+    this.titleDisposable?.dispose();
+    this.titleDisposable = params.api.onDidTitleChange((event) => {
+      this.label.textContent = event.title;
+    });
+  }
+
+  setDirty(dirty: boolean): void {
+    this.dirtyMark.classList.toggle('hidden', !dirty);
+  }
+
+  dispose(): void {
+    documentTabRenderers.delete(this.panelId);
+    this.titleDisposable?.dispose();
+    this.titleDisposable = undefined;
+  }
+}
+
+function groupContainsWorkflow(group: IDockviewGroupPanel): boolean {
+  return group.panels.some((panel) => panel.api.id === 'workflow');
 }
 
 class PopoutHeaderAction implements IHeaderActionsRenderer {
@@ -320,7 +436,6 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
 
   constructor(
     private readonly canPopout: (group: IDockviewGroupPanel) => boolean = () => true,
-    private readonly workflowTabHost?: HTMLElement,
   ) {
     this.element.className = 'dock-header-actions';
     this.button.type = 'button';
@@ -341,18 +456,6 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
   init(params: IGroupHeaderProps): void {
     this.params = params;
     const update = (): void => {
-      // init() 可能在 panel 真正进入 group 之前执行，因此必须在每次布局
-      // 变化时重新判断 editor 归属，否则文档标签宿主永远不会挂载。
-      const isEditorGroup = Boolean(this.workflowTabHost && groupContainsEditor(params.group));
-      const header = this.element.closest<HTMLElement>('.dv-tabs-and-actions-container');
-      const nativeTabs = header?.querySelector<HTMLElement>('.dv-tabs-container');
-      if (isEditorGroup && nativeTabs && this.workflowTabHost && this.workflowTabHost.parentElement !== nativeTabs) {
-        // 放入 Dockview 自己的可滚动标签列表，而不是右侧 actions 区。
-        nativeTabs.appendChild(this.workflowTabHost);
-      } else if (!isEditorGroup && this.workflowTabHost && header?.contains(this.workflowTabHost)) {
-        this.workflowTabHost.remove();
-      }
-      header?.classList.toggle('workflow-editor-tab-header', isEditorGroup);
       const isPopout = params.api.location.type === 'popout';
       const isFixed = !this.canPopout(params.group);
       this.button.disabled = isPopout || isFixed;
@@ -368,9 +471,6 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
   }
 
   dispose(): void {
-    const header = this.element.closest<HTMLElement>('.dv-tabs-and-actions-container');
-    header?.classList.remove('workflow-editor-tab-header');
-    if (this.workflowTabHost && header?.contains(this.workflowTabHost)) this.workflowTabHost.remove();
     this.locationDisposable?.dispose();
     this.layoutDisposable?.dispose();
     this.locationDisposable = undefined;
@@ -602,13 +702,18 @@ function registerDraggedSourceGroupVacancy(
   };
 }
 
-export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFailure?: () => void): DockingController {
+export function createDockingWorkspace(
+  onLayoutChange?: () => void,
+  onPopoutFailure?: () => void,
+  hooks?: Partial<DocumentPanelHooks>,
+): DockingController {
   const container = document.querySelector<HTMLElement>('#dock-workspace')!;
   const moduleStore = document.querySelector<HTMLElement>('#dock-module-store')!;
-  const workflowTabHost = document.createElement('div');
-  workflowTabHost.id = 'workflow-document-tabs';
-  workflowTabHost.className = 'workflow-document-tab-host';
-  workflowTabHost.setAttribute('aria-label', '已打开的工作流');
+  const documentHooks: DocumentPanelHooks = {
+    onFrameCreated: hooks?.onFrameCreated ?? (() => undefined),
+    onFrameDisposed: hooks?.onFrameDisposed ?? (() => undefined),
+    onCloseRequested: hooks?.onCloseRequested ?? (() => undefined),
+  };
   const modules = new Map<string, HTMLElement>();
   for (const definition of Object.values(PANEL_DEFINITIONS)) {
     modules.set(definition.moduleElementId, document.querySelector<HTMLElement>(`#${definition.moduleElementId}`)!);
@@ -625,21 +730,40 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     // 关闭 dockview 的 tab 溢出下拉（组头部右侧的“∨ 数量”角标）。
     disableTabsOverflowList: true,
     dropOverlayModel: ({ location }) => resolveDropOverlayModel(location),
-    createRightHeaderActionComponent: () => new PopoutHeaderAction(() => true, workflowTabHost),
-    createComponent: () => new ExistingModuleRenderer(modules, moduleStore),
+    createRightHeaderActionComponent: () => new PopoutHeaderAction(() => true),
+    createComponent: ({ name }) => name === DOCUMENT_COMPONENT
+      ? new WorkflowCanvasRenderer(documentHooks)
+      : new ExistingModuleRenderer(modules, moduleStore),
+    createTabComponent: ({ name }) => name === DOCUMENT_TAB_COMPONENT
+      ? new WorkflowDocumentTab((panelId) => {
+        const uri = documentUriFromPanelId(panelId);
+        if (uri) documentHooks.onCloseRequested(uri);
+      })
+      : undefined,
   });
-
-  // 标题栏是在布局恢复/创建 panel 时由 Dockview 动态产生的，不能在此处
-  // 缓存 closest() 结果。返回稳定的内层根节点，拖放处理时再判断当前标题栏。
-  const workflowTabDropTarget = container;
 
   let suspendPersistence = true;
   let temporaryDragLayout = false;
 
+  const isDocumentPanel = (panel: IDockviewPanel): boolean => Boolean(documentUriFromPanelId(panel.api.id));
+
+  const documentPanels = (): IDockviewPanel[] => api.panels.filter(isDocumentPanel);
+
+  /** 文档面板始终作为同一组的标签加入，保证打开新工作流时复用标签栏。 */
+  const anchorDocumentPanel = (): IDockviewPanel | undefined => documentPanels()[0]
+    ?? api.panels[0];
+
+  /** “editor” 是占位引用，实际落在第一个打开的文档面板上。 */
+  const resolveReference = (reference?: PanelReference): IDockviewPanel | undefined => {
+    if (!reference) return undefined;
+    if (reference === 'editor') return documentPanels()[0];
+    return api.getPanel(reference) ?? undefined;
+  };
+
   const addPanel = (panelId: DockPanelId): void => {
     if (api.getPanel(panelId)) return;
     const definition = PANEL_DEFINITIONS[panelId];
-    const reference = definition.reference ? api.getPanel(definition.reference) : undefined;
+    const reference = resolveReference(definition.reference);
     api.addPanel({
       id: panelId,
       title: definition.title,
@@ -659,39 +783,96 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     });
   };
 
+  const openDocument = (uri: string, title: string): void => {
+    if (!uri) return;
+    const panelId = documentPanelId(uri);
+    const existing = api.getPanel(panelId);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const anchor = anchorDocumentPanel();
+    api.addPanel({
+      id: panelId,
+      title,
+      component: DOCUMENT_COMPONENT,
+      tabComponent: DOCUMENT_TAB_COMPONENT,
+      params: { uri },
+      renderer: 'always',
+      minimumWidth: 420,
+      minimumHeight: 260,
+      position: anchor ? { referencePanel: anchor, direction: 'within' } : undefined,
+    });
+  };
+
+  const closeDocument = (uri: string): void => {
+    api.getPanel(documentPanelId(uri))?.api.close();
+  };
+
+  const focusDocument = (uri: string): boolean => {
+    const panel = api.getPanel(documentPanelId(uri));
+    if (!panel) return false;
+    panel.api.setActive();
+    panel.focus();
+    return true;
+  };
+
   const saveLayout = (): void => {
     if (suspendPersistence || temporaryDragLayout) return;
     persistLayout(LAYOUT_STORAGE_KEY, JSON.stringify(api.toJSON()));
     onLayoutChange?.();
   };
 
-  const resetLayout = (): void => {
-    suspendPersistence = true;
-    api.clear();
-    DEFAULT_PANEL_ORDER.forEach(addPanel);
-    suspendPersistence = false;
-    saveLayout();
-    window.requestAnimationFrame(() => {
-      api.getPanel('structure')?.api.group.api.setSize({ width: 260 });
-      api.getPanel('variables')?.api.group.api.setSize({ width: 260, height: 400 });
-      api.getPanel('details')?.api.group.api.setSize({ width: 320 });
-      api.getPanel('runtime')?.api.group.api.setSize({ height: 260 });
-    });
+  const applyDefaultSizes = (): void => {
+    api.getPanel('structure')?.api.group.api.setSize({ width: 260 });
+    api.getPanel('variables')?.api.group.api.setSize({ width: 260, height: 400 });
+    api.getPanel('details')?.api.group.api.setSize({ width: 320 });
+    api.getPanel('runtime')?.api.group.api.setSize({ height: 260 });
   };
 
-  let restored = false;
+  // 布局恢复只负责重建面板；文档由壳层根据会话逐条打开。
   const savedLayout = readPersistedLayout(LAYOUT_STORAGE_KEY);
   if (savedLayout) {
     try {
       api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
-      restored = api.totalPanels > 0;
     } catch {
       window.onmyoji.writeLayout(LAYOUT_STORAGE_KEY, null);
       window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
     }
   }
-  if (!restored) resetLayout();
   suspendPersistence = false;
+
+  const ensureLayout = (fallbackDocument?: { uri: string; title: string }): void => {
+    suspendPersistence = true;
+    if (documentPanels().length === 0 && fallbackDocument) openDocument(fallbackDocument.uri, fallbackDocument.title);
+    if (documentPanels().length === 0) {
+      suspendPersistence = false;
+      saveLayout();
+      return;
+    }
+    const hadScaffolding = DEFAULT_PANEL_ORDER.some((panelId) => api.getPanel(panelId));
+    DEFAULT_PANEL_ORDER.forEach(addPanel);
+    suspendPersistence = false;
+    saveLayout();
+    if (!hadScaffolding) window.requestAnimationFrame(applyDefaultSizes);
+  };
+
+  const resetLayout = (): void => {
+    const documents = documentPanels().map((panel) => ({
+      uri: documentUriFromPanelId(panel.api.id)!,
+      title: panel.title ?? '',
+    }));
+    const activeUri = api.activePanel ? documentUriFromPanelId(api.activePanel.api.id) : undefined;
+    const document = documents[0] ?? (activeUri ? { uri: activeUri, title: '' } : undefined);
+    suspendPersistence = true;
+    api.clear();
+    if (document) openDocument(document.uri, document.title);
+    DEFAULT_PANEL_ORDER.forEach(addPanel);
+    suspendPersistence = false;
+    saveLayout();
+    if (activeUri) focusDocument(activeUri);
+    window.requestAnimationFrame(applyDefaultSizes);
+  };
 
   const layoutDisposable = api.onDidLayoutChange(saveLayout);
   const panelDisposable = api.onDidActivePanelChange(() => {
@@ -732,8 +913,23 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
 
   return {
     dockviewApi: api,
-    workflowTabHost,
-    workflowTabDropTarget,
+    ensureLayout,
+    openDocument,
+    closeDocument,
+    focusDocument,
+    isDocumentOpen: (uri) => Boolean(api.getPanel(documentPanelId(uri))),
+    documentUris: () => documentPanels().map((panel) => documentUriFromPanelId(panel.api.id)!),
+    activeDocumentUri: () => {
+      const active = api.activePanel;
+      return active ? documentUriFromPanelId(active.api.id) : undefined;
+    },
+    onDidRemoveDocument: (listener) => {
+      const disposable = api.onDidRemovePanel((panel) => {
+        const uri = documentUriFromPanelId(panel.api.id);
+        if (uri) listener(uri);
+      });
+      return { dispose: () => disposable.dispose() };
+    },
     isOpen: (panelId) => Boolean(api.getPanel(panelId)),
     showPanel,
     togglePanel: (panelId) => {
@@ -863,12 +1059,15 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   }
   suspendPersistence = false;
 
-  // 若持久化布局把设置面板恢复为浮动/弹出状态，先关闭它，
-  // 让设置默认停靠在工作流编辑器右侧（见 WORKBENCH_PANEL_DEFINITIONS.settings）。
+  // 设置默认与工作流编辑器叠在同一行标签；若持久化布局把它恢复成右侧独立
+  // 分组或浮动/弹出窗口，先关闭，打开时再作为标签加入（见 settings.direction）。
+  const settingsTabbedWithWorkflow = (): boolean => {
+    const settings = api.getPanel('settings');
+    const workflow = api.getPanel('workflow');
+    return Boolean(settings && workflow && settings.group === workflow.group);
+  };
   const restoredSettings = api.getPanel('settings');
-  if (restoredSettings && (restoredSettings.api.location.type === 'floating' || restoredSettings.api.location.type === 'popout')) {
-    restoredSettings.api.close();
-  }
+  if (restoredSettings && !settingsTabbedWithWorkflow()) restoredSettings.api.close();
   // 引用查看器的内容依赖本次会话的当前目标；不要恢复成空白面板。
   const restoredReferenceViewer = api.getPanel('referenceViewer');
   if (restoredReferenceViewer) restoredReferenceViewer.api.close();
@@ -882,11 +1081,8 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   });
 
   const show = (panelId: WorkbenchPanelId): void => {
-    if (panelId === 'settings') {
-      const existing = api.getPanel('settings');
-      if (existing && (existing.api.location.type === 'floating' || existing.api.location.type === 'popout')) {
-        existing.api.close();
-      }
+    if (panelId === 'settings' && !settingsTabbedWithWorkflow()) {
+      api.getPanel('settings')?.api.close();
     }
     addPanel(panelId);
     const panel = api.getPanel(panelId);

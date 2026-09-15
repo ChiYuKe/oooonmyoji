@@ -20,3 +20,7 @@
 - 抽取 `src/oooonmyoji/naming.py`，统一 4 处重复的文件名清洗实现。
 - 拆分 `workflows/validator.py` 的 `validate_workflow`，并补齐公共入口中文文档字符串。
 - 桌面端统一通过 `StudioShortcuts.matchesById` 判断快捷键。
+
+### 移除
+- 移除已失效的 `run-party-souls` 命令、`PARTY_SOULS_*` 常量、相关测试与 README 段落
+  （对应工作流已在整合中删除，逻辑可从 Git 历史恢复）。

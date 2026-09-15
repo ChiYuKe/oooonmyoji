@@ -7,11 +7,10 @@
 ## 目录结构
 
 - `src/oooonmyoji/`：设备、视觉识别、Action、工作流引擎和运行时源码。
-- `workflows/`：按入口、业务流程和公共子流程分层的 JSON 工作流。
-  - `entrypoints/`：可直接运行的实例入口（`mumu-0` 队长、`mumu-1` 队员/单人循环）。
-  - `souls/party/`：组队御魂队长/队员的单回合流程。
-  - `souls/shared/`：多个入口复用的进入副本、准备阵容、等待胜利和奖励统计流程。
-  - `examples/`：用于开发验证的示例工作流。
+- `workflows/`：Behavior Tree v4（`schema_version: 4`）的 JSON 工作流。
+  - `entrypoints/`：可直接运行的入口工作流。
+  - `generated/`：编辑器与工具生成的临时工作流。
+  - 根目录：当前活动副本循环 `活动副本.json`（工作流 ID `activity_loop`）。
 - `assets/templates/`：按功能和实例分组的游戏模板图。
 - `config/`：示例配置和本机运行配置。
 - `plugins/actions/`：可选的可信本地 Action。
@@ -51,9 +50,8 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 ## VS Code 运行
 
 日常使用统一从 VS Code 左侧活动栏的 **Onmyoji** 页面操作：
-- **组队御魂**：按配置启动 `mumu-0` 队长和 `mumu-1` 队员。
 - **停止**：协作取消当前运行。
-- **运行日志**：分别查看队长、队员步骤和奖励统计。
+- **运行日志**：查看步骤和奖励统计。
 - **脚本概览**：桌面端在“工作流编辑器”旁提供全部工作流卡片；每张卡片可单独配置输入参数，按勾选顺序建立队列、调整先后并连续执行，某项失败或手动停止时不再启动剩余项。
 - 工作流编辑器标题栏的播放按钮可运行当前 JSON 工作流。
 
@@ -68,16 +66,7 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json validate
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-instances
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-workflows
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999
 ```
-
-吃鱼默认在御魂奖励页追踪结界突破券；首次掉落会点击券并读取“已拥有”，之后按奖励累计，到 30 张时再次点击复核。确认达到 30 张后先清结界，清完后由扫地工重复邀请并恢复御魂：
-
-```powershell
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 9999 --realm-threshold 30
-```
-
-结界调度只传给队员实例（默认 `mumu-1`），队长实例不会执行结界突破。临时关闭时使用 `--disable-member-realm-raid`。
 
 `run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
 `config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
@@ -86,7 +75,7 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 ```powershell
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli `
   --config .\config\config.json `
-  run-workflow mumu_1_souls_loop --instance mumu-1 --inputs .\inputs.json
+  run-workflow activity_loop --instance mumu-0 --inputs .\inputs.json
 ```
 
 `tasks` 仍用于定时调度和为同一工作流保存多个固定任务配置。
@@ -109,12 +98,11 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json validate
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json doctor
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-workflows
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json show-workflow mumu_1_souls_loop
+.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json show-workflow activity_loop
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-actions
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-instances
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json serve
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json status
-.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-party-souls --rounds 1
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli cancel <run-id>
 ```
 

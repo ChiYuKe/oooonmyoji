@@ -38,7 +38,6 @@ function shellHarness(options = {}) {
       },
     },
     deleteTarget: options.deleteTarget,
-    selectedContentPath: options.selectedContentPath ?? '',
     overview: {
       isSelected: (rel) => (options.overviewSelection ?? []).includes(rel),
       isRunning: () => Boolean(options.overviewRun?.active),
@@ -46,16 +45,17 @@ function shellHarness(options = {}) {
       selectQueueRow: (rel) => calls.queueRows.push(rel),
     },
     roiPicker: {isOpen: () => Boolean(options.roiPickerState)},
-    contentNameDialogState: options.contentNameDialogState,
-    contentBrowserEntries: () => options.entries ?? [],
-    contentFolders: () => options.folders ?? [],
-    contentFolderItem: (folder) => ({kind: 'folder', path: folder, name: folder}),
-    isContentRootFolder: (folder) => folder === 'assets' || folder === 'workflows',
-    deleteContentItem: (item) => calls.deleted.push(item),
+    contentBrowser: {
+      resolveDeleteTarget: (path) => (options.entries ?? []).find((entry) => entry.path === path)
+        ?? ((options.folders ?? []).includes(path) ? {kind: 'folder', path, name: path} : undefined),
+      isRootFolder: (folder) => folder === 'assets' || folder === 'workflows',
+      deleteItem: (item) => calls.deleted.push(item),
+      isNameDialogOpen: () => Boolean(options.contentNameDialogState),
+    },
     editorCommand: (...args) => calls.commands.push(args),
     showToast: (message, error) => calls.toasts.push([message, Boolean(error)]),
   });
-  vm.runInContext(stripTypeScriptTypes(sliceBetween(shell, 'function isTextEditingTarget(', 'function addContentContextSeparator(')), ctx);
+  vm.runInContext(stripTypeScriptTypes(sliceBetween(shell, 'function isTextEditingTarget(', 'function resetDeleteTargetOnPointerDown(')), ctx);
   return {ctx, calls, Element};
 }
 

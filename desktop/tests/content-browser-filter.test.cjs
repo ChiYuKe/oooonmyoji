@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const {stripTypeScriptTypes} = require('node:module');
 const root = path.join(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'src/renderer/content-browser.ts'), 'utf8');
 
 function extract(name) {
   const start = source.indexOf(`function ${name}(`);

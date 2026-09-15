@@ -100,7 +100,7 @@ test('dock panel content keeps quadrant docking for split layouts', () => {
 });
 
 test('content browser keeps item instances, draft editing and flat grid/list rendering', () => {
-  const source = read('src/renderer/main.ts');
+  const source = read('src/renderer/content-browser.ts');
   const start = source.indexOf('function renderContentBrowser(): void {');
   const js = require('node:module').stripTypeScriptTypes(source.slice(start, source.indexOf('\n}\n', start) + 2));
   const element = () => ({children: [], classList: {toggle() {}}, setAttribute() {}, textContent: '',
@@ -113,7 +113,7 @@ test('content browser keeps item instances, draft editing and flat grid/list ren
     contentBrowserEntries: () => [...entries],
     contentFolderDraft: {parentPath:'',name:'新建文件夹'}, contentBrowserItems:container, contentBrowserView:'grid', selectedContentPath:'',
     createContentItem(item, draft) { const result = {...element(), item, draft}; created.push(result); return result; },
-    document: {createElement: element, querySelector: element, querySelectorAll: () => []}, createIcons() {}, desktopIcons: {}});
+    document: {createElement: element, querySelector: element, querySelectorAll: () => []}, createIconsRef() {}, desktopIconsRef: {}});
   vm.runInContext(js, ctx); ctx.renderContentBrowser();
   // UE 风格：过滤交给左侧类型列，主区直接平铺条目；新建草稿排在最前。
   assert.equal(container.children.length, 4);

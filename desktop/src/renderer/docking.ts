@@ -40,6 +40,10 @@ interface DockPanelDefinition {
 
 export interface DockingController {
   readonly dockviewApi: DockviewApi;
+  /** 工作流文档标签所在的内层画布标签行右侧区域。 */
+  readonly workflowTabHost: HTMLElement;
+  /** 工作流画布分组的整个标题栏，用于接收落在空白处的工作流拖放。 */
+  readonly workflowTabDropTarget: HTMLElement;
   isOpen(panelId: DockPanelId): boolean;
   showPanel(panelId: DockPanelId): void;
   togglePanel(panelId: DockPanelId): void;
@@ -310,6 +314,10 @@ function groupContainsWorkflow(group: IDockviewGroupPanel): boolean {
   return group.panels.some((panel) => panel.api.id === 'workflow');
 }
 
+function groupContainsEditor(group: IDockviewGroupPanel): boolean {
+  return group.panels.some((panel) => panel.api.id === 'editor');
+}
+
 class PopoutHeaderAction implements IHeaderActionsRenderer {
   readonly element = document.createElement('div');
   private button = document.createElement('button');
@@ -317,7 +325,10 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
   private locationDisposable?: { dispose(): void };
   private layoutDisposable?: { dispose(): void };
 
-  constructor(private readonly canPopout: (group: IDockviewGroupPanel) => boolean = () => true) {
+  constructor(
+    private readonly canPopout: (group: IDockviewGroupPanel) => boolean = () => true,
+    private readonly workflowTabHost?: HTMLElement,
+  ) {
     this.element.className = 'dock-header-actions';
     this.button.type = 'button';
     this.button.className = 'dock-popout-action';
@@ -336,6 +347,13 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
 
   init(params: IGroupHeaderProps): void {
     this.params = params;
+    const isEditorGroup = Boolean(this.workflowTabHost && groupContainsEditor(params.group));
+    this.element.classList.toggle('workflow-document-header-action', isEditorGroup);
+    if (isEditorGroup && this.workflowTabHost && this.workflowTabHost.parentElement !== this.element) {
+      this.element.prepend(this.workflowTabHost);
+    }
+    const header = this.element.closest<HTMLElement>('.dv-tabs-and-actions-container');
+    header?.classList.toggle('workflow-editor-tab-header', isEditorGroup);
     const update = (): void => {
       const isPopout = params.api.location.type === 'popout';
       const isFixed = !this.canPopout(params.group);
@@ -352,6 +370,8 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
   }
 
   dispose(): void {
+    this.element.closest<HTMLElement>('.dv-tabs-and-actions-container')?.classList.remove('workflow-editor-tab-header');
+    if (this.workflowTabHost?.parentElement === this.element) this.element.removeChild(this.workflowTabHost);
     this.locationDisposable?.dispose();
     this.layoutDisposable?.dispose();
     this.locationDisposable = undefined;
@@ -586,6 +606,10 @@ function registerDraggedSourceGroupVacancy(
 export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFailure?: () => void): DockingController {
   const container = document.querySelector<HTMLElement>('#dock-workspace')!;
   const moduleStore = document.querySelector<HTMLElement>('#dock-module-store')!;
+  const workflowTabHost = document.createElement('div');
+  workflowTabHost.id = 'workflow-document-tabs';
+  workflowTabHost.className = 'workflow-document-tab-host';
+  workflowTabHost.setAttribute('aria-label', '已打开的工作流');
   const modules = new Map<string, HTMLElement>();
   for (const definition of Object.values(PANEL_DEFINITIONS)) {
     modules.set(definition.moduleElementId, document.querySelector<HTMLElement>(`#${definition.moduleElementId}`)!);
@@ -603,9 +627,12 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
     disableTabsOverflowList: true,
     dropPositionResolver: MERGE_ONLY_DROP_POSITION_RESOLVER,
     dropOverlayModel: ({ location }) => resolveDropOverlayModel(location),
-    createRightHeaderActionComponent: () => new PopoutHeaderAction(),
+    createRightHeaderActionComponent: () => new PopoutHeaderAction(() => true, workflowTabHost),
     createComponent: () => new ExistingModuleRenderer(modules, moduleStore),
   });
+
+  const workflowTabDropTarget = workflowTabHost.closest<HTMLElement>('.workflow-editor-tab-header')
+    ?? workflowTabHost;
 
   let suspendPersistence = true;
   let temporaryDragLayout = false;
@@ -706,6 +733,8 @@ export function createDockingWorkspace(onLayoutChange?: () => void, onPopoutFail
 
   return {
     dockviewApi: api,
+    workflowTabHost,
+    workflowTabDropTarget,
     isOpen: (panelId) => Boolean(api.getPanel(panelId)),
     showPanel,
     togglePanel: (panelId) => {

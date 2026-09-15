@@ -101,6 +101,7 @@ interface SidebarVariable {
   type: string;
   scope: 'inputs' | 'variables';
   public?: boolean;
+  onCard?: boolean;
 }
 
 interface EditorEnvelope {
@@ -174,6 +175,13 @@ interface ContentFolderDraft {
   parentPath: string;
   name: string;
   busy: boolean;
+}
+
+interface WorkflowDocumentTab {
+  uri: string;
+  text: string;
+  dirty: boolean;
+  backStack: string[];
 }
 
 interface OverviewRunState {
@@ -495,6 +503,8 @@ let instanceRefreshTimer: number | undefined;
 let docking: DockingController | undefined;
 let workbenchFrame: WorkbenchFrameController | undefined;
 let sharedPanelDockBridge: SharedPanelDockBridge | undefined;
+let workflowTabHost: HTMLElement | undefined;
+let workflowTabs: WorkflowDocumentTab[] = [];
 let contentAssets: AssetImage[] = [];
 let contentFolderPaths: string[] = [];
 let contentBrowserFolder = '';
@@ -915,6 +925,9 @@ function bindRoiPicker(): void {
 
 function setDirty(value: boolean): void {
   dirty = value;
+  const activeTab = workflowTabs.find((tab) => tab.uri === currentUri);
+  if (activeTab) activeTab.dirty = value;
+  renderWorkflowDocumentTabs();
 }
 
 function clearAutoSaveTimer(): void {
@@ -988,6 +1001,77 @@ async function flushAutoSave(): Promise<void> {
 
 function workflowReference(file: WorkflowDescriptor): string {
   return file.rel.replace(/\\/g, '/').replace(/^workflows\//i, '');
+}
+
+function workflowTabName(uri: string): string {
+  const descriptor = bootstrap?.workflows.find((item) => item.uri === uri);
+  if (descriptor) return (descriptor.id || descriptor.name).replace(/\.json$/i, '');
+  const file = displayFileUri(uri).split(/[\\/]/).pop() || uri;
+  return file.replace(/\.json$/i, '') || '工作流';
+}
+
+function workflowDescriptorForPath(relativePath: string): WorkflowDescriptor | undefined {
+  const normalized = relativePath.replace(/\\/g, '/').replace(/^workflows\//i, '').toLowerCase();
+  return bootstrap?.workflows.find((workflow) => workflowReference(workflow).toLowerCase() === normalized);
+}
+
+function rememberCurrentWorkflowTab(): void {
+  if (!currentUri) return;
+  const tab = workflowTabs.find((item) => item.uri === currentUri);
+  if (!tab) return;
+  tab.text = currentText;
+  tab.dirty = dirty;
+  tab.backStack = [...backStack];
+}
+
+function renderWorkflowDocumentTabs(): void {
+  const host = workflowTabHost;
+  if (!host) return;
+  host.replaceChildren();
+  if (workflowTabs.length === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'workflow-document-tab-empty';
+    empty.textContent = '拖入工作流以打开新画布';
+    host.appendChild(empty);
+    return;
+  }
+
+  const tabs = document.createElement('div');
+  tabs.className = 'workflow-document-tabs';
+  tabs.setAttribute('role', 'tablist');
+  for (const item of workflowTabs) {
+    const tab = document.createElement('div');
+    tab.className = `workflow-document-tab${item.uri === currentUri ? ' active' : ''}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(item.uri === currentUri));
+    tab.title = displayFileUri(item.uri);
+
+    const label = document.createElement('span');
+    label.className = 'workflow-document-tab-label';
+    label.textContent = workflowTabName(item.uri);
+    tab.appendChild(label);
+    if (item.dirty) {
+      const dirtyMark = document.createElement('span');
+      dirtyMark.className = 'workflow-document-tab-dirty';
+      dirtyMark.title = '未保存';
+      tab.appendChild(dirtyMark);
+    }
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'workflow-document-tab-close';
+    close.textContent = '×';
+    close.title = '关闭工作流画布';
+    close.setAttribute('aria-label', `关闭 ${workflowTabName(item.uri)}`);
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void closeWorkflowTab(item.uri);
+    });
+    tab.appendChild(close);
+    tab.addEventListener('click', () => void activateWorkflowTab(item.uri));
+    tabs.appendChild(tab);
+  }
+  host.appendChild(tabs);
 }
 
 function displayFileUri(uri: string): string {
@@ -1544,6 +1628,10 @@ function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
   const description = document.createElement('div');
   description.className = 'overview-card-description';
   description.textContent = workflow.description || '暂无说明，双击或点“编辑”查看工作流。';
+  description.title = workflow.description || '';
+
+  const metadata = document.createElement('div');
+  metadata.className = 'overview-card-metadata';
 
   const footer = document.createElement('div');
   footer.className = 'overview-card-footer';
@@ -1586,10 +1674,13 @@ function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
   const state = document.createElement('span');
   state.className = 'overview-card-status';
   state.textContent = overviewStatusLabel(status, selected);
-  footer.append(kind, inputs, validationTag);
-  if (updatedTag) footer.appendChild(updatedTag);
-  footer.append(configure, open, state);
-  card.append(header, description, footer);
+  metadata.append(kind, inputs, validationTag);
+  if (updatedTag) metadata.appendChild(updatedTag);
+  const actions = document.createElement('div');
+  actions.className = 'overview-card-actions';
+  actions.append(configure, open);
+  footer.append(state, actions);
+  card.append(header, description, metadata, footer);
 
   card.addEventListener('click', (event) => {
     if (locked || (event.target as Element).closest('button, input')) return;
@@ -1600,6 +1691,7 @@ function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
     openOverviewWorkflow(workflow);
   });
   card.addEventListener('keydown', (event) => {
+    if (event.target !== card) return;
     if (locked || event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     updateOverviewSelection(rel, !selected);
@@ -2044,6 +2136,59 @@ function contentDragPath(event: DragEvent): string {
   return transfer.getData('application/x-onmyoji-content') || transfer.getData('text/plain') || '';
 }
 
+function workflowDragUri(event: DragEvent): string {
+  const transfer = event.dataTransfer;
+  if (!transfer) return '';
+  const uri = transfer.getData('application/x-onmyoji-workflow').trim();
+  if (uri) return uri;
+
+  // 兼容内容浏览器或旧版本条目只写入普通内容路径的情况。
+  const path = (transfer.getData('application/x-onmyoji-content') || transfer.getData('text/plain')).trim();
+  const workflow = path ? workflowDescriptorForPath(relativeToProject(path)) : undefined;
+  if (workflow) return workflow.uri;
+
+  // Electron 的文件拖放可直接提供绝对路径；只接受项目内已登记的工作流。
+  const filePath = (transfer.files?.[0] as (File & { path?: string }) | undefined)?.path?.trim();
+  if (filePath) {
+    const droppedWorkflow = workflowDescriptorForPath(relativeToProject(filePath));
+    if (droppedWorkflow) return droppedWorkflow.uri;
+  }
+  return '';
+}
+
+function bindWorkflowTabDropTarget(element: HTMLElement): void {
+  const acceptsWorkflow = (event: DragEvent): boolean => {
+    const types = event.dataTransfer?.types;
+    return Boolean(types && (
+      types.includes('application/x-onmyoji-workflow')
+      || types.includes('application/x-onmyoji-content')
+      || types.includes('text/plain')
+      || types.includes('Files')
+    ));
+  };
+  element.addEventListener('dragover', (event) => {
+    if (!acceptsWorkflow(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    element.classList.add('drag-over');
+  });
+  element.addEventListener('dragleave', (event) => {
+    event.stopPropagation();
+    const related = event.relatedTarget;
+    if (!(related instanceof Node) || !element.contains(related)) element.classList.remove('drag-over');
+  });
+  element.addEventListener('drop', (event) => {
+    if (!acceptsWorkflow(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    element.classList.remove('drag-over');
+    const uri = workflowDragUri(event);
+    if (uri) void openWorkflowTab(uri);
+    else showToast('这里只能打开项目内的工作流文件', true);
+  });
+}
+
 function bindContentDropTarget(element: HTMLElement, folder: string | (() => string)): void {
   const isInternalContentDrag = (event: DragEvent): boolean => {
     const types = event.dataTransfer?.types;
@@ -2078,6 +2223,14 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
     showToast('请先保存当前工作流，再移动内容', true);
     return;
   }
+  const sourceWorkflow = workflowDescriptorForPath(source);
+  const sourceWorkflowTab = sourceWorkflow
+    ? workflowTabs.find((tab) => tab.uri === sourceWorkflow.uri)
+    : undefined;
+  if (sourceWorkflowTab?.dirty) {
+    showToast('请先保存该工作流，再移动它', true);
+    return;
+  }
   const currentRelative = currentUri ? relativeToProject(displayFileUri(currentUri)).replace(/\\/g, '/') : '';
   const movingCurrentWorkflow = currentRelative.toLowerCase() === source.toLowerCase();
   try {
@@ -2104,6 +2257,11 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
     if (movingCurrentWorkflow) {
       const moved = bootstrap.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
       if (moved) await loadWorkflow(moved.uri);
+    } else if (sourceWorkflowTab) {
+      const moved = bootstrap.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
+      if (moved) sourceWorkflowTab.uri = moved.uri;
+      renderWorkflowDocumentTabs();
+      if (result.updatedFiles > 0 && currentUri) await loadWorkflow(currentUri);
     } else if (result.updatedFiles > 0 && currentUri) {
       // 移动模板后，当前工作流的磁盘引用可能已被重写；重新载入以同步编辑器内存状态。
       await loadWorkflow(currentUri);
@@ -2209,7 +2367,12 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
       if (!transfer) return;
       transfer.setData('application/x-onmyoji-content', item.path);
       transfer.setData('text/plain', item.path);
-      transfer.effectAllowed = 'move';
+      if (item.kind === 'workflow' && item.workflow) {
+        transfer.setData('application/x-onmyoji-workflow', item.workflow.uri);
+        transfer.effectAllowed = 'copy';
+      } else {
+        transfer.effectAllowed = 'move';
+      }
       button.classList.add('dragging');
     });
     button.addEventListener('dragend', () => button.classList.remove('dragging'));
@@ -2487,6 +2650,14 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
   }
   const newName = await requestContentName('重命名', '保存', item.name);
   if (newName === null || !newName.trim() || newName.trim() === item.name) return;
+  const sourceWorkflow = item.kind === 'workflow' ? workflowDescriptorForPath(item.path) : undefined;
+  const sourceWorkflowTab = sourceWorkflow
+    ? workflowTabs.find((tab) => tab.uri === sourceWorkflow.uri)
+    : undefined;
+  if (sourceWorkflowTab?.dirty) {
+    showToast('请先保存该工作流，再重命名它', true);
+    return;
+  }
   const currentRelative = currentUri ? relativeToProject(displayFileUri(currentUri)).replace(/\\/g, '/') : '';
   const renamingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
   try {
@@ -2496,6 +2667,11 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
     if (renamingCurrentWorkflow) {
       const renamed = bootstrap?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
       if (renamed) await loadWorkflow(renamed.uri);
+    } else if (sourceWorkflowTab) {
+      const renamed = bootstrap?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
+      if (renamed) sourceWorkflowTab.uri = renamed.uri;
+      renderWorkflowDocumentTabs();
+      if (result.updatedFiles > 0 && currentUri) await loadWorkflow(currentUri);
     } else if (result.updatedFiles > 0 && currentUri) {
       await loadWorkflow(currentUri);
     }
@@ -2512,6 +2688,14 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
     return;
   }
   if (!window.confirm(`确定删除“${item.name}”吗？`)) return;
+  const sourceWorkflow = item.kind === 'workflow' ? workflowDescriptorForPath(item.path) : undefined;
+  const sourceWorkflowTab = sourceWorkflow
+    ? workflowTabs.find((tab) => tab.uri === sourceWorkflow.uri)
+    : undefined;
+  if (sourceWorkflowTab?.dirty) {
+    showToast('请先保存该工作流，再删除它', true);
+    return;
+  }
   const currentRelative = currentUri ? relativeToProject(displayFileUri(currentUri)).replace(/\\/g, '/') : '';
   const deletingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
   try {
@@ -2519,8 +2703,18 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
     selectedContentPath = '';
     await refreshContentBrowser();
     if (deletingCurrentWorkflow) {
-      const fallback = bootstrap?.workflows.find((workflow) => workflow.uri !== currentUri);
-      if (fallback) await loadWorkflow(fallback.uri);
+      const deletedIndex = workflowTabs.findIndex((tab) => tab.uri === currentUri);
+      if (deletedIndex >= 0) workflowTabs.splice(deletedIndex, 1);
+      const next = workflowTabs[Math.min(deletedIndex < 0 ? 0 : deletedIndex, workflowTabs.length - 1)];
+      if (next) await loadWorkflow(next.uri, false, 'activate');
+      else {
+        const fallback = bootstrap?.workflows.find((workflow) => workflow.uri !== currentUri);
+        if (fallback) await loadWorkflow(fallback.uri);
+      }
+    } else if (sourceWorkflowTab) {
+      const deletedIndex = workflowTabs.indexOf(sourceWorkflowTab);
+      if (deletedIndex >= 0) workflowTabs.splice(deletedIndex, 1);
+      renderWorkflowDocumentTabs();
     }
     showToast(`已删除 ${item.path}`);
   } catch (error) {
@@ -3243,7 +3437,7 @@ function syncVariableSelection(previousVariable: string, previousScope: 'inputs'
 
 /** 输入与状态列表内容指纹。 */
 function variableSignature(): string {
-  return sidebarVariables.map((variable) => `${variable.scope}\u0001${variable.name}\u0001${variable.type}\u0001${variable.displayName || ''}\u0001${variable.group || ''}\u0001${variable.public ? '1' : '0'}`).join('\u0004');
+  return sidebarVariables.map((variable) => `${variable.scope}\u0001${variable.name}\u0001${variable.type}\u0001${variable.displayName || ''}\u0001${variable.group || ''}\u0001${variable.public ? '1' : '0'}\u0001${variable.onCard ? '1' : '0'}`).join('\u0004');
 }
 
 function renderVariables(): void {
@@ -3283,7 +3477,7 @@ function renderVariables(): void {
     row.hidden = collapsed.has(groupKey);
     row.className = `variable-row scope-${scope}${variable.name === selectedVariable && scope === selectedVariableScope ? ' selected' : ''}`;
     row.setAttribute('aria-pressed', String(variable.name === selectedVariable && scope === selectedVariableScope));
-    row.title = `${variable.displayName || overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${variable.public ? '公开：引用此流程的节点可见' : '私有：仅流程内部使用'}\n拖到画布可创建引用卡片\nDelete 删除该变量`;
+    row.title = `${variable.displayName || overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${variable.public ? '公开：引用此流程的节点可见' : '私有：仅流程内部使用'}${variable.onCard ? '\n已连接：画布上已有端口引用它' : ''}\n拖到画布可创建引用卡片\nDelete 删除该变量`;
     row.dataset.variableName = variable.name;
     row.dataset.variableScope = scope;
     row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
@@ -3291,7 +3485,16 @@ function renderVariables(): void {
     const icon = row.querySelector<HTMLElement>('.variable-icon')!;
     icon.classList.add(variableGlyph.className);
     icon.appendChild(createTreeIcon(variableGlyph.icon, 'variable-icon-svg'));
-    row.querySelector<HTMLElement>('.variable-name')!.textContent = variable.displayName || overviewInputDisplayName(variable.name);
+    const nameNode = row.querySelector<HTMLElement>('.variable-name')!;
+    nameNode.textContent = variable.displayName || overviewInputDisplayName(variable.name);
+    if (variable.onCard) {
+      // 变量已经连在某个节点卡片端口上：在名字后标出“已连接”，避免看起来像是没用上。
+      const onCard = document.createElement('span');
+      onCard.className = 'variable-on-card';
+      onCard.textContent = '已连接';
+      onCard.title = '画布上的节点端口已经引用该变量';
+      nameNode.appendChild(onCard);
+    }
     const flags = row.querySelector<HTMLElement>('.variable-flags')!;
     flags.textContent = variableTypeLabels[variable.type.toLowerCase()] ?? variable.type;
     flags.title = variable.type;
@@ -3348,19 +3551,43 @@ function renderSidebar(): void {
   createIcons({ icons: desktopIcons, root: structureView });
 }
 
-async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> {
+async function loadWorkflow(uri: string, addToBackStack = false, mode: 'reuse' | 'activate' = 'reuse'): Promise<void> {
   if (!uri) return;
+  const previousUri = currentUri;
+  const previousTab = workflowTabs.find((tab) => tab.uri === previousUri);
+  rememberCurrentWorkflowTab();
   cancelAutoSave();
   await waitForAutoSave();
+  if (mode === 'activate') {
+    const targetTab = workflowTabs.find((tab) => tab.uri === uri);
+    backStack = targetTab ? [...targetTab.backStack] : [];
+  }
   loadingMask.classList.remove('hidden');
   try {
     if (addToBackStack && currentUri && currentUri !== uri) backStack.push(currentUri);
     const init = await api.getWorkflowInit(uri, selectedInstance, backStack.length > 0);
+    if (mode === 'reuse' && previousTab && previousUri && init.document.uri !== previousUri) {
+      const existingTarget = workflowTabs.find((tab) => tab.uri === init.document.uri && tab !== previousTab);
+      if (existingTarget) workflowTabs = workflowTabs.filter((tab) => tab !== previousTab);
+      else {
+        previousTab.uri = init.document.uri;
+        previousTab.text = '';
+        previousTab.dirty = false;
+        previousTab.backStack = [];
+      }
+    }
+    if (!workflowTabs.some((tab) => tab.uri === init.document.uri)) {
+      workflowTabs.push({ uri: init.document.uri, text: '', dirty: false, backStack: [] });
+    }
+    const cachedTab = workflowTabs.find((tab) => tab.uri === init.document.uri);
+    const documentText = cachedTab?.text || init.document.text;
+    init.document.text = documentText;
     currentEditorInit = init;
     if (init.document.uri !== currentUri) collapsedTreeNodes = new Set();
     currentUri = init.document.uri;
     init.workflowTrail = workflowTrail();
-    currentText = init.document.text;
+    currentText = documentText;
+    if (cachedTab) cachedTab.backStack = [...backStack];
     selectedInstance = init.selectedInstance;
     if (bootstrap) {
       bootstrap.workflows = init.workflows;
@@ -3372,7 +3599,8 @@ async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> 
     renderOverview();
     renderContentBrowser();
     document.querySelector<HTMLElement>('#document-path')!.textContent = displayFileUri(init.document.uri);
-    setDirty(false);
+    setDirty(cachedTab?.dirty ?? false);
+    renderWorkflowDocumentTabs();
     postToEditors(init as unknown as Record<string, unknown>);
     setStatus(init.issues.length > 0 ? `${init.issues.length} 个校验问题` : '工作流已载入');
   } catch (error) {
@@ -3380,6 +3608,62 @@ async function loadWorkflow(uri: string, addToBackStack = false): Promise<void> 
     setStatus('载入失败');
   } finally {
     loadingMask.classList.add('hidden');
+  }
+}
+
+async function activateWorkflowTab(uri: string): Promise<void> {
+  if (!uri || uri === currentUri) {
+    renderWorkflowDocumentTabs();
+    return;
+  }
+  if (!workflowTabs.some((tab) => tab.uri === uri)) return;
+  await loadWorkflow(uri, false, 'activate');
+}
+
+async function openWorkflowTab(uri: string): Promise<void> {
+  if (!uri) return;
+  if (!workflowTabs.some((tab) => tab.uri === uri)) {
+    workflowTabs.push({ uri, text: '', dirty: false, backStack: [] });
+    renderWorkflowDocumentTabs();
+  }
+  await activateWorkflowTab(uri);
+}
+
+async function saveCurrentWorkflowBeforeClose(): Promise<void> {
+  rememberCurrentWorkflowTab();
+  cancelAutoSave();
+  await waitForAutoSave();
+  if (!currentUri || !dirty || !currentText) return;
+  await api.saveWorkflow(currentUri, currentText);
+  if (currentEditorInit) currentEditorInit.document.text = currentText;
+  setDirty(false);
+  postToEditors({ type: 'workflowSaved' });
+}
+
+async function closeWorkflowTab(uri: string): Promise<void> {
+  if (workflowTabs.length <= 1) {
+    showToast('至少保留一个工作流画布');
+    return;
+  }
+  const index = workflowTabs.findIndex((tab) => tab.uri === uri);
+  if (index < 0) return;
+  const closingTab = workflowTabs[index];
+  const closingActive = uri === currentUri;
+  try {
+    if (closingActive) await saveCurrentWorkflowBeforeClose();
+    else if (closingTab.dirty && closingTab.text) {
+      await api.saveWorkflow(closingTab.uri, closingTab.text);
+      closingTab.dirty = false;
+    }
+    workflowTabs.splice(index, 1);
+    if (closingActive) {
+      const next = workflowTabs[Math.min(index, workflowTabs.length - 1)];
+      await loadWorkflow(next.uri, false, 'activate');
+    } else {
+      renderWorkflowDocumentTabs();
+    }
+  } catch (error) {
+    showToast(`关闭工作流失败：${errorMessage(error)}`, true);
   }
 }
 
@@ -3861,6 +4145,23 @@ async function openVisionTest(): Promise<void> {
   }
 }
 
+/** 用系统默认程序打开项目 README 使用说明。 */
+async function openHelpReadme(): Promise<void> {
+  try {
+    await api.openReadme();
+  } catch (error) {
+    showToast(`打开使用说明失败：${errorMessage(error)}`, true);
+  }
+}
+
+/** 在设置面板中打开“关于”页。 */
+function openAboutPage(): void {
+  workbenchFrame?.show('settings');
+  window.setTimeout(() => {
+    document.querySelector<HTMLButtonElement>('#settings-tab-about')?.click();
+  }, 0);
+}
+
 function readSettings(): void {
   autoRefreshInstances = window.localStorage.getItem('onmyoji-studio.settings.auto-refresh') !== 'false';
   loadDefaultWorkflowOnStart = window.localStorage.getItem('onmyoji-studio.settings.default-workflow') !== 'false';
@@ -3896,6 +4197,8 @@ function bindUi(): void {
     button.addEventListener('click', () => {
       if (button.dataset.appCommand === 'settings') openSettingsPanel();
       if (button.dataset.appCommand === 'visionTest') void openVisionTest();
+      if (button.dataset.appCommand === 'help') void openHelpReadme();
+      if (button.dataset.appCommand === 'about') openAboutPage();
     });
   });
   settingsContentView.addEventListener('change', () => {
@@ -4193,6 +4496,10 @@ async function start(): Promise<void> {
   installCustomTooltips();
   workbenchFrame = createWorkbenchFrame(updateDockMenuState, showPopoutFailure);
   docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure);
+  workflowTabHost = docking.workflowTabHost;
+  bindWorkflowTabDropTarget(workflowTabHost);
+  if (docking.workflowTabDropTarget !== workflowTabHost) bindWorkflowTabDropTarget(docking.workflowTabDropTarget);
+  renderWorkflowDocumentTabs();
   sharedPanelDockBridge = connectSharedPanelDocking(docking, workbenchFrame, updateDockMenuState);
   updateDockMenuState();
   createIcons({ icons: desktopIcons });

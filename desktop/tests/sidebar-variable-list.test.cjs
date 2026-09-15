@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../public/legacy/workflow-editor.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../public/legacy/editor-sidebar-state.js'), 'utf8');
 
 // 变量列表（桌面端左下角）由编辑器 postSidebarState 推送，这里直接跑生产实现。
 function harness(raw, nodeCardRefs = []) {

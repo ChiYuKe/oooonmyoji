@@ -72,10 +72,10 @@
   font-weight: 600; white-space: normal; overflow-wrap: anywhere;
 }
 #inspector-body .parameter-heading-actions { display: flex; align-items: center; justify-content: flex-end; flex: 0 1 auto; gap: 5px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
-#inspector-body .parameter-enable, #inspector-body .parameter-input, #inspector-body .check-label {
+#inspector-body .parameter-enable, #inspector-body .check-label {
   display: inline-flex; align-items: center; gap: 4px; min-height: 22px; font-size: 10px; color: var(--ui-muted);
 }
-#inspector-body .parameter-enable:has(:checked), #inspector-body .parameter-input:has(:checked) { color: var(--ui-text); }
+#inspector-body .parameter-enable:has(:checked) { color: var(--ui-text); }
 #inspector-body .field-hint, #inspector-body .description { margin: 2px 0 5px; padding: 0; color: var(--ui-muted); font-size: 10px; line-height: 1.4; border: 0; background: transparent; }
 #inspector-body .asset-missing-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; margin: 4px 0 1px; color: var(--ui-danger); font-size: 10px; line-height: 1.4; }
 #inspector-body .asset-missing-hint > span { flex: 1 1 auto; min-width: 90px; }

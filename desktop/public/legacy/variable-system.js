@@ -42,7 +42,7 @@
       return definition.initial_from;
     }
     const input=copy(definition);delete input.initial_from;input._autoPublished=true;
-    const inputId=create(raw,'inputs',label(raw,'variables',id)+' · 初始值',input,definition.default);
+    const inputId=create(raw,'inputs',label(raw,'variables',id),input,definition.default);
     definition.initial_from=inputId;return inputId;
   }
   function referenceLabel(raw,ref){

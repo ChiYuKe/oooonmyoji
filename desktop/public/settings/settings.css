@@ -40,7 +40,14 @@
 .theme-caption strong { font-weight: 500; font-size: 11px; }
 .theme-caption > span { color: var(--ui-muted); font-size: 9px; }
 .settings-footnote { margin: 14px 0 0; color: var(--ui-muted); font-size: 10px; }
+.shortcut-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.shortcut-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 34px; padding: 7px 0; border-bottom: 1px solid var(--ui-line); }
+.shortcut-action { min-width: 0; color: var(--ui-text); font-size: 11px; }
+.shortcut-keys { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.shortcut-keys kbd { display: inline-block; padding: 2px 6px; border-radius: 3px; background: var(--ui-surface); color: var(--ui-muted); font: 10px/1.4 var(--ui-font); white-space: nowrap; }
 @container settings (max-width: 470px) {
+  .shortcut-row { flex-wrap: wrap; gap: 5px; }
+  .shortcut-keys { justify-content: flex-start; }
   .settings-nav { padding-inline: 5px; }
   .settings-body { padding: 16px 12px; }
   .settings-row { flex-wrap: wrap; gap: 8px; }

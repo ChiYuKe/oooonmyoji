@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from src.oooonmyoji.actions.builtin import SleepAction
 from src.oooonmyoji.config import load_config
 from src.oooonmyoji.config.model import JobConfig
 from src.oooonmyoji.devices.protocol import DeviceFrame
@@ -290,7 +291,14 @@ def test_subworkflow_cancellation_reaches_parent_with_receipt(tmp_path: Path, mo
         {"id": "exec_sub", "action": "workflow.run", "params": {"workflow": "child_cancel"}},
     ])
     cancel_event = threading.Event()
-    timer = threading.Timer(0.2, cancel_event.set)
+    # 子脚本一进入睡眠就触发取消：此时父节点已开始执行，避免依赖真实时钟的竞态。
+    original_sleep = SleepAction.execute
+
+    def cancelling_sleep(self: SleepAction, context: object, arguments: dict[str, object]) -> object:
+        cancel_event.set()
+        return original_sleep(self, context, arguments)
+
+    monkeypatch.setattr(SleepAction, "execute", cancelling_sleep)
     job = JobConfig(
         id="run-parent-child-cancel",
         workflow="parent_child_cancel",
@@ -301,11 +309,7 @@ def test_subworkflow_cancellation_reaches_parent_with_receipt(tmp_path: Path, mo
         retry_enabled=False,
     )
 
-    timer.start()
-    try:
-        record = TaskRunner(config).execute(job, config.instance("fake"), cancel_event=cancel_event)
-    finally:
-        timer.cancel()
+    record = TaskRunner(config).execute(job, config.instance("fake"), cancel_event=cancel_event)
 
     assert record.status.value == "cancelled"
     parent_step = _step(record, "exec_sub")

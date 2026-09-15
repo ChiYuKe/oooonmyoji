@@ -4,15 +4,11 @@ import base64
 import threading
 from pathlib import Path
 
-import pytest
-
 from src.oooonmyoji.actions.builtin import WaitTextAction
 from src.oooonmyoji.devices.coordinates import CoordinateMapper
 from src.oooonmyoji.devices.protocol import DeviceFrame
-from src.oooonmyoji.exceptions import OcrError
 from src.oooonmyoji.runtime.context import TaskContextImpl
 from src.oooonmyoji.runtime.logging import EventLogger
-from src.oooonmyoji.vision.image import frame_to_bgr
 from src.oooonmyoji.vision.ocr import OcrResult
 from src.oooonmyoji.vision.template import TemplateMatcher
 

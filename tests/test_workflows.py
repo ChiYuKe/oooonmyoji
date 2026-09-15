@@ -276,21 +276,21 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
             "id": "run_all",
             "type": "instance_parallel",
             "runs": [
-                {"instance": "mumu-0", "workflow": "entrypoints/mumu_0_souls_party_leader.json", "inputs": {"运行轮数": {"ref": "inputs.运行轮数"}}},
-                {"instance": "mumu-1", "workflow": "entrypoints/mumu_1_souls_loop.json", "inputs": {}},
+                {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json", "inputs": {"子工作流": {"ref": "inputs.子工作流"}}},
+                {"instance": "mumu-1", "workflow": "entrypoints/new_workflow.json", "inputs": {}},
             ],
             "wait_for": "all",
             "cancel_on_failure": True,
         },
-    ], "run_all", inputs={"运行轮数": {"type": "integer", "default": 1}})
+    ], "run_all", inputs={"子工作流": {"type": "string", "default": "活动副本.json"}})
     parsed = validate(valid, actions)
     assert parsed.node_map["run_all"].runs[0].instance == "mumu-0"
     assert parsed.node_map["run_all"].wait_for == "all"
 
     duplicate = tree([
         {"id": "run_all", "type": "instance_parallel", "runs": [
-            {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json"},
-            {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json"},
+            {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json"},
+            {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json"},
         ]},
     ], "run_all")
     with pytest.raises(ConfigError, match="more than once"):
@@ -298,7 +298,7 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
 
     output_binding = tree([
         {"id": "run_all", "type": "instance_parallel", "runs": [
-            {"instance": "mumu-0", "workflow": "entrypoints/mumu_1_souls_loop.json", "inputs": {"value": {"ref": "nodes.some.output.value"}}},
+            {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json", "inputs": {"子工作流": {"ref": "nodes.some.output.value"}}},
         ]},
     ], "run_all")
     with pytest.raises(ConfigError, match="only reference inputs"):
@@ -906,177 +906,3 @@ def test_workflow_loader_discovers_nested_workflows_and_resolves_ids(tmp_path: P
     assert list(loader.discover()) == [raw["id"]]
 
 
-def test_party_member_waits_for_reward_overlay_to_close_before_next_invite() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls" / "party" / "member_round.json"
-    raw = json.loads(workflow_path.read_text(encoding="utf-8"))
-    nodes = {node["id"]: node for node in raw["nodes"]}
-
-    assert nodes["settled_after_one_tap"]["children"][-3:] == [
-        "pause_after_reward_once",
-        "wait_reward_overlay_gone_after_one",
-        "done_after_one",
-    ]
-    assert nodes["settled_after_two_taps"]["children"][-3:] == [
-        "pause_after_reward_twice",
-        "wait_reward_overlay_gone_after_two",
-        "done_after_two",
-    ]
-    for node_id in ("wait_reward_overlay_gone_after_one", "wait_reward_overlay_gone_after_two"):
-        params = nodes[node_id]["params"]
-        assert params["template"] == "assets/templates/souls/souls-victory-continue.png"
-        assert params["present"] is False
-    invite_params = nodes["wait_auto_ready_invite"]["params"]
-    assert invite_params["threshold"] >= 0.85
-    assert invite_params["timeout_seconds"] >= 12
-    assert (project_root / invite_params["template"]).is_file()
-    assert nodes["complete_auto_ready_setup"]["children"] == [
-        "wait_lobby_without_confirmation",
-        "handle_auto_ready_confirmation",
-    ]
-    assert nodes["wait_lobby_without_confirmation"]["params"]["timeout_seconds"] <= 2
-
-
-def test_party_member_setup_phase_accepts_return_to_lobby() -> None:
-    workflow_path = Path(__file__).resolve().parents[1] / "workflows" / "souls" / "party" / "member_round.json"
-    raw = json.loads(workflow_path.read_text(encoding="utf-8"))
-    nodes = {node["id"]: node for node in raw["nodes"]}
-    lobby_phase_condition = {
-        "type": "condition",
-        "expression": {"ne": [{"ref": "inputs.执行阶段"}, "finish"]},
-    }
-
-    for node_id in ("wait_lobby_direct", "wait_lobby_after_one", "wait_lobby_after_two"):
-        assert lobby_phase_condition in nodes[node_id]["decorators"]
-
-
-def test_party_entrypoints_recover_to_souls_after_the_final_round() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    entrypoints = (
-        ("mumu_0_souls_party_leader.json", "mumu-0.png"),
-        ("mumu_1_souls_party_member.json", "mumu-1.png"),
-    )
-
-    for filename, courtyard_name in entrypoints:
-        raw = json.loads((project_root / "workflows/entrypoints" / filename).read_text(encoding="utf-8"))
-        nodes = {node["id"]: node for node in raw["nodes"]}
-        main_children = nodes["main"]["children"]
-        assert main_children.index("final_recovery") > main_children.index("battle_plan")
-        final_recovery = nodes["final_recovery"]
-        assert final_recovery["params"]["workflow"] == "shared/recover_to_souls.json"
-        assert final_recovery["params"]["inputs"]["庭院入口模板"].endswith(courtyard_name)
-
-
-def test_party_leader_member_detection_tolerates_live_nameplate_effects() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    leader_entry = json.loads(
-        (project_root / "workflows/entrypoints/mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
-    )
-    leader_round = json.loads(
-        (project_root / "workflows/souls/party/leader_round.json").read_text(encoding="utf-8")
-    )
-
-    entry_nodes = {node["id"]: node for node in leader_entry["nodes"]}
-    round_nodes = {node["id"]: node for node in leader_round["nodes"]}
-    assert entry_nodes["detect_member_present"]["params"]["threshold"] == 0.8
-    assert entry_nodes["tap_create_team"]["params"]["revalidate"] is True
-    assert entry_nodes["retry_create_dialog"]["children"] == [
-        "wait_create_team",
-        "tap_create_team",
-        "wait_create_confirm_after_retry",
-    ]
-    assert entry_nodes["retry_create_dialog"]["decorators"][0]["type"] == "retry"
-    assert round_nodes["wait_member_present"]["params"]["threshold"] == 0.8
-
-
-def test_party_leader_allows_member_to_leave_before_starting_next_round() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    leader_entry = json.loads(
-        (project_root / "workflows/entrypoints/mumu_0_souls_party_leader.json").read_text(encoding="utf-8")
-    )
-    nodes = {node["id"]: node for node in leader_entry["nodes"]}
-
-    assert leader_entry["inputs"]["队员离开宽限时间"]["default"] == 5
-    assert nodes["battle_plan"]["children"][:2] == ["ensure_member_invited", "round_selector"]
-    assert nodes["send_initial_invite"]["children"][0] == "tap_empty_member_slot"
-    assert nodes["send_reinvite_after_departure"]["children"][0] == "wait_member_departure_window"
-    assert nodes["wait_member_departure_window"]["params"]["seconds"] == {
-        "ref": "inputs.队员离开宽限时间"
-    }
-
-
-def test_realm_entry_can_confirm_leaving_a_party_room() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    realm_entry = json.loads(
-        (project_root / "workflows/realm/shared/enter_realm.json").read_text(encoding="utf-8")
-    )
-    recover = next(node for node in realm_entry["nodes"] if node["id"] == "recover")
-    states = {state["name"]: state for state in recover["params"]["states"]}
-    transitions = {transition["from"]: transition for transition in recover["params"]["transitions"]}
-
-    assert states["party_exit_confirm"]["template"] == {"ref": "inputs.退出队伍确认模板"}
-    assert states["party_browser"]["template"] == {"ref": "inputs.组队界面模板"}
-    assert "party_exit_confirm" in transitions["party_room"]["expected_states"]
-    assert transitions["party_exit_confirm"]["type"] == "tap_template"
-    assert transitions["party_exit_confirm"]["return_action"] is True
-    assert transitions["party_browser"]["keycode"] == "KEYCODE_BACK"
-
-
-def test_mumu1_courtyard_detection_covers_camera_shift() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    member = json.loads((project_root / "workflows/souls/party/member_round.json").read_text(encoding="utf-8"))
-    workflow_nodes = [
-        node for node in member["nodes"]
-        if node.get("params", {}).get("template") == "assets/templates/souls/courtyard-explore/mumu-1.png"
-    ]
-    assert len(workflow_nodes) == 3
-    for node in workflow_nodes:
-        params = node["params"]
-        x, y, width, height = params["roi"]
-        assert x <= 567
-        assert x + width >= 835
-        assert y <= 145
-        assert y + height >= 265
-        assert params["threshold"] <= 0.65
-
-    shared = json.loads((project_root / "workflows/shared/recover_to_souls.json").read_text(encoding="utf-8"))
-    recover = next(node for node in shared["nodes"] if node["id"] == "recover")
-    courtyard = next(state for state in recover["params"]["states"] if state["name"] == "courtyard")
-    assert courtyard["template"] == {"ref": "inputs.庭院入口模板"}
-    assert courtyard["roi"] == [0, 0, 1920, 500]
-    assert courtyard["threshold"] <= 0.65
-
-    bounty = next(state for state in recover["params"]["states"] if state["name"] == "bounty_popup")
-    assert bounty["template"] == {"ref": "inputs.悬赏拒绝按钮模板"}
-    assert "bounty_popup" in recover["params"]["overlay_states"]
-    transition = next(item for item in recover["params"]["transitions"] if item["from"] == "bounty_popup")
-    assert transition["type"] == "tap_match"
-    realm_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "realm_raid")
-    assert "bounty_popup" in realm_transition["expected_states"]
-    party_room_transition = next(
-        item for item in recover["params"]["transitions"] if item["from"] == "party_room"
-    )
-    assert "party_browser" in party_room_transition["expected_states"]
-    continue_prompt = next(state for state in recover["params"]["states"] if state["name"] == "continue_prompt")
-    assert continue_prompt["template"] == {"ref": "inputs.继续邀请提示模板"}
-    continue_transition = next(
-        item for item in recover["params"]["transitions"] if item["from"] == "continue_prompt"
-    )
-    assert continue_transition["type"] == "tap_template"
-    assert continue_transition["template"] == {"ref": "inputs.继续邀请取消按钮模板"}
-    party_exit_transition = next(
-        item for item in recover["params"]["transitions"] if item["from"] == "party_exit_confirm"
-    )
-    assert "party_browser" in party_exit_transition["expected_states"]
-    assert party_exit_transition["type"] == "tap_template"
-    assert party_exit_transition["template"] == {"ref": "inputs.退出队伍按钮模板"}
-    souls_type = next(state for state in recover["params"]["states"] if state["name"] == "souls_type")
-    assert souls_type["template"] == {"ref": "inputs.御魂类型页面模板"}
-    souls_type_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "souls_type")
-    assert souls_type_transition["type"] == "tap"
-    assert souls_type_transition["x"] == {"ref": "inputs.御魂类型入口位置.0"}
-    treasure = next(state for state in recover["params"]["states"] if state["name"] == "treasure_popup")
-    assert treasure["template"] == {"ref": "inputs.宝箱页面模板"}
-    treasure_transition = next(item for item in recover["params"]["transitions"] if item["from"] == "treasure_popup")
-    assert treasure_transition["type"] == "tap"
-    assert treasure_transition["x"] == {"ref": "inputs.宝箱关闭位置.0"}

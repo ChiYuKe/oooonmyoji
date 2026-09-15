@@ -2,7 +2,7 @@
   "schema_version": 4,
   "id": "new_workflow",
   "version": "4.0.0",
-  "description": "",
+  "description": "空白工作流模板：调用指定子工作流执行。",
   "resolution": [
     1920,
     1080
@@ -34,18 +34,6 @@
           "ref": "inputs.子工作流"
         }
       }
-    },
-    {
-      "id": "task_1",
-      "type": "task",
-      "action": "core.assert",
-      "params": {}
-    },
-    {
-      "id": "task_2",
-      "type": "task",
-      "action": "core.assert",
-      "params": {}
     }
   ],
   "_layout": {
@@ -56,22 +44,14 @@
     "root": {
       "x": 0,
       "y": 0
-    },
-    "task_1": {
-      "x": -132,
-      "y": 236
-    },
-    "task_2": {
-      "x": -132,
-      "y": 236
     }
   },
   "_variableCards": {
     "card_1": {
       "name": "子工作流",
       "scope": "inputs",
-      "x": -264,
-      "y": 296
+      "x": -224,
+      "y": 208
     }
   },
   "_variableLinks": {

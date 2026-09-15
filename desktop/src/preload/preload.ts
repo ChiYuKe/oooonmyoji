@@ -54,6 +54,7 @@ const api: OnmyojiDesktopApi = {
   captureRoi: (request: RoiCaptureRequest) => ipcRenderer.invoke('runtime:capture-roi', request),
   checkTemplate: (request: TemplateCheckRequest) => ipcRenderer.invoke('runtime:check-template', request),
   openVisionTest: (instanceId: string) => ipcRenderer.invoke('tools:open-vision-test', instanceId),
+  openReadme: () => ipcRenderer.invoke('help:open-readme'),
   visionStart: () => ipcRenderer.invoke('vision:start'),
   visionCommand: (command: VisionCommand) => ipcRenderer.invoke('vision:command', command),
   visionStop: () => ipcRenderer.invoke('vision:stop'),

@@ -268,6 +268,10 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     this.stopRequested = true;
     this.emitState({ state: 'stopping', label: '正在停止...' });
     this.emitOutput('system', '正在停止工作流...\n');
+    await this.terminateProcessTree(child);
+  }
+
+  private async terminateProcessTree(child: ChildProcess): Promise<void> {
     if (process.platform === 'win32' && child.pid) {
       await new Promise<void>((resolve) => {
         const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
@@ -283,6 +287,14 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     } else {
       child.kill('SIGTERM');
     }
+    if (child.exitCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 5000);
+      child.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   private startWatching(files: Array<{ file: string; instanceId: string }>): void {
@@ -447,8 +459,8 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     }
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.stopWatching();
-    if (this.activeProcess?.exitCode === null) this.activeProcess.kill();
+    await this.stopWorkflow();
   }
 }

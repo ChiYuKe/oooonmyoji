@@ -10,6 +10,7 @@ import {
   net,
   nativeTheme,
   protocol,
+  shell,
   type IpcMainInvokeEvent,
 } from 'electron';
 import type {
@@ -42,6 +43,7 @@ let rendererBaseUrl = '';
 let visionTestWindow: BrowserWindow | undefined;
 let visionTestStream: VisionStream | undefined;
 let visionTestInstanceId = '';
+let isQuitting = false;
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 const THEME_STORE_KEY = 'onmyoji-studio.appearance';
 function readTheme(): 'dark' | 'light' {
@@ -273,6 +275,11 @@ function registerIpc(): void {
   ipcMain.handle('tools:open-vision-test', (_event, instanceId: string) => {
     openVisionTestWindow(typeof instanceId === 'string' ? instanceId : '');
   });
+  ipcMain.handle('help:open-readme', async () => {
+    const readmePath = path.join(project.projectRoot, 'README.md');
+    const error = await shell.openPath(readmePath);
+    if (error) throw new Error(`打开使用说明失败：${error}`);
+  });
   ipcMain.handle('vision:start', (event) => {
     if (ownerWindow(event) !== visionTestWindow) return;
     startVisionTestStream();
@@ -397,9 +404,18 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
-  runtime?.dispose();
-  stopVisionTestStream();
-  rendererServer?.close();
-  rendererServer = undefined;
+app.on('before-quit', (event) => {
+  if (isQuitting) return;
+  event.preventDefault();
+  isQuitting = true;
+  void (async () => {
+    try {
+      await runtime?.dispose();
+    } finally {
+      stopVisionTestStream();
+      rendererServer?.close();
+      rendererServer = undefined;
+      app.quit();
+    }
+  })();
 });

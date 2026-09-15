@@ -293,6 +293,8 @@ export interface OnmyojiDesktopApi {
   checkTemplate(request: TemplateCheckRequest): Promise<TemplateCheckResult>;
   /** 打开（或聚焦）独立的模拟器画面测试工具窗口。 */
   openVisionTest(instanceId: string): Promise<void>;
+  /** 用系统默认程序打开项目 README 使用说明。 */
+  openReadme(): Promise<void>;
   /** 工具窗口页面内调用：开始画面推流并订阅事件。 */
   visionStart(): Promise<void>;
   /** 工具窗口页面内调用：向推流服务发送一条命令。 */

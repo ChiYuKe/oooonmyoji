@@ -117,11 +117,6 @@ def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, sav
                 payload["thumbnail"] = thumbnail
         except Exception:
             pass
-    output = event.get("output")
-    if event.get("action") == "stats.enqueue_reward" and isinstance(output, dict):
-        screenshot = output.get("screenshot")
-        if isinstance(screenshot, str) and screenshot:
-            payload["screenshot"] = screenshot
     return payload
 
 

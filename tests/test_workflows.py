@@ -459,6 +459,29 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     assert not ReferenceResolver({}, {}).condition({"exists": {"ref": "inputs.missing"}})
 
 
+def test_engine_retry_retries_only_the_decorated_node() -> None:
+    before_action = CountingAction()
+    before_action.name = "test.before"
+    retry_action = RetryAction()
+    actions = registry(action_spec(before_action), action_spec(retry_action))
+    raw = tree([
+        {"id": "sequence", "type": "sequence", "children": ["before", "click"]},
+        task("before", "test.before"),
+        task("click", "test.retry", decorators=[{"type": "retry", "attempts": 2}]),
+    ], "sequence")
+
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+
+    assert result.status == ActionStatus.SUCCEEDED
+    assert before_action.calls == 1
+    assert retry_action.calls == 2
+    before_events = [item for item in result.step_history if item["step_id"] == "before"]
+    click_events = [item for item in result.step_history if item["step_id"] == "click"]
+    assert len(before_events) == 1
+    assert len(click_events) == 1
+    assert click_events[0]["attempts"] == 2
+
+
 def test_engine_keeps_inputs_and_variables_read_only() -> None:
     actions = registry(action_spec(EchoAction()))
     raw = tree([

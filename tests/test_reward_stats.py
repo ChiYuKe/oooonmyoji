@@ -7,9 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.oooonmyoji.actions.builtin import EnqueueRewardStatsAction
 from src.oooonmyoji.runtime.reward_stats import RewardStatsProcessor
-from src.oooonmyoji.runtime.runner import _step_event_payload
 from src.oooonmyoji.runtime.supervisor import Supervisor
 from src.oooonmyoji.vision.ocr import OcrResult
 
@@ -276,160 +274,12 @@ def test_supervisor_drains_reward_stats_before_stopping_ocr(tmp_path: Path) -> N
     assert supervisor.ocr_pool is None
 
 
-def test_enqueue_reward_action_is_non_fatal_when_queue_is_unavailable() -> None:
-    class Context:
-        def enqueue_reward_statistics(self, **_arguments: object) -> dict[str, object]:
-            raise RuntimeError("queue unavailable")
-
-        def log(self, _message: str, **_fields: object) -> None:
-            return None
-
-    result = EnqueueRewardStatsAction().execute(Context(), {"category": "souls", "layer": 1})
-    assert result.status.value == "succeeded"
-    assert result.output["accepted"] is False
-    assert result.output["error"] == "queue unavailable"
 
 
-def test_reward_action_confirms_first_realm_pass_then_rechecks_at_threshold() -> None:
-    class Match:
-        reference_x = 400.0
-        reference_y = 260.0
-        reference_width = 112.0
-        reference_height = 111.0
-
-        def to_dict(self) -> dict[str, object]:
-            return {
-                "x": 400, "y": 260, "width": 112, "height": 111,
-                "confidence": 0.99, "reference": [400, 260, 112, 111], "center": [456, 315],
-            }
-
-    class Context:
-        def __init__(self) -> None:
-            self.initialized = False
-            self.confirmed = 0
-            self.awarded = 0
-            self.owned_values = iter([24, 30])
-            self.current_owned = 0
-            self.taps: list[tuple[int, int]] = []
-
-        def enqueue_reward_statistics(self, **_arguments: object) -> dict[str, object]:
-            return {"accepted": True, "screenshot": "reward.png", "battle_index": 1, "layer": 1}
-
-        def find_template(self, *_args: object, **_kwargs: object) -> list[Match]:
-            return [Match()]
-
-        def ocr_current(self, **_kwargs: object) -> list[object]:
-            return []
-
-        def observe_realm_pass_reward(self, quantity: int, *, threshold: int) -> dict[str, object]:
-            if not self.initialized:
-                return {"estimated_owned": 0, "needs_confirmation": True, "first_detection": True}
-            self.awarded += quantity
-            estimate = self.confirmed + self.awarded
-            return {"estimated_owned": estimate, "needs_confirmation": estimate >= threshold, "first_detection": False}
-
-        def confirm_realm_pass_count(self, owned: int, *, threshold: int) -> dict[str, object]:
-            self.initialized = owned < threshold
-            self.confirmed = owned if self.initialized else 0
-            self.awarded = 0
-            return {"estimated_owned": owned, "should_enter": owned >= threshold}
-
-        def tap(self, x: int, y: int) -> None:
-            self.taps.append((x, y))
-            if len(self.taps) % 2 == 1:
-                self.current_owned = next(self.owned_values)
-            else:
-                self.current_owned = 0
-
-        def ocr(self, **_kwargs: object) -> list[object]:
-            text = f"已拥有 {self.current_owned}" if self.current_owned else "奖励"
-            return [SimpleNamespace(text=text, x=0, y=0)]
-
-        def check_cancelled(self) -> None:
-            return None
-
-        def log(self, _message: str, **_fields: object) -> None:
-            return None
-
-    context = Context()
-    action = EnqueueRewardStatsAction()
-    arguments = {"category": "souls", "layer": 1, "track_realm_pass": True, "realm_threshold": 30}
-
-    first = action.execute(context, arguments).output
-    assert first["realm_pass_owned"] == 24
-    assert first["should_enter_realm"] is False
-    for _ in range(5):
-        result = action.execute(context, arguments).output
-        assert result["realm_pass_confirmation_required"] is False
-    final = action.execute(context, arguments).output
-    assert final["realm_pass_owned"] == 30
-    assert final["should_enter_realm"] is True
-    assert len(context.taps) == 4
 
 
-def test_souls_workflow_calls_statistics_before_closing_rewards() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    workflow = json.loads((project_root / "workflows" / "entrypoints" / "mumu_1_souls_loop.json").read_text(encoding="utf-8"))
-    stats_workflow = json.loads((project_root / "workflows" / "souls" / "shared" / "reward_statistics.json").read_text(encoding="utf-8"))
-    nodes = {node["id"]: node for node in workflow["nodes"]}
-    assert nodes["main"]["children"] == ["recover_entry", "battle_loop"]
-    assert nodes["recover_entry"]["params"]["workflow"] == "shared/recover_to_souls.json"
-    assert nodes["battle_loop"]["children"] == [
-        "prepare_lineup",
-        "await_victory",
-        "settlement",
-    ]
-    assert nodes["prepare_lineup"]["children"] == ["wait_ready_or_victory", "route_ready_or_victory"]
-    assert nodes["wait_ready_or_victory"]["action"] == "input.recover_state"
-    assert nodes["wait_ready_or_victory"]["params"]["max_transitions"] == 3
-    assert nodes["wait_ready_or_victory"]["params"]["transitions"][0]["retry_if_unchanged_seconds"] == 3
-    assert nodes["tap_ready_from_probe"]["params"]["revalidate"] is True
-    assert nodes["await_victory"]["params"] == {
-        "workflow": "souls/shared/await_victory.json",
-        "inputs": {"总超时时间": {"ref": "inputs.战斗超时时间"}},
-    }
-    assert nodes["settlement"]["children"] == [
-        "stats_reward_layer_1",
-        "recover_after_rewards",
-        "realm_scheduler",
-    ]
-    assert nodes["stats_reward_layer_1"]["params"]["workflow"] == "souls/shared/reward_statistics.json"
-    assert nodes["stats_reward_layer_1"]["params"]["inputs"]["统计结界通关"] == {
-        "ref": "inputs.启用结界突破"
-    }
-    assert nodes["realm_scheduler"]["params"]["inputs"]["进入结界突破"] == {
-        "ref": "nodes.stats_reward_layer_1.output.output.enqueue_reward.should_enter_realm"
-    }
-    assert nodes["recover_after_rewards"]["params"]["workflow"] == "shared/recover_to_souls.json"
-    stats_nodes = {node["id"]: node for node in stats_workflow["nodes"]}
-    assert stats_nodes["enqueue_reward"]["params"]["roi"] == [320, 200, 1280, 640]
-
-    prepare_workflow = json.loads(
-        (project_root / "workflows" / "souls" / "shared" / "prepare_lineup.json").read_text(encoding="utf-8")
-    )
-    victory_workflow = json.loads(
-        (project_root / "workflows" / "souls" / "shared" / "await_victory.json").read_text(encoding="utf-8")
-    )
-    prepare_nodes = {node["id"]: node for node in prepare_workflow["nodes"]}
-    victory_nodes = {node["id"]: node for node in victory_workflow["nodes"]}
-    assert prepare_nodes["tap_ready"]["params"]["revalidate"] is True
-    assert victory_nodes["tap_victory"]["params"]["revalidate"] is True
 
 
-def test_party_leader_and_member_both_collect_reward_statistics() -> None:
-    project_root = Path(__file__).resolve().parents[1]
-    party_workflows = (
-        project_root / "workflows" / "souls" / "party" / "leader_round.json",
-        project_root / "workflows" / "souls" / "party" / "member_round.json",
-    )
-
-    for workflow_path in party_workflows:
-        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        nodes = {node["id"]: node for node in workflow["nodes"]}
-        round_children = nodes["round"]["children"]
-        assert round_children.index("stats_reward_layer_1") == round_children.index("await_victory") + 1
-        assert round_children.index("settle_to_round_destination") == round_children.index("stats_reward_layer_1") + 1
-        assert nodes["stats_reward_layer_1"]["params"]["workflow"] == "souls/shared/reward_statistics.json"
 
 
 def test_courtyard_explore_templates_are_scoped_by_instance() -> None:
@@ -832,13 +682,3 @@ def test_reward_material_catalog_templates_exist_and_are_readable() -> None:
         assert image is not None, material["id"]
         assert image.shape[0] >= 80
         assert image.shape[1] >= 80
-
-
-def test_reward_capture_is_attached_to_run_log_event() -> None:
-    payload = _step_event_payload("run-one", None, {
-        "step_id": "enqueue_reward",
-        "action": "stats.enqueue_reward",
-        "status": "succeeded",
-        "output": {"accepted": True, "screenshot": "artifacts/run-one/rewards/reward.png"},
-    })
-    assert payload["screenshot"] == "artifacts/run-one/rewards/reward.png"

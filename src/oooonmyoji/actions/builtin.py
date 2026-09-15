@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import random
-import re
 import time
 from typing import Any
 
@@ -49,202 +48,6 @@ class LogAction(Action):
         fields = arguments.get("fields", {})
         context.log(str(arguments["message"]), **fields)
         return ActionResult.succeeded({"message": str(arguments["message"])})
-
-
-class EnqueueRewardStatsAction(Action):
-    """Capture rewards, enqueue full statistics, and optionally track realm passes."""
-
-    name = "stats.enqueue_reward"
-
-    _number = re.compile(r"(?<!\d)(\d{1,4})(?!\d)")
-
-    @classmethod
-    def _quantity_near_match(cls, context: Any, match: Any) -> int:
-        left = max(0, int(round(match.reference_x + match.reference_width * 0.65)))
-        top = max(0, int(round(match.reference_y + match.reference_height * 0.55)))
-        width = max(1, int(round(match.reference_width * 0.55 + 50)))
-        height = max(1, int(round(match.reference_height * 0.45 + 60)))
-        try:
-            results = context.ocr_current(roi=[left, top, width, height])
-        except RuntimeError as exc:
-            context.log("realm.reward_quantity_unavailable", error=str(exc))
-            return 1
-        values = [
-            int(value)
-            for result in results
-            for value in cls._number.findall(str(getattr(result, "text", "")))
-            if 1 <= int(value) <= 30
-        ]
-        return values[0] if values else 1
-
-    @classmethod
-    def _owned_count(cls, results: list[Any]) -> tuple[int | None, str]:
-        ordered = sorted(
-            results,
-            key=lambda item: (int(getattr(item, "y", 0)), int(getattr(item, "x", 0))),
-        )
-        texts = [str(getattr(item, "text", "")).strip() for item in ordered]
-        compact = "".join(text for text in texts if text)
-        for pattern in (r"已拥有\D{0,12}(\d{1,3})", r"拥有\D{0,12}(\d{1,3})"):
-            matched = re.search(pattern, compact)
-            if matched is not None:
-                return int(matched.group(1)), " ".join(texts)
-        return None, " ".join(texts)
-
-    @classmethod
-    def _confirm_owned_count(
-        cls,
-        context: Any,
-        match: Any,
-        arguments: dict[str, Any],
-    ) -> tuple[int | None, str]:
-        x = int(round(match.reference_x + match.reference_width / 2))
-        y = int(round(match.reference_y + match.reference_height / 2))
-        context.tap(x, y)
-        deadline = time.monotonic() + float(arguments.get("realm_popup_timeout_seconds", 3.0))
-        raw_text = ""
-        owned: int | None = None
-        while True:
-            context.check_cancelled()
-            try:
-                results = context.ocr(roi=arguments.get("realm_popup_roi"))
-            except RuntimeError as exc:
-                context.log("realm.owned_count_unavailable", error=str(exc))
-                break
-            owned, raw_text = cls._owned_count(results)
-            if owned is not None or time.monotonic() >= deadline:
-                break
-            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
-        close_point = arguments.get("realm_popup_close_point", [1700, 850, 0, 0])
-        if isinstance(close_point, list) and len(close_point) == 4:
-            context.tap(int(close_point[0]), int(close_point[1]))
-            close_deadline = time.monotonic() + float(arguments.get("realm_popup_timeout_seconds", 3.0))
-            while True:
-                context.check_cancelled()
-                results = context.ocr(roi=arguments.get("realm_popup_roi"))
-                if cls._owned_count(results)[0] is None:
-                    break
-                if time.monotonic() >= close_deadline:
-                    raise RuntimeError("realm pass owned-count popup did not close")
-                time.sleep(min(0.1, max(0.0, close_deadline - time.monotonic())))
-        return owned, raw_text
-
-    def _track_realm_pass(self, context: Any, arguments: dict[str, Any]) -> dict[str, Any]:
-        output = {
-            "realm_pass_detected": False,
-            "realm_pass_quantity": 0,
-            "realm_pass_match": {},
-            "realm_pass_first_detection": False,
-            "realm_pass_confirmation_required": False,
-            "realm_pass_confirmed": False,
-            "realm_pass_owned": 0,
-            "realm_pass_estimated_owned": 0,
-            "realm_pass_confirmation_text": "",
-            "should_enter_realm": False,
-        }
-        if not bool(arguments.get("track_realm_pass", False)):
-            return output
-        threshold = int(arguments.get("realm_threshold", 30))
-        if threshold < 1:
-            raise ValueError("realm_threshold must be positive")
-        template = str(arguments.get("realm_pass_template", "assets/templates/rewards/realm-raid-pass.png"))
-        roi = arguments.get("roi")
-        matches = context.find_template(
-            template,
-            roi=roi,
-            threshold=float(arguments.get("realm_pass_threshold", 0.88)),
-            max_results=1,
-            scale_search=False,
-        )
-        if not matches:
-            return output
-        match = matches[0]
-        quantity = self._quantity_near_match(context, match)
-        observation = context.observe_realm_pass_reward(quantity, threshold=threshold)
-        match_output = match.to_dict()
-        match_output.update({"template": template, "roi": roi, "threshold": float(arguments.get("realm_pass_threshold", 0.88))})
-        output.update({
-            "realm_pass_detected": True,
-            "realm_pass_quantity": quantity,
-            "realm_pass_match": match_output,
-            "realm_pass_first_detection": bool(observation["first_detection"]),
-            "realm_pass_confirmation_required": bool(observation["needs_confirmation"]),
-            "realm_pass_estimated_owned": int(observation["estimated_owned"]),
-        })
-        if not observation["needs_confirmation"]:
-            return output
-        owned, raw_text = self._confirm_owned_count(context, match, arguments)
-        output["realm_pass_confirmation_text"] = raw_text
-        if owned is None:
-            context.log(
-                "realm.owned_count_not_detected",
-                first_detection=observation["first_detection"],
-                estimated_owned=observation["estimated_owned"],
-                raw_text=raw_text,
-            )
-            return output
-        confirmation = context.confirm_realm_pass_count(owned, threshold=threshold)
-        output.update({
-            "realm_pass_confirmed": True,
-            "realm_pass_owned": owned,
-            "realm_pass_estimated_owned": int(confirmation["estimated_owned"]),
-            "should_enter_realm": bool(confirmation["should_enter"]),
-        })
-        context.log(
-            "realm.owned_count_confirmed",
-            owned=owned,
-            threshold=threshold,
-            should_enter=confirmation["should_enter"],
-        )
-        return output
-
-    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
-        try:
-            output = context.enqueue_reward_statistics(
-                category=str(arguments.get("category", "reward")),
-                layer=int(arguments.get("layer", 1)),
-                roi=arguments.get("roi"),
-            )
-        except Exception as exc:
-            context.log("reward_stats.enqueue_failed", error=str(exc))
-            output = {
-                "accepted": False,
-                "screenshot": "",
-                "battle_index": 0,
-                "layer": int(arguments.get("layer", 1)),
-                "error": str(exc),
-            }
-            if bool(arguments.get("track_realm_pass", False)):
-                try:
-                    context.capture()
-                except Exception as capture_exc:
-                    context.log("realm.reward_tracking_capture_failed", error=str(capture_exc))
-                    return ActionResult.succeeded({**output, **self._track_realm_pass_defaults()})
-            else:
-                return ActionResult.succeeded({**output, **self._track_realm_pass_defaults()})
-        else:
-            output = {**output, "error": ""}
-        try:
-            tracking = self._track_realm_pass(context, arguments)
-        except Exception as exc:
-            context.log("realm.reward_tracking_failed", error=str(exc))
-            tracking = self._track_realm_pass_defaults()
-        return ActionResult.succeeded({**output, **tracking})
-
-    @staticmethod
-    def _track_realm_pass_defaults() -> dict[str, Any]:
-        return {
-            "realm_pass_detected": False,
-            "realm_pass_quantity": 0,
-            "realm_pass_match": {},
-            "realm_pass_first_detection": False,
-            "realm_pass_confirmation_required": False,
-            "realm_pass_confirmed": False,
-            "realm_pass_owned": 0,
-            "realm_pass_estimated_owned": 0,
-            "realm_pass_confirmation_text": "",
-            "should_enter_realm": False,
-        }
 
 
 class AssertAction(Action):
@@ -601,6 +404,53 @@ class TapMatchAction(Action):
         x = int(round(float(reference[0]) + float(reference[2]) / 2))
         y = int(round(float(reference[1]) + float(reference[3]) / 2))
         clicked_x, clicked_y, interval_seconds = _tap_with_variation(context, x, y, arguments)
+        verified_gone = False
+        if bool(arguments.get("verify_gone", False)):
+            verify_template = selected.get("template") or match.get("template")
+            if not isinstance(verify_template, str) or not verify_template:
+                return ActionResult.failed(
+                    "verify_gone requires match.template",
+                    category="workflow",
+                )
+            verify_timeout = float(arguments.get("verify_timeout_seconds", 8.0))
+            if verify_timeout < 0:
+                return ActionResult.failed(
+                    "verify_timeout_seconds must be non-negative",
+                    category="workflow",
+                )
+            verify_threshold = float(selected.get("threshold", match.get("threshold", 0.85)))
+            if not 0.0 <= verify_threshold <= 1.0:
+                return ActionResult.failed(
+                    "match threshold must be between 0 and 1",
+                    category="workflow",
+                )
+            verify_roi = selected.get("roi", match.get("roi"))
+            verify_deadline = time.monotonic() + verify_timeout
+            while True:
+                context.check_cancelled()
+                context.capture()
+                if not context.find_template(verify_template, roi=verify_roi, threshold=verify_threshold):
+                    verified_gone = True
+                    break
+                if time.monotonic() >= verify_deadline:
+                    return ActionResult.failed(
+                        "tap completed but matched template did not disappear",
+                        category="vision",
+                        output={
+                            "origin_x": x,
+                            "origin_y": y,
+                            "x": clicked_x,
+                            "y": clicked_y,
+                            "offset_x": clicked_x - x,
+                            "offset_y": clicked_y - y,
+                            "interval_seconds": interval_seconds,
+                            "revalidated": bool(arguments.get("revalidate", True)),
+                            "skipped": False,
+                            "final_state": "",
+                            "verified_gone": False,
+                        },
+                    )
+                time.sleep(min(0.1, max(0.0, verify_deadline - time.monotonic())))
         return ActionResult.succeeded({
             "origin_x": x,
             "origin_y": y,
@@ -612,6 +462,7 @@ class TapMatchAction(Action):
             "revalidated": bool(arguments.get("revalidate", True)),
             "skipped": False,
             "final_state": "",
+            "verified_gone": verified_gone,
         })
 
 
@@ -1252,135 +1103,6 @@ class WaitAnyTextAction(Action):
             time.sleep(0.1)
 
 
-class ReadRealmPassCountAction(Action):
-    """读取结界突破券数量；识别失败时返回 skip，避免误停御魂。"""
-
-    name = "realm.read_pass_count"
-
-    _number = re.compile(r"(?<!\d)(\d{1,4})(?!\d)")
-
-    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
-        minimum = int(arguments.get("minimum_passes", 1))
-        if minimum < 0:
-            return ActionResult.failed("minimum_passes must be non-negative", category="workflow")
-        key_texts = arguments.get("key_texts", ["结界突破", "突破券", "结界券"])
-        if not isinstance(key_texts, list) or not all(isinstance(item, str) for item in key_texts):
-            return ActionResult.failed("key_texts must be an array of strings", category="workflow")
-        try:
-            results = context.ocr(roi=arguments.get("roi"))
-        except RuntimeError as exc:
-            context.log("realm.pass_count_unavailable", error=str(exc))
-            return ActionResult.succeeded({"passes": 0, "detected": False, "should_enter": False, "mode": "skip", "raw_text": ""})
-        text = " ".join(result.text for result in results)
-        numbers: list[int] = []
-        for result in results:
-            numbers.extend(int(value) for value in ReadRealmPassCountAction._number.findall(result.text))
-        # Prefer numbers located in the same OCR item as a known label. If OCR
-        # split the label and number into separate items, use the first small
-        # count in the configured ROI as a conservative fallback.
-        labelled = [
-            int(value)
-            for result in results
-            if any(label in result.text for label in key_texts)
-            for value in ReadRealmPassCountAction._number.findall(result.text)
-        ]
-        passes = labelled[0] if labelled else (numbers[0] if numbers else 0)
-        return ActionResult.succeeded({
-            "passes": passes,
-            "detected": bool(numbers),
-            "should_enter": bool(numbers) and passes >= minimum,
-            "mode": "run" if bool(numbers) and passes >= minimum else "skip",
-            "raw_text": text,
-        })
-
-
-class DetectRealmProgressAction(Action):
-    """检测当前页 9 个目标的完成态并返回断点。"""
-
-    name = "realm.detect_progress"
-
-    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
-        rois = arguments.get("target_rois")
-        if not isinstance(rois, list) or len(rois) != 9 or not all(isinstance(roi, list) and len(roi) == 4 for roi in rois):
-            return ActionResult.failed("target_rois must contain exactly 9 rects", category="workflow")
-        completed_texts = arguments.get("completed_texts", ["已挑战", "已击败", "胜利", "占领", "破"])
-        templates = arguments.get("completed_templates", [])
-        if not isinstance(completed_texts, list) or not all(isinstance(item, str) and item for item in completed_texts):
-            return ActionResult.failed("completed_texts must be an array of strings", category="workflow")
-        if not isinstance(templates, list) or not all(isinstance(item, str) and item for item in templates):
-            return ActionResult.failed("completed_templates must be an array of assets", category="workflow")
-        min_confidence = float(arguments.get("min_confidence", 0.45))
-        target_limit = int(arguments.get("target_limit", 9))
-        if not 0.0 <= min_confidence <= 1.0:
-            return ActionResult.failed("min_confidence must be between 0 and 1", category="workflow")
-        if not 1 <= target_limit <= 9:
-            return ActionResult.failed("target_limit must be between 1 and 9", category="workflow")
-        # The page title ROI only covers the header.  Scan the union of all
-        # target cards instead so completion stamps at the card's right edge
-        # are visible, while retaining the caller's per-card ROIs for matching.
-        scan_roi = arguments.get("progress_roi")
-        if scan_roi is None:
-            coordinates = [tuple(int(value) for value in roi) for roi in rois]
-            bounds = list(zip(*coordinates))
-            min_x = min(bounds[0])
-            min_y = min(bounds[1])
-            max_x = max(x + width for x, _, width, _ in coordinates)
-            max_y = max(y + height for _, y, _, height in coordinates)
-            padding = 96
-            scan_roi = [max(0, min_x - padding), max(0, min_y - padding), max_x - min_x + padding * 2, max_y - min_y + padding * 2]
-        try:
-            context.capture()
-            ocr_items = _ocr_current(context, scan_roi)
-        except RuntimeError as exc:
-            context.log("realm.progress_unavailable", error=str(exc))
-            return ActionResult.succeeded({
-                "detected": False,
-                "completed": [False] * 9,
-                "selected": [False] * 9,
-                "completed_count": 0,
-                "next_index": 1,
-                "source": "unavailable",
-                "evidence": [[] for _ in range(9)],
-            })
-        completed = [False] * 9
-        evidence: list[list[str]] = [[] for _ in range(9)]
-        # "破" is the game's standard completed-card stamp.  Keep it enabled
-        # even for older workflow files whose configured text list predates it.
-        effective_completed_texts = list(dict.fromkeys([*completed_texts, "破"]))
-        for index, roi in enumerate(rois):
-            x, y, width, height = (int(value) for value in roi)
-            for item in ocr_items:
-                if item.confidence < min_confidence:
-                    continue
-                if x <= item.x <= x + width and y <= item.y <= y + height and any(text in item.text for text in effective_completed_texts):
-                    completed[index] = True
-                    evidence[index].append(item.text)
-            for template in templates:
-                try:
-                    if context.find_template(template, roi=roi, threshold=min_confidence):
-                        completed[index] = True
-                        evidence[index].append(template)
-                except (OSError, ValueError):
-                    continue
-        completed_count = sum(completed)
-        next_index = next((index + 1 for index, value in enumerate(completed) if not value), 9)
-        selected = [False] * 9
-        remaining = target_limit
-        for index, is_completed in enumerate(completed):
-            if not is_completed and remaining > 0:
-                selected[index] = True
-                remaining -= 1
-        return ActionResult.succeeded({
-            "detected": any(completed),
-            "completed": completed,
-            "selected": selected,
-            "completed_count": completed_count,
-            "next_index": next_index,
-            "source": "ocr_or_template",
-            "evidence": evidence,
-        })
-
-
 # Action parameter metadata now lives in the shared manifest files under
 # ``src/oooonmyoji/actions/manifests/*.json`` (one per Action, consumed by both
 # the Python runtime and the TypeScript editor). This module only implements the
@@ -1391,7 +1113,6 @@ __all__ = [
     "AssertAction",
     "CaptureAction",
     "DetectStateAction",
-    "EnqueueRewardStatsAction",
     "LogAction",
     "MatchTemplateAction",
     "OcrAction",
@@ -1405,8 +1126,6 @@ __all__ = [
     "WaitTemplateAction",
     "WaitTextAction",
     "WaitAnyTextAction",
-    "ReadRealmPassCountAction",
-    "DetectRealmProgressAction",
     "DismissTemplateUntilTextAction",
     "RecoverStateAction",
 ]

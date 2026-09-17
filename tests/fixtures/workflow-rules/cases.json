@@ -1,0 +1,340 @@
+{
+  "description": "两端共同的工作流校验规则样例：Python 是权威实现，TypeScript 提供编辑时诊断。cases 中 python_error 为主进程错误信息匹配（正则），desktop_codes 为编辑器诊断必须包含的 code。",
+  "actions": {
+    "test.echo": {
+      "retry_safe": true,
+      "input_schema": { "type": "object" },
+      "output_schema": { "type": "object" }
+    },
+    "test.produce": {
+      "retry_safe": true,
+      "input_schema": {
+        "type": "object",
+        "properties": { "value": { "type": "integer" } },
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": { "value": { "type": "integer" } },
+        "additionalProperties": false
+      }
+    },
+    "test.consume": {
+      "retry_safe": false,
+      "input_schema": {
+        "type": "object",
+        "properties": { "count": { "type": "integer" } },
+        "additionalProperties": false
+      },
+      "output_schema": { "type": "object", "additionalProperties": false }
+    }
+  },
+  "cases": [
+    {
+      "name": "valid-minimal",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["work"] },
+          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+        ]
+      }
+    },
+    {
+      "name": "valid-sequence-output-binding",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["seq"] },
+          { "id": "seq", "type": "sequence", "children": ["producer", "consumer"] },
+          { "id": "producer", "type": "task", "action": "test.produce", "params": { "value": 1 } },
+          { "id": "consumer", "type": "task", "action": "test.consume", "params": { "count": { "ref": "nodes.producer.output.value" } } }
+        ]
+      }
+    },
+    {
+      "name": "valid-selector-exists-check",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["seq"] },
+          { "id": "seq", "type": "sequence", "children": ["choice", "check"] },
+          { "id": "choice", "type": "selector", "children": ["producer", "fallback"] },
+          { "id": "producer", "type": "task", "action": "test.produce", "params": { "value": 1 } },
+          { "id": "fallback", "type": "task", "action": "test.echo", "params": {} },
+          {
+            "id": "check",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "decorators": [{ "type": "condition", "expression": { "exists": { "ref": "nodes.producer.output.value" } } }]
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-repeat-until-body-output",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["loop"] },
+          {
+            "id": "loop",
+            "type": "repeat_until",
+            "condition": { "exists": { "ref": "nodes.body.output.value" } },
+            "children": ["body"]
+          },
+          { "id": "body", "type": "task", "action": "test.produce", "params": { "value": 1 } }
+        ]
+      }
+    },
+    {
+      "name": "invalid-schema-version",
+      "valid": false,
+      "desktop_codes": ["schema-version"],
+      "workflow": {
+        "schema_version": 3,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["work"] },
+          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+        ]
+      }
+    },
+    {
+      "name": "invalid-unknown-action",
+      "valid": false,
+      "python_error": "unknown Action",
+      "desktop_codes": ["unknown-action"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["work"] },
+          { "id": "work", "type": "task", "action": "missing.action", "params": {} }
+        ]
+      }
+    },
+    {
+      "name": "invalid-duplicate-node-ids",
+      "valid": false,
+      "python_error": "duplicate node IDs",
+      "desktop_codes": ["duplicate-node"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["work"] },
+          { "id": "work", "type": "task", "action": "test.echo", "params": {} },
+          { "id": "work", "type": "task", "action": "test.produce", "params": { "value": 1 } }
+        ]
+      }
+    },
+    {
+      "name": "invalid-unknown-child",
+      "valid": false,
+      "python_error": "unknown child",
+      "desktop_codes": ["unknown-child"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["seq"] },
+          { "id": "seq", "type": "sequence", "children": ["missing"] }
+        ]
+      }
+    },
+    {
+      "name": "invalid-root-child-count",
+      "valid": false,
+      "python_error": "exactly one child",
+      "desktop_codes": ["root-child-count"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["a", "b"] },
+          { "id": "a", "type": "task", "action": "test.echo", "params": {} },
+          { "id": "b", "type": "task", "action": "test.echo", "params": {} }
+        ]
+      }
+    },
+    {
+      "name": "invalid-unavailable-output",
+      "valid": false,
+      "python_error": "unavailable at this execution point",
+      "desktop_codes": ["unavailable-ref"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["seq"] },
+          { "id": "seq", "type": "sequence", "children": ["consumer", "producer"] },
+          { "id": "consumer", "type": "task", "action": "test.consume", "params": { "count": { "ref": "nodes.producer.output.value" } } },
+          { "id": "producer", "type": "task", "action": "test.produce", "params": { "value": 1 } }
+        ]
+      }
+    },
+    {
+      "name": "invalid-binding-type",
+      "valid": false,
+      "python_error": "incompatible",
+      "desktop_codes": ["binding-type"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": { "name": { "type": "string" } },
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["consumer"] },
+          { "id": "consumer", "type": "task", "action": "test.consume", "params": { "count": { "ref": "inputs.name" } } }
+        ]
+      }
+    },
+    {
+      "name": "invalid-missing-variable-default",
+      "valid": false,
+      "python_error": "require defaults",
+      "desktop_codes": ["missing-variable-default"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": { "v": { "type": "integer" } },
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["work"] },
+          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+        ]
+      }
+    },
+    {
+      "name": "invalid-removed-public-field",
+      "valid": false,
+      "python_error": "public was removed",
+      "desktop_codes": ["removed-public-field"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": { "x": { "type": "integer", "public": true } },
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["work"] },
+          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+        ]
+      }
+    },
+    {
+      "name": "invalid-unsafe-retry",
+      "valid": false,
+      "python_error": "not declared retry-safe",
+      "desktop_codes": ["unsafe-retry"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["consumer"] },
+          {
+            "id": "consumer",
+            "type": "task",
+            "action": "test.consume",
+            "params": {},
+            "decorators": [{ "type": "retry", "attempts": 2 }]
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-unreachable-nodes",
+      "valid": false,
+      "python_error": "exactly one parent",
+      "desktop_codes": ["parent-count", "unreachable-node"],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          { "id": "root", "type": "root", "children": ["a"] },
+          { "id": "a", "type": "task", "action": "test.echo", "params": {} },
+          { "id": "seq", "type": "sequence", "children": ["c"] },
+          { "id": "c", "type": "task", "action": "test.echo", "params": {} }
+        ]
+      }
+    }
+  ]
+}

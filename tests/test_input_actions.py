@@ -42,12 +42,12 @@ class WaitContext:
 def test_tap_applies_random_offset_and_interval(monkeypatch: pytest.MonkeyPatch) -> None:
     context = TapContext()
     offsets = iter((4, -3))
-    monkeypatch.setattr("src.oooonmyoji.actions.builtin.random.randint", lambda _minimum, _maximum: next(offsets))
-    monkeypatch.setattr("src.oooonmyoji.actions.builtin.random.uniform", lambda _minimum, _maximum: 0.25)
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.input.random.randint", lambda _minimum, _maximum: next(offsets))
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.input.random.uniform", lambda _minimum, _maximum: 0.25)
     clock = iter((0.0, 0.0, 0.3))
     sleeps: list[float] = []
-    monkeypatch.setattr("src.oooonmyoji.actions.builtin.time.monotonic", lambda: next(clock))
-    monkeypatch.setattr("src.oooonmyoji.actions.builtin.time.sleep", sleeps.append)
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.input.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.input.time.sleep", sleeps.append)
 
     result = TapAction().execute(context, {
         "x": 100,
@@ -73,7 +73,7 @@ def test_tap_applies_random_offset_and_interval(monkeypatch: pytest.MonkeyPatch)
 def test_tap_match_applies_variation_to_match_center(monkeypatch: pytest.MonkeyPatch) -> None:
     context = MatchContext()
     offsets = iter((2, 1))
-    monkeypatch.setattr("src.oooonmyoji.actions.builtin.random.randint", lambda _minimum, _maximum: next(offsets))
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.input.random.randint", lambda _minimum, _maximum: next(offsets))
 
     result = TapMatchAction().execute(context, {
         "match": {"reference": [100, 200, 40, 20]},

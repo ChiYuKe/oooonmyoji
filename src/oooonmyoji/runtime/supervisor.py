@@ -10,138 +10,26 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ..actions import build_action_registry
-from ..config.loader import load_config
 from ..config.model import AppConfig, InstanceConfig, JobConfig
 from ..vision.ocr import SharedOcrPool
 from ..workflows.loader import WorkflowLoader
 from ..workflows.model import WorkflowNode, WorkflowSpec
 from ..workflows.resolver import ReferenceResolver
-from ..devices.lock import InstanceLock, InstanceLockError
+from .group import _Group, group_payload, group_status
 from .logging import EventLogger
 from .records import AtomicJsonStore, RunStatus
+from .reconciliation import reconcile_stale_run_records
 from .reward_stats import RewardStatsProcessor
-from .runner import RemoteOcrEngine, TaskRunner
-
-
-@dataclass
-class _Worker:
-    instance: InstanceConfig
-    process: Any
-    command_queue: Any
-    response_queue: Any
-    control_queue: Any
-
-
-@dataclass
-class _Group:
-    group_id: str
-    workflow: WorkflowSpec
-    node: WorkflowNode
-    run_ids: list[str]
-    entries: list[dict[str, Any]]
-    records: dict[str, dict[str, Any] | None]
-    done: threading.Event
-    cancel_requested: bool = False
-    terminal_status: str | None = None
-    finished: bool = False
-
-
-def _apply_cancel_request(
-    run_id: object,
-    current_run_id: str | None,
-    current_cancel: threading.Event,
-    pending_cancels: set[str],
-    completed_run_ids: set[str] | None = None,
-) -> None:
-    if isinstance(run_id, str) and completed_run_ids is not None and run_id in completed_run_ids:
-        return
-    if run_id == current_run_id:
-        current_cancel.set()
-    elif current_run_id is None and isinstance(run_id, str):
-        pending_cancels.add(run_id)
-
-
-def _activate_run_cancel(run_id: str, pending_cancels: set[str]) -> threading.Event:
-    cancel_event = threading.Event()
-    if run_id in pending_cancels:
-        cancel_event.set()
-        pending_cancels.remove(run_id)
-    return cancel_event
-
-
-def _instance_worker(
-    config_path: str,
-    instance: InstanceConfig,
-    command_queue: Any,
-    control_queue: Any,
-    event_queue: Any,
-    response_queue: Any,
-) -> None:
-    config = load_config(config_path)
-    registry = build_action_registry(config.action_dir)
-    workflow_loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
-    logger = EventLogger(config.log_dir)
-    runner = TaskRunner(config, registry=registry, workflow_loader=workflow_loader, logger=logger)
-    state_lock = threading.Lock()
-    current_run_id: str | None = None
-    current_cancel = threading.Event()
-    pending_cancels: set[str] = set()
-    completed_run_ids: set[str] = set()
-    stop_requested = threading.Event()
-
-    def control_loop() -> None:
-        nonlocal current_run_id
-        while True:
-            control = control_queue.get()
-            if control.get("type") == "stop":
-                stop_requested.set()
-                current_cancel.set()
-                return
-            if control.get("type") != "cancel":
-                continue
-            with state_lock:
-                _apply_cancel_request(control.get("run_id"), current_run_id, current_cancel, pending_cancels, completed_run_ids)
-
-    threading.Thread(target=control_loop, name=f"control-{instance.id}", daemon=True).start()
-    while True:
-        command = command_queue.get()
-        if command.get("type") == "stop":
-            return
-        if command.get("type") != "run":
-            continue
-        command_job = command.get("job")
-        job = command_job if isinstance(command_job, JobConfig) else config.job(command["job_id"])
-        with state_lock:
-            current_run_id = command["run_id"]
-            current_cancel = _activate_run_cancel(current_run_id, pending_cancels)
-        ocr_engine = RemoteOcrEngine(event_queue, response_queue, instance.id, cancel_event=current_cancel)
-        try:
-            record = runner.execute(
-                job,
-                instance,
-                run_id=command["run_id"],
-                ocr_engine=ocr_engine,
-                cancel_event=current_cancel,
-                event_queue=event_queue,
-                events_file=command.get("events_file"),
-            )
-        finally:
-            with state_lock:
-                completed_run_ids.add(command["run_id"])
-                if len(completed_run_ids) >= 512:
-                    # 防止长驻 worker 内存无限增长，只保留最近的完成记录
-                    completed_run_ids = set(list(completed_run_ids)[-256:])
-                current_run_id = None
-            if stop_requested.is_set():
-                return
-        if record.details.get("worker_restart_required"):
-            return
+from .worker import _Worker, _instance_worker
+# Keep these names importable for existing callers and cancellation tests.
+from .worker import _activate_run_cancel as _activate_run_cancel
+from .worker import _apply_cancel_request as _apply_cancel_request
 
 
 class Supervisor:
@@ -179,97 +67,10 @@ class Supervisor:
                 self._start_worker(context, instance)
 
     def _reconcile_stale_run_records(self, *, stale_after_seconds: float = 300.0) -> list[str]:
-        """Close records left non-terminal after their owning process exited.
+        """启动收敛：关闭归属进程已退出的非终态 run/group 记录。"""
 
-        A live controller holds the per-instance OS lock for a running task. The
-        age grace covers the short queue-to-lock window during normal startup.
-        """
+        return reconcile_stale_run_records(self.config.artifact_dir, self.logger, stale_after_seconds=stale_after_seconds)
 
-        runs_dir = self.config.artifact_dir / "runs"
-        if not runs_dir.is_dir():
-            return []
-        transient = {
-            RunStatus.QUEUED.value,
-            RunStatus.RUNNING.value,
-            RunStatus.RETRYING.value,
-        }
-        terminal = {
-            RunStatus.SUCCEEDED.value,
-            RunStatus.FAILED.value,
-            RunStatus.CANCELLED.value,
-            RunStatus.INTERRUPTED.value,
-        }
-        now = time.time()
-        finished_at = datetime.now(timezone.utc).isoformat()
-        lock_available: dict[str, bool] = {}
-        reconciled: list[str] = []
-
-        def is_stale(path: Path) -> bool:
-            try:
-                return now - path.stat().st_mtime >= stale_after_seconds
-            except OSError:
-                return False
-
-        records: dict[str, tuple[Path, dict[str, Any]]] = {}
-        for path in runs_dir.glob("*.json"):
-            record = AtomicJsonStore(path).read(default={})
-            if isinstance(record, dict):
-                records[path.stem] = (path, record)
-
-        for record_id, (path, record) in records.items():
-            if record.get("status") not in transient or isinstance(record.get("runs"), list) or not is_stale(path):
-                continue
-            instance_id = record.get("instance_id")
-            if not isinstance(instance_id, str) or not instance_id:
-                continue
-            if instance_id not in lock_available:
-                lock = InstanceLock(self.config.artifact_dir / "locks", instance_id)
-                try:
-                    lock.acquire()
-                except InstanceLockError:
-                    lock_available[instance_id] = False
-                else:
-                    lock_available[instance_id] = True
-                    lock.release()
-            if not lock_available[instance_id]:
-                continue
-            record["status"] = RunStatus.INTERRUPTED.value
-            record["finished_at"] = finished_at
-            record["error"] = "owning supervisor exited before the run reached a terminal status"
-            record["error_category"] = "internal"
-            details = record.setdefault("details", {})
-            if isinstance(details, dict):
-                details["reconciled_at_startup"] = True
-            AtomicJsonStore(path).write(record)
-            reconciled.append(record_id)
-            self.logger.emit("run.stale_reconciled", run_id=record_id, instance_id=instance_id)
-
-        for group_id, (path, group) in records.items():
-            if group.get("status") not in transient or not isinstance(group.get("runs"), list) or not is_stale(path):
-                continue
-            child_records: dict[str, dict[str, Any]] = {}
-            for run_id in group.get("run_ids", []):
-                if not isinstance(run_id, str):
-                    continue
-                child = AtomicJsonStore(runs_dir / f"{run_id}.json").read(default={})
-                if isinstance(child, dict):
-                    child_records[run_id] = child
-            run_ids = [run_id for run_id in group.get("run_ids", []) if isinstance(run_id, str)]
-            if not run_ids or any(child_records.get(run_id, {}).get("status") not in terminal for run_id in run_ids):
-                continue
-            for entry in group["runs"]:
-                if isinstance(entry, dict) and isinstance(entry.get("run_id"), str):
-                    child = child_records.get(entry["run_id"])
-                    if child is not None:
-                        entry["status"] = child.get("status")
-            group["status"] = RunStatus.INTERRUPTED.value
-            group["finished_at"] = finished_at
-            group["error"] = "owning supervisor exited before the group reached a terminal status"
-            group["error_category"] = "internal"
-            AtomicJsonStore(path).write(group)
-            reconciled.append(group_id)
-            self.logger.emit("group.stale_reconciled", group_id=group_id, run_ids=run_ids)
-        return reconciled
 
     def _start_worker(self, context: Any, instance: InstanceConfig) -> None:
         command_queue = context.Queue(maxsize=1)
@@ -412,45 +213,11 @@ class Supervisor:
         return AtomicJsonStore(self.config.artifact_dir / "runs" / f"{group_id}.json")
 
     def _group_payload(self, group: _Group, *, status: str | None = None) -> dict[str, Any]:
-        child_rows: list[dict[str, Any]] = []
-        for entry in group.entries:
-            row = dict(entry)
-            record = group.records.get(entry["run_id"])
-            if isinstance(record, dict):
-                row["status"] = record.get("status", row.get("status"))
-                row["record"] = record
-            child_rows.append(row)
-        return {
-            "group_id": group.group_id,
-            "workflow_id": group.workflow.workflow_id,
-            "workflow_file": str(group.workflow.path),
-            "workflow_file_hash": group.workflow.file_hash,
-            "node_id": group.node.id,
-            "status": status or self._group_status(group),
-            "wait_for": group.node.wait_for,
-            "cancel_on_failure": group.node.cancel_on_failure,
-            "run_ids": list(group.run_ids),
-            "runs": child_rows,
-        }
+        return group_payload(group, status=status)
 
     @staticmethod
     def _group_status(group: _Group) -> str:
-        if group.terminal_status is not None:
-            return group.terminal_status
-        if len(group.records) < len(group.run_ids):
-            return RunStatus.QUEUED.value
-        statuses = [
-            record.get("status") if isinstance(record, dict) else RunStatus.FAILED.value
-            for run_id in group.run_ids
-            for record in [group.records.get(run_id)]
-        ]
-        if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
-            return RunStatus.SUCCEEDED.value
-        if all(status == RunStatus.SUCCEEDED.value for status in statuses):
-            return RunStatus.SUCCEEDED.value
-        if all(status == RunStatus.CANCELLED.value for status in statuses):
-            return RunStatus.CANCELLED.value
-        return RunStatus.FAILED.value
+        return group_status(group)
 
     def _persist_group(self, group: _Group, *, status: str | None = None, finished: bool = False) -> None:
         payload = self._group_payload(group, status=status)

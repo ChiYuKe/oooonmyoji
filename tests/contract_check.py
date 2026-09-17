@@ -10,6 +10,7 @@ SRC = PROJECT_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from oooonmyoji.actions.manifest import COLOR_PATTERN, KEY_PATTERN, PARAMETER_TYPES
 from oooonmyoji.runtime.records import RunStatus
 from oooonmyoji.workflows.model import DECORATOR_TYPES, INSTANCE_PARALLEL_WAIT_MODES, NODE_TYPES, PARALLEL_FINISH_MODES
 
@@ -21,13 +22,24 @@ def _exported_values(source: str, name: str) -> tuple[str, ...]:
     return tuple(re.findall(r"['\"]([^'\"]+)['\"]", match.group(1)))
 
 
+def _exported_string(source: str, name: str) -> str:
+    match = re.search(rf"export const {name} = ['\"]([^'\"]+)['\"];", source)
+    if match is None:
+        raise AssertionError(f"missing TypeScript contract: {name}")
+    return match.group(1)
+
+
 def main() -> int:
-    desktop = (PROJECT_ROOT / "desktop/src/main/core/workflow.ts").read_text(encoding="utf-8")
+    desktop = (PROJECT_ROOT / "desktop/src/shared/workflow/types.ts").read_text(encoding="utf-8")
+    parameters = (PROJECT_ROOT / "desktop/src/shared/parameter-types.ts").read_text(encoding="utf-8")
     checks = {
         "desktop NODE_TYPES": _exported_values(desktop, "NODE_TYPES") == tuple(NODE_TYPES),
         "desktop DECORATOR_TYPES": _exported_values(desktop, "DECORATOR_TYPES") == tuple(DECORATOR_TYPES),
         "desktop PARALLEL_FINISH_MODES": _exported_values(desktop, "PARALLEL_FINISH_MODES") == tuple(PARALLEL_FINISH_MODES),
         "desktop INSTANCE_PARALLEL_WAIT_MODES": _exported_values(desktop, "INSTANCE_PARALLEL_WAIT_MODES") == tuple(INSTANCE_PARALLEL_WAIT_MODES),
+        "desktop PARAMETER_TYPES": _exported_values(parameters, "PARAMETER_TYPES") == tuple(PARAMETER_TYPES),
+        "desktop COLOR_PATTERN": _exported_string(parameters, "COLOR_PATTERN") == COLOR_PATTERN,
+        "desktop KEY_PATTERN": _exported_string(parameters, "KEY_PATTERN") == KEY_PATTERN,
     }
     expected_statuses = {"queued", "running", "retrying", "succeeded", "failed", "cancelled", "interrupted"}
     checks["Python runtime statuses"] = {status.value for status in RunStatus} == expected_statuses

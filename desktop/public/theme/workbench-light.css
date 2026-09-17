@@ -347,6 +347,21 @@
 :root[data-theme="light"] .variable-icon.type-any {
     color: #696969
 }
+:root[data-theme="light"] .variable-icon.type-point {
+    color: #366577
+}
+:root[data-theme="light"] .variable-icon.type-enum {
+    color: #7d5639
+}
+:root[data-theme="light"] .variable-icon.type-key {
+    color: #525c7c
+}
+:root[data-theme="light"] .variable-icon.type-color {
+    color: #824f6e
+}
+:root[data-theme="light"] .variable-icon.type-duration {
+    color: #4b6442
+}
 :root[data-theme="light"] .variable-scope {
     color: #45616e
 }
@@ -1177,4 +1192,27 @@
 }
 :root[data-theme="light"] .ui-dropdown-items {
     scrollbar-color: #696969 transparent
+}
+:root[data-theme="light"] .inline-param-editor {
+    border: 1px solid var(--card-port, #b2b2b2);
+    background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input {
+    color: var(--card-text, #232323)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-axis-label {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-unit {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-swatch {
+    border: 1px solid var(--card-port, #b2b2b2)
+}
+:root[data-theme="light"] .definition-color-picker {
+    border: 1px solid var(--border, #dadada);
+    background: var(--surface, #ececec)
+}
+:root[data-theme="light"] .definition-unit {
+    color: var(--muted, #696969)
 }

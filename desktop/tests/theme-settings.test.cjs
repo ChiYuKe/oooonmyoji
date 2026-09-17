@@ -37,7 +37,7 @@ test('standalone previews use browser storage and react to other preview tabs',(
   b.fire('storage',{key:'onmyoji-studio.appearance',newValue:'dark'}); assert.equal(b.win.StudioTheme.get(),'dark');
 });
 test('all production surfaces initialize theme before content and load scoped adapters',()=>{
-  const files=['src/renderer/index.html','src/renderer/popout.html','src/renderer/vision-test.html','public/legacy/editor-frame.html','public/runtime-log/index.html'];
+  const files=['src/renderer/index.html','src/renderer/popout.html','src/renderer/vision-test.html','src/renderer/canvas.html','public/runtime-log/index.html'];
   for(const file of files) {
     const html=fs.readFileSync(path.join(root,file),'utf8');
     assert(html.indexOf('/theme/theme.js')<html.indexOf('</head>'),file);

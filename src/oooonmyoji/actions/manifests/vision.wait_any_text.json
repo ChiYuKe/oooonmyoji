@@ -11,7 +11,7 @@
       "min_items": 1,
       "items": { "type": "string", "min_length": 1 }
     },
-    "timeout_seconds": { "type": "number", "required": true, "min": 0 },
+    "timeout_seconds": { "type": "duration", "required": true, "min": 0 },
     "present": { "type": "boolean", "default": true },
     "allow_timeout": { "type": "boolean", "default": false },
     "roi": { "type": "rect" },

@@ -16,11 +16,17 @@ Parameter ``type`` is one of:
 * ``array`` — homogeneous list via ``items`` (plus ``min_items``/``max_items``)
 * ``object`` — nested object via ``properties``
 * ``any`` — no type constraint (used by e.g. ``core.assert.value``)
+* ``point`` — ``{"x": int, "y": int}`` point in reference resolution
+* ``enum`` — string restricted to the required, non-empty ``enum`` list
+* ``key`` — Android keyevent token (``BACK``, ``DPAD_UP``, ``4`` …)
+* ``color`` — ``#rrggbb`` colour string
+* ``duration`` — seconds as a number (accepts ``min``/``max`` like ``number``)
 
 Optional per-parameter fields: ``required``, ``default``, ``description``,
-``editor`` (control hint), ``min``/``max`` (number bounds), ``min_length``/
-``max_length`` (string bounds), ``enum``, ``min_items``/``max_items``,
-``items`` (array), ``properties`` (object).
+``editor`` (control hint), ``min``/``max`` (``number``/``integer``/
+``duration`` bounds), ``min_length``/``max_length`` (``string``/``asset``/
+``path``/``key``/``enum`` bounds), ``enum`` (required for ``enum``),
+``min_items``/``max_items``, ``items`` (array), ``properties`` (object).
 """
 
 from __future__ import annotations
@@ -42,7 +48,32 @@ PARAMETER_TYPES = (
     "array",
     "object",
     "any",
+    "point",
+    "enum",
+    "key",
+    "color",
+    "duration",
 )
+
+#: `point` 的值形状：参考分辨率下的整数坐标点 `{"x": int, "y": int}`。
+POINT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+    "required": ["x", "y"],
+    "additionalProperties": False,
+}
+
+#: `color` 的值形状：`#rrggbb`。
+COLOR_PATTERN = "^#[0-9a-fA-F]{6}$"
+
+#: `key` 的值形状：Android keyevent 令牌（如 `BACK`、`ENTER`、`4`），不含空白。
+KEY_PATTERN = "^[A-Za-z0-9_]+$"
+
+#: 接受 min/max 的类型。
+NUMERIC_TYPES = frozenset({"number", "integer", "duration"})
+
+#: 接受 min_length/max_length 的类型。
+STRING_TYPES = frozenset({"string", "asset", "path", "key", "enum"})
 
 _RETRY_MODES = ("safe", "unsafe")
 _MISSING_DEFAULT = object()
@@ -152,6 +183,12 @@ class ParameterDefinition:
         if type_name != "object" and properties:
             raise ConfigError(f"parameter {name}: properties is only valid for object")
         enum = tuple(raw["enum"]) if isinstance(raw.get("enum"), list) else ()
+        if type_name == "enum":
+            if not enum:
+                raise ConfigError(f"parameter {name}: enum type requires a non-empty enum list")
+            for index, option in enumerate(enum):
+                if not isinstance(option, str):
+                    raise ConfigError(f"parameter {name}.enum[{index}] must be a string")
         definition = cls(
             name=name,
             type=type_name,
@@ -173,9 +210,9 @@ class ParameterDefinition:
         return definition
 
     def _validate(self) -> None:
-        if self.type not in {"number", "integer"} and (self.min is not None or self.max is not None):
+        if self.type not in NUMERIC_TYPES and (self.min is not None or self.max is not None):
             raise ConfigError(f"parameter {self.name}: min/max are only valid for numeric types")
-        if self.type not in {"string", "asset", "path"} and (
+        if self.type not in STRING_TYPES and (
             self.min_length is not None or self.max_length is not None
         ):
             raise ConfigError(f"parameter {self.name}: min_length/max_length are only valid for string types")
@@ -231,12 +268,36 @@ class ParameterDefinition:
                     schema["minLength"] = self.min_length
                 if self.max_length is not None:
                     schema["maxLength"] = self.max_length
+        elif self.type == "duration":
+            schema["type"] = "number"
+            if self.min is not None:
+                schema["minimum"] = self.min
+            if self.max is not None:
+                schema["maximum"] = self.max
         elif self.type in {"asset", "path"}:
             schema["type"] = "string"
             if self.min_length is not None:
                 schema["minLength"] = self.min_length
             if self.max_length is not None:
                 schema["maxLength"] = self.max_length
+        elif self.type == "enum":
+            schema["type"] = "string"
+            if self.min_length is not None:
+                schema["minLength"] = self.min_length
+            if self.max_length is not None:
+                schema["maxLength"] = self.max_length
+        elif self.type == "key":
+            schema["type"] = "string"
+            schema["pattern"] = KEY_PATTERN
+            if self.min_length is not None:
+                schema["minLength"] = self.min_length
+            if self.max_length is not None:
+                schema["maxLength"] = self.max_length
+        elif self.type == "color":
+            schema["type"] = "string"
+            schema["pattern"] = COLOR_PATTERN
+        elif self.type == "point":
+            schema.update(deepcopy(POINT_SCHEMA))
         elif self.type == "rect":
             schema["type"] = "array"
             schema["prefixItems"] = [
@@ -394,7 +455,12 @@ class ActionDefinition:
 
 __all__ = [
     "ACTION_MANIFEST_SCHEMA",
+    "COLOR_PATTERN",
+    "KEY_PATTERN",
+    "NUMERIC_TYPES",
     "PARAMETER_TYPES",
+    "POINT_SCHEMA",
+    "STRING_TYPES",
     "ActionDefinition",
     "ParameterDefinition",
     "apply_parameter_defaults",

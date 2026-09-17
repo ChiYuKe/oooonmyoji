@@ -382,6 +382,21 @@
 :root[data-theme="light"] .instance-variable-pin.type-object, :root[data-theme="light"] .instance-variable-pin.type-any {
     fill: #61577e
 }
+:root[data-theme="light"] .instance-variable-pin.type-point {
+    fill: #366577
+}
+:root[data-theme="light"] .instance-variable-pin.type-enum {
+    fill: #7d5639
+}
+:root[data-theme="light"] .instance-variable-pin.type-key {
+    fill: #525c7c
+}
+:root[data-theme="light"] .instance-variable-pin.type-color {
+    fill: #824f6e
+}
+:root[data-theme="light"] .instance-variable-pin.type-duration {
+    fill: #4b6442
+}
 :root[data-theme="light"] .port-variable, :root[data-theme="light"] .port-variable-out {
     fill: #61577e;
     stroke: #232323
@@ -404,6 +419,21 @@
 }
 :root[data-theme="light"] .port-variable.type-object, :root[data-theme="light"] .port-variable-out.type-object, :root[data-theme="light"] .variable-card-dot.type-object, :root[data-theme="light"] .port-variable.type-any, :root[data-theme="light"] .port-variable-out.type-any, :root[data-theme="light"] .variable-card-dot.type-any {
     fill: #61577e
+}
+:root[data-theme="light"] .port-variable.type-point, :root[data-theme="light"] .port-variable-out.type-point, :root[data-theme="light"] .variable-card-dot.type-point {
+    fill: #366577
+}
+:root[data-theme="light"] .port-variable.type-enum, :root[data-theme="light"] .port-variable-out.type-enum, :root[data-theme="light"] .variable-card-dot.type-enum {
+    fill: #7d5639
+}
+:root[data-theme="light"] .port-variable.type-key, :root[data-theme="light"] .port-variable-out.type-key, :root[data-theme="light"] .variable-card-dot.type-key {
+    fill: #525c7c
+}
+:root[data-theme="light"] .port-variable.type-color, :root[data-theme="light"] .port-variable-out.type-color, :root[data-theme="light"] .variable-card-dot.type-color {
+    fill: #824f6e
+}
+:root[data-theme="light"] .port-variable.type-duration, :root[data-theme="light"] .port-variable-out.type-duration, :root[data-theme="light"] .variable-card-dot.type-duration {
+    fill: #4b6442
 }
 :root[data-theme="light"] .pin-variable-name {
     fill: #323232
@@ -438,6 +468,27 @@
 }
 :root[data-theme="light"] .variable-card.type-array .variable-card-accent, :root[data-theme="light"] .variable-card.type-rect .variable-card-accent {
     fill: #6c5b32
+}
+:root[data-theme="light"] .variable-card.type-object .variable-card-accent, :root[data-theme="light"] .variable-card.type-any .variable-card-accent {
+    fill: #61577e
+}
+:root[data-theme="light"] .variable-card.type-point .variable-card-accent {
+    fill: #366577
+}
+:root[data-theme="light"] .variable-card.type-enum .variable-card-accent {
+    fill: #7d5639
+}
+:root[data-theme="light"] .variable-card.type-key .variable-card-accent {
+    fill: #525c7c
+}
+:root[data-theme="light"] .variable-card.type-color .variable-card-accent {
+    fill: #824f6e
+}
+:root[data-theme="light"] .variable-card.type-duration .variable-card-accent {
+    fill: #4b6442
+}
+:root[data-theme="light"] .variable-card-swatch {
+    stroke: #696969
 }
 :root[data-theme="light"] .variable-card-header-rule {
     stroke: #696969
@@ -781,6 +832,29 @@
 }
 :root[data-theme="light"] .ui-dropdown-items {
     scrollbar-color: #696969 transparent
+}
+:root[data-theme="light"] .inline-param-editor {
+    border: 1px solid var(--card-port, #b2b2b2);
+    background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input {
+    color: var(--card-text, #232323)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-axis-label {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-unit {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-swatch {
+    border: 1px solid var(--card-port, #b2b2b2)
+}
+:root[data-theme="light"] .definition-color-picker {
+    border: 1px solid var(--border, #dadada);
+    background: var(--surface, #ececec)
+}
+:root[data-theme="light"] .definition-unit {
+    color: var(--muted, #696969)
 }
 :root[data-theme="light"] #inspector-body .section-header {
     border-bottom: 1px solid #e6e6e6;

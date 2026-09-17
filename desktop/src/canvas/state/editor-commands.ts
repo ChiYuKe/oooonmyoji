@@ -1,0 +1,214 @@
+/**
+ * 画布命令：变量卡片增删与放置、节点重命名与类型切换。
+ * 原 `workflow-editor.js` 的两段：removeVariableCard 至 addVariableCardCommand、renameNode 至 changeNodeType。
+ *
+ * 命令通过 mutate 提交历史，不直接改视图。
+ */
+import type { CanvasState } from '../state/canvas-state';
+
+export interface EditorCommandsDeps {
+  state: Omit<CanvasState, 'raw'> & { raw: any };
+  mutate(fn: () => void): void;
+  nodeById(id: string): any;
+  nodes(): any[];
+  layout(): Record<string, any>;
+  position(node: any): { x: number; y: number };
+  clone<T>(value: T): T;
+  toast(message: string, isError?: boolean): void;
+  variableCards(): Record<string, any>;
+  variableLinks(): Record<string, any>;
+  nextVariableCardId(): string;
+  parameterLiteralCache(): Record<string, any>;
+  parameterLiteralCacheKey(node: any, name: string): string;
+  setVariableCardSelection(ids: any): void;
+  variableInputTargetAt(...args: any[]): any;
+  instanceRunCards(): any[];
+  displayNameOfDefinition(definition: any, name?: string): string;
+  wrap: HTMLElement;
+  variableCardWidth: number;
+  variableCardHeight: number;
+  variableCardPortY: number;
+  nodeWidth: number;
+  runCardWidth: number;
+}
+
+export function createEditorCommands(deps: EditorCommandsDeps) {
+  const {
+    state, mutate, nodeById, nodes, layout, position, clone, toast,
+    variableCards, variableLinks, nextVariableCardId,
+    parameterLiteralCache, parameterLiteralCacheKey, setVariableCardSelection, variableInputTargetAt,
+    instanceRunCards, displayNameOfDefinition, wrap,
+    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
+    variableCardPortY: VARIABLE_CARD_PORT_Y, nodeWidth: NODE_W, runCardWidth: RUN_CARD_W,
+  } = deps;
+  function removeVariableCard(id: string): void {
+    removeVariableCards([id]);
+  }
+
+  /**
+   * 解除某个端口（键为 `nodeId:param`，实例子输入为 `nodeId:runs.N.inputs.param`）的变量绑定。
+   * 绑定前的字面量若已缓存则恢复，否则直接移除引用（参数回落到定义默认值）。
+   */
+  function releasePinBinding(key: string): void {
+    const separator = typeof key === 'string' ? key.indexOf(':') : -1;
+    if (separator < 0) return;
+    const node = nodeById(key.slice(0, separator));
+    const param = key.slice(separator + 1);
+    if (!node) return;
+    const runMatch = /^runs\.(\d+)\.inputs\.(.+)$/.exec(param);
+    if (runMatch) {
+      const run = Array.isArray(node.runs) ? node.runs[Number(runMatch[1])] : null;
+      if (run && run.inputs && typeof run.inputs === 'object' && !Array.isArray(run.inputs)) delete run.inputs[runMatch[2]];
+      return;
+    }
+    const nested = param.startsWith('inputs.');
+    const name = nested ? param.slice('inputs.'.length) : param;
+    const holder = nested ? node.params && node.params.inputs : node.params;
+    if (!holder || typeof holder !== 'object' || Array.isArray(holder)) return;
+    const cache = parameterLiteralCache();
+    const cacheKey = parameterLiteralCacheKey(node, name);
+    if (Object.prototype.hasOwnProperty.call(cache, cacheKey)) holder[name] = clone(cache[cacheKey]);
+    else delete holder[name];
+    delete cache[cacheKey];
+  }
+
+  /**
+   * 删除变量卡片。画布连接优先：没有卡片再引用该变量的端口会同步解除绑定，
+   * 同一变量若还有别的卡片存活，则把连线改指到存活卡片上（绑定保留）。
+   */
+  function removeVariableCards(ids: any): void {
+    const targets = [...new Set(Array.isArray(ids) ? ids : [])]
+      .filter((id) => Object.prototype.hasOwnProperty.call(variableCards(), id));
+    if (!targets.length) return;
+    const targetSet = new Set(targets);
+    const describe = (value: any) => ({
+      scope: value && value.scope === 'variables' ? 'variables' : 'inputs',
+      name: value && typeof value.name === 'string' ? value.name : '',
+    });
+    const released: any[] = [];
+    for (const [key, cardId] of Object.entries(variableLinks())) {
+      if (!targetSet.has(cardId)) continue;
+      const card = variableCards()[cardId];
+      if (card) released.push({ key, ...describe(card) });
+    }
+    const survivors = Object.entries(variableCards())
+      .filter(([id]) => !targetSet.has(id))
+      .map(([id, value]) => ({ id, ...describe(value) }));
+    const unbind = released.filter((item) => !survivors.some((card) => card.scope === item.scope && card.name === item.name));
+    mutate(() => {
+      for (const id of targets) delete variableCards()[id];
+      for (const [key, cardId] of Object.entries(variableLinks())) if (targetSet.has(cardId)) delete variableLinks()[key];
+      for (const item of released) {
+        const survivor = survivors.find((card) => card.scope === item.scope && card.name === item.name);
+        if (survivor) variableLinks()[item.key] = survivor.id;
+        else releasePinBinding(item.key);
+      }
+      const selected = state.selectedVariableCardIds && typeof state.selectedVariableCardIds.forEach === 'function'
+        ? [...state.selectedVariableCardIds]
+        : [];
+      setVariableCardSelection(selected.filter((id: any) => !targetSet.has(id)));
+    });
+    toast(unbind.length
+      ? `已删除 ${targets.length} 个变量卡片，并解除 ${unbind.length} 处端口引用`
+      : `已删除 ${targets.length} 个变量卡片`);
+  }
+
+  /** 把变量卡片放到指定世界坐标；若附近有兼容端点则吸附到端点旁并建立绑定。 */
+  function placeVariableCard(scope: string, name: string, point: { x: number; y: number }, options: any = {}): any {
+    if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) return;
+    if (!Object.prototype.hasOwnProperty.call(state.raw[scope], name)) { toast(`${scope}.${name} 不存在`, true); return; }
+    const target = options.connect === false ? null : variableInputTargetAt(point, scope, name);
+    mutate(() => {
+      const cards = variableCards();
+      const cardId = nextVariableCardId();
+      if (target && target.kind === 'instance-input') {
+        const runCard = instanceRunCards().find((item: any) => item.node.id === target.nodeId && item.index === target.runIndex);
+        const run = runCard && runCard.run;
+        const left = runCard.x - VARIABLE_CARD_W - 56;
+        const x = left >= 24 ? left : runCard.x + RUN_CARD_W + 56;
+        cards[cardId] = { name, scope, x: Math.round(x / 8) * 8, y: Math.max(24, Math.round((target.y - VARIABLE_CARD_PORT_Y) / 8) * 8) };
+        if (!run.inputs || typeof run.inputs !== 'object' || Array.isArray(run.inputs)) run.inputs = {};
+        run.inputs[target.param] = { ref: `${scope}.${name}` };
+        variableLinks()[`${target.nodeId}:runs.${target.runIndex}.inputs.${target.param}`] = cardId;
+      } else if (target) {
+        const node = nodeById(target.nodeId);
+        const pos = position(node);
+        const left = pos.x - VARIABLE_CARD_W - 56;
+        const x = left >= 24 ? left : pos.x + NODE_W + 56;
+        cards[cardId] = { name, scope, x: Math.round(x / 8) * 8, y: Math.max(24, Math.round((target.y - VARIABLE_CARD_PORT_Y) / 8) * 8) };
+        variableLinks()[`${target.nodeId}:${target.param}`] = cardId;
+        if (target.param.startsWith('inputs.')) {
+          if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
+          node.params.inputs[target.param.slice('inputs.'.length)] = { ref: `${scope}.${name}` };
+        } else node.params[target.param] = { ref: `${scope}.${name}` };
+      } else {
+        cards[cardId] = { name, scope, x: Math.round((point.x - VARIABLE_CARD_W / 2) / 8) * 8, y: Math.round((point.y - VARIABLE_CARD_PORT_Y) / 8) * 8 };
+      }
+    });
+    if (target && target.kind === 'instance-input') toast(`已连接 实例输入 ${target.param} ← 变量 ${displayNameOfDefinition(state.raw[scope][name], name)}`);
+    else if (target) toast(`已连接 参数 ${target.param} ← 变量 ${name}`);
+    else toast(`已添加变量卡片 ${name}`);
+  }
+
+  /** 编辑器命令入口：在鼠标处（或视野中心）创建变量卡片。 */
+  function addVariableCardCommand(value: any): void {
+    const scope = value && value.scope === 'variables' ? 'variables' : 'inputs';
+    const variableName = String(value && value.name !== undefined ? value.name : value ?? '').trim();
+    if (!variableName) return;
+    if (!state.raw[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], variableName)) { toast(`${scope}.${variableName} 不存在`, true); return; }
+    if (!wrap.clientWidth || !wrap.clientHeight) return;
+    const rect = wrap.getBoundingClientRect();
+    const point = state.mouse || { x: (rect.width / 2 - state.panX) / state.zoom, y: (rect.height / 2 - state.panY) / state.zoom };
+    placeVariableCard(scope, variableName, point, { connect: false });
+  }
+
+  function renameNode(oldId: string, value: string): void {
+    if (!value || value === oldId) return;
+    if (nodeById(value)) { toast('节点 ID 已存在', true); return; }
+    mutate(() => {
+      const node = nodeById(oldId); node.id = value;
+      for (const parent of nodes()) if (Array.isArray(parent.children)) parent.children = parent.children.map((child: any) => child === oldId ? value : child);
+      if (state.raw.root === oldId) state.raw.root = value;
+      layout()[value] = layout()[oldId]; delete layout()[oldId];
+      const remap = (item: any) => {
+        if (Array.isArray(item)) return item.forEach(remap);
+        if (!item || typeof item !== 'object') return;
+        if (typeof item.ref === 'string') item.ref = item.ref.replace(`nodes.${oldId}.output.`, `nodes.${value}.output.`);
+        Object.values(item).forEach(remap);
+      };
+      remap(state.raw.nodes);
+      state.selected = new Set([value]);
+    });
+  }
+
+  function changeNodeType(node: any, type: string): void {
+    mutate(() => {
+      node.type = type;
+      if (type === 'task') {
+        delete node.children; delete node.finish_mode;
+        delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
+        node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture'; node.params = {};
+      } else if (type === 'instance_parallel') {
+        delete node.action; delete node.params; delete node.children; delete node.finish_mode;
+        node.runs = Array.isArray(node.runs) && node.runs.length ? node.runs : [{ instance: state.instances[0]?.id || '', workflow: '', inputs: {} }];
+        node.wait_for = node.wait_for === 'any' ? 'any' : 'all';
+        node.cancel_on_failure = node.cancel_on_failure !== false;
+      } else {
+        delete node.action; delete node.params;
+        node.children = [];
+        delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
+        if (type === 'simple_parallel') node.finish_mode = 'abort_background'; else delete node.finish_mode;
+        if (type === 'repeat_until') { node.condition = node.condition || { eq: [1, 1] }; node.max_iterations = node.max_iterations || 100; }
+        if (type === 'branch') node.conditions = Array.isArray(node.conditions) ? node.conditions : [];
+        if (type === 'switch') { node.expression = node.expression ?? 0; node.cases = Array.isArray(node.cases) ? node.cases : []; }
+        if (type === 'parallel') { node.wait_for = 'all'; node.cancel_on_failure = true; }
+        if (type !== 'parallel') { delete node.wait_for; delete node.cancel_on_failure; }
+      }
+    });
+  }
+
+  return {
+    removeVariableCard, releasePinBinding, removeVariableCards, placeVariableCard, addVariableCardCommand,
+    renameNode, changeNodeType,
+  };
+}

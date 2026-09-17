@@ -7,7 +7,6 @@ const {stripTypeScriptTypes} = require('node:module');
 const root = path.join(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
 const popout = fs.readFileSync(path.join(root, 'src/renderer/popout.ts'), 'utf8');
-const editor = fs.readFileSync(path.join(root, 'public/legacy/workflow-editor.js'), 'utf8');
 const overviewSrc = fs.readFileSync(path.join(root, 'src/renderer/overview.ts'), 'utf8');
 
 /** 与其它渲染层测试一致：切片执行生产代码，不打开桌面窗口，也不操控鼠标键盘。 */
@@ -171,7 +170,13 @@ test('画布删除入口覆盖实例运行项、变量与节点/连线', () => {
       deleteSelection: () => { calls.selections += 1; },
       render: () => { calls.renders += 1; },
     });
-    vm.runInContext(sliceBetween(editor, 'function deleteCurrentSelection() {', 'function executeEditorCommand'), ctx);
+    const runEvents = require('../dist-test-renderer/canvas/state/run-events.js').createRunEvents({
+      state: ctx.state, nodes: () => [], nodeById: (id) => ctx.nodeById(id), clone: (value) => JSON.parse(JSON.stringify(value)),
+      render: () => ctx.render(), deleteSelection: () => ctx.deleteSelection(),
+      removeVariableCards: () => {}, removeVariableCard: (id) => ctx.removeVariableCard(id),
+      removeInstanceRun: (node, index) => ctx.removeInstanceRun(node, index), removeVariable: (scope, name) => ctx.removeVariable(scope, name),
+    });
+    ctx.deleteCurrentSelection = runEvents.deleteCurrentSelection;
     return {ctx, calls};
   };
 
@@ -218,12 +223,17 @@ test('画布、标题栏命令与独立窗口共用同一个删除入口', () =>
       },
     },
   });
-  vm.runInContext(sliceBetween(editor, 'function matchesShortcut(event, id) {', "window.addEventListener('keydown'"), h);
+  h.matchesShortcut = require('../dist-test-renderer/canvas/interactions/input-bridge.js').createInputBridge({
+    getShortcuts: () => h.window.StudioShortcuts,
+  }).matchesShortcut;
   assert.equal(h.matchesShortcut({key: 'Delete'}, 'editor.delete'), true);
   assert.equal(h.matchesShortcut({key: 'Backspace'}, 'editor.delete'), true);
   assert.equal(h.matchesShortcut({key: 'x'}, 'editor.delete'), false);
-  assert.match(editor, /if \(!editing && matchesShortcut\(event, 'editor\.delete'\)\) \{/);
-  assert.match(editor, /command === 'deleteSelection'\) deleteCurrentSelection\(\)/);
+  const inputBridgeSource = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/interactions/input-bridge.js'), 'utf8');
+  assert.match(inputBridgeSource, /matchesShortcut\(event, 'editor\.delete'\)/);
+  const dispatchSource = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/state/editor-command-dispatch.js'), 'utf8');
+  assert.match(dispatchSource, /command === 'deleteSelection'\)/);
+  assert.match(dispatchSource, /deleteCurrentSelection\(\);/);
   assert.match(shell, /if \(handleDeleteShortcut\(event\)\) return;/);
   assert.match(shell, /document\.addEventListener\('pointerdown', resetDeleteTargetOnPointerDown, true\)/);
   assert.match(overviewSrc, /setDeleteTarget\(\{ kind: 'queue', rel \}\);/);

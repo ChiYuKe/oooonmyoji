@@ -46,10 +46,18 @@
     frame.contentWindow.postMessage(sampleData(), window.location.origin);
     feedback.textContent = scenario === 'empty' ? '空状态示例' : '示例已加载 · 可点击步骤展开';
   }
+  function makeButton(label, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ui-button ui-segment';
+    button.textContent = label;
+    button.addEventListener('click', onClick);
+    return button;
+  }
   for (const [value,label] of [['completed','已完成'],['running','运行中'],['empty','空状态']]) {
-    const button = UI.button({label,className:'ui-segment',onClick:()=>{
+    const button = makeButton(label,()=>{
       scenario=value; sync(); load();
-    }});
+    });
     button.dataset.value=value; scenarioButtons.push(button); document.getElementById('scenarios').appendChild(button);
   }
   function sync() { scenarioButtons.forEach(button=>{const selected=button.dataset.value===scenario;button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));}); }

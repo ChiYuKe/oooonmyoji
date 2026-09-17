@@ -25,6 +25,7 @@ vscode-onmyoji-workflow/out/
 desktop/node_modules/
 desktop/dist/
 desktop/dist-electron/
+desktop/dist-test-renderer/
 desktop/release/
 
 # Stray artifacts from scripts with unexpanded %SystemDrive% env var

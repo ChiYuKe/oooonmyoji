@@ -5,9 +5,10 @@
   "description": "Standalone desktop workflow editor and runtime for oooonmyoji",
   "main": "dist-electron/main/main.js",
   "scripts": {
-    "test": "npm run build:electron && node --test tests/*.test.cjs",
+    "test": "npm run build:electron && npm run build:renderer-tests && node --test tests/*.test.cjs",
     "dev": "npm run build:electron && concurrently -k -s first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env ONMYOJI_DESKTOP_DEV_URL=http://127.0.0.1:5173 electron .\"",
     "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer-tests": "tsc -p tsconfig.renderer-tests.json",
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "build": "node scripts/build-light-palette.cjs && npm run typecheck && npm run build:electron && vite build",
     "start": "npm run build && electron ."

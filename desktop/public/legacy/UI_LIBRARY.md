@@ -4,13 +4,13 @@
 
 ## 文件职责
 
-- `ui.js`：组件工厂、事件与浮层生命周期。
+- `src/canvas/ui/elements.ts`：组件工厂、事件与浮层生命周期（原 `ui.js`，画布入口与展示页通过 `createUi()` 安装）。
 - `ui.css`：`--ui-*` 设计变量及通用组件样式，单独引用即可使用。
 - `inspector.css`：详情面板的栅格、间距、窄栏布局，禁止在这里另起一套控件颜色。
 - `workflow-editor.css`：旧画布和布局样式，放在 `legacy` 层，优先级低于组件库。
 - `editor-frame.css`：桌面嵌入页专用尺寸规则，最后加载。画布始终单行占满剩余空间（保留 30px 面包屑），独立详情占满宿主高度；不继承旧版窄屏上下分栏，也不为隐藏顶栏预留高度。
-- `ui-showcase.html`：真实组件的交互展示、禁用状态与 240–520px 详情栏预览；字体与桌面端一致，支持深浅主题切换。
-- `node-cards.js` / `node-cards.css`：SVG 节点卡片的文本宽度预算与双主题样式。普通节点、实例子卡、变量卡共用，布局和端口仍由编辑器管理；`node-cards-showcase.html` 使用真实画布示例，不保存项目。
+- `src/renderer/ui-showcase.html`：真实组件的交互展示、禁用状态与 240–520px 详情栏预览；字体与桌面端一致，支持深浅主题切换（入口 `src/canvas/ui/showcase.ts`）。
+- `src/canvas/render/node-cards.ts` / `node-cards.css`：SVG 节点卡片的文本宽度预算与双主题样式。普通节点、实例子卡、变量卡共用，布局和端口仍由编辑器管理；`node-cards-showcase.html` 使用真实画布示例，不保存项目。
 - `../runtime-log/`：使用同一套样式的运行日志组合组件；`showcase.html` 提供常规、窄栏与底部停靠示例，不连接实际工作流。
 - `../settings/`：左侧分类与右侧内容、主题预览选项，以及真实设置布局的独立展示页。
 - `../workbench/`：紧凑横排工具栏、低频命令菜单，以及按文件夹、工作流和图片分类的内容浏览器。普通文件项使用图标与两行文字，只有图片保留缩略图。主窗口与内容浏览器独立窗口共用样式。
@@ -20,7 +20,7 @@
 
 ## 使用
 
-引入 `ui.css`、`ui.js`，容器添加 `studio-ui`。所有工厂返回 DOM 元素。
+引入 `ui.css`，在页面入口调用 `createUi()` 安装组件库（画布入口与展示页已如此处理）。所有工厂返回 DOM 元素。
 
 ```js
 panel.appendChild(UI.input({ value: 6, type: 'number', label: '超时秒数', onChange: text => save(Number(text)) }));
@@ -56,7 +56,7 @@ panel.appendChild(UI.rect({ value: [0, 0, 100, 100], onChange: save, onPick: pic
 
 节点基本信息使用 48px 标签列；顺序/选择节点直接展示执行说明，不额外套一层复合节点标题。子节点行使用 18px 序号及三个 22px 操作位，保留 `.child-row` 结构以兼容排序拖拽。Retry 明示尝试次数和间隔单位，Repeat 来源与公开按钮同排、值独占下一行，其他时长控件显示秒单位；装饰器标题使用中性文字。
 
-修改组件时同步展示页；不要向旧样式文件末尾追加一轮覆盖。先改 `--ui-*`，必要时改组件规则，布局适配只放在 `inspector.css`。
+修改组件时同步展示页（`src/renderer/ui-showcase.html` 与 `src/canvas/ui/elements.ts`）；不要向旧样式文件末尾追加一轮覆盖。先改 `--ui-*`，必要时改组件规则，布局适配只放在 `inspector.css`。
 
 运行日志布局放在 `../runtime-log/run-log.css`。步骤用原生 details / summary，默认显示名称、结果、耗时及操作摘要；参数、输出、调用路径、开始时间与截图在展开区。错误原因不得隐藏。展开状态和阅读位置按实例保存，统计不受 300 条显示上限影响。运行日志工具栏复用 `ui-button`、`ui-segmented`、`ui-checkbox`，不能另写亮色选中样式。
 
@@ -71,7 +71,7 @@ panel.appendChild(UI.rect({ value: [0, 0, 100, 100], onChange: save, onPick: pic
 
 变量详情的“分组”字段控制左侧列表归类；同名分组自动合并，标题可折叠。公开生成的输入仅在最后一个引用解除后清理，手动与历史无标记输入保留。撤销同时恢复引用和输入定义。
 
-`variable-system.js` 提供稳定标识、显示名、引用查询、初始化公开、局部可见性以及结构预设。
+`src/canvas/model/variable-system.ts` 提供稳定标识、显示名、引用查询、初始化公开、局部可见性以及结构预设。
 变量详情提供 Get / Set、作用范围、初始化来源、结构预设、引用位置与最近运行值；参数的“绑定”菜单支持选择兼容引用或提升当前固定值。
 沿用紧凑平面控件与主题语义色。Retry 保留一个公开入口，两个分量使用同一结构输入。已被引用的结构暂不允许改动字段，避免留下失效路径。
 静态回归入口：在 desktop 目录运行 `npm test`，会先构建校验模块。

@@ -35,14 +35,14 @@
         "type": "object",
         "properties": {
           "from": { "type": "string", "required": true, "min_length": 1 },
-          "type": { "type": "string", "required": true, "enum": ["tap_match", "tap_template", "tap", "key"] },
+          "type": { "type": "enum", "required": true, "enum": ["tap_match", "tap_template", "tap", "key"] },
           "template": { "type": "asset" },
           "roi": { "type": "rect" },
           "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 },
           "scale_search": { "type": "boolean", "default": false },
           "x": { "type": "integer" },
           "y": { "type": "integer" },
-          "keycode": { "type": "string" },
+          "keycode": { "type": "key" },
           "expected_states": { "type": "array", "default": [], "items": { "type": "string", "min_length": 1 } },
           "retry_if_unchanged_seconds": { "type": "number", "min": 0, "description": "页面保持不变达到该时长后，按有限转移次数重试" },
           "return_action": { "type": "boolean", "default": false }
@@ -50,18 +50,18 @@
       }
     },
     "allow_ocr": { "type": "boolean", "default": true },
-    "timeout_seconds": { "type": "number", "default": 15, "min": 0.1 },
-    "initial_state_timeout_seconds": { "type": "number", "default": 0, "min": 0, "description": "初始加载画面的模板轮询时间，结束后才尝试一次 OCR" },
-    "confirm_timeout_seconds": { "type": "number", "default": 5, "min": 0.1 },
-    "poll_interval_seconds": { "type": "number", "default": 0.1, "min": 0 },
-    "post_action_delay": { "type": "number", "default": 0.35, "min": 0 },
+    "timeout_seconds": { "type": "duration", "default": 15, "min": 0.1 },
+    "initial_state_timeout_seconds": { "type": "duration", "default": 0, "min": 0, "description": "初始加载画面的模板轮询时间，结束后才尝试一次 OCR" },
+    "confirm_timeout_seconds": { "type": "duration", "default": 5, "min": 0.1 },
+    "poll_interval_seconds": { "type": "duration", "default": 0.1, "min": 0 },
+    "post_action_delay": { "type": "duration", "default": 0.35, "min": 0 },
     "max_return_attempts": { "type": "integer", "default": 3, "min": 1 },
     "max_overlay_clicks": { "type": "integer", "default": 6, "min": 1 },
     "max_transitions": { "type": "integer", "default": 12, "min": 1 },
     "failure_frame_name": { "type": "string", "default": "recovery-failure.png", "min_length": 1 },
     "hold_ms": { "type": "integer", "default": 0, "min": 0 },
     "random_offset": { "type": "integer", "default": 0, "min": 0 },
-    "random_interval": { "type": "array", "items": { "type": "number", "min": 0 }, "min_items": 2, "max_items": 2, "default": [0, 0] }
+    "random_interval": { "type": "array", "items": { "type": "duration", "min": 0 }, "min_items": 2, "max_items": 2, "default": [0, 0] }
   },
   "outputs": {
     "type": "object",

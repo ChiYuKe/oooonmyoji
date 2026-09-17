@@ -6,7 +6,7 @@
   "description": "等待 seconds 秒（可取消）。输出 { seconds }。",
   "parameters": {
     "seconds": {
-      "type": "number",
+      "type": "duration",
       "required": true,
       "min": 0,
       "description": "等待的秒数"

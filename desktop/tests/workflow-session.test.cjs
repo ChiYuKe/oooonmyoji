@@ -1,33 +1,17 @@
+// Run via npm test (builds the desktop output first).
+// 会话序列化已迁到 shared/workspace/session.ts：直接导入编译产物，不截取源码。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const {stripTypeScriptTypes} = require('node:module');
-const root = path.join(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'src/renderer/workflow-session.ts'), 'utf8');
-
-/** 与其它渲染层测试一致：切片执行生产函数，不打开桌面窗口。 */
-function extract(name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert(start >= 0, `未找到 ${name}`);
-  const end = source.indexOf('\n}\n', start);
-  assert(end > start, `未闭合 ${name}`);
-  return source.slice(start, end + 3);
-}
-
-function harness() {
-  const ctx = vm.createContext({WORKFLOW_SESSION_VERSION: 1});
-  const code = [extract('serializeWorkflowSession'), extract('parseWorkflowSession'), extract('reconcileWorkflowSession')].join('\n');
-  vm.runInContext(stripTypeScriptTypes(code), ctx);
-  return ctx;
-}
+const {
+  serializeWorkflowSession,
+  parseWorkflowSession,
+  reconcileWorkflowSession,
+} = require('../dist-electron/shared/workspace/session.js');
 
 const tab = (uri, extra = {}) => ({uri, text: '', dirty: false, backStack: [], ...extra});
 
 test('会话序列化只为脏标签保留正文并保持顺序', () => {
-  const ctx = harness();
-  const raw = ctx.serializeWorkflowSession([
+  const raw = serializeWorkflowSession([
     tab('workflows/a.json', {text: 'saved', dirty: false, backStack: ['workflows/root.json']}),
     tab('workflows/b.json', {text: 'unsaved', dirty: true}),
   ], 'workflows/b.json');
@@ -41,13 +25,12 @@ test('会话序列化只为脏标签保留正文并保持顺序', () => {
 });
 
 test('会话解析容忍损坏数据并规范化脏标记', () => {
-  const ctx = harness();
-  assert.equal(ctx.parseWorkflowSession(null), undefined);
-  assert.equal(ctx.parseWorkflowSession('not json'), undefined);
-  assert.equal(ctx.parseWorkflowSession('[]'), undefined);
-  assert.equal(ctx.parseWorkflowSession('{"tabs":[]}'), undefined);
+  assert.equal(parseWorkflowSession(null), undefined);
+  assert.equal(parseWorkflowSession('not json'), undefined);
+  assert.equal(parseWorkflowSession('[]'), undefined);
+  assert.equal(parseWorkflowSession('{"tabs":[]}'), undefined);
 
-  const session = ctx.parseWorkflowSession(JSON.stringify({
+  const session = parseWorkflowSession(JSON.stringify({
     tabs: [
       {uri: 'workflows/a.json', text: 'body', dirty: true, backStack: ['x', 7, 'y']},
       {uri: '', text: 'skip'},
@@ -68,14 +51,13 @@ test('会话解析容忍损坏数据并规范化脏标记', () => {
 });
 
 test('会话恢复会丢弃已不存在的画布并回退激活项', () => {
-  const ctx = harness();
-  const session = ctx.parseWorkflowSession(JSON.stringify({
+  const session = parseWorkflowSession(JSON.stringify({
     tabs: [{uri: 'workflows/a.json'}, {uri: 'workflows/gone.json'}, {uri: 'workflows/c.json'}],
     activeUri: 'workflows/gone.json',
   }));
-  const reconciled = ctx.reconcileWorkflowSession(session, ['workflows/a.json', 'workflows/c.json']);
+  const reconciled = reconcileWorkflowSession(session, ['workflows/a.json', 'workflows/c.json']);
   assert.equal(reconciled.tabs.length, 2);
   assert.equal(reconciled.activeUri, 'workflows/a.json');
-  assert.equal(ctx.reconcileWorkflowSession(session, ['workflows/other.json']), undefined);
-  assert.equal(ctx.reconcileWorkflowSession(undefined, ['workflows/a.json']), undefined);
+  assert.equal(reconcileWorkflowSession(session, ['workflows/other.json']), undefined);
+  assert.equal(reconcileWorkflowSession(undefined, ['workflows/a.json']), undefined);
 });

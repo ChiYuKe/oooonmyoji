@@ -37,3 +37,28 @@
 :root[data-theme] .studio-card:is(.connect-hover, .connect-target) .card-head { fill: var(--card-selected-head); }
 :root[data-theme] .studio-card text { pointer-events: visiblePainted; cursor: inherit; }
 :root[data-theme] .studio-card text.node-icon { pointer-events: none; }
+
+/* 参数行（UE 风格）：左侧类型引脚 + 参数名，右侧当前值/勾选框，整行可按值就地编辑。
+ * 行高与排布由 paramRows 几何决定，这里只负责配色与命中区域。 */
+:root[data-theme] .studio-card .param-row-rule { stroke: var(--card-rule); stroke-width: 1; }
+:root[data-theme] .studio-card .param-row-label { fill: var(--card-secondary); font-size: 10px; font-weight: 500; pointer-events: none; }
+:root[data-theme] .studio-card .param-row-label.required { fill: var(--card-text); font-weight: 600; }
+:root[data-theme] .studio-card .param-row-value { fill: var(--card-muted); font-size: 10px; font-weight: 400; pointer-events: none; }
+:root[data-theme] .studio-card .param-row-value.tone-literal { fill: var(--card-secondary); }
+:root[data-theme] .studio-card .param-row-value.tone-bound { fill: var(--card-port); font-weight: 500; }
+:root[data-theme] .studio-card .param-row-value.tone-default { fill: var(--card-muted); }
+:root[data-theme] .studio-card .param-row-value.tone-unset { fill: var(--card-muted); font-style: italic; }
+:root[data-theme] .studio-card .param-row-value.tone-complex { fill: var(--card-muted); }
+:root[data-theme] .studio-card .param-row-check { fill: var(--card-bg); stroke: var(--card-port); stroke-width: 1.2; pointer-events: none; }
+:root[data-theme] .studio-card .param-row-check.checked { fill: var(--card-port); }
+:root[data-theme] .studio-card .param-row-swatch { stroke: var(--card-rule); stroke-width: 1; pointer-events: none; }
+:root[data-theme] .studio-card .param-row-check-mark { stroke: var(--card-bg); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+:root[data-theme] .studio-card .param-row-hit { fill: rgba(0, 0, 0, 0); cursor: text; pointer-events: all; }
+:root[data-theme] .studio-card .param-row-hit:hover { fill: rgba(162, 179, 193, .16); }
+:root[data-theme] .studio-card .param-row-hit.tone-bound { cursor: pointer; }
+:root[data-theme] .studio-card .param-row-hit.tone-complex { cursor: pointer; }
+:root[data-theme] .studio-card .param-rows-toggle { fill: var(--card-muted); font-size: 10px; font-weight: 600; cursor: pointer; }
+:root[data-theme] .studio-card .param-rows-toggle:hover,
+:root[data-theme] .studio-card .param-rows-toggle.expanded { fill: var(--card-text); }
+:root[data-theme] .studio-card .port-variable.configured { fill: var(--card-port); }
+:root[data-theme] .studio-card .port-variable.bound { stroke: var(--card-text); stroke-width: 2; }

@@ -1,6 +1,8 @@
+// Run via npm test (builds the renderer test output first).
+// 变量模型已迁到 src/canvas/model/variable-system.ts：直接导入编译产物。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const V = require('../public/legacy/variable-system.js');
+const V = require('../dist-test-renderer/canvas/model/variable-system.js');
 
 test('stable IDs preserve refs and old keys through display renames', () => {
   const raw = {variables:{legacy:{type:'integer',default:6}},nodes:[{id:'a',params:{value:{ref:'variables.legacy'}}}]};
@@ -53,14 +55,19 @@ test('shared refs, initializer links and Get cards protect automatic inputs',()=
 });
 
 test('editor mutation cleans the complete vector atomically and undo keeps its input',()=>{
-  const fs=require('node:fs'),vm=require('node:vm');
-  const source=fs.readFileSync(require('node:path').join(__dirname,'../public/legacy/workflow-editor.js'),'utf8');
-  const start=source.indexOf('  function mutate(');
+  const {createEditorHistory}=require('../dist-test-renderer/canvas/state/history.js');
   const raw={inputs:{a:{_autoPublished:true,default:{attempts:2,delay_seconds:0}}},nodes:[{id:'n',decorators:[{attempts:{ref:'inputs.a.attempts'},delay_seconds:{ref:'inputs.a.delay_seconds'}}]}]};
-  const state={raw,undo:[],redo:[]};
-  const ctx=vm.createContext({state,VariableSystem:V,snapshot:()=>JSON.stringify(state.raw),setDirty(){},render(){}});
-  vm.runInContext(source.slice(start,source.indexOf('\n  }',start)+4),ctx);
-  ctx.mutate(()=>{const d=raw.nodes[0].decorators[0];d.attempts=V.defaultAt(raw,d.attempts.ref);d.delay_seconds=V.defaultAt(raw,d.delay_seconds.ref);});
+  const state={raw,undo:[],redo:[],selected:new Set(),selectedEdge:null,selectedRun:null,selectedVariable:'',selectedVariableScope:'inputs',inspector:'node'};
+  const history=createEditorHistory({
+    state,
+    cleanupReleased:(value,before)=>V.cleanupReleased(value,before),
+    clearVariableCardSelection:()=>{},
+    nodeById:()=>null,
+    normalizeRaw:(value)=>value,
+    setDirty:()=>{},
+    render:()=>{},
+  });
+  history.mutate(()=>{const d=raw.nodes[0].decorators[0];d.attempts=V.defaultAt(raw,d.attempts.ref);d.delay_seconds=V.defaultAt(raw,d.delay_seconds.ref);});
   assert.equal(raw.inputs.a,undefined);
   assert.deepEqual(raw.nodes[0].decorators[0],{attempts:2,delay_seconds:0});
   assert.ok(JSON.parse(state.undo[0]).inputs.a);

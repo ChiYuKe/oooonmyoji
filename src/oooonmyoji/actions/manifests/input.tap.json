@@ -29,7 +29,7 @@
     },
     "random_interval": {
       "type": "array",
-      "items": { "type": "number", "min": 0 },
+      "items": { "type": "duration", "min": 0 },
       "min_items": 2,
       "max_items": 2,
       "default": [0, 0],

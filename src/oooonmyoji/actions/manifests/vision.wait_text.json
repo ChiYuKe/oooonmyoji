@@ -12,7 +12,7 @@
       "description": "要等待出现的文本子串（OCR 识别结果包含即命中）"
     },
     "timeout_seconds": {
-      "type": "number",
+      "type": "duration",
       "required": true,
       "min": 0,
       "description": "等待超时秒数，超时则失败"

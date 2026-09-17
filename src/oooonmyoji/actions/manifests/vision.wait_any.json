@@ -6,7 +6,7 @@
   "description": "按模板列表顺序逐个匹配；首个模板命中后立即返回，不再检查后续模板。",
   "parameters": {
     "templates": { "type": "array", "items": { "type": "asset" }, "min_items": 1, "required": true },
-    "timeout_seconds": { "type": "number", "required": true, "min": 0 },
+    "timeout_seconds": { "type": "duration", "required": true, "min": 0 },
     "roi": { "type": "rect" },
     "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 },
     "scale_search": { "type": "boolean", "default": false, "description": "是否启用多尺度搜索" }

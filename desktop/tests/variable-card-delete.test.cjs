@@ -3,25 +3,43 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../public/legacy/workflow-editor.js'), 'utf8');
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-// 变量卡片删除属于画布数据操作，这里直接跑生产实现（按函数名切片）。
+// 变量卡片删除属于画布数据操作，这里直接跑生产实现（编译模块）。
 function harness(raw, literals) {
   const calls = { toasts: [], renders: 0 };
   const ctx = vm.createContext({ JSON, console });
-  const slice = (name) => {
-    const start = source.indexOf(`  function ${name}(`);
-    assert.notEqual(start, -1, `${name} 必须存在`);
-    vm.runInContext(source.slice(start, source.indexOf('\n  }', start) + 4), ctx);
-  };
   const state = { raw, paramLiteralCache: literals || {}, selectedVariableCardId: '', selectedVariableCardIds: vm.runInContext('new Set()', ctx) };
   ctx.state = state;
   ctx.clone = (value) => JSON.parse(JSON.stringify(value));
   ctx.mutate = (fn) => { fn(); calls.renders += 1; };
   ctx.toast = (message) => calls.toasts.push(message);
   ctx.nodeById = (id) => (Array.isArray(raw.nodes) ? raw.nodes : []).find((node) => node.id === id) || null;
-  for (const name of ['variableCards', 'variableLinks', 'setVariableCardSelection', 'parameterLiteralCache', 'parameterLiteralCacheKey', 'releasePinBinding', 'removeVariableCards', 'removeVariableCard']) slice(name);
+  const model = require('../dist-test-renderer/canvas/model/workflow-model.js').createWorkflowModel(state);
+  const vmSet = (values) => { ctx.__values = [...values]; return vm.runInContext('new Set(__values)', ctx); };
+  ctx.variableCards = model.variableCards;
+  ctx.variableLinks = model.variableLinks;
+  // 切片函数在 vm 领域内做 `instanceof Set`，模型返回的 Set 需要转换回该领域。
+  ctx.setVariableCardSelection = (ids) => {
+    model.setVariableCardSelection(ids);
+    if (state.selectedVariableCardIds instanceof Set) state.selectedVariableCardIds = vmSet(state.selectedVariableCardIds);
+  };
+  const controls = require('../dist-test-renderer/canvas/inspector/parameter-controls.js').createParameterControls({ state, clone: ctx.clone, UI: { ICON_SVG: {}, icon: () => null } });
+  ctx.parameterLiteralCache = controls.parameterLiteralCache;
+  ctx.parameterLiteralCacheKey = controls.parameterLiteralCacheKey;
+  const commands = require('../dist-test-renderer/canvas/state/editor-commands.js').createEditorCommands({
+    state, mutate: (fn) => ctx.mutate(fn), nodeById: (id) => ctx.nodeById(id), nodes: () => Array.isArray(raw.nodes) ? raw.nodes : [],
+    layout: () => ({}), position: () => ({ x: 0, y: 0 }), clone: ctx.clone, toast: (message) => ctx.toast(message),
+    variableCards: model.variableCards, variableLinks: model.variableLinks, nextVariableCardId: () => `card_${Math.random()}`,
+    parameterLiteralCache: controls.parameterLiteralCache, parameterLiteralCacheKey: controls.parameterLiteralCacheKey,
+    setVariableCardSelection: (ids) => ctx.setVariableCardSelection(ids), variableInputTargetAt: () => null,
+    instanceRunCards: () => [], displayNameOfDefinition: (definition) => definition && definition.display_name || '',
+    wrap: { clientWidth: 0, clientHeight: 0, getBoundingClientRect: () => ({ width: 0, height: 0 }) },
+    variableCardWidth: 168, variableCardHeight: 58, variableCardPortY: 29, nodeWidth: 260, runCardWidth: 250,
+  });
+  ctx.releasePinBinding = commands.releasePinBinding;
+  ctx.removeVariableCards = commands.removeVariableCards;
+  ctx.removeVariableCard = commands.removeVariableCard;
   return {ctx, state, calls};
 }
 function documentWith(node, cards, links) {
@@ -97,8 +115,9 @@ test('删除卡片后仍被选择的卡片会从选择里剔除', () => {
 });
 
 test('删除变量卡片走 releasePinBinding，端口引用不会残留', () => {
-  assert.match(source, /function removeVariableCards\(ids\) \{/);
-  assert.match(source, /else releasePinBinding\(item\.key\);/);
-  assert.match(source, /if \(survivor\) variableLinks\(\)\[item\.key\] = survivor\.id;/);
-  assert.match(source, /function releasePinBinding\(key\) \{/);
+  const moduleSource = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/state/editor-commands.js'), 'utf8');
+  assert.match(moduleSource, /function removeVariableCards\(ids\) \{/);
+  assert.match(moduleSource, /releasePinBinding\(item\.key\);/);
+  assert.match(moduleSource, /variableLinks\(\)\[item\.key\] = survivor\.id;/);
+  assert.match(moduleSource, /function releasePinBinding\(key\) \{/);
 });

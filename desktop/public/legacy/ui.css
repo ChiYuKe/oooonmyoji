@@ -162,3 +162,44 @@
   transition: transform .12s ease;
 }
 .ui-dropdown.open .ui-dropdown-button::after { transform: rotate(180deg); }
+
+/* 卡片参数行的行内编辑器：纯 SVG 画布没有原生控件，浮层贴在参数行上。
+ * 层级低于右键菜单（260）与 toast（300），高于画布浮层（200）。 */
+.inline-param-editor {
+  position: fixed; z-index: 250; display: flex; align-items: center;
+  padding: 1px 2px; border: 1px solid var(--card-port, #a2b3c1); border-radius: 4px;
+  background: var(--card-head, #2e3338); box-shadow: 0 3px 12px rgba(0, 0, 0, .35);
+}
+.inline-param-editor .inline-param-input {
+  width: 100%; height: 100%; min-height: 0; padding: 0 6px; border: 0; border-radius: 3px;
+  background: transparent; color: var(--card-text, #e2e7ec); font-size: 11px; text-align: right;
+}
+.inline-param-editor .inline-param-input:focus { outline: none; }
+/* 坐标点：两个数值输入并排，X/Y 用小标签分隔。 */
+.inline-param-editor .inline-param-axis { width: 46px; flex: 0 0 auto; text-align: center; }
+.inline-param-editor .inline-param-axis-label {
+  flex: 0 0 auto; padding: 0 2px 0 6px; color: var(--card-muted, #8f9aa3); font-size: 9px; font-weight: 700;
+}
+/* 时长：数值右侧的秒单位。 */
+.inline-param-editor .inline-param-unit {
+  flex: 0 0 auto; padding: 0 6px 0 2px; color: var(--card-muted, #8f9aa3); font-size: 10px;
+}
+/* 颜色：色块即取色器入口，原生 input[type=color] 透明覆盖在色块上。 */
+.inline-param-editor .inline-param-swatch {
+  position: relative; flex: 0 0 auto; width: 16px; height: 16px; margin-left: 3px;
+  border: 1px solid var(--card-port, #a2b3c1); border-radius: 3px; overflow: hidden; cursor: pointer;
+}
+.inline-param-editor .inline-param-color {
+  position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px);
+  padding: 0; border: 0; opacity: 0; cursor: pointer;
+}
+/* 详情栏里的取色器与按键选择器：与文本输入同高。 */
+.definition-color-picker {
+  flex: 0 0 auto; width: 26px; height: 24px; padding: 0 2px; border: 1px solid var(--border, #3a4147);
+  border-radius: 4px; background: var(--surface, #22272b); cursor: pointer;
+}
+.definition-key-picker { flex: 0 0 auto; max-width: 132px; height: 24px; font-size: 11px; }
+.definition-unit { flex: 0 0 auto; padding: 0 4px; color: var(--muted, #8f9aa3); font-size: 11px; }
+.point-control { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.definition-enum-options { display: grid; gap: 4px; }
+.definition-enum-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; }

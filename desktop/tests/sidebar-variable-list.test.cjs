@@ -1,27 +1,21 @@
+// Run via npm test (builds the renderer test output first).
+// 变量列表推送已迁到 src/canvas/model/sidebar-state.ts：直接实例化编译产物。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../public/legacy/editor-sidebar-state.js'), 'utf8');
+const { createSidebarState } = require('../dist-test-renderer/canvas/model/sidebar-state.js');
 
 // 变量列表（桌面端左下角）由编辑器 postSidebarState 推送，这里直接跑生产实现。
 function harness(raw, nodeCardRefs = []) {
   const messages = [];
-  const ctx = vm.createContext({
-    JSON, Set,
+  const controller = createSidebarState({
     state: { raw, inspector: 'none', selectedVariable: '', selectedVariableScope: 'inputs', selected: new Set() },
     collectNodeCardVariableRefs: () => new Set(nodeCardRefs),
     nodes: () => (Array.isArray(raw.nodes) ? raw.nodes : []).map((node, index) => ({ id: node.id || `node_${index}`, ...node })),
     currentInspectorSelection: () => ({ kind: 'none' }),
     vscode: { postMessage: (message) => messages.push(message) },
-    lastSidebarState: '',
   });
-  const start = source.indexOf('  function postSidebarState(');
-  assert.notEqual(start, -1, 'postSidebarState 必须存在');
-  vm.runInContext(source.slice(start, source.indexOf('\n  }', start) + 4), ctx);
-  ctx.postSidebarState();
-  return { messages, ctx };
+  controller.postSidebarState();
+  return { messages };
 }
 const plain = (value) => JSON.parse(JSON.stringify(value));
 

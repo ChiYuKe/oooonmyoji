@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Studio UI · 组件库</title>
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Bold.css">
+  <link rel="stylesheet" href="/legacy/workflow-editor.css">
+  <link rel="stylesheet" href="/legacy/ui.css">
+  <link rel="stylesheet" href="/legacy/inspector.css">
+  <link rel="stylesheet" href="/legacy/ui-showcase.css">
+  <link rel="stylesheet" href="/theme/editor-light.css">
+  <link rel="stylesheet" href="/theme/theme.css">
+  <script src="/theme/theme.js"></script>
+</head>
+<body class="studio-ui">
+  <header class="showcase-header"><div><strong>Studio UI</strong><span>紧凑 · 中性灰 · 无亮边</span></div><div id="demo-theme" aria-label="预览主题"></div></header>
+  <main class="showcase-layout">
+    <section class="showcase-panel">
+      <h1>基础控件</h1><p>与详情面板使用同一套组件。点击即可体验。</p>
+      <h2>按钮</h2><div id="demo-buttons" class="demo-row"></div>
+      <h2>输入框</h2><div id="demo-inputs" class="demo-stack"></div>
+      <h2>复选框</h2><div id="demo-checks" class="demo-row"></div>
+      <h2>固定值 / 变量</h2><div id="demo-segments" class="demo-row"></div>
+      <h2>下拉与搜索</h2><div id="demo-dropdowns" class="demo-stack"></div>
+      <h2>图标按钮</h2><div id="demo-icons" class="demo-row"></div>
+      <h2>区域坐标</h2><div id="demo-rect"></div>
+      <h2>禁用区域 / 无框选</h2><div id="demo-rect-disabled"></div>
+      <p id="demo-feedback" role="status">等待操作</p>
+    </section>
+    <section class="showcase-panel">
+      <h1>详情面板</h1><p>拖动滑块查看窄栏布局；示例数据仅保存在本页。</p>
+      <label class="preview-size">面板宽度 <input id="preview-width" type="range" min="240" max="520" value="400"><output id="preview-width-label">400px</output></label>
+      <div class="preview-viewport"><aside id="inspector"><div class="preview-tabs">详细信息<span>运行日志</span></div><div id="inspector-body"></div></aside></div>
+    </section>
+    <section class="showcase-panel specification">
+      <h1>统一尺度</h1>
+      <p><a href="/runtime-log/showcase.html">查看运行日志组件 →</a></p>
+      <p><a href="/settings/showcase.html">查看设置与主题 →</a></p>
+      <p><a href="/legacy/node-cards-showcase.html">查看节点卡片 →</a></p>
+      <dl><dt>常规输入</dt><dd>26px</dd><dt>按钮 / 切换</dt><dd>22px</dd><dt>正文字号</dt><dd>11px</dd><dt>辅助说明</dt><dd>10px</dd><dt>行内间距</dt><dd>4px</dd><dt>圆角</dt><dd>3px</dd></dl>
+      <h2>中性色阶</h2><div id="demo-swatches"></div>
+      <h2>交互约定</h2><p>悬停只改变背景。键盘焦点显示细线。禁用项降低对比度。删除使用克制的红色文字。</p>
+      <h2>组件能力</h2><p>按钮、输入框、复选框、分段切换、搜索下拉、区域坐标、分区标题、图标及提示浮层。</p>
+      <p>重复点击当前模式不会触发修改。搜索下拉支持方向键、Enter 与 Esc。</p>
+    </section>
+  </main>
+  <script type="module" src="../canvas/ui/showcase.ts"></script>
+</body>
+</html>

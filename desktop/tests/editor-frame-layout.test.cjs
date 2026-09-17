@@ -37,9 +37,10 @@ test('separate details panel fills its host without reserving a hidden breadcrum
 });
 
 test('both frame modes load the explicit desktop layout after all shared styles', () => {
-  const html=read('editor-frame.html');
+  const html=fs.readFileSync(path.join(__dirname,'../src/renderer/canvas.html'),'utf8');
   const styles=[...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(match=>match[1]);
-  assert.equal(styles.at(-1),'./editor-frame.css');
+  assert.equal(styles.at(-1),'/legacy/editor-frame.css');
   assert(!html.includes('<style>'), 'avoid a generic inline main height overriding details mode');
-  assert(read('bridge.js').includes('desktop-${frameMode}-mode'));
+  const bridge=fs.readFileSync(path.join(__dirname,'../src/canvas/bridge.ts'),'utf8');
+  assert(bridge.includes('desktop-${mode}-mode'));
 });

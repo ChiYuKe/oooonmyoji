@@ -13,6 +13,7 @@ import type {
   WorkflowDescriptor,
 } from '../shared/contracts';
 import type { DockingController, SharedPanelDockBridge, WorkbenchFrameController } from './docking';
+import { OVERVIEW_INPUT_LABELS, overviewInputDisplayName } from './naming';
 
 type OverviewItemStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
 
@@ -53,110 +54,6 @@ const OVERVIEW_SELECTION_KEY = 'onmyoji-studio.overview-selection.v1';
 const OVERVIEW_CONFIG_KEY = 'onmyoji-studio.overview-inputs.v1';
 const WORKFLOW_SESSION_KEY = 'onmyoji-studio.workflow-session.v1';
 const WORKFLOW_SESSION_VERSION = 1;
-const OVERVIEW_INPUT_LABELS: Record<string, string> = {
-  attack_point: '攻击点击位置',
-  attack_points: '攻击目标位置列表',
-  battle_roi: '战斗识别区域',
-  battle_texts: '战斗页面识别文字',
-  battle_timeout: '战斗超时时间',
-  bounty_reject_template: '悬赏拒绝按钮模板',
-  buff_auto_disabled_template: '自动加成关闭提示模板',
-  cancel_button_template: '取消按钮模板',
-  category: '任务类别',
-  challenge_template: '挑战按钮模板',
-  challenge_timeout: '挑战超时时间',
-  completed_templates: '完成状态模板列表',
-  completed_texts: '完成状态文字列表',
-  confirm_timeout: '确认超时时间',
-  continue_cancel_template: '继续邀请取消按钮模板',
-  continue_prompt_template: '继续邀请提示模板',
-  courtyard_template: '庭院入口模板',
-  enable_realm_raid: '启用结界突破',
-  entry_point: '入口点击位置',
-  exit_confirm_point: '退出确认点击位置',
-  exit_confirm_roi: '退出确认识别区域',
-  exit_confirm_texts: '退出确认文字列表',
-  experience_template: '经验结算模板',
-  invite_popup_template: '邀请弹窗模板',
-  invite_target_template: '邀请目标模板',
-  layer: '奖励层级',
-  leave_current_screen: '离开当前页面',
-  map_realm_template: '结界突破地图入口模板',
-  map_souls_template: '御魂地图入口模板',
-  max_return_attempts: '最大返回尝试次数',
-  max_settlement_clicks: '最大结算点击次数',
-  member_departure_grace_seconds: '队员离开宽限时间',
-  member_join_timeout: '队员加入超时时间',
-  member_present_template: '队员已在场模板',
-  minimum_passes: '最少通关次数',
-  page_roi: '页面识别区域',
-  page_texts: '页面识别文字列表',
-  party_browser_template: '组队界面模板',
-  party_exit_button_template: '退出队伍按钮模板',
-  party_exit_confirm_template: '退出队伍确认模板',
-  party_room_template: '组队房间模板',
-  pass_roi: '通关状态识别区域',
-  passes_available: '是否有可挑战次数',
-  phase: '执行阶段',
-  prepare_point: '准备按钮点击位置',
-  prepare_timeout: '准备超时时间',
-  ready_template: '准备按钮模板',
-  realm_close_point: '结界突破关闭位置',
-  realm_completed_templates: '结界完成模板列表',
-  realm_completed_texts: '结界完成文字列表',
-  realm_entry_point: '结界突破入口位置',
-  realm_pass_roi: '结界通关识别区域',
-  realm_pass_template: '结界通关模板',
-  realm_popup_close_point: '结界弹窗关闭位置',
-  realm_popup_roi: '结界弹窗识别区域',
-  realm_target_points: '结界目标点击位置列表',
-  realm_target_rois: '结界目标识别区域列表',
-  realm_template: '结界突破页面模板',
-  realm_threshold: '结界突破阈值',
-  recovery_timeout: '页面恢复超时时间',
-  resume_souls: '恢复御魂任务',
-  retry_confirm_checkbox_point: '再次挑战复选框位置',
-  retry_confirm_point: '再次挑战确认位置',
-  retry_confirm_roi: '再次挑战确认区域',
-  retry_confirm_texts: '再次挑战确认文字列表',
-  retry_point: '再次挑战点击位置',
-  reward_advance_delay_seconds: '奖励页前进等待时间',
-  reward_advance_x: '奖励页点击横坐标',
-  reward_advance_y: '奖励页点击纵坐标',
-  rounds: '运行轮数',
-  settlement_roi: '结算识别区域',
-  settlement_template: '结算页面模板',
-  settlement_timeout: '结算超时时间',
-  should_enter_realm: '进入结界突破',
-  souls_courtyard_template: '御魂庭院入口模板',
-  souls_type_entry_point: '御魂类型入口位置',
-  souls_type_template: '御魂类型页面模板',
-  target_limit: '目标数量上限',
-  target_points: '目标点击位置列表',
-  target_rois: '目标识别区域列表',
-  target_states: '目标状态列表',
-  timeout_seconds: '总超时时间',
-  track_realm_pass: '统计结界通关',
-  treasure_close_point: '宝箱关闭位置',
-  treasure_template: '宝箱页面模板',
-  victory_texts: '胜利页面识别文字',
-};
-const OVERVIEW_INPUT_WORDS: Record<string, string> = {
-  attack: '攻击', target: '目标', battle: '战斗', bounty: '悬赏', buff: '加成', auto: '自动',
-  cancel: '取消', category: '类别', challenge: '挑战', completed: '完成', confirm: '确认', continue: '继续',
-  courtyard: '庭院', enable: '启用', entry: '入口', exit: '退出', experience: '经验', invite: '邀请',
-  layer: '层级', leave: '离开', map: '地图', max: '最大', member: '队员', minimum: '最少', page: '页面',
-  party: '队伍', pass: '通关', passes: '次数', phase: '阶段', prepare: '准备', ready: '就绪', realm: '结界',
-  recovery: '恢复', resume: '恢复', retry: '重试', reward: '奖励', rounds: '轮数', settlement: '结算',
-  should: '是否', souls: '御魂', timeout: '超时', track: '统计', treasure: '宝箱', victory: '胜利',
-  point: '点击位置', points: '位置列表', roi: '识别区域', rois: '区域列表', template: '模板', templates: '模板列表',
-  text: '文字', texts: '文字列表', seconds: '秒', limit: '上限', threshold: '阈值', available: '可用',
-  current: '当前', screen: '页面', return: '返回', attempts: '尝试次数', clicks: '点击次数', join: '加入',
-  departure: '离开', grace: '宽限', popup: '弹窗', close: '关闭', checkbox: '复选框', advance: '前进',
-  delay: '等待', x: '横坐标', y: '纵坐标', type: '类型', states: '状态列表', browser: '界面', room: '房间',
-};
-
-
 
 /* ---------- 依赖端口：由 createOverview 注入 ---------- */
 type QueueDeleteTarget = { kind: 'queue'; rel: string };
@@ -1047,14 +944,6 @@ async function refreshOverviewCatalog(): Promise<void> {
   }
 }
 
-function overviewInputDisplayName(name: string): string {
-  const exact = OVERVIEW_INPUT_LABELS[name];
-  if (exact) return exact;
-  const words = name.split('_').map((word) => OVERVIEW_INPUT_WORDS[word] ?? word);
-  const translated = words.join('');
-  return translated === name.replaceAll('_', '') ? name : translated;
-}
-
 /** 绑定概览面板的搜索、队列、运行与配置弹层事件。 */
 function bindOverviewUi(): void {
   overviewSearch.addEventListener('input', () => {
@@ -1180,5 +1069,3 @@ export function createOverview(deps: OverviewDeps): Overview {
     bind: bindOverviewUi,
   };
 }
-
-export { overviewInputDisplayName };

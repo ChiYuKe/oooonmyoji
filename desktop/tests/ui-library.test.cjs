@@ -1,9 +1,20 @@
+// Run via npm test (builds the renderer test output first).
+// 组件库已迁到 src/canvas/ui/elements.ts：直接使用编译产物，行为测试不再切片源码。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '../public/legacy');
+const { createUi } = require('../dist-test-renderer/canvas/ui/elements.js');
+const { createParameterControls } = require('../dist-test-renderer/canvas/inspector/parameter-controls.js');
+const controlsSource = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/inspector/parameter-controls.js'), 'utf8');
+const { createCanvasReferences } = require('../dist-test-renderer/canvas/model/references.js');
+const references = createCanvasReferences({
+  state: {}, clone: value => JSON.parse(JSON.stringify(value)), nodes: () => [],
+  definitionSchema: () => undefined, compatibleRefType: () => false, appendNestedRefs: () => {},
+  variableSystem: { visible: () => true, referenceLabel: ref => ref }, catalogByName: () => null,
+});
 
 // Minimal DOM event harness: verifies behavior, not browser layout.
 function harness() {
@@ -37,14 +48,17 @@ function harness() {
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
     getBoundingClientRect() { return { left: 10, top: 20, bottom: 46, right: 170, width: 160, height: 26 }; }
     get offsetHeight() { return 120; }
+    get offsetWidth() { return 160; }
   }
   doc.body = new Element('body'); doc.createElement = tag => new Element(tag);
   doc.querySelectorAll = selector => doc.body.querySelectorAll(selector);
   const win = { addEventListener() {}, removeEventListener() {}, innerWidth: 400, innerHeight: 800 }; win.parent = win;
   const timers = [];
-  const ctx = vm.createContext({ window: win, document: doc, Element, Node: Element, setTimeout: fn => timers.push(fn) });
-  vm.runInContext(fs.readFileSync(path.join(root, 'ui.js'), 'utf8'), ctx);
-  return { UI: win.UI, doc, ctx, flush: () => timers.splice(0).forEach(fn => fn()) };
+  globalThis.window = win; globalThis.document = doc; globalThis.Element = Element; globalThis.Node = Element;
+  globalThis.setTimeout = (fn) => { timers.push(fn); return timers.length; };
+  const UI = createUi();
+  const ctx = vm.createContext({ window: win, document: doc, Element, Node: Element, setTimeout: globalThis.setTimeout, JSON, console });
+  return { UI, doc, win, ctx, flush: () => timers.splice(0).forEach(fn => fn()) };
 }
 
 test('segmented controls ignore repeated clicks and respect rejected changes', () => {
@@ -59,15 +73,20 @@ test('segmented controls ignore repeated clicks and respect rejected changes', (
 });
 
 test('fixed values survive the real editor mode-switch callback', () => {
-  const {UI,ctx} = harness(); const source=fs.readFileSync(path.join(root,'workflow-editor.js'),'utf8');
-  const helpers=['parameterLiteralCache','parameterLiteralCacheKey','rememberParameterLiteral','restoreParameterLiteral','isBindingValue','defaultValue'];
+  const {UI,ctx} = harness();
   ctx.state={paramLiteralCache:{}}; ctx.clone=v=>JSON.parse(JSON.stringify(v));
-  for(const name of helpers) { const start=source.indexOf(`  function ${name}(`); assert(start>=0); vm.runInContext(source.slice(start,source.indexOf('\n  }',start)+4),ctx); }
+  ctx.defaultValue=references.defaultValue;
+  const controls=createParameterControls({state:ctx.state,clone:ctx.clone,defaultValue:references.defaultValue,UI:{ICON_SVG:{},icon:()=>null}});
+  ctx.parameterLiteralCache=controls.parameterLiteralCache;
+  ctx.parameterLiteralCacheKey=controls.parameterLiteralCacheKey;
+  ctx.rememberParameterLiteral=controls.rememberParameterLiteral;
+  ctx.restoreParameterLiteral=controls.restoreParameterLiteral;
+  ctx.isBindingValue=controls.isBindingValue;
   ctx.node={id:'task',params:{timeout_seconds:6}}; ctx.name='timeout_seconds'; ctx.definition={type:'number'};
   ctx.mutate=fn=>fn(); ctx.allRefs=()=>['inputs.timeout']; ctx.variableLinks=()=>({});
-  const start=source.indexOf('(next) => mutate(() => {',source.indexOf("const mode = segmentedInput(bound"));
-  const end=source.indexOf('\n    }));',start);
-  const onChange=vm.runInContext('('+source.slice(start,end)+'\n    })'+')',ctx);
+  const start=controlsSource.indexOf('(next) => mutate(() => {',controlsSource.indexOf("const mode = segmentedInput(bound"));
+  const end=controlsSource.indexOf('}));',start);
+  const onChange=vm.runInContext(controlsSource.slice(start,end+2),ctx);
   const control=UI.segmented({value:'literal',options:[{value:'literal',label:'固定值'},{value:'binding',label:'变量'}],onChange});
   for(const value of [6,12,0,false,'assets/template.png',[1,2,30,40]]) {
     ctx.node.params.timeout_seconds=value; control.children[1].fire('click'); control.children[0].fire('click');
@@ -165,9 +184,125 @@ test('rectangle controls disable every coordinate and picker; no-picker layout h
   const css=require('postcss').parse(fs.readFileSync(path.join(root,'ui.css'),'utf8'));
   let columns;css.walkRules('.ui-rect',rule=>rule.walkDecls('grid-template-columns',decl=>{columns=decl.value;}));
   assert.equal(columns,'repeat(4, minmax(0, 1fr))');
-  const html=fs.readFileSync(path.join(root,'ui-showcase.html'),'utf8');
-  for(const asset of ['../theme/editor-light.css','../theme/theme.css','../theme/theme.js']) assert(html.includes(asset));
+  const html=fs.readFileSync(path.join(__dirname,'../src/renderer/ui-showcase.html'),'utf8');
+  for(const asset of ['/theme/editor-light.css','/theme/theme.css','/theme/theme.js']) assert(html.includes(asset));
   assert(html.includes('id="demo-theme"')); assert(html.includes('id="demo-rect-disabled"'));
+});
+
+test('详情栏标量控件覆盖坐标点/颜色/按键/时长', () => {
+  const {UI,doc}=harness(); const assigned=[];
+  const el=(tag,className,text)=>{const node=doc.createElement(tag);node.className=className||'';if(text!==undefined)node.textContent=text;return node;};
+  const textInput=(value,onChange,options={})=>{
+    const input=doc.createElement('input');
+    input.value=value===undefined||value===null?'':String(value);
+    input.type=options.type||'text';
+    for(const name of ['min','max','step']) if(options[name]!==undefined) input.attrs[name]=String(options[name]);
+    input.addEventListener('change',()=>onChange(input.value));
+    return input;
+  };
+  const controls=createParameterControls({
+    state:{paramLiteralCache:{}},clone:v=>JSON.parse(JSON.stringify(v)),defaultValue:references.defaultValue,
+    UI:{ICON_SVG:{},icon:()=>null},el,textInput,
+  });
+  const set=value=>assigned.push(value);
+
+  const point=controls.scalarValueControl({type:'point'},{x:1,y:2},set);
+  assert.equal(point.className,'rect-control point-control');
+  assert.equal(point.children.length,2);
+  point.children[0].value='960'; point.children[0].fire('change');
+  assert.deepEqual(assigned.at(-1),{x:960,y:2});
+  // 改另一个轴时保留当前输入里的 X，而不是回退到初始值。
+  point.children[1].value='540.6'; point.children[1].fire('change');
+  assert.deepEqual(assigned.at(-1),{x:960,y:541});
+
+  const color=controls.scalarValueControl({type:'color'},'#ff8c3a',set);
+  const colorText=color.children[0], picker=color.children[1];
+  assert.equal(colorText.value,'#ff8c3a');
+  assert.equal(picker.type,'color');
+  assert.equal(picker.className,'definition-color-picker');
+  assert.equal(picker.value,'#ff8c3a');
+  picker.value='#123456'; picker.fire('input');
+  assert.equal(colorText.value,'#123456');
+  assert.equal(assigned.at(-1),'#123456');
+
+  const key=controls.scalarValueControl({type:'key'},'BACK',set);
+  const keyText=key.children[0], keyPicker=key.children[1];
+  assert.equal(keyText.value,'BACK');
+  assert.equal(keyPicker.value,'BACK');
+  assert.ok(keyPicker.children.length>=13);
+  assert.equal(keyPicker.children[1].textContent,'BACK · 返回');
+  keyPicker.value='DPAD_UP'; keyPicker.fire('change');
+  assert.equal(keyText.value,'DPAD_UP');
+  assert.equal(assigned.at(-1),'DPAD_UP');
+  // 清单外的令牌不回填选择器，也不会因为选择器空值而写回。
+  const custom=controls.scalarValueControl({type:'key'},'KEYCODE_99',set);
+  assert.equal(custom.children[1].value,'');
+  custom.children[1].value=''; custom.children[1].fire('change');
+  assert.equal(assigned.at(-1),'DPAD_UP');
+
+  const duration=controls.scalarValueControl({type:'duration',min:0,max:5},1.5,set);
+  assert.equal(String(duration.children[0].value),'1.5');
+  assert.equal(duration.children[0].attrs.min,'0');
+  assert.equal(duration.children[0].attrs.step,'any');
+  assert.equal(duration.children[1].textContent,'秒');
+  duration.children[0].value='2.5'; duration.children[0].fire('change');
+  assert.equal(assigned.at(-1),2.5);
+
+  // 新类型都按标量走详情栏就地编辑，而不是退化成 JSON 文本框。
+  for(const definition of [{type:'point'},{type:'color'},{type:'key'},{type:'duration'}]) {
+    assert.equal(controls.scalarDefinitionUsable(definition),true,definition.type);
+  }
+  assert.equal(controls.scalarDefinitionUsable({type:'object'}),false);
+  assert.equal(controls.scalarDefinitionUsable(null),false);
+  assert.deepEqual(controls.itemDefaultValue({type:'point'}),{x:0,y:0});
+  assert.equal(controls.itemDefaultValue({type:'duration'}),0);
+  assert.equal(controls.itemDefaultValue({type:'color'}),'#000000');
+  assert.equal(controls.itemDefaultValue({type:'enum',enum:['甲','乙']}),'甲');
+});
+
+test('任务参数结构化控件：固定长度数组给固定输入，未声明字段的对象按值推断', () => {
+  const {UI,doc}=harness();
+  const el=(tag,className,text)=>{const node=doc.createElement(tag);node.className=className||'';if(text!==undefined)node.textContent=text;return node;};
+  const textInput=(value,onChange,options={})=>{
+    const input=doc.createElement('input');
+    input.value=value===undefined||value===null?'':String(value);
+    input.type=options.type||'text';
+    for(const name of ['min','max','step']) if(options[name]!==undefined) input.attrs[name]=String(options[name]);
+    input.addEventListener('change',()=>onChange(input.value));
+    return input;
+  };
+  const controls=createParameterControls({
+    state:{paramLiteralCache:{}},mutate:fn=>fn(),clone:v=>JSON.parse(JSON.stringify(v)),
+    defaultValue:references.defaultValue,UI,el,textInput,toast:()=>{},fieldLabel:name=>name,enumOption:value=>value,
+  });
+  // 随机间隔这类固定长度数组：正好两个输入，不出现增删按钮。
+  let random=[0.2,0.6];
+  const tuple=controls.nestedValueControl({type:'array',items:{type:'duration',min:0},min_items:2,max_items:2},random,next=>{random=next;},{},'random_interval');
+  assert.equal(tuple.className,'scalar-array');
+  assert.equal(tuple.children.length,2,'固定长度数组不渲染增删按钮');
+  assert.ok(tuple.children.every(row=>row.className==='scalar-array-row'));
+  assert.equal(tuple.children[1].children[0].children[0].type,'number','元素沿用 duration 控件（秒单位）');
+  const firstItem=tuple.children[0].children[0].children[0];
+  firstItem.value='1.5'; firstItem.fire('change');
+  assert.deepEqual(random,[1.5,0.6]);
+  // 不定长数组仍保留删除 + 添加。
+  const list=controls.nestedValueControl({type:'array',items:{type:'integer'}},[1,2],()=>{}, {},'x');
+  assert.equal(list.children.length,3,'两项 + 添加按钮');
+  assert.equal(list.children.at(-1).className,'structured-add');
+  // 没有声明 properties 的对象按当前值的键推断字段，而不是 JSON 文本框。
+  const object=controls.nestedValueControl({type:'object'},{x:1,y:2},()=>{}, {},'match');
+  assert.equal(object.className,'structured-object');
+  assert.equal(object.children.length,2);
+  assert.deepEqual(object.children.map(row=>row.children[0].textContent),['x','y']);
+  assert.equal(object.children[0].children[1].tagName,'INPUT','推断出来的字段直接给输入控件');
+  // 元素是「没有字段声明的对象」时，按现有元素的键推断字段（如消失状态列表）。
+  const objectList=controls.nestedValueControl({type:'array',items:{type:'object'}},[{name:'a',ttl:2}],()=>{}, {},'disappeared_states');
+  assert.equal(objectList.className,'object-array');
+  assert.equal(objectList.querySelectorAll('.object-array-card').length,1);
+  assert.deepEqual(objectList.querySelectorAll('.structured-field').map(field=>field.children[0].textContent),['name','ttl']);
+  // 空对象无法推断字段，保留原有的 JSON 兜底（有明确结构时不会出现）。
+  const empty=controls.nestedValueControl({type:'object'},{},()=>{}, {},'blank');
+  assert.equal(empty.tagName,'TEXTAREA');
 });
 
 test('font entries and their local subsets exist for all desktop surfaces', () => {

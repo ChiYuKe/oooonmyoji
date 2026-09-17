@@ -21,7 +21,7 @@ const workspace = read('src/renderer/workspace.ts');
   assert.match(docking, /const DOCUMENT_TAB_COMPONENT = 'workflow-document-tab'/);
   assert.match(docking, /createComponent: \(\{ name \}\) => name === DOCUMENT_COMPONENT/);
   assert.match(docking, /createTabComponent: \(\{ name \}\) => name === DOCUMENT_TAB_COMPONENT/);
-  assert.match(docking, /frame\.src = '\.\/legacy\/editor-frame\.html\?mode=canvas'/);
+  assert.match(docking, /frame\.src = '\.\/canvas\.html\?mode=canvas'/);
   assert.match(docking, /onFrameCreated\(this\.panelId, this\.uri, this\.frame\)/);
   assert.match(docking, /openDocument\(uri: string, title: string\): void/);
   assert.match(docking, /closeDocument\(uri: string\): void/);

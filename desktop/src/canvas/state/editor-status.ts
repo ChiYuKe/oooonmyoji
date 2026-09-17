@@ -1,0 +1,44 @@
+/**
+ * 编辑器状态与详情请求：脏标记广播、当前选中项描述、打开详情面板请求。
+ * 原 `workflow-editor.js` 的 setDirty 至 requestInspector 区间。
+ */
+import type { CanvasState } from '../state/canvas-state';
+
+export interface EditorStatusDeps {
+  state: Omit<CanvasState, 'raw'> & { raw: any };
+  vscode: any;
+  $(id: string): HTMLElement;
+}
+
+export function createEditorStatus(deps: EditorStatusDeps) {
+  const { state, vscode, $ } = deps;
+  function setDirty(value: boolean = true): void {
+    state.dirty = value;
+    $('dirty-badge').classList.toggle('hidden', !value);
+    vscode.setState({ dirty: value });
+    if (value && state.raw) {
+      vscode.postMessage({
+        type: 'documentStateChanged',
+        text: JSON.stringify(state.raw, null, 2) + '\n',
+        dirty: true,
+      });
+    }
+  }
+
+  let lastSidebarState = '';
+
+  function currentInspectorSelection(): any {
+    if (state.inspector === 'workflow') return { kind: 'workflow' };
+    if (state.inspector === 'variables') return { kind: 'variables', name: state.selectedVariable || '', scope: state.selectedVariableScope };
+    if (state.selectedRun) return { kind: 'run', nodeId: state.selectedRun.nodeId, index: state.selectedRun.index };
+    if (state.selectedEdge) return { kind: 'edge', parent: state.selectedEdge.parent, child: state.selectedEdge.child };
+    if (state.selected.size === 1) return { kind: 'node', nodeId: [...state.selected][0] };
+    return { kind: 'none' };
+  }
+
+  function requestInspector(selection: any = currentInspectorSelection()): void {
+    vscode.postMessage({ type: 'inspectorRequested', inspectorSelection: selection });
+  }
+
+  return { setDirty, currentInspectorSelection, requestInspector };
+}

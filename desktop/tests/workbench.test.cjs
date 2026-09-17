@@ -5,18 +5,76 @@ const path = require('node:path');
 const vm = require('node:vm');
 const base = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(base, file), 'utf8');
+const { createCanvasReferences } = require('../dist-test-renderer/canvas/model/references.js');
+const references = createCanvasReferences({
+  state: {}, clone: value => JSON.parse(JSON.stringify(value)), nodes: () => [],
+  definitionSchema: () => undefined, compatibleRefType: () => false, appendNestedRefs: () => {},
+  variableSystem: { visible: () => true, referenceLabel: ref => ref }, catalogByName: () => null,
+});
 
 function modeHarness() {
-  const source = read('public/legacy/workflow-editor.js');
-  const ctx = vm.createContext({clone: value => JSON.parse(JSON.stringify(value))});
-  vm.runInContext('const publicInputModeCache = new WeakMap();', ctx);
-  for (const name of ['defaultValue', 'changePublicInputMode']) {
-    const start = source.indexOf(`  function ${name}(`);
-    assert(start >= 0);
-    vm.runInContext(source.slice(start, source.indexOf('\n  }', start) + 4), ctx);
-  }
-  return ctx.changePublicInputMode;
+  return require('../dist-test-renderer/canvas/inspector/detail-inspectors.js')
+    .createDetailInspectors({ clone: value => JSON.parse(JSON.stringify(value)), defaultValue: references.defaultValue })
+    .changePublicInputMode;
 }
+
+/** 详情栏字面量控件的最小 DOM 桩：只验证行为，不验证排版。 */
+function literalHarness() {
+  const make = (tag) => ({
+    tagName: tag, children: [], attrs: {}, className: '', events: {}, style: {}, dataset: {},
+    appendChild(child) { this.children.push(child); return child; },
+    addEventListener(name, fn) { (this.events[name] ||= []).push(fn); },
+    fire(name) { for (const fn of this.events[name] || []) fn({ target: this }); },
+    get textContent() { return this.text || ''; },
+    set textContent(value) { this.text = value; this.children = []; },
+  });
+  globalThis.document = { createElement: make };
+  const el = (tag, className, text) => { const node = make(tag); node.className = className || ''; if (text !== undefined) node.textContent = text; return node; };
+  const textInput = (value, onChange, options = {}) => {
+    const input = make('input');
+    input.value = value === undefined || value === null ? '' : String(value);
+    input.type = options.type || 'text';
+    for (const name of ['min', 'max', 'step']) if (options[name] !== undefined) input.attrs[name] = String(options[name]);
+    input.addEventListener('change', () => onChange(input.value));
+    return input;
+  };
+  const mutations = [];
+  const inspectors = require('../dist-test-renderer/canvas/inspector/detail-inspectors.js')
+    .createDetailInspectors({
+      clone: value => JSON.parse(JSON.stringify(value)), defaultValue: references.defaultValue,
+      el, textInput, mutate: fn => { mutations.push(fn); fn(); }, UI: {},
+    });
+  return { literal: inspectors.runInputLiteralControl, mutations };
+}
+
+test('运行实例输入的字面量控件覆盖坐标点/颜色/按键/时长', () => {
+  const { literal, mutations } = literalHarness();
+  const holder = { inputs: {} };
+  const point = literal(holder, 'target', { type: 'point' }, 'multi:0');
+  assert.equal(point.className, 'rect-control point-control');
+  point.children[0].value = '960'; point.children[0].fire('change');
+  assert.deepEqual(holder.inputs.target, { x: 960, y: 0 });
+  point.children[1].value = '540.6'; point.children[1].fire('change');
+  assert.deepEqual(holder.inputs.target, { x: 960, y: 541 });
+  const color = literal(holder, 'tint', { type: 'color' }, 'multi:0');
+  const picker = color.children[1];
+  assert.equal(picker.type, 'color');
+  assert.equal(picker.className, 'definition-color-picker');
+  picker.value = '#123456'; picker.fire('input');
+  assert.equal(holder.inputs.tint, '#123456');
+  assert.equal(color.children[0].value, '#123456');
+  const key = literal(holder, 'keycode', { type: 'key' }, 'multi:0');
+  assert.equal(key.children[1].className, 'ui-select definition-key-picker');
+  key.children[1].value = 'DPAD_UP'; key.children[1].fire('change');
+  assert.equal(holder.inputs.keycode, 'DPAD_UP');
+  const duration = literal(holder, 'seconds', { type: 'duration', min: 0 }, 'multi:0');
+  assert.equal(duration.children[0].attrs.min, '0');
+  assert.equal(duration.children[1].textContent, '秒');
+  duration.children[0].value = '2.5'; duration.children[0].fire('change');
+  assert.equal(holder.inputs.seconds, 2.5);
+  // 每次修改都走 mutate，保证可以撤销。
+  assert.equal(mutations.length, 5);
+});
 
 test('public input modes preserve literals and selected references through default mode', () => {
   const change = modeHarness();

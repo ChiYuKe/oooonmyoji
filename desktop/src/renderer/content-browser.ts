@@ -95,7 +95,9 @@ let getBootstrap!: () => BootstrapData | undefined;
 let setBootstrap!: (value: BootstrapData) => void;
 let getCurrentUri!: () => string;
 let isDirty!: () => boolean;
-let getWorkflowTabs!: () => WorkflowDocumentTab[];
+let getWorkflowTabs!: () => readonly WorkflowDocumentTab[];
+let renameWorkflowTab!: (oldUri: string, newUri: string) => void;
+let removeWorkflowTab!: (uri: string) => void;
 let getOverview!: () => ContentOverviewPort;
 let getReferenceViewer!: () => ContentReferenceViewerPort;
 let getDocking!: () => DockingController | undefined;
@@ -896,16 +898,16 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
     if (renamingCurrentWorkflow) {
       const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
       if (renamed) {
-        const tab = getWorkflowTabs().find((item) => item.uri === getCurrentUri());
-        if (tab) tab.uri = renamed.uri;
-        relocateDocument(getCurrentUri(), renamed.uri);
+        const oldUri = getCurrentUri();
+        renameWorkflowTab(oldUri, renamed.uri);
+        relocateDocument(oldUri, renamed.uri);
         await loadWorkflow(renamed.uri);
       }
     } else if (sourceWorkflowTab) {
       const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
       if (renamed) {
         const oldUri = sourceWorkflowTab.uri;
-        sourceWorkflowTab.uri = renamed.uri;
+        renameWorkflowTab(oldUri, renamed.uri);
         relocateDocument(oldUri, renamed.uri);
       }
       if (result.updatedFiles > 0 && getCurrentUri()) await loadWorkflow(getCurrentUri());
@@ -947,7 +949,7 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
         getDocking()?.closeDocument(oldUri);
         getClosingDocuments().delete(oldUri);
         getDocumentRuntimes().delete(oldUri);
-        getWorkflowTabs().splice(deletedIndex, 1);
+        removeWorkflowTab(oldUri);
       }
       const remaining = getWorkflowTabs()[Math.min(deletedIndex < 0 ? 0 : deletedIndex, getWorkflowTabs().length - 1)];
       const next = remaining ?? getBootstrap()?.workflows.find((workflow) => workflow.uri !== getCurrentUri());
@@ -961,7 +963,7 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
         getDocking()?.closeDocument(oldUri);
         getClosingDocuments().delete(oldUri);
         getDocumentRuntimes().delete(oldUri);
-        getWorkflowTabs().splice(deletedIndex, 1);
+        removeWorkflowTab(oldUri);
       }
       syncDocumentTabs();
     }
@@ -1126,7 +1128,9 @@ export interface ContentBrowserDeps {
   setBootstrap: (value: BootstrapData) => void;
   getCurrentUri: () => string;
   isDirty: () => boolean;
-  getWorkflowTabs: () => WorkflowDocumentTab[];
+  getWorkflowTabs: () => readonly WorkflowDocumentTab[];
+  renameWorkflowTab: (oldUri: string, newUri: string) => void;
+  removeWorkflowTab: (uri: string) => void;
   getOverview: () => ContentOverviewPort;
   getReferenceViewer: () => ContentReferenceViewerPort;
   getDocking: () => DockingController | undefined;
@@ -1171,6 +1175,8 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
   getCurrentUri = deps.getCurrentUri;
   isDirty = deps.isDirty;
   getWorkflowTabs = deps.getWorkflowTabs;
+  renameWorkflowTab = deps.renameWorkflowTab;
+  removeWorkflowTab = deps.removeWorkflowTab;
   getOverview = deps.getOverview;
   getReferenceViewer = deps.getReferenceViewer;
   getDocking = deps.getDocking;

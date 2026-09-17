@@ -1,40 +1,16 @@
 /**
- * 文档工作区核心（阶段 1+2）：消息路由、文档运行时注册表、自动保存与会话持久化。
+ * 文档工作区：文档列表、活动文档、保存状态与会话数据的唯一归属。
  *
- * 主窗口通过 createWorkspace(deps) 注入实时状态读写器与共享操作；
- * 「活动文档镜像」状态（currentUri/currentText/dirty/workflowTabs 等）仍由 main 持有，
- * 这里只搬函数，避免大面积改写调用点。
+ * 壳层通过状态访问器读写文档，通过命令式方法修改（setText/setDirty/...），
+ * 画布 iframe 只接收消息，不再由入口维护一套镜像状态。
  */
 import type { BootstrapData, WorkflowEditorInit, WorkflowDescriptor } from '../shared/contracts';
-import { parseWorkflowSession, reconcileWorkflowSession, serializeWorkflowSession, type WorkflowDocumentTab, type WorkflowSession } from './workflow-session';
+import type { InspectorSelection, SidebarNode, SidebarVariable } from '../shared/editor-messages';
+import { createAutoSaveQueue } from '../shared/workspace/autosave';
+import { createDocumentStore } from '../shared/workspace/documents';
+import { parseWorkflowSession, reconcileWorkflowSession, serializeWorkflowSession, type WorkflowDocumentTab, type WorkflowSession } from '../shared/workspace/session';
 
-export interface SidebarNode {
-  id: string;
-  name: string;
-  type: string;
-  meta: string;
-  children: string[];
-}
-
-export interface SidebarVariable {
-  name: string;
-  displayName?: string;
-  group?: string;
-  type: string;
-  scope: 'inputs' | 'variables';
-  public?: boolean;
-  onCard?: boolean;
-}
-
-export interface InspectorSelection {
-  kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow';
-  nodeId?: string;
-  index?: number;
-  parent?: string;
-  child?: string;
-  name?: string;
-  scope?: 'inputs' | 'variables';
-}
+export type { InspectorSelection, SidebarNode, SidebarVariable } from '../shared/editor-messages';
 
 /** 一个工作流文档对应的画布运行时：各自的 iframe、初始化和侧栏状态。 */
 export interface DocumentRuntime {
@@ -56,17 +32,6 @@ export interface WorkspaceDeps {
   api: {
     saveWorkflow(uri: string, text: string): Promise<void>;
   };
-  getCurrentUri: () => string;
-  getCurrentText: () => string;
-  setCurrentText: (text: string) => void;
-  isDirty: () => boolean;
-  setDirtyFlag: (dirty: boolean) => void;
-  getWorkflowTabs: () => WorkflowDocumentTab[];
-  setWorkflowTabs: (tabs: WorkflowDocumentTab[]) => void;
-  getCurrentEditorInit: () => WorkflowEditorInit | undefined;
-  getBackStack: () => string[];
-  getRestoreUri: () => string;
-  setRestoreUri: (uri: string) => void;
   getBootstrap: () => BootstrapData | undefined;
   showToast: (message: string, error?: boolean) => void;
   errorMessage: (error: unknown) => string;
@@ -75,6 +40,26 @@ export interface WorkspaceDeps {
 }
 
 export interface Workspace {
+  // 文档状态
+  tabs(): readonly WorkflowDocumentTab[];
+  tab(uri: string): WorkflowDocumentTab | undefined;
+  activeUri(): string;
+  activeTab(): WorkflowDocumentTab | undefined;
+  activeText(): string;
+  isDirty(): boolean;
+  activeBackStack(): string[];
+  ensureDocument(uri: string): WorkflowDocumentTab;
+  removeDocument(uri: string): boolean;
+  renameDocument(oldUri: string, newUri: string): void;
+  setActiveDocument(uri: string): void;
+  setDocumentText(uri: string, text: string): void;
+  setDocumentDirty(uri: string, dirty: boolean): void;
+  setDocumentBackStack(uri: string, stack: string[]): void;
+  setActiveBackStack(stack: string[]): void;
+  pushActiveBackStack(uri: string): void;
+  popActiveBackStack(): string | undefined;
+  popDocumentBackStack(uri: string): string | undefined;
+  // 画布运行时注册表与消息
   getDocumentRuntimes(): Map<string, DocumentRuntime>;
   activeRuntime(): DocumentRuntime | undefined;
   runtimeForUri(uri: string): DocumentRuntime | undefined;
@@ -90,7 +75,6 @@ export interface Workspace {
   displayFileUri(uri: string): string;
   // 自动保存
   setDirty(value: boolean): void;
-  clearAutoSaveTimer(): void;
   cancelAutoSave(): void;
   scheduleAutoSave(text: string): void;
   waitForAutoSave(): Promise<void>;
@@ -99,7 +83,8 @@ export interface Workspace {
   workflowReference(file: WorkflowDescriptor): string;
   workflowTabName(uri: string): string;
   workflowDescriptorForPath(relativePath: string): WorkflowDescriptor | undefined;
-  rememberCurrentWorkflowTab(): void;
+  restoreUri(): string;
+  setRestoreUri(uri: string): void;
   readWorkflowSession(): WorkflowSession | undefined;
   applyWorkflowSession(session: WorkflowSession): void;
   flushRestoredEdits(): Promise<void>;
@@ -112,23 +97,46 @@ const AUTO_SAVE_DELAY_MS = 700;
 
 export function createWorkspace(deps: WorkspaceDeps): Workspace {
   const {
-    detailsFrame, api, getCurrentUri, getCurrentText, setCurrentText, isDirty, setDirtyFlag,
-    getWorkflowTabs, setWorkflowTabs, getCurrentEditorInit, getBackStack, getRestoreUri, setRestoreUri,
-    getBootstrap, showToast, errorMessage, setStatus, syncDocumentTabs,
+    detailsFrame, api, getBootstrap, showToast, errorMessage, setStatus, syncDocumentTabs,
   } = deps;
 
+  const store = createDocumentStore();
   const documentRuntimes = new Map<string, DocumentRuntime>();
   const documentFrameUris = new WeakMap<HTMLIFrameElement, string>();
-
-  let autoSaveTimer: number | undefined;
-  let autoSaveInFlight = false;
-  let autoSavePromise: Promise<void> | undefined;
-  let autoSaveRevision = 0;
-  let autoSavePending: { uri: string; text: string; revision: number } | undefined;
+  let restoreWorkflowUri = '';
   let workflowSessionTimer: number | undefined;
 
+  const autoSave = createAutoSaveQueue({
+    delayMs: AUTO_SAVE_DELAY_MS,
+    setTimer: (handler, delay) => window.setTimeout(handler, delay),
+    clearTimer: (id) => window.clearTimeout(id),
+    save: (uri, text) => api.saveWorkflow(uri, text),
+    onSaved: (uri, text) => {
+      store.setText(uri, text);
+      store.setDirty(uri, false);
+      const runtime = documentRuntimes.get(uri);
+      if (runtime?.init) runtime.init.document.text = text;
+      if (uri === store.activeUri()) {
+        postToEditors({ type: 'workflowSaved' });
+        setStatus('工作流已自动保存');
+      } else {
+        syncDocumentTabs();
+      }
+    },
+    onFailed: (uri, error) => {
+      store.setDirty(uri, true);
+      if (uri === store.activeUri()) {
+        postToEditors({ type: 'workflowSaveFailed' });
+        showToast(`自动保存失败：${errorMessage(error)}`, true);
+        setStatus('自动保存失败');
+      } else {
+        syncDocumentTabs();
+      }
+    },
+  });
+
   function activeRuntime(): DocumentRuntime | undefined {
-    return documentRuntimes.get(getCurrentUri());
+    return documentRuntimes.get(store.activeUri());
   }
 
   function runtimeForUri(uri: string): DocumentRuntime | undefined {
@@ -205,80 +213,29 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
   }
 
   function setDirty(value: boolean): void {
-    setDirtyFlag(value);
-    const activeTab = getWorkflowTabs().find((tab) => tab.uri === getCurrentUri());
-    if (activeTab) activeTab.dirty = value;
+    store.setDirty(store.activeUri(), value);
     syncDocumentTabs();
   }
 
-  function clearAutoSaveTimer(): void {
-    if (autoSaveTimer !== undefined) {
-      window.clearTimeout(autoSaveTimer);
-      autoSaveTimer = undefined;
-    }
+  function setDocumentDirty(uri: string, value: boolean): void {
+    store.setDirty(uri, value);
+    syncDocumentTabs();
+  }
+
+  function scheduleAutoSave(text: string): void {
+    autoSave.schedule(store.activeUri(), text);
   }
 
   function cancelAutoSave(): void {
-    clearAutoSaveTimer();
-    autoSavePending = undefined;
-    autoSaveRevision += 1;
+    autoSave.cancel(store.activeUri());
   }
 
-  /** 文档变化后延迟写盘，连续拖拽或输入只保存最后一次内容。 */
-  function scheduleAutoSave(text: string): void {
-    if (!getCurrentUri() || !text) return;
-    const revision = ++autoSaveRevision;
-    autoSavePending = { uri: getCurrentUri(), text, revision };
-    clearAutoSaveTimer();
-    autoSaveTimer = window.setTimeout(runAutoSave, AUTO_SAVE_DELAY_MS);
+  function waitForAutoSave(): Promise<void> {
+    return autoSave.wait();
   }
 
-  function runAutoSave(): void {
-    autoSaveTimer = undefined;
-    if (autoSaveInFlight) return;
-    const promise = flushAutoSave();
-    autoSavePromise = promise;
-    void promise.finally(() => {
-      if (autoSavePromise === promise) autoSavePromise = undefined;
-    });
-  }
-
-  async function waitForAutoSave(): Promise<void> {
-    if (autoSavePromise) await autoSavePromise;
-  }
-
-  async function flushAutoSave(): Promise<void> {
-    if (autoSaveInFlight) return;
-    const pending = autoSavePending;
-    autoSavePending = undefined;
-    if (!pending || pending.uri !== getCurrentUri()) return;
-
-    autoSaveInFlight = true;
-    const uri = pending.uri;
-    try {
-      setStatus('正在自动保存…');
-      await api.saveWorkflow(uri, pending.text);
-      if (uri === getCurrentUri() && pending.revision === autoSaveRevision) {
-        setCurrentText(pending.text);
-        const init = getCurrentEditorInit();
-        if (init) init.document.text = pending.text;
-        setDirty(false);
-        postToEditors({ type: 'workflowSaved' });
-        setStatus('工作流已自动保存');
-      }
-    } catch (error) {
-      if (uri === getCurrentUri() && pending.revision === autoSaveRevision) {
-        setDirty(true);
-        postToEditors({ type: 'workflowSaveFailed' });
-        showToast(`自动保存失败：${errorMessage(error)}`, true);
-        setStatus('自动保存失败');
-      }
-    } finally {
-      autoSaveInFlight = false;
-      if (autoSavePending && autoSaveTimer === undefined) {
-        autoSaveTimer = window.setTimeout(runAutoSave, AUTO_SAVE_DELAY_MS);
-      }
-    }
+  function flushAutoSave(): Promise<void> {
+    return autoSave.flush(store.activeUri());
   }
 
   function workflowReference(file: WorkflowDescriptor): string {
@@ -297,38 +254,23 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     return getBootstrap()?.workflows.find((workflow) => workflowReference(workflow).toLowerCase() === normalized);
   }
 
-  function rememberCurrentWorkflowTab(): void {
-    const uri = getCurrentUri();
-    if (!uri) return;
-    const tab = getWorkflowTabs().find((item) => item.uri === uri);
-    if (!tab) return;
-    tab.text = getCurrentText();
-    tab.dirty = isDirty();
-    tab.backStack = [...getBackStack()];
-  }
-
   function readWorkflowSession(): WorkflowSession | undefined {
     const known = getBootstrap()?.workflows.map((workflow) => workflow.uri) ?? [];
     return reconcileWorkflowSession(parseWorkflowSession(window.onmyoji.readLayout(WORKFLOW_SESSION_KEY)), known);
   }
 
   function applyWorkflowSession(session: WorkflowSession): void {
-    setWorkflowTabs(session.tabs.map((tab) => ({
-      uri: tab.uri,
-      text: tab.text,
-      dirty: tab.dirty,
-      backStack: [...tab.backStack],
-    })));
-    setRestoreUri(session.activeUri);
+    store.replaceAll(session.tabs, session.activeUri);
+    restoreWorkflowUri = session.activeUri;
   }
 
   /** 把上次退出时的未保存内容先写盘，避免恢复后标记变干净却丢失改动。 */
   async function flushRestoredEdits(): Promise<void> {
-    for (const tab of getWorkflowTabs()) {
+    for (const tab of store.tabs()) {
       if (!tab.dirty || !tab.text) continue;
       try {
         await api.saveWorkflow(tab.uri, tab.text);
-        tab.dirty = false;
+        store.setDirty(tab.uri, false);
       } catch {
         // 写盘失败时保留脏标记，下一次会话仍会带上这段内容。
       }
@@ -340,10 +282,9 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
       window.clearTimeout(workflowSessionTimer);
       workflowSessionTimer = undefined;
     }
-    if (getWorkflowTabs().length === 0) return;
-    rememberCurrentWorkflowTab();
+    if (store.tabs().length === 0) return;
     try {
-      window.onmyoji.writeLayout(WORKFLOW_SESSION_KEY, serializeWorkflowSession(getWorkflowTabs(), getCurrentUri() || getRestoreUri()));
+      window.onmyoji.writeLayout(WORKFLOW_SESSION_KEY, serializeWorkflowSession(store.tabs(), store.activeUri() || restoreWorkflowUri));
     } catch {
       // 会话持久化尽力而为，不能影响编辑。
     }
@@ -358,6 +299,24 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
   }
 
   return {
+    tabs: store.tabs,
+    tab: store.tab,
+    activeUri: store.activeUri,
+    activeTab: store.activeTab,
+    activeText: store.activeText,
+    isDirty: store.isDirty,
+    activeBackStack: store.activeBackStack,
+    ensureDocument: store.ensure,
+    removeDocument: store.remove,
+    renameDocument: store.rename,
+    setActiveDocument: store.setActive,
+    setDocumentText: store.setText,
+    setDocumentDirty,
+    setDocumentBackStack: store.setBackStack,
+    setActiveBackStack: store.setActiveBackStack,
+    pushActiveBackStack: store.pushActiveBackStack,
+    popActiveBackStack: store.popActiveBackStack,
+    popDocumentBackStack: store.popBackStack,
     getDocumentRuntimes: () => documentRuntimes,
     activeRuntime,
     runtimeForUri,
@@ -372,7 +331,6 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     unregisterDocumentFrame,
     displayFileUri,
     setDirty,
-    clearAutoSaveTimer,
     cancelAutoSave,
     scheduleAutoSave,
     waitForAutoSave,
@@ -380,7 +338,8 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     workflowReference,
     workflowTabName,
     workflowDescriptorForPath,
-    rememberCurrentWorkflowTab,
+    restoreUri: () => restoreWorkflowUri,
+    setRestoreUri: (uri) => { restoreWorkflowUri = uri; },
     readWorkflowSession,
     applyWorkflowSession,
     flushRestoredEdits,

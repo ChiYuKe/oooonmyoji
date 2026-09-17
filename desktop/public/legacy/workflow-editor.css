@@ -360,6 +360,11 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .instance-variable-pin.type-boolean { fill: #cf777d; }
 .instance-variable-pin.type-array, .instance-variable-pin.type-rect { fill: #c8a95c; }
 .instance-variable-pin.type-object, .instance-variable-pin.type-any { fill: #998ac8; }
+.instance-variable-pin.type-point { fill: #5fb0d0; }
+.instance-variable-pin.type-enum { fill: #d08f5f; }
+.instance-variable-pin.type-key { fill: #8f9fd8; }
+.instance-variable-pin.type-color { fill: #d07fb0; }
+.instance-variable-pin.type-duration { fill: #8fbf7f; }
 .port-variable, .port-variable-out { fill: #998ac8; stroke: #edf2ef; stroke-width: 1.5; cursor: crosshair; }
 .variable-card-dot { fill: #998ac8; stroke: #edf2ef; stroke-width: 1; }
 .port-variable.type-string, .port-variable-out.type-string, .variable-card-dot.type-string,
@@ -372,6 +377,11 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .port-variable.type-rect, .port-variable-out.type-rect, .variable-card-dot.type-rect { fill: #c8a95c; }
 .port-variable.type-object, .port-variable-out.type-object, .variable-card-dot.type-object,
 .port-variable.type-any, .port-variable-out.type-any, .variable-card-dot.type-any { fill: #998ac8; }
+.port-variable.type-point, .port-variable-out.type-point, .variable-card-dot.type-point { fill: #5fb0d0; }
+.port-variable.type-enum, .port-variable-out.type-enum, .variable-card-dot.type-enum { fill: #d08f5f; }
+.port-variable.type-key, .port-variable-out.type-key, .variable-card-dot.type-key { fill: #8f9fd8; }
+.port-variable.type-color, .port-variable-out.type-color, .variable-card-dot.type-color { fill: #d07fb0; }
+.port-variable.type-duration, .port-variable-out.type-duration, .variable-card-dot.type-duration { fill: #8fbf7f; }
 .pin-variable-name { fill: #ccd2d8; font-size: 10px; font-weight: 650; pointer-events: none; }
 .pin-variable-param { fill: #828b94; font-size: 9px; pointer-events: none; }
 .variable-connection-preview { fill: none; stroke: #65b69c; stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; vector-effect: non-scaling-stroke; }
@@ -383,6 +393,13 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .variable-card.type-number .variable-card-accent, .variable-card.type-integer .variable-card-accent { fill: #79b888; }
 .variable-card.type-boolean .variable-card-accent { fill: #cf777d; }
 .variable-card.type-array .variable-card-accent, .variable-card.type-rect .variable-card-accent { fill: #c8a95c; }
+.variable-card.type-object .variable-card-accent, .variable-card.type-any .variable-card-accent { fill: #998ac8; }
+.variable-card.type-point .variable-card-accent { fill: #5fb0d0; }
+.variable-card.type-enum .variable-card-accent { fill: #d08f5f; }
+.variable-card.type-key .variable-card-accent { fill: #8f9fd8; }
+.variable-card.type-color .variable-card-accent { fill: #d07fb0; }
+.variable-card.type-duration .variable-card-accent { fill: #8fbf7f; }
+.variable-card-swatch { stroke: #1c2022; stroke-width: 1; pointer-events: none; }
 .variable-card-header-rule { stroke: #39413f; stroke-width: 1; pointer-events: none; }
 .variable-card.selected .variable-card-box { fill: #27302f; stroke: #7dc7ae; stroke-width: 1.8; }
 .variable-card.connect-target .variable-card-box { stroke: #7ed28a; stroke-width: 2.5; }

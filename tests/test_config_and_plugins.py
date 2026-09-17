@@ -7,6 +7,9 @@ import pytest
 
 from src.oooonmyoji.actions import build_action_registry
 from src.oooonmyoji.actions.manifest import (
+    COLOR_PATTERN,
+    KEY_PATTERN,
+    POINT_SCHEMA,
     ActionDefinition,
     ParameterDefinition,
     apply_parameter_defaults,
@@ -197,3 +200,162 @@ def test_parameter_definitions_apply_nested_constraints_and_defaults() -> None:
 def test_action_definition_rejects_invalid_manifest_semantics(manifest: dict[str, object], message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         ActionDefinition.parse(manifest)
+
+
+def test_new_parameter_types_compile_to_expected_schemas() -> None:
+    """point / enum / key / color / duration 的值形状与约束。"""
+    assert ParameterDefinition.parse("point", {"type": "point"}).to_schema() == {
+        "type": "object",
+        "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+        "required": ["x", "y"],
+        "additionalProperties": False,
+    }
+    assert ParameterDefinition.parse("color", {"type": "color"}).to_schema() == {
+        "type": "string",
+        "pattern": COLOR_PATTERN,
+    }
+    assert ParameterDefinition.parse("key", {"type": "key", "min_length": 1}).to_schema() == {
+        "type": "string",
+        "pattern": KEY_PATTERN,
+        "minLength": 1,
+    }
+    assert ParameterDefinition.parse("wait", {"type": "duration", "min": 0.5, "max": 3}).to_schema() == {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 3,
+    }
+    assert ParameterDefinition.parse("mode", {"type": "enum", "enum": ["safe", "fast"]}).to_schema() == {
+        "type": "string",
+        "enum": ["safe", "fast"],
+    }
+
+
+def test_new_parameter_types_validate_defaults() -> None:
+    parsed = ParameterDefinition.parse(
+        "point",
+        {"type": "point", "default": {"x": 1, "y": 2}},
+    )
+    assert parsed.default == {"x": 1, "y": 2}
+    assert ParameterDefinition.parse("mode", {"type": "enum", "enum": ["a"], "default": "a"}).default == "a"
+    assert ParameterDefinition.parse("key", {"type": "key", "default": "BACK"}).default == "BACK"
+    assert ParameterDefinition.parse("color", {"type": "color", "default": "#0a0b0c"}).default == "#0a0b0c"
+    assert ParameterDefinition.parse("wait", {"type": "duration", "default": 1.5}).default == 1.5
+
+
+@pytest.mark.parametrize(
+    "definition, message",
+    [
+        ({"type": "enum"}, "enum type requires a non-empty enum list"),
+        ({"type": "enum", "enum": []}, "enum type requires a non-empty enum list"),
+        ({"type": "enum", "enum": [1, 2]}, r"enum\[0\] must be a string"),
+        ({"type": "point", "min": 1}, "min/max are only valid for numeric types"),
+        ({"type": "color", "min_length": 1}, "min_length/max_length are only valid for string types"),
+        ({"type": "color", "default": "red"}, "default"),
+        ({"type": "point", "default": {"x": 1}}, "default"),
+        ({"type": "key", "default": "BACK SPACE"}, "default"),
+        ({"type": "duration", "default": "soon"}, "default"),
+    ],
+)
+def test_new_parameter_types_reject_invalid_definitions(definition: dict[str, object], message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        ParameterDefinition.parse("candidate", definition)
+
+
+def test_promoted_input_definitions_pass_python_validation(tmp_path: Path) -> None:
+    """桌面「提升为变量」写出的定义（结构字段 + 字面量默认值）必须能被 Python 侧编译并绑定。"""
+    config = load_config(_write_config(tmp_path))
+    registry = build_action_registry(config.action_dir)
+    workflow_path = config.workflow_dir / "simple.json"
+    body: dict[str, object] = {
+        "schema_version": 4,
+        "id": "simple",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {
+            "随机间隔_秒": {
+                "type": "array", "items": {"type": "duration", "min": 0},
+                "min_items": 2, "max_items": 2, "default": [0.2, 0.6], "display_name": "随机间隔（秒）",
+            },
+            "识别区域": {"type": "rect", "default": [10, 20, 30, 40], "display_name": "识别区域"},
+            "match": {"type": "object", "default": {"x": 1, "y": 2}},
+        },
+        "variables": {},
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["seq"]},
+            {"id": "seq", "type": "sequence", "children": ["tap"]},
+            {"id": "tap", "type": "task", "action": "input.tap_match", "params": {
+                "match": {"ref": "inputs.match"},
+                "random_interval": {"ref": "inputs.随机间隔_秒"},
+            }},
+        ],
+    }
+    workflow_path.write_text(json.dumps(body), encoding="utf-8")
+    workflow = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")
+    properties = workflow.input_schema["properties"]
+    assert properties["随机间隔_秒"]["items"] == {"type": "number", "minimum": 0}
+    assert (properties["随机间隔_秒"]["minItems"], properties["随机间隔_秒"]["maxItems"]) == (2, 2)
+    assert properties["识别区域"] == {
+        "type": "array",
+        "prefixItems": [{"type": "integer"}] * 4,
+        "minItems": 4,
+        "maxItems": 4,
+        "default": [10, 20, 30, 40],
+    }
+    assert properties["match"]["default"] == {"x": 1, "y": 2}
+    # 绑定到参数后仍然合法：数组对数组、对象对对象。
+    tap = next(node for node in workflow.nodes if node.id == "tap")
+    assert tap.params["random_interval"] == {"ref": "inputs.随机间隔_秒"}
+    assert tap.params["match"] == {"ref": "inputs.match"}
+
+
+def test_workflow_variables_accept_new_parameter_types(tmp_path: Path) -> None:
+    """变量定义与动作参数走同一套规则：新类型能编译进变量 schema 并被任务引用。"""
+    config = load_config(_write_config(tmp_path))
+    registry = build_action_registry(config.action_dir)
+    workflow_path = config.workflow_dir / "simple.json"
+    body: dict[str, object] = {
+        "schema_version": 4,
+        "id": "simple",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {
+            "目标点": {"type": "point", "default": {"x": 960, "y": 540}},
+            "主题色": {"type": "color", "default": "#ff8c3a"},
+            "挑战模式": {"type": "enum", "enum": ["安全", "快速"], "default": "安全"},
+            "稳定等待": {"type": "duration", "default": 1.5, "min": 0},
+            "关闭按键": {"type": "key", "default": "BACK"},
+        },
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["seq"]},
+            {"id": "seq", "type": "sequence", "children": ["key", "sleep"]},
+            {"id": "key", "type": "task", "action": "input.key", "params": {"keycode": {"ref": "variables.关闭按键"}}},
+            {"id": "sleep", "type": "task", "action": "core.sleep", "params": {"seconds": 1.5}},
+        ],
+    }
+    workflow_path.write_text(json.dumps(body), encoding="utf-8")
+    workflow = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")
+    assert workflow.variable_defaults == {
+        "目标点": {"x": 960, "y": 540},
+        "主题色": "#ff8c3a",
+        "挑战模式": "安全",
+        "稳定等待": 1.5,
+        "关闭按键": "BACK",
+    }
+    properties = workflow.variable_schema["properties"]
+    assert {key: value for key, value in properties["目标点"].items() if key != "default"} == POINT_SCHEMA
+    assert properties["目标点"]["default"] == {"x": 960, "y": 540}
+    assert properties["主题色"]["pattern"] == COLOR_PATTERN
+    assert properties["关闭按键"]["pattern"] == KEY_PATTERN
+    assert properties["挑战模式"]["enum"] == ["安全", "快速"]
+    assert properties["稳定等待"]["minimum"] == 0
+    # 枚举变量缺少选项列表时按同一规则拒绝。
+    variables = body["variables"]
+    assert isinstance(variables, dict)
+    variables["挑战模式"] = {"type": "enum", "default": "安全"}
+    workflow_path.write_text(json.dumps(body), encoding="utf-8")
+    with pytest.raises(ConfigError, match="enum type requires a non-empty enum list"):
+        WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")
+

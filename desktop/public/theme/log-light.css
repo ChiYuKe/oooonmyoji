@@ -39,6 +39,29 @@
 :root[data-theme="light"] .ui-dropdown-items {
     scrollbar-color: #696969 transparent
 }
+:root[data-theme="light"] .inline-param-editor {
+    border: 1px solid var(--card-port, #b2b2b2);
+    background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input {
+    color: var(--card-text, #232323)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-axis-label {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-unit {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-swatch {
+    border: 1px solid var(--card-port, #b2b2b2)
+}
+:root[data-theme="light"] .definition-color-picker {
+    border: 1px solid var(--border, #dadada);
+    background: var(--surface, #ececec)
+}
+:root[data-theme="light"] .definition-unit {
+    color: var(--muted, #696969)
+}
 :root[data-theme="light"] {
     --success: #48644b;
     --danger: #825252;

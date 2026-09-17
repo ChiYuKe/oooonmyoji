@@ -679,6 +679,11 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .variable-icon.type-array { color: #9d8dca; }
 .variable-icon.type-object { color: #c99068; }
 .variable-icon.type-any { color: #89939d; }
+.variable-icon.type-point { color: #5fb0d0; }
+.variable-icon.type-enum { color: #d08f5f; }
+.variable-icon.type-key { color: #8f9fd8; }
+.variable-icon.type-color { color: #d07fb0; }
+.variable-icon.type-duration { color: #8fbf7f; }
 .variable-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .variable-flags { display: flex; align-items: center; gap: 5px; color: var(--muted); font: 9px/1 Consolas, monospace; }
 .variable-scope { color: #78a9bf; }

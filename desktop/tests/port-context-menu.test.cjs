@@ -4,8 +4,64 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const editorPath = path.join(__dirname, '../public/legacy/workflow-editor.js');
+const editorPath = path.join(__dirname, '../dist-test-renderer/canvas/editor.js');
 const source = fs.readFileSync(editorPath, 'utf8');
+const { createCanvasPortMenu } = require('../dist-test-renderer/canvas/interactions/port-menu.js');
+
+const MIGRATED_PORT_MENU = new Set([
+  'nodeInputPortMenuItems', 'nodeOutputPortMenuItems', 'nodeVariablePinMenuItems',
+  'instanceRunPinMenuItems', 'variableCardPortMenuItems', 'insertNodeAbove', 'addChildNode',
+  'promotePinToVariable', 'copyVariableReference',
+]);
+const call = (ctx, name, ...args) => (typeof ctx[name] === 'function' ? ctx[name](...args) : undefined);
+
+/** 迁移期：用编译产物的工厂包装 vm 上下文里的依赖桩，保持测试以裸名调用。 */
+function createPortMenuFor(ctx) {
+  const state = ctx.state || {raw: null};
+  const box = {};
+  // 上下文里显式的桩优先；没有桩时回落到模块自身的实现（与旧闭包一致）。
+  const fromCtxOr = (name, ...args) => (typeof ctx[name] === 'function' ? ctx[name](...args) : box.menu[name](...args));
+  const menu = createCanvasPortMenu({
+    state,
+    startConnectionFromInput: (...args) => call(ctx, 'startConnectionFromInput', ...args),
+    startConnection: (...args) => call(ctx, 'startConnection', ...args),
+    startVariableConnectionFromPin: (...args) => call(ctx, 'startVariableConnectionFromPin', ...args),
+    startVariableConnectionFromInstanceInput: (...args) => call(ctx, 'startVariableConnectionFromInstanceInput', ...args),
+    startVariableConnectionFromCard: (...args) => call(ctx, 'startVariableConnectionFromCard', ...args),
+    parentOf: (...args) => call(ctx, 'parentOf', ...args),
+    buildNode: (...args) => call(ctx, 'buildNode', ...args),
+    canConnect: (...args) => call(ctx, 'canConnect', ...args),
+    connect: (...args) => call(ctx, 'connect', ...args) ?? true,
+    disconnect: (...args) => call(ctx, 'disconnect', ...args),
+    mutate: (fn) => (typeof ctx.mutate === 'function' ? ctx.mutate(fn) : fn()),
+    nodeById: (id) => call(ctx, 'nodeById', id),
+    position: (node) => call(ctx, 'position', node) || {x: 0, y: 0},
+    layout: () => (typeof ctx.layout === 'function' ? ctx.layout() : (state.raw._layout ||= {})),
+    nodes: () => (typeof ctx.nodes === 'function' ? ctx.nodes() : (state.raw.nodes || [])),
+    nodeVariablePins: (node) => call(ctx, 'nodeVariablePins', node) || [],
+    variableCards: () => (typeof ctx.variableCards === 'function' ? ctx.variableCards() : (state.raw._variableCards ||= {})),
+    variableLinks: () => (typeof ctx.variableLinks === 'function' ? ctx.variableLinks() : (state.raw._variableLinks ||= {})),
+    nextVariableCardId: () => (typeof ctx.nextVariableCardId === 'function' ? ctx.nextVariableCardId() : 'card_1'),
+    variableCardList: () => call(ctx, 'variableCardList') || [],
+    variableCardPosition: (node, index) => call(ctx, 'variableCardPosition', node, index) || {x: 0, y: 0},
+    focusVariableCard: (card) => call(ctx, 'focusVariableCard', card),
+    placeVariableCard: (...args) => call(ctx, 'placeVariableCard', ...args),
+    disconnectVariableFromPin: (...args) => call(ctx, 'disconnectVariableFromPin', ...args),
+    disconnectVariableFromInstanceInput: (...args) => call(ctx, 'disconnectVariableFromInstanceInput', ...args),
+    removeVariableCard: (id) => call(ctx, 'removeVariableCard', id),
+    insertNodeAbove: (...args) => fromCtxOr('insertNodeAbove', ...args),
+    addChildNode: (...args) => fromCtxOr('addChildNode', ...args),
+    promotePinToVariable: (...args) => fromCtxOr('promotePinToVariable', ...args),
+    copyVariableReference: (...args) => fromCtxOr('copyVariableReference', ...args),
+    fieldLabel: (param) => (typeof ctx.fieldLabel === 'function' ? ctx.fieldLabel(param) : param),
+    toast: (...args) => call(ctx, 'toast', ...args),
+    typeNames: ctx.TYPE_NAMES || {},
+    get nodeWidth() { return typeof ctx.NODE_W === 'number' ? ctx.NODE_W : 260; },
+    getNavigator: () => ctx.navigator,
+  });
+  box.menu = menu;
+  return menu;
+}
 
 /** 与其它渲染层测试一致：按函数名切片执行生产代码，不打开桌面窗口。 */
 function extractFunction(src, name) {
@@ -22,6 +78,15 @@ function extractFunction(src, name) {
 }
 
 function runFunction(name, context) {
+  if (MIGRATED_PORT_MENU.has(name)) return createPortMenuFor(context)[name];
+  if (name === 'openPortContextMenu') {
+    return require('../dist-test-renderer/canvas/ui/canvas-helpers.js').createCanvasHelpers({
+      state: {}, $: () => null, nodes: () => [], worldPoint: (event) => context.worldPoint(event),
+      render: () => {}, contextMenuSuppressedByPan: () => context.contextMenuSuppressedByPan(),
+      setVariableCardSelection: () => {}, wrap: { getBoundingClientRect: () => ({ width: 0, height: 0 }) },
+      variableCardWidth: 168, variableCardHeight: 58,
+    }).openPortContextMenu;
+  }
   vm.runInContext(extractFunction(source, name), context);
   return context[name];
 }
@@ -337,6 +402,60 @@ test('提升为变量：把字面量转成输入定义、绑定端口，并创�
   assert.deepEqual(calls, [['toast', '已创建变量「模板」并连接端口']]);
 });
 
+test('提升为变量：数组元素、对象字段与边界一起带过去，变量详情才有结构化控件', () => {
+  const node = { id: 'task_9', type: 'task', params: { random_interval: [0.2, 0.6], roi: [10, 20, 30, 40], match: { x: 1, y: 2 } } };
+  const context = contextWith({
+    nodeById: () => node,
+    fieldLabel: (name) => ({ random_interval: '随机间隔（秒）', roi: '识别区域' }[name] || name),
+    variableCards: () => ({}),
+    variableLinks: () => ({}),
+    nextVariableCardId: () => 'card_x',
+    variableCardPosition: () => ({ x: 0, y: 0 }),
+    nodeVariablePins: () => [],
+    toast: () => {},
+    state: { raw: { inputs: {} } },
+  });
+  const promote = runFunction('promotePinToVariable', context);
+  promote('task_9', 'random_interval', {
+    param: 'random_interval', type: 'array',
+    definition: { type: 'array', items: { type: 'duration', min: 0 }, min_items: 2, max_items: 2, default: [0, 0] },
+  });
+  promote('task_9', 'roi', { param: 'roi', type: 'rect', definition: { type: 'rect' } });
+  promote('task_9', 'match', { param: 'match', type: 'object', definition: { type: 'object', required: true } });
+  // 随机间隔：变量拿到 items/min_items/max_items，详情栏就能给两个元素输入框。
+  // 标签里的全角括号会规范化成下划线（首尾不带）。
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.raw.inputs['随机间隔_秒'])), {
+    type: 'array', items: { type: 'duration', min: 0 }, min_items: 2, max_items: 2,
+    default: [0.2, 0.6], display_name: '随机间隔（秒）',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.raw.inputs['识别区域'])), {
+    type: 'rect', default: [10, 20, 30, 40], display_name: '识别区域',
+  });
+  // required 这类调用参数不进变量定义；对象本身保留字面量默认值。
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.raw.inputs.match)), { type: 'object', default: { x: 1, y: 2 } });
+
+  // 端口没有字面量时用清单默认值，避免变量卡片空着。
+  const fresh = { id: 'task_10', type: 'task', params: {} };
+  const freshContext = contextWith({
+    nodeById: () => fresh,
+    fieldLabel: (name) => name,
+    variableCards: () => ({}),
+    variableLinks: () => ({}),
+    nextVariableCardId: () => 'card_y',
+    variableCardPosition: () => ({ x: 0, y: 0 }),
+    nodeVariablePins: () => [],
+    toast: () => {},
+    state: { raw: { inputs: {} } },
+  });
+  runFunction('promotePinToVariable', freshContext)('task_10', 'random_interval', {
+    param: 'random_interval', type: 'array',
+    definition: { type: 'array', items: { type: 'duration' }, min_items: 2, max_items: 2, default: [0, 0] },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(freshContext.state.raw.inputs.random_interval)), {
+    type: 'array', items: { type: 'duration' }, min_items: 2, max_items: 2, default: [0, 0],
+  });
+});
+
 test('提升为变量：已绑定端口不允许重复提取，重名时自动编号', () => {
   const node = { id: 'task_2', type: 'task', params: { hp: { ref: 'inputs.boss' } } };
   const calls = [];
@@ -398,37 +517,41 @@ test('复制变量引用：没有剪贴板时直接提示文本', () => {
 });
 
 test('五类端口都接入了右键菜单，UE 交互（常驻搜索、子菜单、打平过滤）全部接线', () => {
-  assert.match(source, /input\.addEventListener\('contextmenu', \(event\) => \{\s*const point = openPortContextMenu\(event\);/);
-  assert.match(source, /output\.addEventListener\('contextmenu', \(event\) => \{\s*const point = openPortContextMenu\(event\);/);
-  assert.match(source, /hit\.addEventListener\('contextmenu', \(event\) => \{\s*const point = openPortContextMenu\(event\);/);
-  assert.match(source, /port\.addEventListener\('contextmenu', \(event\) => \{\s*const point = openPortContextMenu\(event\);/);
-  assert.match(source, /showMenu\(event\.clientX, event\.clientY, nodeInputPortMenuItems\(node\.id, point\)\)/);
-  assert.match(source, /showMenu\(event\.clientX, event\.clientY, nodeOutputPortMenuItems\(node\.id, point\)\)/);
-  assert.match(source, /showMenu\(event\.clientX, event\.clientY, nodeVariablePinMenuItems\(node\.id, pin, point\)\)/);
-  assert.match(source, /showMenu\(event\.clientX, event\.clientY, instanceRunPinMenuItems\(card, variable, point\)\)/);
-  assert.match(source, /showMenu\(event\.clientX, event\.clientY, variableCardPortMenuItems\(card, point\)\)/);
-  assert.match(source, /function insertNodeAbove\(childId, type\)/);
-  assert.match(source, /function addChildNode\(parentId, type, point\)/);
-  assert.match(source, /function promotePinToVariable\(nodeId, param, pin\)/);
-  assert.match(source, /function copyVariableReference\(scope, name\)/);
-  // UE 风格：搜索框常驻顶部
-  assert.match(source, /const search = document\.createElement\('input'\);/);
-  assert.match(source, /search\.placeholder = '搜索操作…'/);
+  const cardsSource = fs.readFileSync(path.join(__dirname, '../src/canvas/render/cards.ts'), 'utf8');
+  const nodeCardSource = fs.readFileSync(path.join(__dirname, '../src/canvas/render/node-card.ts'), 'utf8');
+  assert.match(nodeCardSource, /input\.addEventListener\('contextmenu', \(event: any\) => \{\s*const point = openPortContextMenu\(event\);/);
+  assert.match(nodeCardSource, /output\.addEventListener\('contextmenu', \(event: any\) => \{\s*const point = openPortContextMenu\(event\);/);
+  assert.match(nodeCardSource, /hit\.addEventListener\('contextmenu', \(event: any\) => \{\s*const point = openPortContextMenu\(event\);/);
+  assert.match(cardsSource, /port\.addEventListener\('contextmenu', \(event: any\) => \{\s*const point = openPortContextMenu\(event\);/);
+  assert.match(nodeCardSource, /showMenu\(event\.clientX, event\.clientY, nodeInputPortMenuItems\(node\.id, point\)\)/);
+  assert.match(nodeCardSource, /showMenu\(event\.clientX, event\.clientY, nodeOutputPortMenuItems\(node\.id, point\)\)/);
+  assert.match(nodeCardSource, /showMenu\(event\.clientX, event\.clientY, nodeVariablePinMenuItems\(node\.id, pin, point\)\)/);
+  assert.match(cardsSource, /showMenu\(event\.clientX, event\.clientY, instanceRunPinMenuItems\(card, variable, point\)\)/);
+  assert.match(cardsSource, /showMenu\(event\.clientX, event\.clientY, variableCardPortMenuItems\(card, point\)\)/);
+  const portMenuSource = fs.readFileSync(path.join(__dirname, '../src/canvas/interactions/port-menu.ts'), 'utf8');
+  assert.match(portMenuSource, /function insertNodeAbove\(childId: string, type: string\)/);
+  assert.match(portMenuSource, /function addChildNode\(parentId: string, type: string, point: PortPoint\)/);
+  assert.match(portMenuSource, /function promotePinToVariable\(nodeId: string, param: string, pin: PortPin\)/);
+  assert.match(portMenuSource, /function copyVariableReferenceDefault\(scope: string, name: string\)/);
+  // UE 风格：搜索框常驻顶部（菜单浮层已迁到 src/canvas/ui/overlays.ts）
+  const overlaysSource = fs.readFileSync(path.join(__dirname, '../src/canvas/ui/overlays.ts'), 'utf8');
+  assert.match(overlaysSource, /const search = document\.createElement\('input'\);/);
+  assert.match(overlaysSource, /search\.placeholder = '搜索操作…'/);
   // UE 风格：子菜单 + 搜索时打平子菜单
-  assert.match(source, /button\.classList\.add\('has-submenu'\)/);
-  assert.match(source, /chevron\.className = 'menu-chevron'/);
-  assert.match(source, /el\('div', 'context-menu context-menu-sub'\)/);
-  assert.match(source, /if \(item\.children && item\.children\.length\) \{ for \(const child of item\.children\) walk\(child\); return; \}/);
+  assert.match(overlaysSource, /button\.classList\.add\('has-submenu'\)/);
+  assert.match(overlaysSource, /chevron\.className = 'menu-chevron'/);
+  assert.match(overlaysSource, /el\('div', 'context-menu context-menu-sub'\)/);
+  assert.match(overlaysSource, /if \(item\.children && item\.children\.length\) \{ for \(const child of item\.children\) walk\(child\); return; \}/);
   // UE 风格：端口菜单提供创建变量卡片（Get）
-  assert.match(source, /创建变量卡片（Get）/);
+  assert.match(portMenuSource, /创建变量卡片（Get）/);
   // 提升为变量：创建输入定义 + 绑定端口 + 画布变量卡片自动连线
-  assert.match(source, /variableCards\(\)\[cardId\] = \{ name, scope: 'inputs', x: at\.x, y: at\.y \};/);
-  assert.match(source, /variableLinks\(\)\[`\$\{nodeId\}:\$\{param\}`\] = cardId;/);
+  assert.match(portMenuSource, /variableCards\(\)\[cardId\] = \{ name, scope: 'inputs', x: at\.x, y: at\.y \};/);
+  assert.match(portMenuSource, /variableLinks\(\)\[`\$\{nodeId\}:\$\{param\}`\] = cardId;/);
   // UE 风格：普通节点卡片右键也有节点菜单（复制/剪切/删除）
-  assert.match(source, /\{ label: '删除节点', danger: true, run: \(\) => deleteSelection\(\) \},\n        \]\);\n      \}\);\n    \}/);
-  assert.equal((source.match(/删除节点', danger: true/g) || []).length, 2); // 子流程节点 + 普通节点
+  assert.match(nodeCardSource, /\{ label: '删除节点', danger: true, run: \(\) => deleteSelection\(\) \},\n        \]\);\n      \}\);\n    \}/);
+  assert.equal((nodeCardSource.match(/删除节点', danger: true/g) || []).length, 2); // 子流程节点 + 普通节点
   // UE 行为：菜单外的按下/右键会收起当前菜单（避免旧菜单盖住端口导致无法再次右键），菜单空白处右键也收起并抑制原生菜单
-  assert.match(source, /document\.addEventListener\('mousedown', \(event\) => \{\s*if \(event\.target && event\.target\.closest && event\.target\.closest\('\.context-menu'\)\) return;\s*hideMenus\(\);\s*\}, true\)/);
-  assert.match(source, /document\.addEventListener\('contextmenu', \(event\) => \{\s*const inMenu = event\.target && event\.target\.closest && event\.target\.closest\('\.context-menu'\);/);
-  assert.match(source, /if \(!event\.target\.closest\('\.context-menu button'\)\) hideMenus\(\);/);
+  assert.match(source, /document\.addEventListener\('mousedown', \(event\) => \{\s*if \(event\.target instanceof Element && event\.target\.closest\('\.context-menu'\)\)\s*return;\s*hideMenus\(\);\s*\}, true\)/);
+  assert.match(source, /document\.addEventListener\('contextmenu', \(event\) => \{\s*const target = event\.target instanceof Element \? event\.target : null;\s*const inMenu = target\?\.closest\('\.context-menu'\);/);
+  assert.match(source, /if \(!target\?\.closest\('\.context-menu button'\)\)\s*hideMenus\(\);/);
 });

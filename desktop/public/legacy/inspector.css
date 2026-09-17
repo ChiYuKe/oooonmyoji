@@ -178,6 +178,10 @@
 #inspector-body .variable-struct-value { width: 100%; min-width: 0; }
 #inspector-body .variable-array-value { display: grid; gap: 4px; }
 #inspector-body .variable-array-item { display: flex; gap: 4px; min-width: 0; }
+/* 无字段声明的对象：一行一个「字段名 + 值 + 删除」，按钮不参与拉伸。 */
+#inspector-body .variable-map-value { display: grid; gap: 4px; width: 100%; min-width: 0; }
+#inspector-body .variable-map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; align-items: center; }
+#inspector-body .variable-map-value > button { justify-self: start; }
 #inspector-body textarea { width: 100%; min-height: 72px; height: auto; padding: 6px 7px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-field); color: var(--ui-text); font: 11px/1.5 var(--ui-font); }
 #inspector-body textarea:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
 #inspector-body .ui-input, #inspector-body .ui-checkbox { box-shadow: none; }

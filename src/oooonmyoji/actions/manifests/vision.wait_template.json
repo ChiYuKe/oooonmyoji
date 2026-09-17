@@ -12,7 +12,7 @@
       "description": "模板图路径"
     },
     "timeout_seconds": {
-      "type": "number",
+      "type": "duration",
       "required": true,
       "min": 0,
       "description": "等待超时秒数，超时则失败"

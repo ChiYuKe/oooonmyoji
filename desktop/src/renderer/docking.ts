@@ -351,7 +351,7 @@ class WorkflowCanvasRenderer implements IContentRenderer {
     if (!this.attached) {
       this.attached = true;
       this.frame.id = this.panelId;
-      this.frame.src = './legacy/editor-frame.html?mode=canvas';
+      this.frame.src = './canvas.html?mode=canvas';
       this.element.appendChild(this.frame);
     }
     this.hooks.onFrameCreated(this.panelId, this.uri, this.frame);

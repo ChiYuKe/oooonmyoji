@@ -157,6 +157,83 @@ test('dock panel content keeps quadrant docking for split layouts', () => {
     'whole-workspace edge overlays stay disabled independently of panel split docking');
 });
 
+test('「变量引用」默认叠在内容浏览器旁边（内层/外层都跟着它）', () => {
+  const docking = read('src/renderer/docking.ts');
+  const sharedPanels = read('src/renderer/docking/shared-panels.ts');
+  const section = (start, end, source) => source.slice(source.indexOf(start), source.indexOf(end));
+  // 两层都声明「与内容浏览器同组」：内容浏览器默认停在内层，所以内层定义才是默认位置。
+  assert.match(
+    section('const PANEL_DEFINITIONS', 'const DEFAULT_PANEL_ORDER', docking),
+    /variableReferences: \{[\s\S]*?SHARED_PANEL_DEFINITIONS\.variableReferences[\s\S]*?reference: 'contentBrowser',\s*\n\s*direction: 'within',/,
+    '内层「变量引用」必须与内容浏览器叠成同一个标签组',
+  );
+  assert.match(
+    section('const WORKBENCH_PANEL_DEFINITIONS', 'const DEFAULT_WORKBENCH_PANEL_ORDER', docking),
+    /variableReferences: \{[\s\S]*?reference: 'contentBrowser',\s*\n\s*direction: 'within',/,
+    '外层「变量引用」同样叠在内容浏览器旁边',
+  );
+  // 它是共享面板：内容浏览器被拖到哪一层，它就跟到哪一层。
+  assert.match(docking, /export type SharedDockPanelId = 'contentBrowser' \| 'runtime' \| 'variableReferences';/);
+  assert.match(sharedPanels, /DEFAULT_SHARED_PANEL_SURFACES[\s\S]*?variableReferences: 'inner',/);
+  assert.match(sharedPanels, /COMPANION_SHARED_PANELS[\s\S]*?variableReferences: 'contentBrowser',/);
+  // 参照面板不在时不落成独立分组（那正是“跑到右边去了”的样子）。
+  assert.match(docking, /definition\.direction === 'within'\s*\n?\s*\?\s*undefined/);
+});
+
+test('内容浏览器之外：独立窗口的分组拖回主窗口', () => {
+  // 行为：直接实例化编译产物里的真实手势模块（依赖注入的 DockviewApi 桩）。
+  const { registerDockBackGesture } = require('../dist-test-renderer/renderer/docking/gestures.js');
+
+  const removed = [];
+  const timers = [];
+  const listeners = [];
+  const docHandlers = new Map();
+  const doc = {
+    addEventListener: (type, fn) => { (docHandlers.get(type) || docHandlers.set(type, []).get(type)).push(fn); },
+    removeEventListener: (type, fn) => { const list = docHandlers.get(type) || []; const index = list.indexOf(fn); if (index >= 0) list.splice(index, 1); },
+  };
+  const win = {
+    document: doc,
+    screenX: 400, screenY: 200, outerWidth: 600, outerHeight: 400,
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+  };
+  const group = { api: { location: { type: 'popout' } } };
+  const api = {
+    removeGroup: (item) => removed.push(item),
+    getPopouts: () => [{ window: win, group }],
+    onDidAddPopoutGroup: (fn) => { listeners.push(fn); return { dispose: () => { listeners.splice(listeners.indexOf(fn), 1); } }; },
+  };
+  const dispose = registerDockBackGesture(api);
+  const fire = (type, event) => (docHandlers.get(type) || []).slice().forEach((fn) => fn(event));
+  const flush = () => { while (timers.length) timers.shift()(); };
+
+  // 窗口内的普通点击：不回停靠。
+  fire('pointerdown', { screenX: 500, screenY: 300 });
+  fire('pointerup', { screenX: 500, screenY: 300 });
+  flush();
+  assert.deepEqual(removed, [], '窗口内点击不触发');
+  // 窗口内的拖拽：不回停靠。
+  fire('pointerdown', { screenX: 500, screenY: 300 });
+  fire('pointerup', { screenX: 560, screenY: 340 });
+  flush();
+  assert.deepEqual(removed, [], '窗口内拖拽不触发');
+  // 拖到窗口外松手：把分组移回主窗口网格。
+  fire('pointerdown', { screenX: 500, screenY: 300 });
+  fire('pointerup', { screenX: 1100, screenY: 300 });
+  flush();
+  assert.deepEqual(removed, [group], '拖出窗口后 removeGroup 让分组回到主窗口');
+  // 拖动距离太小（例如贴着窗口边缘误触）：不算拖回来。
+  removed.length = 0;
+  fire('pointerdown', { screenX: 1000, screenY: 300 });
+  fire('pointerup', { screenX: 1006, screenY: 300 });
+  flush();
+  assert.deepEqual(removed, [], '按下与松开之间没有真实拖拽就不触发');
+  // 解绑后不再响应，并且会清掉监听。
+  dispose.dispose();
+  assert.deepEqual(listeners, []);
+  assert.equal((docHandlers.get('pointerup') || []).length, 0);
+});
+
 test('content browser keeps item instances, draft editing and flat grid/list rendering', () => {
   const source = read('src/renderer/content-browser.ts');
   const start = source.indexOf('function renderContentBrowser(): void {');

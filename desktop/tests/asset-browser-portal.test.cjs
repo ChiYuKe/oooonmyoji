@@ -8,7 +8,7 @@ const { createAssetBrowser } = require('../dist-test-renderer/canvas/interaction
 
 function harness() {
   const element = (tag) => ({
-    tag, children: [], events: {}, style: { setProperty() {}, cssText: '' }, className: '', textContent: '', dataset: {},
+    tag, children: [], events: {}, style: { setProperty() {}, cssText: '' }, className: '', textContent: '', dataset: {}, rel: '', href: '',
     classList: { add() {}, remove() {}, toggle() {} },
     setAttribute() {},
     appendChild(child) { this.children.push(child); child.parentNode = this; },
@@ -24,7 +24,7 @@ function harness() {
   const overlay = element('overlay');
   overlay.parentNode = parent;
   const focus = { isConnected: true, focus() { this.restored = true; } };
-  const documentStub = { body: parent, documentElement: {}, activeElement: focus, baseURI: 'http://localhost/canvas.html', createElement: element };
+  const documentStub = { body: parent, documentElement: {}, activeElement: focus, baseURI: 'http://localhost/renderer/canvas.html', createElement: element };
   const topDocument = { body: element('top-body'), createElement: element };
   globalThis.document = documentStub;
   globalThis.window = { top: { document: topDocument } };
@@ -55,6 +55,19 @@ test('picker is mounted in the top window modal, not the inspector viewport', ()
   assert.equal(h.browser.assetBrowserOverlay(), h.overlay);
   h.browser.openAssetBrowser('node', 'template', 'assets/templates/a.png');
   assert.equal(h.topDocument.body.children.length, 1);
+});
+
+// 弹层样式来自画布文档之外的 `<root>/legacy/asset-browser.css`：
+// 少写 legacy/ 段会让顶层弹层静默 404，退化成铺满窗口的无样式布局。
+test('picker stylesheet resolves to the legacy folder, never the document root', () => {
+  const h = harness();
+  h.browser.openAssetBrowser('node', 'template', 'assets/templates/a.png');
+  const shadow = h.overlay.parentNode;
+  const sheet = shadow.children.find((child) => child.tag === 'link' && child.rel === 'stylesheet');
+  assert.ok(sheet, '弹层 shadow root 里应挂一份样式表');
+  assert.equal(sheet.href, 'http://localhost/renderer/legacy/asset-browser.css');
+  assert.ok(sheet.href.includes('/legacy/'), '缺少 legacy/ 段会解析到文档根而 404');
+  assert.ok(!/\/renderer\/asset-browser\.css$/.test(sheet.href));
 });
 
 test('closing restores the original overlay and focus, including Escape', () => {

@@ -26,7 +26,7 @@ class FakeNode {
   querySelectorAll(tag) { return this.children.flatMap((child) => [...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag)]); }
 }
 
-function harness() {
+function harness(options = {}) {
   const body = new FakeNode('body');
   const documentListeners = {};
   const windowListeners = {};
@@ -43,7 +43,7 @@ function harness() {
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
   };
   const { createCanvasInlineEditor } = require(path.join('..', 'dist-test-renderer', 'canvas', 'interactions', 'inline-editor.js'));
-  const calls = { menus: [], inspectors: [], toasts: [], remembered: [], cleared: [], mutations: 0 };
+  const calls = { menus: [], inspectors: [], toasts: [], remembered: [], cleared: [], mutations: 0, assets: [], rois: [] };
   const state = { zoom: 1, panX: 0, panY: 0 };
   const links = {};
   const editor = createCanvasInlineEditor({
@@ -59,7 +59,13 @@ function harness() {
     requestInspector: (selection) => calls.inspectors.push(selection),
     toast: (message, error) => calls.toasts.push([message, Boolean(error)]),
     enumOption: (value) => ({ all: '全部', any: '任意' }[value] || value),
-    fieldLabel: (name) => ({ verify_gone: '确认模板消失', random_offset: '随机偏移' }[name] || name),
+    fieldLabel: (name) => ({ verify_gone: '确认模板消失', random_offset: '随机偏移', template: '模板', roi: '识别区域' }[name] || name),
+    openAssetBrowser: options.openAssetBrowser === undefined
+      ? (nodeId, key, current, applyValue) => calls.assets.push([nodeId, key, current, applyValue])
+      : options.openAssetBrowser,
+    requestRoi: options.requestRoi === undefined
+      ? (nodeId, key, mode, roiOptions) => calls.rois.push([nodeId, key, mode, roiOptions])
+      : options.requestRoi,
   });
   const flushTimers = () => { while (timers.length) timers.shift()(); };
   const fireDocument = (type, event) => (documentListeners[type] || []).forEach((fn) => fn(event));
@@ -249,20 +255,25 @@ test('输入框提交、取消、非法值与外部点击的行为', () => {
   assert.equal(editor.inlineEditorOpen(), false);
 });
 
-test('资源与结构体参数不就地编辑，转到详情栏并提示', () => {
+test('结构体参数不就地编辑，转到详情栏并提示', () => {
   const { editor, calls, body } = harness();
   const node = { id: 'tap', params: {} };
   editor.openParamEditor(request(node, { param: 'match', definition: { type: 'object', required: true } }));
   assert.deepEqual(calls.inspectors, [{ kind: 'node', nodeId: 'tap' }]);
   assert.deepEqual(calls.toasts, [['match 需要在详情栏编辑', false]]);
   assert.equal(body.children.length, 0);
-  editor.openParamEditor(request(node, { param: 'template', definition: { type: 'asset' } }));
+  assert.equal(calls.menus.length, 0);
+  editor.openParamEditor(request(node, { param: 'states', definition: { type: 'array' } }));
   assert.deepEqual(calls.inspectors.at(-1), { kind: 'node', nodeId: 'tap' });
+  // 资源参数改成卡片内菜单（素材浏览器 / 截图截取），不再跳详情栏。
+  editor.openParamEditor(request(node, { param: 'template', definition: { type: 'asset' } }));
+  assert.equal(calls.menus.length, 1);
+  assert.equal(calls.inspectors.length, 2);
   // 缺少节点或参数名时什么都不做。
   editor.openParamEditor(request(null, { param: 'x' }));
   editor.openParamEditor(request(node, { param: '' }));
   assert.equal(calls.inspectors.length, 2);
-  assert.equal(calls.menus.length, 0);
+  assert.equal(calls.menus.length, 1);
 });
 
 test('坐标点参数用 X/Y 双输入，回车提交整点', () => {
@@ -386,4 +397,164 @@ test('按键参数弹出常用按键选择器，仍可自定义令牌', () => {
   retry.value = 'BACK SPACE';
   retry.events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
   assert.deepEqual(calls.toasts.at(-1), ['keycode：按键名只能是字母/数字/下划线', true]);
+});
+
+test('模板参数在卡片上直接选素材图或从当前画面截取', () => {
+  const { editor, calls, body } = harness();
+  const node = { id: 'wait', params: {} };
+  const pin = { param: 'template', definition: { type: 'asset', required: true }, configured: false };
+  editor.openParamEditor(request(node, pin, { clientX: 33, clientY: 44 }));
+  assert.equal(body.children.length, 0, '资源参数走菜单，不生成输入框');
+  const items = calls.menus[0][2];
+  assert.deepEqual(items.map((item) => (typeof item === 'string' ? item : item.label)),
+    ['选择模板图…', '从当前画面截取…', 'separator', '在详情栏编辑']);
+  assert.deepEqual([calls.menus[0][0], calls.menus[0][1]], [33, 44]);
+  // 选素材：打开素材浏览器，选中后由它的 applyValue 写回卡片（弹层自己包 mutate）。
+  items[0].run();
+  assert.deepEqual(calls.assets.map(([nodeId, key, current]) => [nodeId, key, current]), [['wait', 'template', '']]);
+  calls.assets[0][3]('assets/templates/battle.png');
+  assert.equal(node.params.template, 'assets/templates/battle.png');
+  assert.deepEqual(calls.remembered, [['wait', 'template', 'assets/templates/battle.png']]);
+  assert.equal(calls.mutations, 0, '写入由弹层负责，行内不再多包一层历史');
+  // 截取：交给 ROI 拾取（asset 模式），回调同样直接写回。
+  items[1].run();
+  assert.deepEqual(calls.rois.map(([nodeId, key, mode]) => [nodeId, key, mode]), [['wait', 'template', 'asset']]);
+  calls.rois[0][3].applyValue('assets/templates/cut.png');
+  assert.equal(node.params.template, 'assets/templates/cut.png');
+  // 已配置时给出更换与清除入口。
+  const configured = { id: 'wait', params: { template: 'assets/templates/old.png' } };
+  editor.openParamEditor(request(configured, { ...pin, configured: true, value: 'assets/templates/old.png' }));
+  const configuredLabels = calls.menus.at(-1)[2].map((item) => (typeof item === 'string' ? item : item.label));
+  assert.deepEqual(configuredLabels, ['更换模板图…', '从当前画面截取…', 'separator', '清除本行取值', 'separator', '在详情栏编辑']);
+  calls.menus.at(-1)[2].find((item) => item.label === '更换模板图…').run();
+  assert.equal(calls.assets.at(-1)[2], 'assets/templates/old.png');
+  calls.menus.at(-1)[2].find((item) => item.label === '清除本行取值').run();
+  assert.equal('template' in configured.params, false);
+});
+
+test('识别区域参数在卡片上直接框选或手输四坐标', () => {
+  const { editor, calls, body } = harness();
+  const node = { id: 'wait', params: {} };
+  const pin = { param: 'roi', definition: { type: 'rect' }, configured: true, value: [10, 20, 200, 80] };
+  editor.openParamEditor(request(node, pin));
+  assert.equal(body.children.length, 0, '区域参数先出菜单，不直接开输入框');
+  const items = calls.menus[0][2];
+  assert.deepEqual(items.map((item) => (typeof item === 'string' ? item : item.label)),
+    ['在当前画面上框选…', '手动输入四坐标…', 'separator', '清除本行取值', 'separator', '在详情栏编辑']);
+  // 框选：ROI 拾取 rect 模式，确认后由 applyValue 写回四坐标。
+  items[0].run();
+  assert.deepEqual(calls.rois.map(([nodeId, key, mode]) => [nodeId, key, mode]), [['wait', 'roi', 'rect']]);
+  calls.rois[0][3].applyValue([60, 120, 300, 90]);
+  assert.deepEqual(node.params.roi, [60, 120, 300, 90]);
+  assert.deepEqual(calls.remembered, [['wait', 'roi', [60, 120, 300, 90]]]);
+  assert.equal(calls.mutations, 0);
+  // 手输：X/Y/宽/高 四个输入框，回车一次提交整个区域。
+  items[1].run();
+  const shell = body.children[0];
+  assert.equal(shell.className, 'inline-param-editor');
+  const axisLabels = shell.children.filter((child) => child.className === 'inline-param-axis-label').map((child) => child.textContent);
+  assert.deepEqual(axisLabels, ['X', 'Y', '宽', '高']);
+  const inputs = shell.children.filter((child) => child.tag === 'input');
+  assert.deepEqual(inputs.map((input) => input.value), ['10', '20', '200', '80']);
+  assert.deepEqual(inputs.map((input) => input.min), [undefined, undefined, '0', '0']);
+  assert.equal(inputs[0].focused, true);
+  inputs[2].value = '320';
+  inputs[3].value = '96';
+  inputs[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  assert.deepEqual(node.params.roi, [10, 20, 320, 96]);
+  assert.equal(editor.inlineEditorOpen(), false);
+  assert.equal(calls.mutations, 1);
+  // 非法输入留在浮层里并提示，不写盘。
+  items[1].run();
+  const bad = body.children[0].children.filter((child) => child.tag === 'input');
+  bad[1].value = 'x';
+  bad[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  assert.deepEqual(calls.toasts.at(-1), ['roi：区域需要数值', true]);
+  assert.deepEqual(node.params.roi, [10, 20, 320, 96]);
+  assert.equal(editor.inlineEditorOpen(), true);
+  // 负宽高被拒绝。
+  bad[1].value = '20';
+  bad[2].value = '-5';
+  bad[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  assert.deepEqual(calls.toasts.at(-1), ['roi：区域宽高不能为负', true]);
+  assert.deepEqual(node.params.roi, [10, 20, 320, 96]);
+});
+
+test('卡片声明的 control 覆盖参数类型：数组参数也能用区域控件', () => {
+  const { editor, calls } = harness();
+  const node = { id: 'patrol', params: {} };
+  const pin = { param: 'target_rois', control: 'rect', definition: { type: 'array', items: { type: 'number' } }, configured: true, value: [1, 2, 3, 4] };
+  editor.openParamEditor(request(node, pin));
+  assert.deepEqual(calls.menus[0][2].map((item) => (typeof item === 'string' ? item : item.label)).slice(0, 2),
+    ['在当前画面上框选…', '手动输入四坐标…']);
+  // control 声明成 inspector 时回到详情栏。
+  const forced = harness();
+  forced.editor.openParamEditor(request({ id: 'wait', params: {} }, { param: 'match', control: 'inspector', definition: { type: 'object' }, configured: false }));
+  assert.deepEqual(forced.calls.menus, []);
+  assert.deepEqual(forced.calls.inspectors, [{ kind: 'node', nodeId: 'wait' }]);
+  assert.deepEqual(forced.calls.toasts, [['match 需要在详情栏编辑', false]]);
+});
+
+test('固定长度数组用并排输入格，回车提交整行', () => {
+  const { editor, calls, body } = harness();
+  const node = { id: 'tap', params: {} };
+  const definition = { type: 'array', items: { type: 'duration', min: 0 }, min_items: 2, max_items: 2, default: [0, 0] };
+  const pin = { param: 'random_interval', definition, configured: true, value: [0.2, 0.6] };
+  editor.openParamEditor(request(node, pin, { valueAlign: 'left' }));
+  const shell = body.children[0];
+  assert.equal(shell.className, 'inline-param-editor value-align-left inline-param-tuple');
+  const inputs = shell.children.filter((child) => child.tag === 'input');
+  assert.deepEqual(inputs.map((input) => input.className), ['ui-input inline-param-input inline-param-tuple-input', 'ui-input inline-param-input inline-param-tuple-input']);
+  assert.deepEqual(inputs.map((input) => input.value), ['0.2', '0.6'], '每格显示自己的元素');
+  assert.deepEqual(inputs.map((input) => input.type), ['number', 'number']);
+  assert.deepEqual(inputs.map((input) => input.min), ['0', '0'], '范围来自 items');
+  assert.deepEqual(inputs.map((input) => input.step), ['any', 'any']);
+  assert.deepEqual(inputs.map((input) => input.attrs['aria-label']), ['random_interval 第 1 项', 'random_interval 第 2 项']);
+  assert.equal(inputs[0].focused, true);
+  assert.equal(inputs[0].selected, true);
+  // 回车一次提交整个数组（元素按各自类型解析）。
+  inputs[1].value = '1.5';
+  inputs[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  assert.deepEqual(node.params.random_interval, [0.2, 1.5]);
+  assert.equal(editor.inlineEditorOpen(), false);
+  assert.equal(calls.mutations, 1);
+  // 任一格非法：整行不写入，提示带格子序号。
+  editor.openParamEditor(request(node, pin, { valueAlign: 'left' }));
+  const retry = body.children[0].children.filter((child) => child.tag === 'input');
+  retry[0].value = '-1';
+  retry[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  assert.deepEqual(calls.toasts.at(-1), ['random_interval：第 1 项：不能小于 0', true]);
+  assert.deepEqual(node.params.random_interval, [0.2, 1.5]);
+  assert.equal(editor.inlineEditorOpen(), true);
+  retry[0].value = '0.3';
+  retry[1].value = 'x';
+  retry[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  assert.deepEqual(calls.toasts.at(-1), ['random_interval：第 2 项：需要数值', true]);
+  // 未配置时用定义默认值铺满每一格。
+  editor.openParamEditor(request(node, { ...pin, configured: false, value: undefined }));
+  assert.deepEqual(body.children[0].children.filter((child) => child.tag === 'input').map((input) => input.value), ['0', '0']);
+  // 长度不定的数组仍然走详情栏。
+  const loose = harness();
+  loose.editor.openParamEditor(request({ id: 'tap', params: {} }, { param: 'states', definition: { type: 'array', items: { type: 'object' } }, configured: false }));
+  assert.deepEqual(loose.calls.inspectors, [{ kind: 'node', nodeId: 'tap' }]);
+});
+
+test('布尔行的状态文案跟卡片声明走', () => {
+  const { editor, calls } = harness();
+  const node = { id: 'wait', params: {} };
+  editor.openParamEditor(request(node, {
+    param: 'present', definition: { type: 'boolean', default: true }, configured: false,
+    onLabel: '等待出现', offLabel: '等待消失',
+  }));
+  assert.equal(node.params.present, false);
+  assert.deepEqual(calls.toasts, [['present：等待消失', false]]);
+  editor.openParamEditor(request(node, {
+    param: 'present', definition: { type: 'boolean', default: true }, configured: true, value: false,
+    onLabel: '等待出现', offLabel: '等待消失',
+  }));
+  assert.equal(node.params.present, true);
+  assert.deepEqual(calls.toasts.at(-1), ['present：等待出现', false]);
+  // 没声明状态文案时退回通用说法。
+  editor.openParamEditor(request(node, { param: 'present', definition: { type: 'boolean' }, configured: true, value: true }));
+  assert.deepEqual(calls.toasts.at(-1), ['present：已关闭', false]);
 });

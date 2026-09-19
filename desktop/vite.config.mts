@@ -18,6 +18,7 @@ export default defineConfig({
         index: path.resolve(import.meta.dirname, 'src/renderer/index.html'),
         popout: path.resolve(import.meta.dirname, 'src/renderer/popout.html'),
         'vision-test': path.resolve(import.meta.dirname, 'src/renderer/vision-test.html'),
+        'live-view': path.resolve(import.meta.dirname, 'src/renderer/live-view.html'),
         canvas: path.resolve(import.meta.dirname, 'src/renderer/canvas.html'),
         'ui-showcase': path.resolve(import.meta.dirname, 'src/renderer/ui-showcase.html'),
       },

@@ -8,25 +8,27 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('workflow documents are real Dockview panels with per-document canvases', () => {
   const docking = read('src/renderer/docking.ts');
+  const dockingDocuments = read('src/renderer/docking/documents.ts');
   const shell = read('src/renderer/main.ts');
+  const lifecycleSrc = read('src/renderer/document-lifecycle.ts');
 const workspace = read('src/renderer/workspace.ts');
   const styles = read('src/renderer/styles.css');
   const html = read('src/renderer/index.html');
 
-  // 每个工作流文档一个 Dockview 面板，面板自带独立画布 iframe。
+  // 每个工作流文档一个 Dockview 面板，面板自带独立画布 iframe（渲染器在 docking/documents.ts）。
   assert.match(docking, /interface DocumentPanelHooks/);
-  assert.match(docking, /class WorkflowCanvasRenderer implements IContentRenderer/);
-  assert.match(docking, /class WorkflowDocumentTab implements ITabRenderer/);
-  assert.match(docking, /const DOCUMENT_COMPONENT = 'workflow-canvas'/);
-  assert.match(docking, /const DOCUMENT_TAB_COMPONENT = 'workflow-document-tab'/);
+  assert.match(dockingDocuments, /class WorkflowCanvasRenderer implements IContentRenderer/);
+  assert.match(dockingDocuments, /class WorkflowDocumentTab implements ITabRenderer/);
+  assert.match(dockingDocuments, /const DOCUMENT_COMPONENT = 'workflow-canvas'/);
+  assert.match(dockingDocuments, /const DOCUMENT_TAB_COMPONENT = 'workflow-document-tab'/);
   assert.match(docking, /createComponent: \(\{ name \}\) => name === DOCUMENT_COMPONENT/);
   assert.match(docking, /createTabComponent: \(\{ name \}\) => name === DOCUMENT_TAB_COMPONENT/);
-  assert.match(docking, /frame\.src = '\.\/canvas\.html\?mode=canvas'/);
-  assert.match(docking, /onFrameCreated\(this\.panelId, this\.uri, this\.frame\)/);
+  assert.match(dockingDocuments, /frame\.src = '\.\/canvas\.html\?mode=canvas'/);
+  assert.match(dockingDocuments, /onFrameCreated\(this\.panelId, this\.uri, this\.frame\)/);
   assert.match(docking, /openDocument\(uri: string, title: string\): void/);
   assert.match(docking, /closeDocument\(uri: string\): void/);
   assert.match(docking, /onDidRemoveDocument\(listener: \(uri: string\) => void\)/);
-  assert.match(docking, /export function documentUriForPanelId/);
+  assert.match(dockingDocuments, /export function documentUriForPanelId/);
   assert.match(docking, /reference === 'editor'\)\s*return documentPanels\(\)\[0\]/);
 
   // 壳层按面板登记运行时并按 iframe 路由消息，不再共享单一画布。
@@ -34,17 +36,18 @@ const workspace = read('src/renderer/workspace.ts');
   assert.match(workspace, /function registerDocumentFrame\(panelId: string, uri: string, frame: HTMLIFrameElement\): void/);
   assert.match(workspace, /function unregisterDocumentFrame\(panelId: string\): void/);
   assert.match(workspace, /function runtimeForFrame\(frame: HTMLIFrameElement\)/);
-  assert.match(shell, /function syncDocumentTabs\(\): void/);
-  assert.match(shell, /function ensureDocument\(uri: string\): WorkflowDocumentTab/);
-  assert.match(shell, /function applyDocumentState\(uri: string, tab: WorkflowDocumentTab, runtime: DocumentRuntime\): void/);
-  assert.match(shell, /async function handleDocumentRemoved\(uri: string\): Promise<void>/);
-  assert.match(shell, /docking\.onDidRemoveDocument\(\(uri\) => void handleDocumentRemoved\(uri\)\)/);
+  // 文档生命周期（打开/激活/关闭/对账）集中在 document-lifecycle.ts，main.ts 只接线。
+  assert.match(lifecycleSrc, /function syncDocumentTabs\(\): void/);
+  assert.match(lifecycleSrc, /function ensureDocument\(uri: string\): WorkflowDocumentTab/);
+  assert.match(lifecycleSrc, /function applyDocumentState\(uri: string, tab: WorkflowDocumentTab, runtime: DocumentRuntime\): void/);
+  assert.match(lifecycleSrc, /async function handleDocumentRemoved\(uri: string\): Promise<void>/);
+  assert.match(lifecycleSrc, /function reconcileDocumentPanels\(\): void/);
+  assert.match(lifecycleSrc, /async function closeWorkflowTab\(uri: string\): Promise<void>/);
+  assert.match(shell, /docking\.onDidRemoveDocument\(\(uri\) => void lifecycle\.handleDocumentRemoved\(uri\)\)/);
   assert.match(shell, /docking\.dockviewApi\.onDidActivePanelChange/);
   assert.match(shell, /documentUriForPanelId\(event\.panel\.api\.id\)/);
   assert.match(shell, /onFrameCreated: \(panelId, uri, frame\) => workspace\.registerDocumentFrame\(panelId, uri, frame\)/);
-  assert.match(shell, /onCloseRequested: \(uri\) => void closeWorkflowTab\(uri\)/);
-  assert.match(shell, /function reconcileDocumentPanels\(\): void/);
-  assert.match(shell, /async function closeWorkflowTab\(uri: string\): Promise<void>/);
+  assert.match(shell, /onCloseRequested: \(uri\) => void lifecycle\.closeWorkflowTab\(uri\)/);
 
   // 旧的自定义标签宿主与静态画布已移除。
   assert.doesNotMatch(shell, /workflowTabHost/);

@@ -37,7 +37,7 @@ test('standalone previews use browser storage and react to other preview tabs',(
   b.fire('storage',{key:'onmyoji-studio.appearance',newValue:'dark'}); assert.equal(b.win.StudioTheme.get(),'dark');
 });
 test('all production surfaces initialize theme before content and load scoped adapters',()=>{
-  const files=['src/renderer/index.html','src/renderer/popout.html','src/renderer/vision-test.html','src/renderer/canvas.html','public/runtime-log/index.html'];
+  const files=['src/renderer/index.html','src/renderer/popout.html','src/renderer/vision-test.html','src/renderer/live-view.html','src/renderer/canvas.html','public/runtime-log/index.html'];
   for(const file of files) {
     const html=fs.readFileSync(path.join(root,file),'utf8');
     assert(html.indexOf('/theme/theme.js')<html.indexOf('</head>'),file);
@@ -116,4 +116,59 @@ test('settings navigation and theme events still work after the module is moved 
   tabs[1].fire('click'); assert.equal(tabs[1]['aria-selected'],'true'); assert.equal(pages['#settings-page-appearance'].classes.has('hidden'),true);
   tabs[1].fire('keydown',{key:'End'}); assert.equal(tabs[4]['aria-selected'],'true'); assert.equal(tabs[4].focused,true);
   choices[1].checked=true; choices[1].fire('change'); assert.equal(win.StudioTheme.get(),'light'); assert.match(feedback.textContent,/浅色/);
+});
+
+
+test('every palette persists, synchronizes and retains the appropriate base styles',()=>{
+  let persisted='dark'; const listeners=new Set();
+  const host={getTheme:()=>persisted,setTheme:value=>{persisted=value;for(const fn of listeners)fn(value);return value;},onThemeChanged:fn=>{listeners.add(fn);return()=>listeners.delete(fn);}};
+  const first=themeWindow(host); const second=themeWindow(host);
+  const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
+  for(const id of ['dark','graphite','warm','contrast','light']) {
+    assert(html.includes('value="'+id+'"'));
+    assert.equal(first.win.StudioTheme.set(id),true);
+    assert.equal(second.win.StudioTheme.get(),id);
+    assert.equal(second.doc.documentElement.dataset.palette,id);
+    assert.equal(second.doc.documentElement.dataset.theme,id==='light'?'light':'dark');
+    assert.equal(second.doc.documentElement.style.colorScheme,id==='light'?'light':'dark');
+    assert.equal(themeWindow(host).win.StudioTheme.get(),id);
+    const store={}; const preview=themeWindow(null,store);
+    preview.win.StudioTheme.set(id);
+    assert.equal(themeWindow(null,store).win.StudioTheme.get(),id);
+  }
+  assert.equal(first.win.StudioTheme.set('unknown'),false);
+  assert.equal(first.win.StudioTheme.get(),'light');
+  assert.equal(themeWindow(null,{'onmyoji-studio.appearance':'removed-theme'}).win.StudioTheme.get(),'dark');
+});
+
+test('native and browser palette validation agree and native appearance stays dark or light',()=>{
+  const native=require('../dist-electron/shared/appearance.js');
+  const preview=themeWindow(null);
+  for(const id of native.appearanceThemes) {
+    assert.equal(preview.win.StudioTheme.set(id),true);
+    assert.equal(native.themeColorScheme(id),preview.doc.documentElement.style.colorScheme);
+    assert.match(native.themeBackground(id),/^#[0-9a-f]{6}$/);
+  }
+  for(const invalid of ['system','toString','__proto__',null,42]) {
+    assert.equal(native.isAppearanceTheme(invalid),false);
+    assert.equal(preview.win.StudioTheme.set(invalid),false);
+  }
+});
+
+
+test('detached Dockview roots override library chrome for both light and dark schemes',()=>{
+  const css=postcss.parse(fs.readFileSync(path.join(root,'public/theme/theme.css'),'utf8'));
+  for(const mode of ['dark','light']) {
+    const declarations=new Map();
+    css.walkRules(rule=>{
+      if(rule.selector===':root[data-theme="'+mode+'"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs)') {
+        rule.walkDecls(decl=>declarations.set(decl.prop,decl.value));
+      }
+    });
+    assert.equal(declarations.get('--dv-tabs-and-actions-container-background-color'),'var(--'+mode+'-chrome)');
+    for(const group of ['activegroup','inactivegroup']) {
+      assert.equal(declarations.get('--dv-'+group+'-visiblepanel-tab-background-color'),'var(--ui-panel)');
+      assert.equal(declarations.get('--dv-'+group+'-hiddenpanel-tab-background-color'),'var(--'+mode+'-chrome)');
+    }
+  }
 });

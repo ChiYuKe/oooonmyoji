@@ -72,26 +72,34 @@ test('segmented controls ignore repeated clicks and respect rejected changes', (
   rejected.children[1].fire('click'); assert.equal(rejected.children[0].attrs['aria-pressed'],'true');
 });
 
-test('fixed values survive the real editor mode-switch callback', () => {
+test('详情栏不再渲染参数的绑定入口（连线一律回画布）', () => {
+  // 这里断言编译产物：参数块曾经同时挂着「固定值 / 变量」模式切换和「绑定 ▾」下拉，
+  // 两者都是在详情栏里改 `{ref}`；现在连线与断线都只在画布上做，容易漏删一个，
+  // 所以钉住这条契约（要恢复入口就必须同时改这条测试）。
+  const source = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/inspector/parameter-controls.js'), 'utf8');
+  assert.equal(source.includes('valueBindingMenu'), false, '参数标题行不应再挂「绑定 ▾」下拉');
+  assert.equal(source.includes('segmentedInput('), false, '参数标题行不应再有「固定值 / 变量」模式切换');
+});
+
+test('fixed values survive binding and unbinding on the canvas', () => {
   const {UI,ctx} = harness();
   ctx.state={paramLiteralCache:{}}; ctx.clone=v=>JSON.parse(JSON.stringify(v));
   ctx.defaultValue=references.defaultValue;
   const controls=createParameterControls({state:ctx.state,clone:ctx.clone,defaultValue:references.defaultValue,UI:{ICON_SVG:{},icon:()=>null}});
   ctx.parameterLiteralCache=controls.parameterLiteralCache;
-  ctx.parameterLiteralCacheKey=controls.parameterLiteralCacheKey;
   ctx.rememberParameterLiteral=controls.rememberParameterLiteral;
   ctx.restoreParameterLiteral=controls.restoreParameterLiteral;
-  ctx.isBindingValue=controls.isBindingValue;
-  ctx.node={id:'task',params:{timeout_seconds:6}}; ctx.name='timeout_seconds'; ctx.definition={type:'number'};
-  ctx.mutate=fn=>fn(); ctx.allRefs=()=>['inputs.timeout']; ctx.variableLinks=()=>({});
-  const start=controlsSource.indexOf('(next) => mutate(() => {',controlsSource.indexOf("const mode = segmentedInput(bound"));
-  const end=controlsSource.indexOf('}));',start);
-  const onChange=vm.runInContext(controlsSource.slice(start,end+2),ctx);
-  const control=UI.segmented({value:'literal',options:[{value:'literal',label:'固定值'},{value:'binding',label:'变量'}],onChange});
+  const node={id:'task',params:{timeout_seconds:6}};
+  const definition={type:'number'};
+  // 详情栏已经没有「固定值 / 变量」模式切换：连线与断线都发生在画布上。
+  // 断线时要能恢复连线前的固定值，所以各种字面量都必须原样留在缓存里。
   for(const value of [6,12,0,false,'assets/template.png',[1,2,30,40]]) {
-    ctx.node.params.timeout_seconds=value; control.children[1].fire('click'); control.children[0].fire('click');
-    assert.deepEqual(JSON.parse(JSON.stringify(ctx.node.params.timeout_seconds)),value);
+    ctx.rememberParameterLiteral(node,'timeout_seconds',value);
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.restoreParameterLiteral(node,'timeout_seconds',definition))),value);
   }
+  // 没有缓存过就回落到定义默认值。
+  ctx.state.paramLiteralCache={};
+  assert.equal(ctx.restoreParameterLiteral({id:'other',params:{}},'timeout_seconds',{type:'number',default:3}),3);
 });
 
 test('inputs preserve zero, checkbox uses boolean, rect edits do not mutate caller data', () => {

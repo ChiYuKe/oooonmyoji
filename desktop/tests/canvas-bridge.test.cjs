@@ -18,9 +18,12 @@ function harness(mode) {
     parent: { postMessage: (message) => posted.push(message) },
     addEventListener: (name, fn) => { listeners[name] = fn; },
     dispatchEvent: () => {},
-    __topbar: { setWorkflow: (value) => posted.push({ topbar: ['workflow', value] }), setInstance: (value) => posted.push({ topbar: ['instance', value] }) },
   };
   const bridge = createCanvasBridge({ win, doc });
+  bridge.setTopbarControls({
+    setWorkflow: (value) => posted.push({ topbar: ['workflow', value] }),
+    setInstance: (value) => posted.push({ topbar: ['instance', value] }),
+  });
   return {
     bridge,
     posted,

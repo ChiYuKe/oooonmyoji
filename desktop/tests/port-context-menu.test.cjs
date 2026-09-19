@@ -63,20 +63,7 @@ function createPortMenuFor(ctx) {
   return menu;
 }
 
-/** 与其它渲染层测试一致：按函数名切片执行生产代码，不打开桌面窗口。 */
-function extractFunction(src, name) {
-  const start = src.indexOf(`  function ${name}(`);
-  assert.notEqual(start, -1, `找不到函数 ${name}`);
-  const open = src.indexOf('{', start);
-  let depth = 0;
-  for (let index = open; index < src.length; index += 1) {
-    if (src[index] === '{') depth += 1;
-    if (src[index] === '}') depth -= 1;
-    if (depth === 0) return src.slice(start, index + 1);
-  }
-  throw new Error(`函数 ${name} 未闭合`);
-}
-
+/** 菜单函数已全部迁到编译产物：按名字取工厂实例或 canvas-helpers 的导出。 */
 function runFunction(name, context) {
   if (MIGRATED_PORT_MENU.has(name)) return createPortMenuFor(context)[name];
   if (name === 'openPortContextMenu') {
@@ -87,8 +74,7 @@ function runFunction(name, context) {
       variableCardWidth: 168, variableCardHeight: 58,
     }).openPortContextMenu;
   }
-  vm.runInContext(extractFunction(source, name), context);
-  return context[name];
+  throw new Error(`未迁移的面板菜单函数：${name}`);
 }
 
 function contextWith(stubs = {}) {
@@ -541,7 +527,10 @@ test('五类端口都接入了右键菜单，UE 交互（常驻搜索、子菜�
   assert.match(overlaysSource, /button\.classList\.add\('has-submenu'\)/);
   assert.match(overlaysSource, /chevron\.className = 'menu-chevron'/);
   assert.match(overlaysSource, /el\('div', 'context-menu context-menu-sub'\)/);
-  assert.match(overlaysSource, /if \(item\.children && item\.children\.length\) \{ for \(const child of item\.children\) walk\(child\); return; \}/);
+  assert.match(overlaysSource, /for \(const child of item\.children\) walk\(child, path\); return; \}/);
+  // 打平搜索的结果带父级标签（「第 1 项 · 复制 置信度」），否则同名子项分不清来源
+  assert.match(overlaysSource, /const path = prefix && label \? `\$\{prefix\} · \$\{label\}` : \(label \|\| prefix\);/);
+  assert.match(overlaysSource, /for \(const item of items\) walk\(item, ''\);/);
   // UE 风格：端口菜单提供创建变量卡片（Get）
   assert.match(portMenuSource, /创建变量卡片（Get）/);
   // 提升为变量：创建输入定义 + 绑定端口 + 画布变量卡片自动连线

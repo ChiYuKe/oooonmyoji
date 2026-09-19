@@ -116,7 +116,7 @@ test('empty variable list skips the redundant heading and explains the single ad
   assert(/id="add-variable-button"[^>]*>[\s\S]*?<span>变量<\/span><\/button>/.test(html));
 });
 
-test('eye toggles public state for variables and stays fixed for inputs', () => {
+test('eye toggles public state for both variables and inputs', () => {
   const h = harness([{name: 'v_1', scope: 'variables', type: 'integer', public: false}, {name: 'new_input', scope: 'inputs', type: 'integer', public: true}]);
   const eye = (row) => row.children.find((item) => item.className.includes('variable-eye'));
   assert(eye(h.rows()[0]).className.includes('off'));
@@ -124,9 +124,11 @@ test('eye toggles public state for variables and stays fixed for inputs', () => 
   eye(h.rows()[0]).events.click({stopPropagation() {}});
   assert.equal(h.commands[0][0], 'setVariablePublic');
   assert.equal(h.commands[0][1].name, 'v_1'); assert.equal(h.commands[0][1].scope, 'variables'); assert.equal(h.commands[0][1].public, true);
-  assert(eye(h.rows()[1]).className.includes('fixed'));
-  assert(!eye(h.rows()[1]).className.includes('toggle'));
-  assert.equal(eye(h.rows()[1]).events.click, undefined);
+  assert(eye(h.rows()[1]).className.includes('toggle'));
+  eye(h.rows()[1]).events.click({stopPropagation() {}});
+  assert.deepEqual(h.commands[1], ['setVariablePublic', {name:'new_input',scope:'inputs',public:false}]);
+  eye(h.rows()[1]).events.keydown({key:'Enter',preventDefault(){},stopPropagation(){}});
+  assert.equal(h.commands.length, 3);
 });
 
 test('已连接画布的变量在列表里标记出来，未连接的没有标记', () => {

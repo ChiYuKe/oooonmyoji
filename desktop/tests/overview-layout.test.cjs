@@ -2,9 +2,8 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const vm=require('node:vm');
-const {stripTypeScriptTypes}=require('node:module');
-const source=fs.readFileSync(path.join(__dirname,'../src/renderer/overview.ts'),'utf8');
+const {renderOverviewCard}=require('../dist-test-renderer/renderer/overview/card.js');
+
 function setup(locked=false){
  class E {
   constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.events={};this.attrs={};}
@@ -14,15 +13,22 @@ function setup(locked=false){
   addEventListener(k,v){this.events[k]=v;}
  }
  const calls=[];
- const context=vm.createContext({document:{createElement:t=>new E(t)},overviewSelection:[],overviewRun:locked?{active:true}:null,
-  overviewRunItem:()=>null,overviewWorkflowName:w=>w.name,overviewWorkflowKind:()=> '工作流',
-  overviewWorkflowValidation:()=>({className:'valid',label:'已校验',title:'校验通过'}),
-  overviewWorkflowUpdated:()=> '更新 09/14 03:30',overviewConfiguredInputs:()=>false,
-  overviewStatusLabel:()=> '未选择',updateOverviewSelection:(...a)=>calls.push(['select',...a]),
-  openOverviewConfiguration:()=>calls.push(['configure']),openOverviewWorkflow:()=>calls.push(['open'])});
- const start=source.indexOf('function renderOverviewCard(');
- vm.runInContext(stripTypeScriptTypes(source.slice(start,source.indexOf('\n}\n',start)+2)),context);
- return {card:context.renderOverviewCard({rel:'workflows/example.json',name:'很长的脚本名',description:'说明',inputs:[],updatedAt:1}),calls};
+ const deps={
+  document:{createElement:t=>new E(t)},
+  selectedIndex:()=>-1,
+  isRunning:()=>locked,
+  runItem:()=>null,
+  workflowName:w=>w.name,
+  workflowKind:()=> '工作流',
+  workflowValidation:()=>({className:'valid',label:'已校验',title:'校验通过'}),
+  workflowUpdated:()=> '更新 09/14 03:30',
+  configuredInputs:()=>false,
+  statusLabel:()=> '未选择',
+  updateSelection:(...a)=>calls.push(['select',...a]),
+  openConfiguration:()=>calls.push(['configure']),
+  openWorkflow:()=>calls.push(['open']),
+ };
+ return {card:renderOverviewCard(deps,{rel:'workflows/example.json',name:'很长的脚本名',description:'说明',inputs:[],updatedAt:1}),calls};
 }
 test('overview separates metadata from actions and retains callbacks',()=>{
  const {card,calls}=setup();

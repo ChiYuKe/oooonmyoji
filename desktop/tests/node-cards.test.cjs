@@ -308,7 +308,7 @@ test('summary preserves zero settings; shared styling covers both themes without
   const {ctx}=harness();assert.equal(ctx.nodeCardSummary({type:'task',params:{timeout_seconds:0,threshold:0,present:false}}),'等待消失 · 超时 0s · 阈值 0%');
   assert.match(ctx.nodeCardSummary({type:'parallel'}),/并行/);
   const css=fs.readFileSync(path.join(root,'node-cards.css'),'utf8');require('postcss').parse(css);
-  assert.match(css,/:root\[data-theme="light"\]/);assert.match(css,/filter: none/);assert.doesNotMatch(css,/drop-shadow|brightness|box-shadow/);
+  assert.doesNotMatch(css,/data-theme="(?:light|dark)"/);assert.match(css,/filter: none/);assert.doesNotMatch(css,/drop-shadow|brightness|box-shadow/);
   const entry=fs.readFileSync(path.join(__dirname,'../src/canvas/editor.ts'),'utf8');
   assert.equal(entry.includes("'/legacy/workflow-editor.js'"),false,'画布已迁入 TS，不应再以经典脚本加载');
   assert(entry.includes('createNodeCards()'));
@@ -324,6 +324,7 @@ function rowHarness(options={}) {
   const renderer=createNodeCardRenderer({
     state:ctx.state,svgEl:built.svgEl,nodeCards:ctx.NodeCards,
     position:()=>({x:0,y:0}),nodeHeight:(node)=>ctx.nodeHeight(node),
+    nodeRowHeight:options.nodeRowHeight,
     subWorkflowRef:()=>null,templatePreview:()=>null,compositeSubtitle:()=>'执行子节点',
     variableDisplayNameOf:(scope,name,fallback)=>ctx.variableDisplayNameOf(scope,name,fallback),
     decoratorLabel:()=>'Retry · 3 次',nodeVariablePins:(node)=>ctx.nodeVariablePins(node),
@@ -339,6 +340,8 @@ function rowHarness(options={}) {
     preview:{x:174,y:56,width:72,height:30},
     compactValue:ctx.compactValue,
     paramRowInfo:info,
+    nodeIssueInfo:options.nodeIssueInfo,
+    issueTitle:options.issueTitle,
     toggleParamRows:(nodeId)=>calls.toggles.push(nodeId),
     openParamEditor:(request)=>calls.editors.push(request),
     paramRowMenuItems:(nodeId,pin)=>['row-menu',pin.param],
@@ -402,8 +405,13 @@ test('参数行点击分派：值区打开编辑器、勾选框切换、引脚�
   assert.equal(pins.length,3);
   pins[1].events.pointerdown[0]({stopPropagation:()=>{},altKey:false});
   assert.equal(pins[1].events.contextmenu.length,1);
-  // 任务节点只有输入端口（输出由后续连线表示），端口命中区不受参数行影响。
-  assert.equal(byClass(card,'port-out').length,0);
+  // 任务节点没有执行流输出（叶子），但右侧带一个「节点输出引用」口。
+  const referencePorts=byClass(card,'port-out-reference');
+  assert.equal(byClass(card,'port-out').length,1);
+  assert.equal(referencePorts.length,1);
+  assert.equal(referencePorts[0].attrs.cx,'260','输出口贴在卡片右侧');
+  assert.equal(referencePorts[0].attrs.cy,'16','输出口在表头中线');
+  assert.equal(referencePorts[0].events.pointerdown.length,1);
   assert.equal(byClass(card,'port-in')[0].events.pointerdown.length,1);
 });
 const typeRowNode={id:'types',type:'task',name:'新类型参数',action:'studio.preview_types',params:{realm_popup_close_point:{x:960,y:540},tint:'#ff8c3a',wait_for:'any',stable_seconds:1.5,keycode:'BACK'},pins:[
@@ -472,4 +480,211 @@ test('折叠箭头显示隐藏数量并回调切换，未接入信息时不渲�
   legacyRenderer.renderNode(plainLayer,rowNode);
   assert.equal(byClass(plainLayer.children[0],'param-rows-toggle').length,0);
   assert.equal(byClass(plainLayer.children[0],'param-row-label').length,3);
+});
+// 固定卡片：清单声明了 card.rows 的动作，端点由清单固定，行样式变成「标签一行 + 值一行」。
+const fixedCardNode={id:'wait',type:'task',name:'等待战斗结束',action:'vision.wait_template',params:{template:'assets/templates/battle.png',present:true},pins:[
+  {param:'template',label:'模板',type:'asset',configured:true,value:'assets/templates/battle.png',definition:{type:'asset',required:true}},
+  {param:'timeout_seconds',label:'超时',type:'duration',configured:false,definition:{type:'duration',required:true,min:0}},
+  {param:'present',label:'存在性',type:'boolean',configured:true,value:true,definition:{type:'boolean',default:true},onLabel:'等待出现',offLabel:'等待消失'},
+  {param:'roi',label:'识别区域',type:'rect',configured:true,value:[60,120,200,80],definition:{type:'rect'}},
+  {param:'threshold',label:'匹配阈值',type:'number',configured:false,definition:{type:'number',default:0.85,min:0,max:1}},
+  {param:'scale_search',label:'多尺度搜索',type:'boolean',configured:false,definition:{type:'boolean',default:false},onLabel:'启用',offLabel:'关闭'},
+]};
+// 固定长度数组（随机间隔）：卡片上拆成两个输入格，各自显示自己的值。
+const tupleCardNode={id:'tap',type:'task',name:'点击挑战按钮',action:'input.tap_match',params:{random_interval:[0.2,0.6]},pins:[
+  {param:'random_interval',label:'随机间隔（秒）',type:'array',configured:true,value:[0.2,0.6],
+    definition:{type:'array',items:{type:'duration',min:0},min_items:2,max_items:2,default:[0,0]}},
+  {param:'disappeared_states',label:'消失状态列表',type:'array',configured:false,
+    definition:{type:'array',items:{type:'object'},default:[]}},
+]};
+test('固定长度数组在固定卡片上拆成并排的输入格',()=>{
+  const {ctx,Element,calls,renderer}=rowHarness({nodeRowHeight:()=>40,paramRowInfo:()=>({expanded:true,total:2,hidden:0,fixed:true,twoLine:true})});
+  ctx.nodeHeight=(node)=>96+(node.pins||[]).length*40;
+  const layer=new Element('g');
+  renderer.renderNode(layer,tupleCardNode);
+  const card=layer.children[0];
+  // 两个输入格：宽度 = (226 - 4) / 2，中间留 4px 间隔，几何与热区所在行一致。
+  // 两个小格挤在一个值框里：每格 (111 - 4) / 2 = 53.5，整行宽度仍不超过一格。
+  const cells=byClass(card,'param-row-cell');
+  assert.equal(cells.length,2);
+  assert.deepEqual(cells.map(node=>node.attrs.x),['22','79.5']);
+  assert.deepEqual(cells.map(node=>node.attrs.width),['53.5','53.5']);
+  assert.deepEqual(cells.map(node=>node.attrs.y),['115','115']);
+  assert.deepEqual(cells.map(node=>node.attrs.height),['18','18']);
+  assert.deepEqual(cells.map(node=>node.attrs.class.includes('goes-inspector')),[false,false]);
+  // 每格一个值文字：0.2 / 0.6，各自贴在自己的格子里。
+  const values=byClass(card,'param-row-value');
+  assert.deepEqual(values.map(node=>node.textContent),['0.2','0.6','[0 项]']);
+  assert.deepEqual(values.slice(0,2).map(node=>node.attrs.x),['31','88.5']);
+  assert.deepEqual(values.slice(0,2).map(node=>node.attrs['text-anchor']),['start','start']);
+  assert.deepEqual(values.slice(0,2).map(node=>node.children[0].textContent),['随机间隔（秒） 第 1 项','随机间隔（秒） 第 2 项']);
+  // 整行一个热区（点哪一格都开同一个行内编辑器），且不画 ›：它是直接在卡片上改的。
+  const hits=byClass(card,'param-row-hit');
+  assert.deepEqual(hits.map(node=>node.attrs['data-param']),['random_interval','disappeared_states']);
+  assert.deepEqual(hits.map(node=>node.attrs.width),['111','111'],'热区就是一格值框：数组的两个小格都在里面');
+  assert.equal(byClass(card,'param-row-caret').length,1,'只有去详情栏的对象数组画 ›');
+  assert.deepEqual(hits.map(node=>node.attrs.class.includes('kind-picker')),[false,true],'去详情栏的行是手型光标');
+  hits[0].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:40,clientY:120});
+  assert.deepEqual(calls.editors.map(request=>request.pin.param),['random_interval']);
+  assert.equal(calls.editors[0].valueAlign,'left');
+  // 长度不定的对象数组仍然是一个虚线框、点击去详情栏。
+  const complexField=byClass(card,'param-row-field').find(node=>node.attrs.class.includes('goes-inspector'));
+  assert.ok(complexField,'长度不定的数组仍是虚线框');
+  assert.equal(complexField.attrs.x,'22');
+  assert.equal(complexField.attrs.width,'111');
+  // 数组的小格子挤在同一格值框里：整行宽度不超过普通值框。
+  assert.ok(Number(cells[0].attrs.x) + cells.reduce((sum, node) => sum + Number(node.attrs.width), 0) + 4 <= 22 + 111);
+});
+test('校验错误的行标红：参数级标在那一行，节点级标在卡片',()=>{
+  const {ctx,Element,renderer}=rowHarness({nodeRowHeight:()=>40,paramRowInfo:()=>({expanded:true,total:6,hidden:0,fixed:true,twoLine:true}),
+    nodeIssueInfo:(node)=>node.id==='wait'?{
+      node:[{message:'Task 必须定义 Action'}],
+      params:new Map([['timeout_seconds',[{message:"'timeout_seconds' is a required property"}]]]),
+    }:null,issueTitle:(items)=>items.map((item)=>item.message).join('\n')});
+  ctx.nodeHeight=(node)=>96+(node.pins||[]).length*40;
+  const layer=new Element('g');
+  renderer.renderNode(layer,fixedCardNode);
+  const card=layer.children[0];
+  // 只有出错的那一行标红：标签 error、值框 error、热区 invalid、引脚 invalid。
+  const labels=byClass(card,'param-row-label');
+  assert.deepEqual(labels.map(node=>node.attrs.class.includes('error')),[false,true,false,false,false,false]);
+  assert.deepEqual(byClass(card,'param-row-field').map(node=>node.attrs.class.includes('error')),[false,true,false,false,false,false]);
+  assert.deepEqual(byClass(card,'variable-port-hit').length,6);
+  assert.deepEqual(byClass(card,'port-variable').map(node=>node.attrs.class.includes('invalid')),[false,true,false,false,false,false]);
+  const hits=byClass(card,'param-row-hit');
+  assert.deepEqual(hits.map(node=>node.attrs.class.includes('invalid')),[false,true,false,false,false,false]);
+  // 出错行的悬停提示给出校验原文。
+  assert.match(hits[1].children.map(child=>child.textContent).join(''),/is a required property/);
+  // 节点级错误：卡片描边 classes.node-invalid + 标题旁红点 + 标题悬停带上原因。
+  assert.equal(card.attrs.class.includes('node-invalid'),true);
+  assert.equal(byClass(card,'node-error-dot').length,1);
+  assert.equal(byClass(card,'node-error-dot')[0].attrs.r,'4');
+  const groupTitle=card.children.find((child)=>child.tag==='title');
+  assert.match(groupTitle.textContent,/Task 必须定义 Action/);
+});
+
+test('固定卡片渲染成双行行样式：值行是可见输入框、无折叠箭头、布尔带状态文案',()=>{
+  const {ctx,Element,calls,renderer}=rowHarness({nodeRowHeight:()=>40,paramRowInfo:()=>({expanded:true,total:6,hidden:0,fixed:true,twoLine:true})});
+  ctx.nodeHeight=(node)=>96+(node.pins||[]).length*40;
+  const layer=new Element('g');
+  renderer.renderNode(layer,fixedCardNode);
+  const card=layer.children[0];
+  assert.equal(byClass(card,'card-body')[0].attrs.height,String(96+6*40));
+  assert.equal(ctx.nodeHeight(fixedCardNode),96+6*40);
+  // 六个端点按清单顺序，标签用清单里的显示名。
+  assert.deepEqual(byClass(card,'param-row-label').map(node=>node.children[0].textContent),
+    ['模板','超时','存在性','识别区域','匹配阈值','多尺度搜索']);
+  assert.deepEqual(byClass(card,'param-row-rule').map(node=>node.attrs.y1),['96','136','176','216','256','296']);
+  assert.deepEqual(byClass(card,'port-variable').map(node=>node.attrs.cy),['116','156','196','236','276','316']);
+  // 标签在上、值在下，值在输入框内左对齐。
+  const labels=byClass(card,'param-row-label');
+  const values=byClass(card,'param-row-value');
+  assert.deepEqual(labels.map(node=>node.attrs.y),['109','149','189','229','269','309']);
+  assert.deepEqual(values.map(node=>node.attrs.y),['127','167','207','247','287','327']);
+  assert.deepEqual(values.map(node=>node.attrs['text-anchor']),['start','start','start','start','start','start']);
+  // 模板只显示文件名，识别区域显示四坐标，未配置的走定义默认值。
+  assert.deepEqual(values.map(node=>node.textContent),
+    ['battle.png','未设置','等待出现','60,120 200×80','0.85','关闭']);
+  // 非布尔行把悬停提示换成完整取值；布尔行的提示就是它的状态文案。
+  assert.deepEqual(values.map(node=>node.children[0].textContent),
+    ['template = assets/templates/battle.png（点击选择模板图）','timeout_seconds：未设置（点击编辑）',
+      '等待出现','roi = 60, 120 200×80','threshold：默认值 0.85（点击编辑）','关闭'])
+  assert.equal(byClass(card,'param-row-swatch').length,0);
+  // 两个布尔行：勾选框在值行框内左侧，勾选的那个画对勾；框按文字光学中心对齐而不是压在基线上。
+  assert.deepEqual(byClass(card,'param-row-check').map(node=>node.attrs.x),['31','31']);
+  assert.deepEqual(byClass(card,'param-row-check').map(node=>node.attrs.y),['198','318']);
+  assert.equal(byClass(card,'param-row-check')[0].attrs.class.includes('checked'),true);
+  assert.equal(byClass(card,'param-row-check')[1].attrs.class.includes('checked'),false);
+  assert.equal(byClass(card,'param-row-check-mark').length,1);
+  // 每行的值都是一个可见的输入框/控件：与热区同矩形，文字在内边距处左对齐。
+  const fields=byClass(card,'param-row-field');
+  assert.equal(fields.length,6);
+  assert.deepEqual(fields.map(node=>node.attrs.y),['115','155','195','235','275','315']);
+  assert.deepEqual(fields.map(node=>node.attrs.height),['18','18','18','18','18','18']);
+  // 值区是一套固定网格：单个值框占一格（111），所有行同宽。
+  assert.deepEqual(fields.map(node=>node.attrs.width),['111','111','111','111','111','111']);
+  assert.equal(fields[0].attrs.rx,'4');
+  assert.deepEqual(fields.map(node=>node.attrs.class.replace('param-row-field','').trim()),
+    ['opens-picker','','','opens-picker','','']);
+  // 需要展开选择器/详情栏的行给一个 › 提示（模板、识别区域、超时不算）。
+  assert.equal(byClass(card,'param-row-caret').length,2);
+  assert.deepEqual(byClass(card,'param-row-caret').map(node=>node.textContent),['›','›']);
+  assert.deepEqual(byClass(card,'param-row-caret').map(node=>node.attrs.x),['124','124'],'› 贴在一格值框的右边缘');
+  // 值文字贴在框内边距（9px）处，左对齐。
+  assert.deepEqual(values.map(node=>node.attrs.x),['31','31','48','31','31','48']);
+  // 热区就是值行框本身（标签行不再是编辑热区），每行一个。
+  const hits=byClass(card,'param-row-hit');
+  assert.equal(hits.length,6);
+  assert.deepEqual(hits.map(node=>node.attrs.y),['115','155','195','235','275','315']);
+  assert.deepEqual(hits.map(node=>node.attrs.height),['18','18','18','18','18','18']);
+  assert.deepEqual(hits.map(node=>node.attrs.width),['111','111','111','111','111','111'],'热区与值框同宽');
+  assert.deepEqual(hits.map(node=>node.attrs['data-param']),
+    ['template','timeout_seconds','present','roi','threshold','scale_search']);
+  // 需要弹选择器的行光标是手型。
+  assert.deepEqual(hits.map(node=>node.attrs.class.includes('kind-picker')),[true,false,false,true,false,false]);
+  assert.equal(fields[0].events.pointerdown,undefined,'值行框本身不吃事件，命中由热区负责');
+  // 资源与区域的行点开也走卡片内编辑（菜单/浮层由编辑器决定），不再直接跳详情栏。
+  hits[0].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:40,clientY:110});
+  hits[3].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:40,clientY:230});
+  assert.deepEqual(calls.editors.map(request=>request.pin.param),['template','roi']);
+  // 双行卡片的值文字在框内左对齐，浮层要按同一种对齐打开。
+  assert.deepEqual(calls.editors.map(request=>request.valueAlign),['left','left']);
+  assert.deepEqual(calls.editors.map(request=>request.rect),[
+    {x:22,y:115,width:111,height:18},{x:22,y:235,width:226,height:18},
+  ],'模板框就是一格；区域要开四个坐标输入，浮层横跨整行值区');
+  assert.equal(calls.inspectors.length,0);
+  // 固定卡片没有折叠箭头，摘要报出端点数量。
+  assert.equal(byClass(card,'param-rows-toggle').length,0);
+  assert.equal(byClass(card,'node-meta')[0].textContent,'6 项端点 · 卡片直接设置');
+  // 视觉对齐：表头说明行、端点标签、值行输入框共用同一条左基准线（22），
+  // 值文字在框内缩进内边距（31），标题跟在 20px 图标后单独一列（39）。
+  assert.deepEqual(
+    ['card-kicker','card-description','node-meta'].map(name=>byClass(card,name)[0].attrs.x),
+    ['22','22','22'],'表头说明行与参数列对齐');
+  assert.deepEqual(byClass(card,'param-row-label').map(node=>node.attrs.x),['22','22','22','22','22','22']);
+  assert.deepEqual(fields.map(node=>node.attrs.x),['22','22','22','22','22','22']);
+  assert.deepEqual(values.map(node=>node.attrs.x),['31','31','48','31','31','48']);
+  assert.equal(byClass(card,'card-title')[0].attrs.x,'39');
+  // 引脚仍是连线端点，类型 class 跟着参数类型走。
+  assert.deepEqual(byClass(card,'port-variable').map(node=>node.attrs.class.split(' ').filter(name=>name.startsWith('type-'))[0]),
+    ['type-asset','type-duration','type-boolean','type-rect','type-number','type-boolean']);
+  assert.equal(byClass(card,'variable-port-hit').length,6);
+  assert.equal(byClass(card,'port-out').length,1,'任务卡右侧有节点输出引用口');
+  assert.equal(byClass(card,'port-out-reference')[0].attrs.cx,'260');
+});
+
+
+test('task categories have distinct, stable identities and reach the rendered SVG',()=>{
+  const {nodeCardCategory}=require('../dist-test-renderer/canvas/render/node-card.js');
+  const examples=[['vision.detect_state','vision'],['vision.match_template','vision'],['vision.wait_template','wait'],['input.tap_match','input'],['workflow.run','workflow'],['core.sleep','wait'],['core.log','utility'],['plugin.custom','custom']];
+  const {ctx,Element}=harness();
+  for(const [action,category] of examples) {
+    const node={id:'test',type:'task',action,params:{}};
+    assert.equal(nodeCardCategory(node),category);
+    const layer=new Element('g');ctx.renderNode(layer,node);
+    assert(layer.children[0].attrs.class.includes('category-'+category));
+  }
+  assert.equal(nodeCardCategory({type:'sequence'}),'control');
+  const css=require('postcss').parse(fs.readFileSync(path.join(root,'node-cards.css'),'utf8'));
+  const local=new Map();
+  css.walkRules(rule=>{if(rule.selector==='.studio-card')rule.walkDecls(d=>local.set(d.prop,d.value));});
+  for(const token of ['--card-bg','--card-head','--card-text','--card-muted','--success','--danger','--warning']) assert(local.has(token),token+' must be owned by cards, not inherited from the theme');
+  // 卡面跟随当前界面主题；分类色落在标题带上（否则分类看不出来）。两者都要在 .studio-card 里声明。
+  assert.match(local.get('--card-bg'),/var\(--ui-panel/,'卡面底色应跟随界面主题');
+  assert.match(local.get('--card-head'),/var\(--ui-surface/,'标题带底色应跟随界面主题');
+  assert.match(local.get('--card-head'),/var\(--card-tint/,'标题带应带分类色，分类才看得出来');
+  // 分类只能改 --card-tint：卡面与标题带由 .studio-card 统一决定，
+  // 否则一屏几十张卡会各自整块跳色（配色太花）。
+  let tinted=0;
+  css.walkRules(rule=>{
+    if(rule.selector==='.studio-card' || !rule.selector.includes('.studio-card')) return;
+    if(!/\.(?:type|category)-|\.variable-card/.test(rule.selector)) return;
+    if(/:root|\.card-|\.run-|\.node-|\.instance-|\.param-|\.port-/.test(rule.selector)) return;
+    const decls=new Map(); rule.walkDecls(d=>decls.set(d.prop,d.value));
+    assert(!decls.has('--card-bg'),rule.selector+' 不应改卡面底色');
+    assert(!decls.has('--card-head'),rule.selector+' 不应改标题带底色');
+    assert(decls.has('--card-tint'),rule.selector+' 应只声明分类色');
+    tinted+=1;
+  });
+  assert(tinted>=10,'分类色规则应覆盖各节点类型与类别');
 });

@@ -1,22 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const vm = require('node:vm');
-
-
-function extractFunction(source, name) {
-  const start = source.indexOf(`  function ${name}(`);
-  assert.notEqual(start, -1, `找不到函数 ${name}`);
-  const open = source.indexOf('{', start);
-  let depth = 0;
-  for (let index = open; index < source.length; index += 1) {
-    if (source[index] === '{') depth += 1;
-    if (source[index] === '}') depth -= 1;
-    if (depth === 0) return source.slice(start, index + 1);
-  }
-  throw new Error(`函数 ${name} 未闭合`);
-}
 
 function harness() {
   let context;

@@ -9,10 +9,11 @@
   ],
   "root": "root",
   "inputs": {
-    "子工作流": {
-      "type": "string",
-      "default": "活动副本.json",
-      "display_name": "子工作流"
+    "inputs_v_e9e2ee318a1e4a84abbe42e1d9a77690": {
+      "type": "integer",
+      "min": 1,
+      "description": "循环执行次数。",
+      "default": 9999
     }
   },
   "variables": {},
@@ -29,10 +30,12 @@
       "type": "task",
       "action": "workflow.run",
       "params": {
-        "inputs": {},
-        "workflow": {
-          "ref": "inputs.子工作流"
-        }
+        "inputs": {
+          "v_e9e2ee318a1e4a84abbe42e1d9a77690": {
+            "ref": "inputs.inputs_v_e9e2ee318a1e4a84abbe42e1d9a77690"
+          }
+        },
+        "workflow": "活动副本.json"
       }
     }
   ],
@@ -48,18 +51,14 @@
   },
   "_variableCards": {
     "card_1": {
-      "name": "子工作流",
+      "name": "inputs_v_e9e2ee318a1e4a84abbe42e1d9a77690",
       "scope": "inputs",
-      "x": -224,
-      "y": 208
+      "x": -208,
+      "y": 344
     }
   },
   "_variableLinks": {
-    "capture:workflow": "card_1"
+    "capture:inputs.v_e9e2ee318a1e4a84abbe42e1d9a77690": "card_1"
   },
-  "_inputParams": {
-    "capture": [
-      "workflow"
-    ]
-  }
+  "_inputParams": {}
 }

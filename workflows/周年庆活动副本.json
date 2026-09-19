@@ -1,7 +1,7 @@
 {
   "schema_version": 4,
   "id": "activity_loop",
-  "version": "4.3.0",
+  "version": "4.4.0",
   "description": "活动副本循环：按页面状态处理挑战页和结算页，点击后确认返回挑战页；运行轮数由输入参数控制。",
   "resolution": [
     1920,
@@ -9,14 +9,25 @@
   ],
   "root": "root",
   "inputs": {
-    "运行轮数": {
+    "v_e9e2ee318a1e4a84abbe42e1d9a77690": {
       "type": "integer",
       "default": 9999,
       "min": 1,
-      "description": "循环执行次数。"
+      "description": "循环执行次数。",
+      "display_name": "运行轮数",
+      "_autoPublished": true
     }
   },
-  "variables": {},
+  "variables": {
+    "v_10a5b9e6f0724cae9fddae2b177a86af": {
+      "type": "integer",
+      "default": 9999,
+      "min": 1,
+      "description": "循环执行次数。",
+      "display_name": "运行轮数",
+      "initial_from": "v_e9e2ee318a1e4a84abbe42e1d9a77690"
+    }
+  },
   "nodes": [
     {
       "id": "root",
@@ -36,7 +47,7 @@
         {
           "type": "repeat",
           "count": {
-            "ref": "inputs.运行轮数"
+            "ref": "variables.v_10a5b9e6f0724cae9fddae2b177a86af"
           }
         }
       ],
@@ -59,12 +70,12 @@
         "states": [
           {
             "name": "challenge",
-            "template": "assets/templates/task_1-template.png",
+            "template": "assets/templates/souls/souls-challenge.png",
             "roi": [
-              1482,
-              731,
-              438,
-              349
+              1621,
+              791,
+              299,
+              289
             ],
             "threshold": 0.88
           },
@@ -134,7 +145,25 @@
         "revalidate": true,
         "verify_gone": true,
         "verify_timeout_seconds": 8,
-        "random_offset": 25
+        "random_offset": 25,
+        "disappeared_states": [
+          {
+            "name": "settlement",
+            "template": "assets/templates/task_3-template.png",
+            "roi": [
+              700,
+              950,
+              520,
+              130
+            ],
+            "threshold": 0.88
+          }
+        ],
+        "disappeared_state_timeout_seconds": 3,
+        "random_interval": [
+          0.2,
+          0.5
+        ]
       },
       "name": "点击挑战按钮"
     },
@@ -187,12 +216,12 @@
         "disappeared_states": [
           {
             "name": "challenge",
-            "template": "assets/templates/task_1-template.png",
+            "template": "assets/templates/souls/souls-challenge.png",
             "roi": [
-              1482,
-              731,
-              438,
-              349
+              1621,
+              791,
+              299,
+              289
             ],
             "threshold": 0.88
           }
@@ -210,14 +239,14 @@
       "type": "task",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/task_1-template.png",
+        "template": "assets/templates/souls/souls-challenge.png",
         "present": true,
         "timeout_seconds": 15,
         "roi": [
-          1482,
-          731,
-          438,
-          349
+          1621,
+          791,
+          299,
+          289
         ],
         "threshold": 0.88
       },
@@ -269,12 +298,12 @@
         "disappeared_states": [
           {
             "name": "challenge",
-            "template": "assets/templates/task_1-template.png",
+            "template": "assets/templates/souls/souls-challenge.png",
             "roi": [
-              1482,
-              731,
-              438,
-              349
+              1621,
+              791,
+              299,
+              289
             ],
             "threshold": 0.88
           }
@@ -288,14 +317,14 @@
       "type": "task",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/task_1-template.png",
+        "template": "assets/templates/souls/souls-challenge.png",
         "present": true,
         "timeout_seconds": 15,
         "roi": [
-          1482,
-          731,
-          438,
-          349
+          1621,
+          791,
+          299,
+          289
         ],
         "threshold": 0.88
       },

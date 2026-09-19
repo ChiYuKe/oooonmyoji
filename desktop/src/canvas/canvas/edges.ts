@@ -46,14 +46,18 @@ export interface EdgesDeps {
   nodeById(id: string): EdgeNode | null;
   position(node: EdgeNode): EdgePoint;
   nodeHeight(node: EdgeNode): number;
+  /** 每个节点自己的参数行高（固定卡片用双行行样式）。 */
+  nodeRowHeight?(node: EdgeNode): number;
   instanceRunCards(): EdgeRunCard[];
   instanceRunInputPosition(card: EdgeRunCard, index: number): EdgePoint;
   variableCardList(): EdgeVariableCard[];
-  nodeVariablePins(node: EdgeNode): Array<{ param: string; variable: string; scope: 'inputs' | 'variables' }>;
+  nodeVariablePins(node: EdgeNode): Array<{ param: string; variable: string; scope: 'inputs' | 'variables'; value?: unknown }>;
   variablePinPosition(node: EdgeNode, index: number): EdgePoint;
   disconnect(parentId: string, childId: string): void;
   disconnectVariableFromPin(nodeId: string, param: string): void;
   disconnectVariableFromInstanceInput(nodeId: string, runIndex: number, param: string): void;
+  /** 断开参数上的节点输出引用（引用边 Alt 点击）。 */
+  disconnectReferenceFromPin(nodeId: string, param: string): void;
   mutate(fn: () => void): void;
   requestInspector(selection?: unknown): void;
   render(): void;
@@ -66,6 +70,8 @@ export interface EdgesDeps {
   variableCardWidth: number;
   variableCardPortY: number;
   variablePinX: number;
+  /** 任务卡右侧输出口在节点内的 Y 偏移（表头中线）。 */
+  taskOutputPortY: number;
 }
 
 export interface CanvasEdges {
@@ -75,9 +81,30 @@ export interface CanvasEdges {
   renderInstanceRunEdge(layer: any, card: EdgeRunCard): void;
   renderConnection(layer: any): void;
   renderVariableConnection(layer: any): void;
+  renderReferenceConnection(layer: any): void;
+  renderReferenceEdges(layer: any): void;
+  referencePortPosition(node: any): EdgePoint;
 }
 
 const RUN_STATUSES = ['running', 'succeeded', 'matched', 'failed', 'not_matched', 'branch_miss', 'cancelled'];
+
+/** 引用边色调数量（配色见 workflow-editor.css 的 `.reference-edge.tone-N`）。 */
+export const REFERENCE_EDGE_TONES = 10;
+
+/** 引用文本 `nodes.<节点>.output[.<字段>]` 里的字段部分；整体输出时记作 output。 */
+export function referenceEdgeField(ref: string): string {
+  return ref.replace(/^nodes\.[^\.]+\.output\.?/, '') || 'output';
+}
+
+/**
+ * 引用边的色调下标：按源输出字段取色，于是**不同变量拉出来的线颜色不同**，
+ * 同一个变量在所有卡片之间的连线颜色一致（同一字段恒等）。
+ */
+export function referenceEdgeTone(field: string): number {
+  let hash = 0;
+  for (let index = 0; index < field.length; index += 1) hash = (hash * 31 + field.charCodeAt(index)) >>> 0;
+  return hash % REFERENCE_EDGE_TONES;
+}
 
 export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   const {
@@ -85,16 +112,42 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     variableCardList, nodeVariablePins, variablePinPosition, disconnect,
     disconnectVariableFromPin, disconnectVariableFromInstanceInput, mutate, requestInspector, render,
     worldPoint, captureConnectionPointer, nodeWidth, runCardWidth, baseHeight, runVariableHeight,
-    variableCardWidth, variableCardPortY, variablePinX,
+    variableCardWidth, variableCardPortY, variablePinX, taskOutputPortY,
+    disconnectReferenceFromPin,
   } = deps;
+  const rowHeightOf = deps.nodeRowHeight ?? (() => runVariableHeight);
 
+  /**
+   * Alt + 左键点线即断开。按下只记起点，抬起时位移仍在阈值内才算「点击」：
+   * 命中范围比线宽大得多，Alt + 拖拽平移常常从线附近开始，不能因此误删连线。
+   */
   function bindVariableEdgeQuickDisconnect(edge: any, disconnectEdge: () => void): void {
+    let origin: { x: number; y: number } | null = null;
     edge.addEventListener('pointerdown', (event: PointerEvent) => {
       if (event.button !== 0 || !event.altKey) return;
+      origin = { x: event.clientX, y: event.clientY };
+    });
+    edge.addEventListener('pointerup', (event: PointerEvent) => {
+      const start = origin;
+      origin = null;
+      if (!start || event.button !== 0 || !event.altKey) return;
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return; // 拖拽（平移）不算点击
       event.preventDefault();
       event.stopPropagation();
       disconnectEdge();
     });
+    edge.addEventListener('pointercancel', () => { origin = null; });
+  }
+
+  /**
+   * 画一条可快速断开的细线：可见线保持细，另叠一条透明的加粗命中线
+   * （`.xxx-hit`，屏幕空间恒定宽度，不随缩放/线宽变细），Alt + 左键点在命中线上即断开。
+   * 命中线在卡片下层，所以不会挡住卡片与引脚的点击；它排在可见线**前面**，
+   * 这样 CSS 能用 `.xxx-hit:hover + .xxx` 把细线点亮，给出「可以点」的反馈。
+   */
+  function renderDisconnectableEdge(layer: any, className: string, hitClassName: string, d: string, disconnectEdge: () => void): void {
+    bindVariableEdgeQuickDisconnect(svgEl('path', { class: hitClassName, d }, layer), disconnectEdge);
+    svgEl('path', { class: className, d }, layer);
   }
 
   function renderVariableEdges(layer: any): void {
@@ -114,10 +167,11 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
         const x1 = card.x + variableCardWidth;
         const y1 = card.y + variableCardPortY;
         const x2 = pos.x + variablePinX;
-        const y2 = pos.y + baseHeight + index * runVariableHeight + runVariableHeight / 2;
+        const rowHeight = rowHeightOf(node);
+        const y2 = pos.y + baseHeight + index * rowHeight + rowHeight / 2;
         const bend = Math.max(32, Math.abs(x2 - x1) * 0.42);
-        const edge = svgEl('path', { class: 'variable-edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}` }, layer);
-        bindVariableEdgeQuickDisconnect(edge, () => disconnectVariableFromPin(node.id, pin.param));
+        renderDisconnectableEdge(layer, 'variable-edge', 'variable-edge-hit', `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
+          () => disconnectVariableFromPin(node.id, pin.param));
       });
     }
     for (const runCard of instanceRunCards()) {
@@ -136,8 +190,8 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
         const y1 = card.y + variableCardPortY;
         const target = instanceRunInputPosition(runCard, index);
         const bend = Math.max(32, Math.abs(target.x - x1) * 0.42);
-        const edge = svgEl('path', { class: 'variable-edge', d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${target.x - bend} ${target.y}, ${target.x} ${target.y}` }, layer);
-        bindVariableEdgeQuickDisconnect(edge, () => disconnectVariableFromInstanceInput(runCard.node.id, runCard.index, variable.name));
+        renderDisconnectableEdge(layer, 'variable-edge', 'variable-edge-hit', `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${target.x - bend} ${target.y}, ${target.x} ${target.y}`,
+          () => disconnectVariableFromInstanceInput(runCard.node.id, runCard.index, variable.name));
       });
     }
   }
@@ -166,7 +220,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     svgEl('text', { class: 'edge-order', x: (x1 + x2) / 2, y: midY + 4, 'text-anchor': 'middle' }, group).textContent = String(order + 1);
     const rewire = svgEl('circle', { class: 'edge-rewire', cx: x2, cy: y2 - 18, r: 6, title: '拖动以重新连接' }, group);
     path.addEventListener('mousedown', (event: MouseEvent) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || event.altKey) return; // Alt 交给下边的快速断开，不当成选中
       event.stopPropagation();
       state.selected.clear();
       state.selectedEdge = { parent: parent.id, child: childId };
@@ -174,6 +228,16 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
       state.inspector = 'node';
       requestInspector({ kind: 'edge', parent: parent.id, child: childId });
       render();
+    });
+    group.addEventListener('mousedown', (event: MouseEvent) => {
+      // Alt + 左键：直接断开这条连线（与变量边/引用边的快速断开一致）。
+      // 挂在整个连线组上，点在线条或顺序徽标上都生效，同时拦住画布的 Alt 平移。
+      if (event.button !== 0 || !event.altKey) return;
+      if ((event.target as Element | null)?.closest?.('.edge-rewire')) return; // 拖拽重连优先
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.selectedEdge && state.selectedEdge.parent === parent.id && state.selectedEdge.child === childId) state.selectedEdge = null;
+      mutate(() => disconnect(parent.id, childId));
     });
     group.addEventListener('dblclick', (event: MouseEvent) => {
       event.stopPropagation();
@@ -243,5 +307,55 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     }, layer);
   }
 
-  return { bindVariableEdgeQuickDisconnect, renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection, renderVariableConnection };
+  function renderReferenceConnection(layer: any): void {
+    const connection = state.referenceConnect;
+    if (!connection) return;
+    const source = nodeById(connection.nodeId);
+    if (!source) return;
+    const origin = referencePortPosition(source);
+    const hover = connection.hover;
+    svgEl('path', {
+      class: `reference-connection-preview${hover ? ' snapped' : ''}`,
+      d: bezier(origin.x, origin.y, hover ? hover.x : connection.x, hover ? hover.y : connection.y),
+    }, layer);
+  }
+
+  /** 任务卡右侧输出口的世界坐标。 */
+  function referencePortPosition(node: any): EdgePoint {
+    const pos = position(node);
+    return { x: pos.x + nodeWidth, y: pos.y + taskOutputPortY };
+  }
+
+  /**
+   * 节点输出引用边：从源任务的输出口连到目标参数端点（实线、比执行连线细；
+   * 颜色按源输出字段取，不同变量拉出来的线颜色不同）。引用文本本身带着源节点
+   * 与字段，所以不需要额外的连线记录。
+   */
+  function renderReferenceEdges(layer: any): void {
+    for (const node of nodes()) {
+      if (!node || node.type !== 'task') continue;
+      const pos = position(node);
+      const rowHeight = rowHeightOf(node);
+      nodeVariablePins(node).forEach((pin, index) => {
+        const ref = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof (pin.value as { ref?: unknown }).ref === 'string'
+          ? (pin.value as { ref: string }).ref
+          : '';
+        const match = /^nodes\.([^\.]+)\.output/.exec(ref);
+        if (!match) return;
+        const source = nodeById(match[1]);
+        if (!source || source.id === node.id) return;
+        const origin = referencePortPosition(source);
+        const target = { x: pos.x + variablePinX, y: pos.y + baseHeight + index * rowHeight + rowHeight / 2 };
+        const bend = Math.max(36, Math.abs(target.x - origin.x) * 0.42);
+        renderDisconnectableEdge(layer, `reference-edge tone-${referenceEdgeTone(referenceEdgeField(ref))}`, 'reference-edge-hit',
+          `M ${origin.x} ${origin.y} C ${origin.x + bend} ${origin.y}, ${target.x - bend} ${target.y}, ${target.x} ${target.y}`,
+          () => disconnectReferenceFromPin(node.id, pin.param));
+      });
+    }
+  }
+
+  return {
+    bindVariableEdgeQuickDisconnect, renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection,
+    renderVariableConnection, renderReferenceConnection, renderReferenceEdges, referencePortPosition,
+  };
 }

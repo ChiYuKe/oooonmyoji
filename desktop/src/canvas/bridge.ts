@@ -30,6 +30,14 @@ export interface CanvasBridge {
   subscribe(listener: (payload: Record<string, unknown>) => void): () => void;
   /** 编辑器消息通道（VSCode 风格 postMessage/onMessage）。 */
   editorApi(): LegacyVsCodeApi;
+  /** 注册顶栏工作流/实例选择器（由工具条模块在构造后提供），供 desktopControl 转发。 */
+  setTopbarControls(controls: TopbarControls | null): void;
+}
+
+/** 顶栏选择器钩子：工具条模块注册，桥接收到 desktopControl 时转发。 */
+export interface TopbarControls {
+  setWorkflow(value: string): void;
+  setInstance(value: string): void;
 }
 
 export interface CanvasBridgeDeps {
@@ -53,6 +61,7 @@ export function createCanvasBridge(deps: CanvasBridgeDeps = {}): CanvasBridge {
 
   let persistedState: unknown = {};
   const listeners = new Set<(payload: Record<string, unknown>) => void>();
+  let topbarControls: TopbarControls | null = null;
 
   function post(message: unknown): void {
     win.parent.postMessage({ source: 'legacy-editor', message }, '*');
@@ -73,9 +82,9 @@ export function createCanvasBridge(deps: CanvasBridgeDeps = {}): CanvasBridge {
       if (buttonId) {
         doc.getElementById(buttonId)?.click();
       } else if (command === 'switchWorkflow') {
-        win.__topbar?.setWorkflow(String(payload.value ?? ''));
+        topbarControls?.setWorkflow(String(payload.value ?? ''));
       } else if (command === 'selectInstance') {
-        win.__topbar?.setInstance(String(payload.value ?? ''));
+        topbarControls?.setInstance(String(payload.value ?? ''));
       }
       return;
     }
@@ -108,5 +117,8 @@ export function createCanvasBridge(deps: CanvasBridgeDeps = {}): CanvasBridge {
         return persistedState;
       },
     }),
+    setTopbarControls(controls) {
+      topbarControls = controls || null;
+    },
   };
 }

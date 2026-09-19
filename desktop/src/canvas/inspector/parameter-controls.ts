@@ -8,6 +8,8 @@ import type { Ui } from '../ui/elements';
 import type { CanvasState } from '../state/canvas-state';
 import { KEY_NAMES, keyOptionLabel } from '../../shared/parameter-types';
 import { paramColorSwatch, paramPointParts } from '../render/param-rows';
+import { isBindingValue } from '../../shared/workflow/bindings';
+import { parameterLiteralCache, parameterLiteralCacheKey } from '../state/literal-cache';
 
 type UiNode = any;
 
@@ -33,8 +35,10 @@ export interface ParameterControlsDeps {
   inputParameterMetadata(definition?: any): any;
   ACTION_LABELS: Record<string, string>;
   requestTemplateCheck(...args: any[]): void;
-  valueBindingMenu(...args: any[]): UiNode;
+  /** 兼容引用的选择与「提升为变量」都在画布上做（参数端点拖线 / 端口右键菜单），详情栏不再提供入口。 */
   variableLinks(): Record<string, any>;
+  /** 变量显示名（`variables.时长` → 「时长（秒）」），用于绑定说明。 */
+  variableDisplayNameOf(scope: 'inputs' | 'variables', name: string, fallback?: string): string;
   requestTemplateReplacement(...args: any[]): void;
   appendMissingAssetAction(...args: any[]): void;
   openWorkflowBrowser(...args: any[]): void;
@@ -53,7 +57,7 @@ export function createParameterControls(deps: ParameterControlsDeps) {
     fieldLabel, enumOption, actionLabel, bindAssetPreview, assetPreviewForPath, assetPathStatus,
     openAssetBrowser, requestRoi, inputParameterMetadata, VariableSystem,
     requestTemplateReplacement, appendMissingAssetAction, openWorkflowBrowser, renderInspector,
-    ACTION_LABELS, requestTemplateCheck, valueBindingMenu, variableLinks,
+    ACTION_LABELS, requestTemplateCheck, variableLinks, variableDisplayNameOf,
     selectInput, textInput, checkbox, segmentedInput, field,
   } = deps;
   function actionDropdown(node: any): UiNode {
@@ -118,7 +122,8 @@ export function createParameterControls(deps: ParameterControlsDeps) {
       check.addEventListener('click', () => { if (!pointerPending) requestTemplateCheck(node.id); });
       headingActions.appendChild(check);
     }
-    headingActions.appendChild(valueBindingMenu(node,definition,()=>node.params[name],(value: any)=>{node.params[name]=value;},fieldLabel(name)));
+    // 这里原来还挂一个「绑定 ▾」下拉（选兼容引用 / 提升为变量）。连线一律回画布做：
+    // 卡片参数端点拖线、节点输出引用口、变量卡片拖线，端口右键菜单里也有「提升为变量」。
     heading.appendChild(headingActions);
     block.appendChild(heading);
     if (definition.description) block.appendChild(el('div', 'field-hint', definition.description));
@@ -129,53 +134,41 @@ export function createParameterControls(deps: ParameterControlsDeps) {
         ? clone(definition.default)
         : defaultValue(definition);
     const bound = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' && Object.keys(value).length === 1;
-    const mode = segmentedInput(bound ? 'binding' : 'literal', [{ value: 'literal', label: '固定值' }, { value: 'binding', label: '变量' }], (next: string) => mutate(() => {
-      if (next === 'binding') {
-        rememberParameterLiteral(node, name, node.params[name]);
-        node.params[name] = { ref: allRefs(node, definition)[0] || '' };
-      } else {
-        node.params[name] = restoreParameterLiteral(node, name, definition);
-        delete variableLinks()[`${node.id}:${name}`];
-      }
-    }));
-    headingActions.insertBefore(mode, headingActions.firstChild);
     if (bound) {
-      const refs = allRefs(node, definition);
-      const ref = value.ref;
-      const options = refs.includes(ref) ? refs : [ref, ...refs];
-      block.appendChild(selectInput(ref, options.map((item: string) => ({
-        value: item,
-        label: referenceLabel(item),
-      })), (next: string) => mutate(() => { node.params[name] = { ref: next }; delete variableLinks()[`${node.id}:${name}`]; }), 'full'));
+      // 引用是在画布上连出来的：详情栏不再提供「固定值 / 变量」模式切换与引用下拉，
+      // 这里只如实说明当前连的是什么，改动一律回画布做。
+      // 文案只按**参数里的引用**判断，不看连线映射：映射可能缺项（旧文档、手工改过的
+      // JSON），按引用判断才不会出现「同一个绑定两种说法」。
+      const ref = String(value.ref);
+      const variableRef = /^(inputs|variables)\.([^\.]+)/.exec(ref);
+      const shown = variableRef
+        ? variableDisplayNameOf(variableRef[1] as 'inputs' | 'variables', ref.slice(variableRef[1].length + 1))
+        : referenceLabel(ref);
+      const note = el('div', 'field-hint parameter-bound-note', variableRef
+        ? `已连接变量 ${shown}（在画布上管理）`
+        : `已连接引用 ${shown}（在画布上管理）`);
+      note.title = ref;
+      block.appendChild(note);
     } else {
       block.appendChild(literalControl(node, name, definition, value, headingActions));
     }
     body.appendChild(block);
   }
 
-  function parameterLiteralCache(): Record<string, any> {
-    if (!state.paramLiteralCache || typeof state.paramLiteralCache !== 'object' || Array.isArray(state.paramLiteralCache)) state.paramLiteralCache = {};
-    return state.paramLiteralCache;
-  }
-
-  function parameterLiteralCacheKey(node: any, name: string): string {
-    return `${node && node.id ? node.id : ''}:${name}`;
-  }
-
   function rememberParameterLiteral(node: any, name: string, value: any): void {
     if (!node || value === undefined || isBindingValue(value)) return;
-    parameterLiteralCache()[parameterLiteralCacheKey(node, name)] = clone(value);
+    parameterLiteralCache(state)[parameterLiteralCacheKey(node, name)] = clone(value);
   }
 
   function restoreParameterLiteral(node: any, name: string, definition: any): any {
-    const cache = parameterLiteralCache();
+    const cache = parameterLiteralCache(state);
     const key = parameterLiteralCacheKey(node, name);
     if (Object.prototype.hasOwnProperty.call(cache, key)) return clone(cache[key]);
     return definition.default !== undefined ? clone(definition.default) : defaultValue(definition);
   }
 
   function clearParameterLiteralCache(nodeId: string, name?: string): void {
-    const cache = parameterLiteralCache();
+    const cache = parameterLiteralCache(state);
     if (name !== undefined) {
       delete cache[`${nodeId}:${name}`];
       return;
@@ -406,11 +399,6 @@ export function createParameterControls(deps: ParameterControlsDeps) {
     if (!definition || typeof definition !== 'object') return false;
     if (Array.isArray(definition.enum) && definition.enum.length) return true;
     return ['string', 'number', 'integer', 'boolean', 'asset', 'path', 'rect', 'duration', 'point', 'color', 'key'].includes(definition.type);
-  }
-
-  function isBindingValue(value: unknown): value is { ref: string } {
-    return value !== null && typeof value === 'object' && !Array.isArray(value)
-      && typeof (value as Record<string, unknown>).ref === 'string' && Object.keys(value).length === 1;
   }
 
   /** 没有声明 items/properties 时按当前值推断结构，避免把结构化参数丢给 JSON 文本框。 */
@@ -871,10 +859,13 @@ export function createParameterControls(deps: ParameterControlsDeps) {
   }
 
   return {
-    actionDropdown, renderParameter, parameterLiteralCache, parameterLiteralCacheKey, rememberParameterLiteral,
+    actionDropdown, renderParameter,
+    parameterLiteralCache: () => parameterLiteralCache(state),
+    parameterLiteralCacheKey,
+    rememberParameterLiteral,
     restoreParameterLiteral, clearParameterLiteralCache, convertWaitTemplateToAny, convertWaitAnyToTemplate,
     literalControl, paramJsonModes, cardExpansion, jsonModeToggle, complexValueControl, scalarDefinitionUsable,
-    isBindingValue, structuredControl, objectFieldsControl, bindingControl, nestedValueControl, scalarValueControl,
+    structuredControl, objectFieldsControl, bindingControl, nestedValueControl, scalarValueControl,
     tupleControl, scalarArrayControl, itemDefaultValue, objectArrayControl, objectArraySummary, iconButton,
     ICON_SVG, iconSvg, addRowButton, CONDITION_OPERATORS, CONDITION_GROUP_OPERATORS, CONDITION_UNARY_OPERATORS,
     conditionControl, conditionOperatorLabel, conditionOperatorDefault, conditionOperandControl,

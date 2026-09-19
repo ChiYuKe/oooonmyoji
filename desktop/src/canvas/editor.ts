@@ -1,13 +1,22 @@
 /**
  * 画布入口组装。
  *
- * 原 `workflow-editor.js` 闭包已全部迁移为 TS 模块；本文件只按既有依赖顺序组装
- * 状态、渲染、交互与壳层通信，并把编辑器命令出口暴露为 `window.__btEditor`。
+ * 原 `workflow-editor.js` 闭包已全部迁移为 TS 模块；本文件只按依赖顺序组装
+ * 状态/模型、渲染、交互与壳层通信，不再有 `late()` 包裹的循环接线。
  *
+ * 仅三处跨模块互调留在入口显式接线，其余依赖顺着构造顺序直接传入：
+ * - render / focusNode：所有模块共用的重绘入口由 RenderEntry 提供，入口先建
+ *   占位函数、渲染层就绪后赋值（各交互/渲染模块直接引用函数本身）；
+ * - inspectorRenderers：详情面板 ⇄ 各详情渲染器互调，面板先建、内容后填表；
+ * - assetHooks.requestTemplateReplacement：素材浏览器补图 ⇄ 素材动作互调。
+ *
+ * 编辑器命令出口以 `CanvasEditorHandle` 显式返回；`window.__btEditor` 仅作为
+ * 验证脚本与旧展示页的调试出口（画布模块自身不再读取）。
  */
 import { createCanvasEdges } from './canvas/edges';
 import { createCanvasMinimap } from './canvas/minimap';
 import { createCanvasViewport } from './canvas/viewport';
+import { validateWorkflow } from '../shared/workflow/validate';
 import { createEditorExport } from './export';
 import { createAssetActions } from './interactions/asset-actions';
 import { createAssetBrowser } from './interactions/asset-browser';
@@ -22,18 +31,20 @@ import { createTemplateCheck } from './interactions/template-check';
 import { createWorkflowBrowser } from './interactions/workflow-browser';
 import { createCompositeInspector } from './inspector/composite-inspector';
 import { createDetailInspectors } from './inspector/detail-inspectors';
-import { createInspectorPanel } from './inspector/panel';
+import { createInspectorPanel, type InspectorRenderers } from './inspector/panel';
 import { createParameterControls } from './inspector/parameter-controls';
 import { createVariableInspectors } from './inspector/variable-inspectors';
 import { createCanvasWorkflowModel } from './model/canvas-workflow-model';
+import { issuesByNode, issueTitle, nodeIssues } from './model/card-issues';
 import { createCanvasReferences } from './model/references';
 import { createEditorSchema } from './model/schema';
 import { createSidebarState } from './model/sidebar-state';
 import { createSubworkflowHelpers } from './model/subworkflow';
 import { createVariableSystem } from './model/variable-system';
 import { createWorkflowModel } from './model/workflow-model';
-import * as cardValues from './render/card-values';
+import { compactValue, instanceLabel } from './render/card-values';
 import { createAssetPreview } from './render/asset-preview';
+import { cardRowParams, hasCardLayout } from './render/card-layout';
 import { createCanvasCards } from './render/cards';
 import { createNodeCardRenderer } from './render/node-card';
 import { createNodeCards } from './render/node-cards';
@@ -44,8 +55,9 @@ import { createEditorCommandDispatch } from './state/editor-command-dispatch';
 import { createEditorCommands } from './state/editor-commands';
 import { createEditorStatus } from './state/editor-status';
 import { createEditorHistory } from './state/history';
+import { normalizeRaw } from './state/normalize';
 import { createRunEvents } from './state/run-events';
-import { createCanvasState } from './state/canvas-state';
+import { createCanvasState, type CanvasState } from './state/canvas-state';
 import { createEditorToolbar } from './toolbar';
 import { createCanvasHelpers } from './ui/canvas-helpers';
 import { createUi } from './ui/elements';
@@ -53,12 +65,39 @@ import { ACTION_LABELS, actionLabel, enumOption, fieldLabel } from './ui/labels'
 import { createCanvasOverlays, type MenuEntry } from './ui/overlays';
 import type { CanvasBridge } from './bridge';
 
-/** Resolve circular wiring only when a callback runs, while preserving its signature. */
-function late<Args extends unknown[], Result>(get: () => (...args: Args) => Result): (...args: Args) => Result {
-  return (...args) => get()(...args);
+/**
+ * 编辑器命令出口（调试与独立窗口转发使用）。
+ * 验证脚本与旧展示页经 `window.__btEditor` 读取；画布模块内部不走这里。
+ */
+export interface CanvasEditorHandle {
+  state: CanvasState;
+  connect(parentId: string, childId: string, replaceIndex?: number): boolean;
+  disconnect(parentId: string, childId: string): void;
+  autoLayout(record?: boolean): void;
+  render(): void;
+  exportFullCanvasImage(): void;
+  copySelection(): void;
+  cutSelection(): void;
+  pasteClipboard(point: { x: number; y: number }): void;
+  snapshot(): string;
+  collectExportTemplatePaths(...args: any[]): any;
+  applyInlineThumbnails(...args: any[]): any;
+  placeVariableCard(...args: any[]): any;
+  variableCardList(): any[];
+  nodeVariablePins(node: any): any[];
+  collectNodeCardVariableRefs(...args: any[]): any;
+  connectVariableToPin(...args: any[]): any;
+  referenceFieldsForPin(...args: any[]): any;
+  nodeOutputFields(...args: any[]): any;
+  removeVariable(...args: any[]): any;
+  deleteVariable(...args: any[]): any;
+  renderInspector(): void;
 }
 
-export function startCanvasEditor(bridge: CanvasBridge): void {
+export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
+  // Initialize before publishing the editor handle: declarations below return
+  // never execute, even when their neighboring function declarations are hoisted.
+  let issuesCache: { version: number; raw: unknown; byNode: Map<string, any> } | null = null;
   const vscode = bridge.editorApi();
   const UI = createUi();
   const VariableSystem = createVariableSystem();
@@ -71,6 +110,8 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   const RUN_CARD_W = 250;
   const RUN_CARD_BASE_H = 78;
   const RUN_VARIABLE_H = 24;
+  /** 清单声明了固定卡片的 Action：双行行样式（标签一行、值一行）的行高。 */
+  const CARD_ROW_H = 40;
   const RUN_CARD_GAP_X = 48;
   const RUN_CARD_GAP_Y = 92;
   const PREVIEW = { x: 174, y: 56, width: 72, height: 30 };
@@ -78,6 +119,8 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   const VARIABLE_CARD_H = 58;
   const VARIABLE_CARD_PORT_Y = 29;
   const VARIABLE_PIN_X = 10;
+  /** 任务卡右侧「节点输出引用」口在节点内的 Y 偏移（表头中线）。 */
+  const TASK_OUTPUT_PORT_Y = 16;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'];
   const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
@@ -89,7 +132,9 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   };
   const state = createCanvasState();
 
-  // 统一 tooltip 由 public/shared/tooltip.js 提供；嵌入时把提示位置转发给父窗口。
+  /** 重绘入口占位：RenderEntry 就绪后赋值（模块直接引用 render/focusNode 函数本身）。 */
+  let renderPieces: { render(): void; focusNode(id: string): void } | null = null;
+
   if (window.StudioTooltip) {
     window.StudioTooltip.install({
       bridge: 'send',
@@ -99,7 +144,6 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
     });
   }
 
-
   const $ = (id: string): HTMLElement => document.getElementById(id)!;
   const graph = document.querySelector<SVGSVGElement>('#graph')!;
   const wrap = $('canvas-wrap');
@@ -108,171 +152,100 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   const { showMenu, hideMenus, openLightbox, toast } = Overlays;
   const Model = createWorkflowModel(state);
   const { nodes, nodeById, layout, position } = Model;
-  const catalogByName = (name: string) => state.catalog.find((item) => item.name === name) || null;
-  const workflowNodeInputs = (node: { [key: string]: unknown }) => subWorkflowRef(node) ? workflowInputs(subWorkflowRef(node)) : [];
-  const nodeHeight = (node: { id?: string; decorators?: unknown[] }) => BASE_H
-    + nodeVariablePins(node).length * RUN_VARIABLE_H
-    + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
-
   const { variableCards, variableLinks, nextVariableCardId, variableCardList, clearVariableCardSelection, setVariableCardSelection } = Model;
   const { displayNameOfDefinition, variableDisplayNameOf, inputParameterMetadata } = Model;
-
-  const CanvasWorkflowModel = createCanvasWorkflowModel({
-    state, Model, VariableSystem, nodes, position, variableCards,
-    compatibleRefType: late(() => compatibleRefType),
-    definitionSchema: late(() => definitionSchema),
-    nodeHeight,
-    baseHeight: BASE_H, nodeWidth: NODE_W, decoHeight: DECO_H,
-    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
-    variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
-    runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H,
-    runCardGapX: RUN_CARD_GAP_X, runCardGapY: RUN_CARD_GAP_Y,
-    catalogByName, fieldLabel: (name) => fieldLabel(name), workflowNodeInputs, nextVariableCardId,
-    workflowReference: late(() => workflowReference),
-  });
-  const {
-    variableTypeOf, nodeVariablePins, collectNodeCardVariableRefs, variableCardPosition, inputParameterNames,
-    paramRowsExpanded,
-    syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition, variableCompatibleWithPin,
-    variableCompatibleWithInstanceInput, workflowDescriptor, workflowInputs, instanceRunCards, instanceRunInputPosition,
-  } = CanvasWorkflowModel;
-
-  function svgEl(tag: string, attrs: Record<string, unknown>, parent?: Element): SVGElement {
-    const element = document.createElementNS(NS, tag);
-    for (const [key, value] of Object.entries(attrs || {})) {
-      if (value !== undefined && value !== null) element.setAttribute(key, String(value));
-    }
-    if (parent) parent.appendChild(element);
-    return element;
-  }
-
-  function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K];
-  function el(tag: string, className?: string, text?: string): HTMLElement;
-  function el(tag: string, className?: string, text?: string): HTMLElement {
-    if (tag === 'button') return UI.button({ label: text, className });
-    const element = document.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined) element.textContent = text;
-    return element;
-  }
 
   const EditorStatus = createEditorStatus({ state, vscode, $ });
   const { setDirty, currentInspectorSelection, requestInspector } = EditorStatus;
 
-  const StudioSidebarState = createSidebarState({ state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode });
-  const postSidebarState = late(() => StudioSidebarState.postSidebarState);
+  const StudioSchema = createEditorSchema();
+  const { definitionSchema, compatibleRefType, appendNestedRefs } = StudioSchema;
+
+  const References = createCanvasReferences({
+    state, clone, nodes, definitionSchema, compatibleRefType, appendNestedRefs,
+    variableSystem: VariableSystem, catalogByName,
+  });
+  const { defaultValue, allRefs, referenceLabel } = References;
+
+  /** 子流程 task（workflow.run）的引用解析与摘要，状态/模型层即可构建。 */
+  const SubworkflowHelpers = createSubworkflowHelpers({
+    state, vscode, nodeById, $, showMenu, compactValue,
+  });
+  const {
+    subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel,
+  } = SubworkflowHelpers;
 
   const History = createEditorHistory({
     state,
     cleanupReleased: (raw, before) => raw ? VariableSystem.cleanupReleased(raw, before) : [],
     clearVariableCardSelection,
     nodeById,
-    normalizeRaw: (value) => normalizeRaw(value),
     setDirty: (value) => setDirty(value),
-    render: () => render(),
+    render,
   });
   const { snapshot, mutate, restore, replaceDocument, undo, redo } = History;
 
-  const Commands = createCanvasCommands({
-    state, nodes, nodeById, layout, mutate, clone, toast: (message, error) => toast(message, error), worldPoint: (event) => worldPoint(event),
-    wrap, nodeWidth: NODE_W, baseHeight: BASE_H,
+  /** 工作流浏览器：CanvasWorkflowModel 的子流程引用解析依赖它，故在模型前创建。 */
+  const StudioWorkflowBrowser = createWorkflowBrowser({ state, $, el, nodeById, mutate, toast, requestWorkflows: () => vscode.postMessage({ type: 'refreshWorkflows' }) });
+  const { workflowReference, openWorkflowBrowser, closeWorkflowBrowser, renderWorkflowBrowser } = StudioWorkflowBrowser;
+
+  /** CanvasWorkflowModel 自身提供的子流程输入列表；经入口回填，避免构造期互相引用。 */
+  let workflowInputs: (reference: any) => any[];
+  const workflowNodeInputs = (node: { [key: string]: unknown }) => subWorkflowRef(node) ? workflowInputs(subWorkflowRef(node)) : [];
+
+  const CanvasWorkflowModel = createCanvasWorkflowModel({
+    state, Model, VariableSystem, nodes, position, variableCards,
+    compatibleRefType, definitionSchema,
+    nodeHeight,
+    baseHeight: BASE_H, nodeWidth: NODE_W, decoHeight: DECO_H,
+    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
+    variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
+    runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H,
+    runCardGapX: RUN_CARD_GAP_X, runCardGapY: RUN_CARD_GAP_Y,
+    catalogByName, fieldLabel, workflowNodeInputs, nextVariableCardId,
+    workflowReference, nodeRowHeight,
   });
-  const { nextId, parentOf, descendants, canConnect, connect, disconnect, buildNode, addNode, deleteSelection, selectionTreeIds, copySelection, cutSelection, pasteClipboard } = Commands;
+  const {
+    nodeVariablePins, collectNodeCardVariableRefs, variableCardPosition, paramRowsExpanded, nodeOutputFields,
+    referenceFieldsForPin, referenceDisplayName, syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition,
+    variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards, instanceRunInputPosition,
+  } = CanvasWorkflowModel;
+  workflowInputs = CanvasWorkflowModel.workflowInputs;
+
+  const StudioSidebarState = createSidebarState({ state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode });
+  const { postSidebarState } = StudioSidebarState;
 
   const Viewport = createCanvasViewport({
     state, nodes, position, layout, mutate, instanceRunCards, variableCardList, nodeHeight,
-    wrap, minimap: () => $('minimap'), render: late(() => render),
+    wrap, minimap: () => $('minimap'), render,
     nodeWidth: NODE_W, baseHeight: BASE_H, runCardWidth: RUN_CARD_W,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
   const { autoLayout, ensureLayout, bounds, fitView, zoomAt, worldPoint, bezier } = Viewport;
 
-  const Edges = createCanvasEdges({
-    state, svgEl, bezier, nodes, nodeById, position, nodeHeight, instanceRunCards, instanceRunInputPosition,
-    variableCardList, nodeVariablePins, variablePinPosition, disconnect,
-    disconnectVariableFromPin: late(() => disconnectVariableFromPin),
-    disconnectVariableFromInstanceInput: late(() => disconnectVariableFromInstanceInput),
-    mutate, requestInspector, render: () => render(),
-    worldPoint, captureConnectionPointer: (event) => captureConnectionPointer(event),
-    nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
-    variableCardWidth: VARIABLE_CARD_W, variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
+  const Commands = createCanvasCommands({
+    state, nodes, nodeById, layout, mutate, clone, toast: (message, error) => toast(message, error), worldPoint,
+    wrap, nodeWidth: NODE_W, baseHeight: BASE_H,
   });
-  const { bindVariableEdgeQuickDisconnect, renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection, renderVariableConnection } = Edges;
+  const { parentOf, canConnect, connect, disconnect, buildNode, addNode, deleteSelection, copySelection, cutSelection, pasteClipboard } = Commands;
 
-  // 行内参数编辑器在下方创建（依赖参数控件），这里先用占位保持重绘收尾的调用顺序。
-  let refreshInlineEditor: () => void = () => {};
-  const RenderEntry = createRenderEntry({
-    state, $, graph, wrap, svgEl, UI, nodes, nodeById, position, nodeHeight, instanceRunCards, variableCardList,
-    renderNode: late(() => renderNode),
-    renderInstanceRunCard: late(() => renderInstanceRunCard),
-    renderVariableCard: late(() => renderVariableCard),
-    renderEdge, renderInstanceRunEdge, renderConnection,
-    renderVariableConnection, renderVariableEdges,
-    renderMinimap: late(() => renderMinimap),
-    renderInspector: late(() => renderInspector),
-    postSidebarState, updateIssueBadge: late(() => updateIssueBadge),
-    ensureLayout, syncLegacyInputParameters, syncLegacyVariableCards, setDirty, nodeWidth: NODE_W,
-    afterRender: () => refreshInlineEditor(),
-  });
-  const { render, focusNode } = RenderEntry;
-
-  const AssetPreview = createAssetPreview({ state, $ });
-  const {
-    templatePreview, assetPreviewForPath, hideAssetPathPreview, showAssetPathPreview, bindAssetPreview, bindAssetPathPreview,
-  } = AssetPreview;
-
-  const CardValues = cardValues;
-  const { nodeCardSummary, compactValue, workflowInputVariableValue } = CardValues;
-  const runtimeInstanceLabel = (instanceId: string, fallback?: string) => CardValues.instanceLabel(instanceId, state.instances, fallback);
-
-  const Cards = createCanvasCards({
-    state, svgEl, nodeCards: nodeCards, displayNameOfDefinition, assetPreviewForPath, bindAssetPathPreview,
-    disconnectVariableFromInstanceInput: late(() => disconnectVariableFromInstanceInput),
-    startVariableConnectionFromInstanceInput: late(() => startVariableConnectionFromInstanceInput),
-    startVariableConnectionFromCard: late(() => startVariableConnectionFromCard),
-    openPortContextMenu: late(() => openPortContextMenu), showMenu, instanceRunPinMenuItems: late(() => instanceRunPinMenuItems), variableCardPortMenuItems: late(() => variableCardPortMenuItems), requestInspector,
-    requestOpenWorkflowReference: late(() => requestOpenWorkflowReference), render, contextMenuSuppressedByPan: () => contextMenuSuppressedByPan(),
-    removeInstanceRun: late(() => removeInstanceRun), removeVariableCard: late(() => removeVariableCard), setVariableCardSelection, worldPoint, snapshot,
-    runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H, portRadius: PORT_R,
+  const HitTest = createCanvasHitTest({
+    state, worldPoint, nodes, nodeById, position, nodeHeight, nodeRowHeight, nodeVariablePins,
+    variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards,
+    instanceRunInputPosition, variableCardList, referenceFieldsForPin,
+    portRadius: PORT_R, nodeWidth: NODE_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
+    variablePinX: VARIABLE_PIN_X, runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H, variableCardPortY: VARIABLE_CARD_PORT_Y,
   });
-  const { renderInstanceRunCard, renderVariableCard, registerCardPress } = Cards;
-
-  const NodeCard = createNodeCardRenderer({
-    state, svgEl, nodeCards: nodeCards, position, nodeHeight,
-    subWorkflowRef: late(() => subWorkflowRef), templatePreview,
-    compositeSubtitle: late(() => compositeSubtitle), variableDisplayNameOf,
-    decoratorLabel: late(() => decoratorLabel), nodeVariablePins, openLightbox,
-    disconnectVariableFromPin: late(() => disconnectVariableFromPin),
-    startVariableConnectionFromPin: late(() => startVariableConnectionFromPin),
-    openPortContextMenu: late(() => openPortContextMenu), showMenu,
-    nodeVariablePinMenuItems: late(() => nodeVariablePinMenuItems),
-    nodeInputPortMenuItems: late(() => nodeInputPortMenuItems),
-    nodeOutputPortMenuItems: late(() => nodeOutputPortMenuItems),
-    startConnectionFromInput: (event, id) => startConnectionFromInput(event, id),
-    startConnection: (event, id) => startConnection(event, id),
-    startNodeDrag: (event, id) => startNodeDrag(event, id),
-    registerCardPress, requestInspector, requestOpenSubWorkflow: late(() => requestOpenSubWorkflow), render,
-    contextMenuSuppressedByPan: () => contextMenuSuppressedByPan(),
-    copySelection, cutSelection, deleteSelection,
-    paramRowInfo, toggleParamRows, paramRowMenuItems,
-    openParamEditor: late(() => InlineEditor.openParamEditor),
-    compactValue,
-    typeIcons: TYPE_ICON, typeNames: TYPE_NAMES, runLabels: RUN_LABEL,
-    nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
-    runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X, preview: PREVIEW,
-  });
-  const { renderNode } = NodeCard;
-
-  const { variableValueSummary } = CardValues;
+  const {
+    connectionTargetAt, variableInputTargetAt, variableCardTargetAt, variableCardTargetAtInstanceInput,
+    variableConnectionTargetAt, referenceConnectionTargetAt, referenceMissAt,
+  } = HitTest;
 
   const EditorCommands = createEditorCommands({
     state, mutate, nodeById, nodes, layout, position, clone, toast,
     variableCards, variableLinks, nextVariableCardId,
-    parameterLiteralCache: late(() => parameterLiteralCache),
-    parameterLiteralCacheKey: late(() => parameterLiteralCacheKey),
-    setVariableCardSelection,
-    variableInputTargetAt: late(() => variableInputTargetAt),
+    setVariableCardSelection, variableInputTargetAt,
     instanceRunCards, displayNameOfDefinition, wrap,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
     variableCardPortY: VARIABLE_CARD_PORT_Y, nodeWidth: NODE_W, runCardWidth: RUN_CARD_W,
@@ -282,44 +255,66 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
     renameNode, changeNodeType,
   } = EditorCommands;
 
-  /** 若节点是子流程 task（workflow.run），返回子工作流引用，否则返回空字符串。 */
-  const SubworkflowHelpers = createSubworkflowHelpers({
-    state, vscode, nodeById, $, showMenu, compactValue,
-    isBindingValue: late(() => isBindingValue),
-  });
-  const {
-    subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel, conditionSummary,
-  } = SubworkflowHelpers;
-
-  const HitTest = createCanvasHitTest({
-    state, worldPoint, nodes, nodeById, position, nodeHeight, nodeVariablePins,
-    variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards,
-    instanceRunInputPosition, variableCardList,
-    portRadius: PORT_R, nodeWidth: NODE_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
-    variablePinX: VARIABLE_PIN_X, runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H,
-    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H, variableCardPortY: VARIABLE_CARD_PORT_Y,
-  });
-  const { connectionTargetAt, variablePinTargetAt, instanceRunInputTargetAt, variableInputTargetAt, variableCardTargetAt, variableCardTargetAtInstanceInput, variableConnectionTargetAt } = HitTest;
-
   const Connections = createCanvasConnections({
     state, graph, worldPoint, render, snapshot, mutate, connect, disconnect, variableConnectionTargetAt,
     nodeById, instanceRunCards, variableCompatibleWithPin, variableCompatibleWithInstanceInput,
     variableLinks, displayNameOfDefinition, variableDisplayNameOf, toast: (message, error) => toast(message, error),
+    referenceConnectionTargetAt, referenceMissAt, fieldLabel, showMenu,
+    referenceDisplayNameOf: (ref) => referenceDisplayName(ref), variableCardList,
   });
   const {
-    startConnection, startConnectionFromInput, captureConnectionPointer, releaseConnectionPointer,
+    startConnection, startConnectionFromInput, captureConnectionPointer,
     cancelConnection, finishConnection, startVariableConnectionFromCard, startVariableConnectionFromPin,
     startVariableConnectionFromInstanceInput, cancelVariableConnection, finishVariableConnection,
     connectVariableToPin, disconnectVariableFromPin, connectVariableToInstanceInput, disconnectVariableFromInstanceInput,
+    startReferenceConnection, cancelReferenceConnection, finishReferenceConnection,
+    connectReferenceToPin, disconnectReferenceFromPin,
   } = Connections;
 
   const Pointer = createCanvasPointer({
     state, graph, wrap, worldPoint, position, nodeById, nodes, nodeHeight, snapshot, render, hideMenus,
     clearVariableCardSelection, layout, variableCards, variableCardList, connectionTargetAt,
-    variableConnectionTargetAt, finishConnection, cancelConnection, finishVariableConnection, setDirty,
+    variableConnectionTargetAt, referenceConnectionTargetAt,
+    finishConnection, cancelConnection, finishVariableConnection, finishReferenceConnection, setDirty,
     nodeWidth: NODE_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
-  const { startNodeDrag, onPointerDown, autoPan, onPointerMove, onPointerUp, contextMenuSuppressedByPan } = Pointer;
+  const { startNodeDrag, onPointerDown, onPointerMove, onPointerUp, contextMenuSuppressedByPan } = Pointer;
+
+  const CanvasHelpers = createCanvasHelpers({
+    state, $, nodes, worldPoint, render,
+    contextMenuSuppressedByPan,
+    setVariableCardSelection, wrap,
+    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
+    localErrorCount: () => {
+      let count = 0;
+      for (const info of documentIssues().values()) count += info.node.length + info.params.size;
+      return count;
+    },
+  });
+  const { updateIssueBadge, openPortContextMenu, focusVariableCard } = CanvasHelpers;
+
+  const AssetPreview = createAssetPreview({ state, $ });
+  const {
+    templatePreview, assetPreviewForPath, hideAssetPathPreview, bindAssetPreview, bindAssetPathPreview,
+  } = AssetPreview;
+
+  /** 素材浏览器 ⇄ 素材动作互相调用（从当前画面补齐模板图），入口显式接线。 */
+  const assetHooks: { requestTemplateReplacement: (...args: any[]) => void } = { requestTemplateReplacement: () => {} };
+  const AssetActions = createAssetActions({
+    state, $, el, vscode,
+    requestTemplateReplacement: (...args) => assetHooks.requestTemplateReplacement(...args),
+  });
+  const { normalizedAssetPath, assetPathStatus, requestAssetInventory, appendMissingAssetAction, requestRoi } = AssetActions;
+
+  const StudioTemplateCheck = createTemplateCheck({ state, $, el, nodeById, catalogByName, clone, vscode, toast });
+  const { requestTemplateCheck, closeTemplateCheck, renderTemplateCheck } = StudioTemplateCheck;
+
+  const StudioAssetBrowser = createAssetBrowser({ state, $, el, mutate, nodeById, toast, vscode, requestRoi });
+  const { openAssetBrowser, closeAssetBrowser, renderAssetBrowser, restoreAssetBrowserAfterRoi } = StudioAssetBrowser;
+  assetHooks.requestTemplateReplacement = StudioAssetBrowser.requestTemplateReplacement;
+
+  const StudioRoiPicker = createEditorRoiPicker({ state, $, el, mutate, vscode, toast, nodeById, restoreAssetBrowserAfterRoi });
+  const { openRoiPicker } = StudioRoiPicker;
 
   const Minimap = createCanvasMinimap({
     state, $, svgEl, bounds, nodes, position, nodeHeight, instanceRunCards, variableCardList,
@@ -327,219 +322,185 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   });
   const { renderMinimap } = Minimap;
 
-  const CanvasHelpers = createCanvasHelpers({
-    state, $, nodes, worldPoint, render: late(() => render),
-    contextMenuSuppressedByPan: () => contextMenuSuppressedByPan(),
-    setVariableCardSelection, wrap,
-    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
+  const Edges = createCanvasEdges({
+    state, svgEl, bezier, nodes, nodeById, position, nodeHeight, nodeRowHeight, instanceRunCards, instanceRunInputPosition,
+    variableCardList, nodeVariablePins, variablePinPosition, disconnect,
+    disconnectVariableFromPin, disconnectVariableFromInstanceInput, disconnectReferenceFromPin,
+    mutate, requestInspector, render,
+    worldPoint, captureConnectionPointer,
+    nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
+    variableCardWidth: VARIABLE_CARD_W, variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
+    taskOutputPortY: TASK_OUTPUT_PORT_Y,
   });
-  const { updateIssueBadge, localIssueCount, openPortContextMenu, focusVariableCard } = CanvasHelpers;
+  const {
+    renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection,
+    renderVariableConnection, renderReferenceConnection, renderReferenceEdges, referencePortPosition,
+  } = Edges;
 
-  /** 节点输入端口（顶部）右键菜单：UE 风格——连线、断开链接（Break Link）、插入节点（Reroute）。 */
   const PortMenu = createCanvasPortMenu({
-    state, startConnectionFromInput: (event, id, point) => startConnectionFromInput(event, id, point),
-    startConnection: (event, id, point) => startConnection(event, id, point),
-    startVariableConnectionFromPin: (event, id, param, point) => startVariableConnectionFromPin(event, id, param, point),
-    startVariableConnectionFromInstanceInput: (event, id, runIndex, param, point) => startVariableConnectionFromInstanceInput(event, id, runIndex, param, point),
-    startVariableConnectionFromCard: (event, scope, name, cardId, point) => startVariableConnectionFromCard(event, scope, name, cardId, point),
+    state, startConnectionFromInput, startConnection, startReferenceConnection,
+    startVariableConnectionFromPin, startVariableConnectionFromInstanceInput, startVariableConnectionFromCard,
     parentOf, buildNode, canConnect, connect, disconnect, mutate, nodeById, position, layout, nodes,
-    nodeVariablePins, variableCards, variableLinks, nextVariableCardId, variableCardList, variableCardPosition,
-    focusVariableCard, placeVariableCard, disconnectVariableFromPin: late(() => disconnectVariableFromPin),
-    disconnectVariableFromInstanceInput: late(() => disconnectVariableFromInstanceInput),
-    removeVariableCard, fieldLabel: (param) => fieldLabel(param), toast: (message, error) => toast(message, error),
+    nodeVariablePins, nodeOutputFields, disconnectReferenceFromPin,
+    variableCards, variableLinks, nextVariableCardId, variableCardList, variableCardPosition,
+    focusVariableCard, placeVariableCard, disconnectVariableFromPin, disconnectVariableFromInstanceInput,
+    removeVariableCard, fieldLabel, toast: (message, error) => toast(message, error),
     typeNames: TYPE_NAMES, nodeWidth: NODE_W,
   });
   const {
-    nodeInputPortMenuItems, nodeOutputPortMenuItems, nodeVariablePinMenuItems, instanceRunPinMenuItems,
-    variableCardPortMenuItems, insertNodeAbove, addChildNode, promotePinToVariable, copyVariableReference,
+    nodeInputPortMenuItems, nodeOutputPortMenuItems, nodeReferencePortMenuItems, nodeVariablePinMenuItems,
+    instanceRunPinMenuItems, variableCardPortMenuItems,
   } = PortMenu;
 
+  /** 详情面板 ⇄ 各详情渲染器互调：面板先建，内容渲染器构造后填表。 */
+  const inspectorRenderers: InspectorRenderers = {
+    renderTaskInspector: () => {}, renderCompositeInspector: () => {}, renderDecorators: () => {},
+    renderWorkflowInspector: () => {}, renderVariablesInspector: () => {}, renderInstanceRunInspector: () => {}, renderEdgeInspector: () => {},
+  };
   const InspectorPanel = createInspectorPanel({
     state, UI, $, el, nodeById, hideAssetPathPreview, types: TYPES, typeNames: TYPE_NAMES, typeLabels: TYPE_LABEL,
-    renameNode: late(() => renameNode),
-    changeNodeType: late(() => changeNodeType),
-    mutate: late(() => mutate),
-    deleteSelection: late(() => deleteSelection),
-    renderTaskInspector: late(() => renderTaskInspector),
-    renderCompositeInspector: late(() => renderCompositeInspector),
-    renderDecorators: late(() => renderDecorators),
-    renderWorkflowInspector: late(() => renderWorkflowInspector),
-    renderVariablesInspector: late(() => renderVariablesInspector),
-    renderInstanceRunInspector: late(() => renderInstanceRunInspector),
-    renderEdgeInspector: late(() => renderEdgeInspector),
+    renameNode, changeNodeType, mutate, deleteSelection,
+    renderers: inspectorRenderers,
   });
   const {
-    clearInspector, section, field, textInput, selectInput, segmentedInput, checkbox, groupSections, renderInspector,
+    clearInspector, section, field, textInput, selectInput, segmentedInput, checkbox, renderInspector,
   } = InspectorPanel;
 
   const StudioToolbar = createEditorToolbar({ state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes, focusNode });
-  const renderInstancePicker = late(() => StudioToolbar.renderInstancePicker);
-  const renderWorkflowPicker = late(() => StudioToolbar.renderWorkflowPicker);
-  const renderWorkflowBreadcrumb = late(() => StudioToolbar.renderWorkflowBreadcrumb);
-  const bindToolbar = late(() => StudioToolbar.bindToolbar);
-  const searchNodeByName = late(() => StudioToolbar.searchNodeByName);
+  const { renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, bindToolbar, searchNodeByName, setWorkflow, setInstance } = StudioToolbar;
+  bridge.setTopbarControls({ setWorkflow, setInstance });
 
-
-  const DetailInspectors = createDetailInspectors({
-    state, mutate, UI, el, $, nodeById, catalogByName, clone,
-    defaultValue: late(() => defaultValue),
-    referenceLabel: late(() => referenceLabel),
-    enumOption: late(() => enumOption),
-    runtimeInstanceLabel, workflowInputs,
-    workflowReference: late(() => workflowReference),
-    requestOpenWorkflowReference,
-    definitionSchema: late(() => definitionSchema),
-    compatibleRefType: late(() => compatibleRefType),
-    actionDropdown: late(() => actionDropdown),
-    renderParameter: late(() => renderParameter),
-    complexValueControl: late(() => complexValueControl),
-    displayNameOfDefinition, compactValue, renderInspector,
-    selectInput, textInput, field, section, clearInspector,
-  });
-  const {
-    renderTaskInspector, removeInstanceRun, parentVariableRefs, runInputLiteralControl, rectLiteralControl,
-    changePublicInputMode, renderPublicWorkflowInputs, renderInstanceRunInspector,
-  } = DetailInspectors;
-
-  const StudioSchema = createEditorSchema();
-  const definitionSchema = late(() => StudioSchema.definitionSchema);
-  const compatibleRefType = late(() => StudioSchema.compatibleRefType);
-  const appendNestedRefs = late(() => StudioSchema.appendNestedRefs);
-
-  const References = createCanvasReferences({
-    state, clone, nodes, definitionSchema, compatibleRefType, appendNestedRefs,
-    variableSystem: VariableSystem, catalogByName,
-  });
-  const {
-    defaultValue, guaranteedOutputIds, availableOutputIds, possibleOutputIdsInSubtree,
-    possiblyAvailableOutputIds, allRefs, referenceLabel,
-  } = References;
+  const StudioExport = createEditorExport({ state, graph, vscode, bounds, wrap, toast, NS });
+  const { exportFullCanvasImage, setExportBusy, collectExportTemplatePaths, applyInlineThumbnails } = StudioExport;
 
   const ParameterControls = createParameterControls({
     state, mutate, UI, el, $, clone, toast, defaultValue, allRefs, referenceLabel,
     fieldLabel, enumOption, actionLabel, bindAssetPreview, assetPreviewForPath,
-    assetPathStatus: late(() => assetPathStatus),
-    openAssetBrowser: late(() => openAssetBrowser),
-    requestRoi: late(() => requestRoi),
+    assetPathStatus, openAssetBrowser, requestRoi,
     inputParameterMetadata, VariableSystem,
     ACTION_LABELS,
-    requestTemplateCheck: late(() => requestTemplateCheck),
-    requestTemplateReplacement: late(() => requestTemplateReplacement),
-    valueBindingMenu: late(() => valueBindingMenu), variableLinks,
-    renderInspector, appendMissingAssetAction: late(() => appendMissingAssetAction),
-    openWorkflowBrowser: late(() => openWorkflowBrowser),
+    requestTemplateCheck,
+    requestTemplateReplacement: (nodeId: string, key: string, path: string, options: any) => StudioAssetBrowser.requestTemplateReplacement(nodeId, key, path, options),
+    variableLinks, variableDisplayNameOf,
+    renderInspector, appendMissingAssetAction, openWorkflowBrowser,
     selectInput, textInput, checkbox, segmentedInput, field,
   });
   const {
-    actionDropdown, renderParameter, parameterLiteralCache, parameterLiteralCacheKey, rememberParameterLiteral,
-    restoreParameterLiteral, clearParameterLiteralCache, convertWaitTemplateToAny, convertWaitAnyToTemplate,
-    literalControl, paramJsonModes, cardExpansion, jsonModeToggle, complexValueControl, scalarDefinitionUsable,
-    isBindingValue, structuredControl, objectFieldsControl, bindingControl, nestedValueControl, scalarValueControl,
-    tupleControl, scalarArrayControl, itemDefaultValue, objectArrayControl, objectArraySummary, iconButton,
-    ICON_SVG, iconSvg, addRowButton, CONDITION_OPERATORS, CONDITION_GROUP_OPERATORS, CONDITION_UNARY_OPERATORS,
-    conditionControl, conditionOperatorLabel, conditionOperatorDefault, conditionOperandControl,
-    conditionLiteralDefault, conditionParseLiteral, nodeChildrenOptions,
+    actionDropdown, renderParameter, rememberParameterLiteral, restoreParameterLiteral, clearParameterLiteralCache,
+    convertWaitTemplateToAny, convertWaitAnyToTemplate, complexValueControl, iconButton, addRowButton,
+    conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions,
   } = ParameterControls;
 
-  /** 卡片参数行的折叠状态：默认只显示「必填 + 已配置」，箭头展开动作定义里的全部参数。 */
-  function paramRowInfo(node: any): { expanded: boolean; total: number; hidden: number } {
-    const spec = node && node.action ? catalogByName(node.action) : null;
-    const total = spec && spec.parameters ? Object.keys(spec.parameters).length : 0;
-    const expanded = paramRowsExpanded().has(node && node.id);
-    const shown = nodeVariablePins(node).length;
-    return { expanded, total, hidden: Math.max(0, total - shown) };
-  }
-
-  function toggleParamRows(nodeId: string): void {
-    const expanded = paramRowsExpanded();
-    if (expanded.has(nodeId)) expanded.delete(nodeId);
-    else expanded.add(nodeId);
-    render();
-  }
-
-  const InlineEditor = createCanvasInlineEditor({
-    state, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
-    showMenu, nodeVariablePinMenuItems: late(() => nodeVariablePinMenuItems), requestInspector,
-    toast: (message, error) => toast(message, error), enumOption, fieldLabel,
+  const DetailInspectors = createDetailInspectors({
+    state, mutate, UI, el, $, nodeById, catalogByName, clone,
+    defaultValue, referenceLabel,
+    enumOption,
+    runtimeInstanceLabel, workflowInputs,
+    workflowReference, requestOpenWorkflowReference,
+    definitionSchema, compatibleRefType,
+    actionDropdown, renderParameter, complexValueControl,
+    displayNameOfDefinition, compactValue, renderInspector,
+    selectInput, textInput, field, section, clearInspector,
   });
-  const { openParamEditor, closeInlineEditor, setParamLiteral } = InlineEditor;
-  refreshInlineEditor = InlineEditor.refreshInlineEditor;
-
-  /** 参数行右键：保留端口菜单（绑定/提升为变量），再补上字面量与详情栏入口。 */
-  function paramRowMenuItems(nodeId: string, pin: any, point: { x: number; y: number }): MenuEntry[] {
-    const node = nodeById(nodeId);
-    const items: MenuEntry[] = nodeVariablePinMenuItems(nodeId, pin, point);
-    items.push('separator');
-    if (pin && pin.configured) {
-      items.push({ label: '恢复默认值', run: () => { if (node) setParamLiteral(node, String(pin.param), undefined); } });
-    }
-    items.push({ label: '在详情栏编辑', run: () => requestInspector({ kind: 'node', nodeId }) });
-    return items;
-  }
-
-  const StudioCompositeInspector = createCompositeInspector({ el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton, conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions, nodeById, mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state, decoratorLabel, isBindingValue, clone, allRefs, referenceLabel, valueBindingMenu: late(() => valueBindingMenu), toast, UI });
-  const renderCompositeInspector = late(() => StudioCompositeInspector.renderCompositeInspector);
-  const renderDecorators = late(() => StudioCompositeInspector.renderDecorators);
+  const { renderTaskInspector, removeInstanceRun, renderInstanceRunInspector } = DetailInspectors;
 
   const VariableInspectors = createVariableInspectors({
     state, mutate, UI, el, $, nodeById, clone, toast,
-    defaultValue: late(() => defaultValue),
-    allRefs: late(() => allRefs),
-    referenceLabel: late(() => referenceLabel),
+    defaultValue, allRefs, referenceLabel,
     fieldLabel, disconnect, bindAssetPreview,
-    openAssetBrowser: late(() => openAssetBrowser),
+    openAssetBrowser,
     variableCards, variableLinks, clearVariableCardSelection, VariableSystem,
+    vscode,
     selectInput, textInput, checkbox, field, section, clearInspector,
   });
   const {
-    renderEdgeInspector, renderLimitControl, renderWorkflowInspector, sameDefinitionValue, definitionAcceptsValue,
-    changeDefinitionType, initialDefinitionValue, definitionValueControl, variableReferenceCount, convertInputToVariable,
-    removeVariable, addVariable, renderVariablesInspector, renameVariable, variableDisplayName, syncExposedInput,
+    renderEdgeInspector, renderWorkflowInspector, removeVariable, deleteVariable, addVariable, renderVariablesInspector,
     valueBindingMenu,
   } = VariableInspectors;
 
-  const StudioExport = createEditorExport({ state, graph, vscode, bounds, wrap, toast, NS });
-  const exportFullCanvasImage = late(() => StudioExport.exportFullCanvasImage);
-  const setExportBusy = late(() => StudioExport.setExportBusy);
-  const collectExportTemplatePaths = late(() => StudioExport.collectExportTemplatePaths);
-  const applyInlineThumbnails = late(() => StudioExport.applyInlineThumbnails);
-
-  const AssetActions = createAssetActions({
-    state, $, el, vscode,
-    requestTemplateReplacement: late(() => requestTemplateReplacement),
+  const StudioCompositeInspector = createCompositeInspector({
+    el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton,
+    conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions, nodeById,
+    mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state,
+    decoratorLabel, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
   });
-  const { normalizedAssetPath, assetPathStatus, requestAssetInventory, appendMissingAssetAction, requestRoi } = AssetActions;
+  const { renderCompositeInspector, renderDecorators } = StudioCompositeInspector;
 
-  const StudioTemplateCheck = createTemplateCheck({ state, $, el, nodeById, catalogByName, clone, vscode, toast });
-  const requestTemplateCheck = late(() => StudioTemplateCheck.requestTemplateCheck);
-  const closeTemplateCheck = late(() => StudioTemplateCheck.closeTemplateCheck);
-  const renderTemplateCheck = late(() => StudioTemplateCheck.renderTemplateCheck);
+  inspectorRenderers.renderTaskInspector = renderTaskInspector;
+  inspectorRenderers.renderInstanceRunInspector = renderInstanceRunInspector;
+  inspectorRenderers.renderCompositeInspector = renderCompositeInspector;
+  inspectorRenderers.renderDecorators = renderDecorators;
+  inspectorRenderers.renderWorkflowInspector = renderWorkflowInspector;
+  inspectorRenderers.renderVariablesInspector = renderVariablesInspector;
+  inspectorRenderers.renderEdgeInspector = renderEdgeInspector;
 
-  const StudioAssetBrowser = createAssetBrowser({ state, $, el, mutate, nodeById, toast, vscode, requestRoi });
-  const openAssetBrowser = late(() => StudioAssetBrowser.openAssetBrowser);
-  const closeAssetBrowser = late(() => StudioAssetBrowser.closeAssetBrowser);
-  const renderAssetBrowser = late(() => StudioAssetBrowser.renderAssetBrowser);
-  const restoreAssetBrowserAfterRoi = late(() => StudioAssetBrowser.restoreAssetBrowserAfterRoi);
-  const requestTemplateReplacement = late(() => StudioAssetBrowser.requestTemplateReplacement);
+  const Cards = createCanvasCards({
+    state, svgEl, nodeCards, displayNameOfDefinition, assetPreviewForPath, bindAssetPathPreview,
+    disconnectVariableFromInstanceInput, startVariableConnectionFromInstanceInput, startVariableConnectionFromCard,
+    openPortContextMenu, showMenu, instanceRunPinMenuItems, variableCardPortMenuItems, requestInspector,
+    requestOpenWorkflowReference, render, contextMenuSuppressedByPan,
+    removeInstanceRun, removeVariableCard, setVariableCardSelection, worldPoint, snapshot,
+    runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H, portRadius: PORT_R,
+    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H, variableCardPortY: VARIABLE_CARD_PORT_Y,
+  });
+  const { renderInstanceRunCard, renderVariableCard, registerCardPress } = Cards;
 
-  const StudioWorkflowBrowser = createWorkflowBrowser({ state, $, el, nodeById, mutate, toast });
-  const workflowReference = late(() => StudioWorkflowBrowser.workflowReference);
-  const openWorkflowBrowser = late(() => StudioWorkflowBrowser.openWorkflowBrowser);
-  const closeWorkflowBrowser = late(() => StudioWorkflowBrowser.closeWorkflowBrowser);
+  const InlineEditor = createCanvasInlineEditor({
+    state, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
+    showMenu, nodeVariablePinMenuItems, requestInspector,
+    toast: (message, error) => toast(message, error), enumOption, fieldLabel,
+    openAssetBrowser, requestRoi,
+  });
+  const { openParamEditor, closeInlineEditor, setParamLiteral, refreshInlineEditor } = InlineEditor;
 
-  const StudioRoiPicker = createEditorRoiPicker({ state, $, el, mutate, vscode, toast, nodeById, restoreAssetBrowserAfterRoi });
-  const openRoiPicker = late(() => StudioRoiPicker.openRoiPicker);
+  const NodeCard = createNodeCardRenderer({
+    state, svgEl, nodeCards, position, nodeHeight, nodeRowHeight,
+    subWorkflowRef, templatePreview,
+    compositeSubtitle, variableDisplayNameOf, referenceDisplayNameOf: (ref) => referenceDisplayName(ref),
+    nodeIssueInfo, issueTitle,
+    decoratorLabel, nodeVariablePins, openLightbox,
+    disconnectVariableFromPin, startVariableConnectionFromPin,
+    openPortContextMenu, showMenu,
+    nodeVariablePinMenuItems, nodeInputPortMenuItems, nodeOutputPortMenuItems,
+    startConnectionFromInput, startConnection, startReferenceConnection,
+    nodeReferencePortMenuItems,
+    startNodeDrag,
+    registerCardPress, requestInspector, requestOpenSubWorkflow, render,
+    contextMenuSuppressedByPan,
+    copySelection, cutSelection, deleteSelection,
+    paramRowInfo, toggleParamRows, paramRowMenuItems,
+    openParamEditor,
+    compactValue,
+    typeIcons: TYPE_ICON, typeNames: TYPE_NAMES, runLabels: RUN_LABEL,
+    nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
+    runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X, taskOutputPortY: TASK_OUTPUT_PORT_Y, preview: PREVIEW,
+  });
+  const { renderNode } = NodeCard;
+
+  const RenderEntry = createRenderEntry({
+    state, $, graph, wrap, svgEl, UI, nodes, nodeById, position, nodeHeight, instanceRunCards, variableCardList,
+    renderNode, renderInstanceRunCard, renderVariableCard,
+    renderEdge, renderInstanceRunEdge, renderConnection,
+    renderVariableConnection, renderReferenceConnection, renderReferenceEdges, renderVariableEdges,
+    renderMinimap, renderInspector,
+    postSidebarState, updateIssueBadge,
+    ensureLayout, syncLegacyInputParameters, syncLegacyVariableCards, setDirty, nodeWidth: NODE_W,
+    afterRender: () => refreshInlineEditor(),
+  });
+  renderPieces = RenderEntry;
 
   const RunEvents = createRunEvents({
     state, nodes, nodeById, clone, render, deleteSelection, removeVariableCards, removeVariableCard,
     removeInstanceRun, removeVariable,
   });
-  const { handleRunEvent, normalizeRaw, deleteCurrentSelection } = RunEvents;
+  const { handleRunEvent, deleteCurrentSelection } = RunEvents;
 
   const EditorCommandDispatch = createEditorCommandDispatch({
+    convertInputToVariable: VariableInspectors.convertInputToVariable,
     state, mutate, nodes, nodeById, undo, redo, fitView, autoLayout, copySelection, cutSelection,
     pasteClipboard, deleteSelection, addNode, render, focusNode, searchNodeByName, exportFullCanvasImage,
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
+    deleteVariable,
     VariableSystem,
   });
   const { executeEditorCommand } = EditorCommandDispatch;
@@ -548,10 +509,10 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   graph.addEventListener('mousemove', onPointerMove);
   graph.addEventListener('mouseup', onPointerUp);
   graph.addEventListener('mousemove', (event) => { state.mouse = worldPoint(event); });
-  graph.addEventListener('pointermove', (event) => { if (state.connect || state.variableConnect) onPointerMove(event); });
-  graph.addEventListener('pointerup', (event) => { if (state.connect || state.variableConnect) onPointerUp(event); });
-  graph.addEventListener('pointercancel', () => { cancelConnection(); cancelVariableConnection(); });
-  graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect || state.variableConnect) onPointerMove(event); });
+  graph.addEventListener('pointermove', (event) => { if (state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
+  graph.addEventListener('pointerup', (event) => { if (state.connect || state.variableConnect || state.referenceConnect) onPointerUp(event); });
+  graph.addEventListener('pointercancel', () => { cancelConnection(); cancelVariableConnection(); cancelReferenceConnection(); });
+  graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
   graph.addEventListener('wheel', (event) => { event.preventDefault(); zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY); }, { passive: false });
   graph.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -577,7 +538,7 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
     items.push('separator', { label: '自动排列', run: () => { autoLayout(); fitView(); } });
     showMenu(event.clientX, event.clientY, items);
   });
-  window.addEventListener('mousemove', (event) => { if (state.drag || state.connect || state.variableConnect) onPointerMove(event); });
+  window.addEventListener('mousemove', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
   window.addEventListener('mouseup', onPointerUp);
 
   // 右键菜单全局收起（UE 行为）：菜单外的任何按下/右键都会先收起当前菜单，
@@ -601,21 +562,19 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
   const InputBridge = createInputBridge({
     state, $, el, wrap, worldPoint, placeVariableCard, variableDragMime: VARIABLE_DRAG_MIME,
     getShortcuts: () => window.StudioShortcuts,
-    cancelConnection: late(() => cancelConnection),
-    cancelVariableConnection: late(() => cancelVariableConnection),
-    hideMenus, closeAssetBrowser: late(() => closeAssetBrowser),
-    closeTemplateCheck: late(() => closeTemplateCheck),
-    render: late(() => render),
-    deleteCurrentSelection: late(() => deleteCurrentSelection),
+    cancelConnection, cancelVariableConnection, cancelReferenceConnection,
+    hideMenus, closeAssetBrowser, closeTemplateCheck,
+    render,
+    deleteCurrentSelection,
     copySelection, cutSelection, pasteClipboard,
-    executeEditorCommand: late(() => executeEditorCommand),
+    executeEditorCommand,
     undo, redo, fitView, nodeById, position, nodeHeight, nodeWidth: NODE_W, bounds,
   });
   InputBridge.install();
-  const { matchesShortcut, variableDragAccepted, hideVariableDropGhost } = InputBridge;
   const CanvasMessages = createCanvasMessages({
     state, $, mutate, nodeById, normalizeRaw, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
     renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, renderInspector, renderAssetBrowser,
+    renderWorkflowBrowser,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
     normalizedAssetPath, handleRunEvent, setExportBusy,
     replaceDocument: (text: string, record?: boolean) => { closeInlineEditor(); replaceDocument(text, record); },
@@ -629,6 +588,136 @@ export function startCanvasEditor(bridge: CanvasBridge): void {
     if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
-  window.__btEditor = { state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard, snapshot: () => clone(state.raw), collectExportTemplatePaths, applyInlineThumbnails, placeVariableCard, variableCardList, nodeVariablePins, collectNodeCardVariableRefs, connectVariableToPin };
+  const handle: CanvasEditorHandle = {
+    state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard,
+    snapshot: () => JSON.stringify(state.raw), collectExportTemplatePaths, applyInlineThumbnails, placeVariableCard, variableCardList,
+    nodeVariablePins, collectNodeCardVariableRefs, connectVariableToPin, referenceFieldsForPin, nodeOutputFields,
+    removeVariable, deleteVariable, renderInspector,
+  };
+  window.__btEditor = handle;
   vscode.postMessage({ type: 'ready' });
+  return handle;
+
+  // ---- 入口局部胶水 ----
+  // 以下函数声明（含 render/focusNode）在函数体内提升，可被上方各工厂直接引用；
+  // 它们只在**调用期**访问后文才初始化的模块输出（nodeVariablePins 等），构造期不调用。
+
+  /** 按名字找 Action 规格（画布目录快照）。 */
+  function catalogByName(name: string): any {
+    return state.catalog.find((item) => item.name === name) || null;
+  }
+
+  /** 校验器要的目录接口：按名字找 Action 规格。 */
+  function catalogLike(): { byName(name: string): any; names(): string[] } {
+    return {
+      byName: (name: string) => catalogByName(name),
+      names: () => state.catalog.map((item) => item.name),
+    };
+  }
+
+  /** 任务节点对应的动作清单（清单里声明 `card.rows` 时卡片布局固定）。 */
+  function nodeActionSpec(node: any): any {
+    return (node && node.type === 'task' && node.action ? catalogByName(node.action) : null);
+  }
+
+  /**
+   * 每个节点自己的参数行高：声明了固定卡片的动作用双行行样式（标签一行、值一行）。
+   * nodeHeight、参数行几何、变量端点、连线与命中测试共用这一个公式。
+   */
+  function nodeRowHeight(node: any): number {
+    return (hasCardLayout(nodeActionSpec(node)) ? CARD_ROW_H : RUN_VARIABLE_H);
+  }
+
+  function nodeHeight(node: { id?: string; decorators?: unknown[] }): number {
+    return BASE_H
+      + nodeVariablePins(node).length * nodeRowHeight(node)
+      + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
+  }
+
+  function svgEl(tag: string, attrs: Record<string, unknown>, parent?: Element): SVGElement {
+    const element = document.createElementNS(NS, tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value !== undefined && value !== null) element.setAttribute(key, String(value));
+    }
+    if (parent) parent.appendChild(element);
+    return element;
+  }
+
+  function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K];
+  function el(tag: string, className?: string, text?: string): HTMLElement;
+  function el(tag: string, className?: string, text?: string): HTMLElement {
+    if (tag === 'button') return UI.button({ label: text, className });
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+
+  /** 实例运行项的实例名显示（含回退）。 */
+  function runtimeInstanceLabel(instanceId: string, fallback?: string): string {
+    return instanceLabel(instanceId, state.instances, fallback);
+  }
+
+  /** 卡片错误标记：文档版本变化时才重跑一次校验，把错误按节点/参数分组。 */
+  function documentIssues(): Map<string, any> {
+    const version = state.docVersion || 0;
+    // 缓存键 = 文档版本 + 文档对象本身：改动走 mutate 会 bump 版本，
+    // 整份替换（载入/撤销/外部同步）会换对象，两条路都能失效。
+    if (issuesCache && issuesCache.version === version && issuesCache.raw === state.raw) return issuesCache.byNode;
+    let byNode = new Map<string, any>();
+    try {
+      byNode = issuesByNode(state.raw ? validateWorkflow(state.raw, catalogLike()) : []);
+    } catch {
+      // 校验是渲染路径上的附加信息：目录/文档畸形时宁可不标红，也不能让画布画不出来。
+      byNode = new Map();
+    }
+    issuesCache = { version, raw: state.raw, byNode };
+    return byNode;
+  }
+
+  function nodeIssueInfo(node: any): { node: any[]; params: Map<string, any[]> } | null {
+    return nodeIssues(documentIssues(), node && node.id);
+  }
+
+  /** 参数行的折叠状态：清单声明了固定卡片的动作按声明显示全部端点（无折叠）；
+   * 其余默认只显示「必填 + 已配置」，箭头展开动作定义里的全部参数。
+   */
+  function paramRowInfo(node: any): { expanded: boolean; total: number; hidden: number; fixed: boolean; twoLine: boolean } {
+    const spec = nodeActionSpec(node);
+    if (hasCardLayout(spec)) {
+      const total = cardRowParams(spec)?.length ?? 0;
+      return { expanded: true, total, hidden: 0, fixed: true, twoLine: true };
+    }
+    const total = spec && spec.parameters ? Object.keys(spec.parameters).length : 0;
+    const expanded = paramRowsExpanded().has(node && node.id);
+    const shown = nodeVariablePins(node).length;
+    return { expanded, total, hidden: Math.max(0, total - shown), fixed: false, twoLine: false };
+  }
+
+  function toggleParamRows(nodeId: string): void {
+    const expanded = paramRowsExpanded();
+    if (expanded.has(nodeId)) expanded.delete(nodeId);
+    else expanded.add(nodeId);
+    render();
+  }
+
+  /** 参数行右键：保留端口菜单（绑定/提升为变量），再补上字面量与详情栏入口。 */
+  function paramRowMenuItems(nodeId: string, pin: any, point: { x: number; y: number }): MenuEntry[] {
+    const node = nodeById(nodeId);
+    const items: MenuEntry[] = nodeVariablePinMenuItems(nodeId, pin, point);
+    items.push('separator');
+    if (pin && pin.configured) {
+      items.push({ label: '恢复默认值', run: () => { if (node) setParamLiteral(node, String(pin.param), undefined); } });
+    }
+    items.push({ label: '在详情栏编辑', run: () => requestInspector({ kind: 'node', nodeId }) });
+    return items;
+  }
+
+  /** 重绘入口占位：RenderEntry 就绪后赋值（模块直接引用 render/focusNode 函数本身）。 */
+  function render(): void {
+    renderPieces?.render();
+  }
+  function focusNode(id: string): void {
+    renderPieces?.focusNode(id);
+  }
 }

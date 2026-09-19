@@ -1,12 +1,13 @@
 /**
  * 复合节点与装饰器详情面板：渲染组合节点设置、子节点列表与装饰器编辑。
- * 原 `editor-composite-inspector.js`；迁移期由 main.ts 以 window.StudioEditorCompositeInspector 挂载。
+ * 原 `editor-composite-inspector.js`；依赖由入口工厂注入。
  *
- * 返回对象同时暴露迁移期的内部函数（decoratorField/decoratorVectorField/
+ * 返回对象同时暴露内部函数（decoratorField/decoratorVectorField/
  * decoratorParameterControl/exposeDecoratorParameter/retryPublicActions），
- * 供编译产物测试使用；阶段 4d 拆出 inspector 模块后收回。
+ * 供编译产物测试使用。
  */
 import { createVariableSystem } from '../model/variable-system';
+import { isBindingValue } from '../../shared/workflow/bindings';
 
 export type UiNode = HTMLElement & Record<string, any>;
 
@@ -60,7 +61,6 @@ export interface CompositeInspectorDeps {
   render(): void;
   state: CompositeInspectorState;
   decoratorLabel(decorator: DecoratorLike): string;
-  isBindingValue(value: unknown): value is { ref: string };
   clone<T>(value: T): T;
   allRefs(node: CompositeNode, schema?: { type: string; min?: number }, existsOnly?: boolean): string[];
   referenceLabel(ref: string): string;
@@ -86,7 +86,7 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
     el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton,
     conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions, nodeById,
     mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state,
-    decoratorLabel, isBindingValue, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
+    decoratorLabel, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
   } = deps;
 
   function renderCompositeInspector(body: UiNode, node: CompositeNode): void {

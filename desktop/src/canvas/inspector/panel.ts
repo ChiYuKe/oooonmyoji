@@ -4,9 +4,22 @@
  * segmentedInput/checkbox/sectionCollapseStates/groupSections/renderInspector。
  *
  * 各详情渲染函数由调用方注入；渲染不修改文档（重命名/类型切换走注入命令）。
+ * 详情内容渲染器（DetailInspectors 等）与面板互相引用：面板在内容模块之前创建，
+ * 通过 `renderers` 记录在**分派时**读取各渲染器（入口按构造顺序填表）。
  */
 import type { CanvasState } from '../state/canvas-state';
 import type { Ui } from '../ui/elements';
+
+/** 详情面板分派的各内容渲染器；入口按构造顺序填入真实实现。 */
+export interface InspectorRenderers {
+  renderTaskInspector(body: HTMLElement, node: any): void;
+  renderCompositeInspector(body: HTMLElement, node: any): void;
+  renderDecorators(body: HTMLElement, node: any): void;
+  renderWorkflowInspector(): void;
+  renderVariablesInspector(): void;
+  renderInstanceRunInspector(): void;
+  renderEdgeInspector(): void;
+}
 
 export interface InspectorPanelDeps {
   state: CanvasState;
@@ -22,13 +35,7 @@ export interface InspectorPanelDeps {
   changeNodeType(node: any, value: string): void;
   mutate(fn: () => void): void;
   deleteSelection(): void;
-  renderTaskInspector(body: HTMLElement, node: any): void;
-  renderCompositeInspector(body: HTMLElement, node: any): void;
-  renderDecorators(body: HTMLElement, node: any): void;
-  renderWorkflowInspector(): void;
-  renderVariablesInspector(): void;
-  renderInstanceRunInspector(): void;
-  renderEdgeInspector(): void;
+  renderers: InspectorRenderers;
 }
 
 export interface InspectorPanel {
@@ -46,8 +53,7 @@ export interface InspectorPanel {
 export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
   const {
     state, UI, $, el, nodeById, hideAssetPathPreview, types, typeNames, typeLabels,
-    renameNode, changeNodeType, mutate, deleteSelection, renderTaskInspector, renderCompositeInspector,
-    renderDecorators, renderWorkflowInspector, renderVariablesInspector, renderInstanceRunInspector, renderEdgeInspector,
+    renameNode, changeNodeType, mutate, deleteSelection, renderers,
   } = deps;
 
   function clearInspector(title: string): HTMLElement {
@@ -161,10 +167,10 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
       $('inspector-body').innerHTML = '';
       return;
     }
-    if (state.inspector === 'workflow') { renderWorkflowInspector(); return; }
-    if (state.inspector === 'variables') { renderVariablesInspector(); return; }
-    if (state.selectedRun) { renderInstanceRunInspector(); return; }
-    if (state.selectedEdge) { renderEdgeInspector(); return; }
+    if (state.inspector === 'workflow') { renderers.renderWorkflowInspector(); return; }
+    if (state.inspector === 'variables') { renderers.renderVariablesInspector(); return; }
+    if (state.selectedRun) { renderers.renderInstanceRunInspector(); return; }
+    if (state.selectedEdge) { renderers.renderEdgeInspector(); return; }
     if (selected.length !== 1) {
       $('inspector-title').textContent = selected.length ? `${selected.length} 个节点` : '详细信息';
       $('inspector-empty').textContent = selected.length ? '可拖动或按 Delete 删除所选节点' : '选择一个节点';
@@ -186,9 +192,9 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
       const typeRow = field(basics, '类型');
       typeRow.appendChild(selectInput(node.type, types.filter((type) => type !== 'root').map((type) => ({ value: type, label: typeNames[type] || typeLabels[type] })), (value) => changeNodeType(node, value)));
     }
-    if (node.type === 'task') renderTaskInspector(body, node);
-    else renderCompositeInspector(body, node);
-    if (node.type !== 'root') renderDecorators(body, node);
+    if (node.type === 'task') renderers.renderTaskInspector(body, node);
+    else renderers.renderCompositeInspector(body, node);
+    if (node.type !== 'root') renderers.renderDecorators(body, node);
     const remove = el('button', 'danger full-command', '删除节点');
     remove.addEventListener('click', deleteSelection);
     body.appendChild(remove);

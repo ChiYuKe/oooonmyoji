@@ -35,7 +35,11 @@ export interface VariableInspectorsDeps {
   clearVariableCardSelection(): void;
   renameVariable?(scope: string, oldName: string, name: string): void;
   removeVariable?(scope: string, name: string): void;
+  /** 观看端确认后的强制删除：引用一并清掉。 */
+  deleteVariable?(scope: string, name: string): void;
   variableReferenceCount?(scope: string, name: string): number;
+  /** 与壳层通信：把引用清单交给「变量引用」面板。 */
+  vscode: { postMessage(message: unknown): void };
   VariableSystem: Record<string, any>;
   selectInput(value: unknown, options: Array<{ value: string; label: string }>, onChange: (value: string) => void, className?: string): UiNode;
   textInput(value: unknown, onChange: (value: string) => void, options?: Record<string, unknown>): UiNode;
@@ -49,6 +53,7 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
   const {
     state, mutate, UI, el, $, nodeById, clone, toast, defaultValue, allRefs, referenceLabel, fieldLabel,
     disconnect, bindAssetPreview, openAssetBrowser, variableCards, variableLinks, clearVariableCardSelection, VariableSystem,
+    vscode,
     selectInput, textInput, checkbox, field, section, clearInspector,
   } = deps;
   function renderEdgeInspector(): void {
@@ -458,12 +463,56 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
   }
 
   function removeVariableDefault(scope: string, name: string): void {
-    const references = variableReferenceCount(scope, name);
-    if (references) {
-      toast(`变量 ${name} 正在被 ${references} 处引用，不能删除`, true);
+    const references = VariableSystem.references(state.raw, scope, name);
+    if (references.length) {
+      // 有引用时不再只丢一句「不能删除」：把引用清单交给「变量引用」面板，
+      // 那边可以逐个跳过去断开，也可以直接删除变量并让引用回落默认值。
+      vscode.postMessage({
+        type: 'variableReferencesRequested',
+        scope,
+        name,
+        displayName: VariableSystem.label(state.raw, scope, name),
+        entries: variableReferenceEntries(scope, name, references),
+      });
       return;
     }
+    deleteVariableDefinition(scope, name);
+  }
+
+  /** 把 VariableSystem 的引用记录补成面板能直接渲染的条目。 */
+  function variableReferenceEntries(scope: string, name: string, references: any[]): any[] {
+    return references.map((reference: any) => {
+      const path = typeof reference.path === 'string' ? reference.path : '';
+      const initializer = reference.initializer === true;
+      const nodeId = typeof reference.nodeId === 'string' ? reference.nodeId : '';
+      const node = nodeId ? nodeById(nodeId) : null;
+      // 参数路径有两类：`nodes.<id>.params.inputs.超时` 与
+      // `nodes.<id>.runs.0.inputs.超时`（实例子输入），取 `params` / `runs` 之后的部分。
+      const parts = path.split('.');
+      const start = parts.findIndex((part: string) => part === 'params' || part === 'runs');
+      const param = start >= 0 ? parts.slice(start + (parts[start] === 'params' ? 1 : 0)).join('.') : '';
+      const key = nodeId && param ? `${nodeId}:${param}` : '';
+      const cardId = key ? variableLinks()[key] : undefined;
+      return {
+        nodeId,
+        nodeName: node && typeof node.name === 'string' ? node.name : nodeId,
+        param,
+        ref: typeof reference.ref === 'string' ? reference.ref : '',
+        label: initializer
+          ? '变量由这个输入初始化'
+          : param
+            ? `参数「${fieldLabel(param)}」`
+            : '参数引用',
+        linked: Boolean(cardId),
+        initializer,
+      };
+    });
+  }
+
+  /** 强制删除：先清掉所有引用（参数回落到动作默认值），再删定义与变量卡片。 */
+  function deleteVariableDefinition(scope: string, name: string, force = false): void {
     mutate(() => {
+      if (force) clearVariableReferences(scope, name);
       clearVariableCardSelection();
       const definitions = state.raw[scope];
       const names = Object.keys(definitions);
@@ -480,6 +529,57 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
       const remaining = Object.keys(definitions);
       state.selectedVariable = remaining[Math.min(Math.max(0, index), remaining.length - 1)] || '';
     });
+  }
+
+  /**
+   * 清掉指向该变量的所有参数引用，并移除与之对应的连线映射。
+   * 参数回到动作默认值（与画布上断开连线同义），缓存里的绑定前字面量仍然生效。
+   */
+  function clearVariableReferences(scope: string, name: string): void {
+    const prefix = `${scope}.${name}`;
+    const matches = (value: any): boolean => Boolean(value)
+      && typeof value === 'object'
+      && !Array.isArray(value)
+      && typeof value.ref === 'string'
+      && (value.ref === prefix || value.ref.startsWith(`${prefix}.`));
+    for (const node of state.raw.nodes || []) {
+      if (!node) continue;
+      const params = node.params;
+      // 注意 params 可能不存在而 runs 存在（子工作流实例节点）：两者互不依赖，
+      // 不能因为缺 params 就跳过 runs 里的引用清理。
+      if (params && typeof params === 'object' && !Array.isArray(params)) {
+        for (const [key, value] of Object.entries(params)) {
+          if (matches(value)) {
+            delete params[key];
+            delete variableLinks()[`${node.id}:${key}`];
+          }
+        }
+        const nested = params.inputs;
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+          for (const [key, value] of Object.entries(nested)) {
+            if (matches(value)) {
+              delete nested[key];
+              delete variableLinks()[`${node.id}:inputs.${key}`];
+            }
+          }
+        }
+      }
+      if (!Array.isArray(node.runs)) continue;
+      node.runs.forEach((run: any, index: number) => {
+        if (!run || !run.inputs || typeof run.inputs !== 'object' || Array.isArray(run.inputs)) return;
+        for (const [key, value] of Object.entries(run.inputs)) {
+          if (matches(value)) {
+            delete run.inputs[key];
+            delete variableLinks()[`${node.id}:runs.${index}.inputs.${key}`];
+          }
+        }
+      });
+    }
+    if (scope === 'inputs') {
+      for (const variable of Object.values<any>(state.raw.variables || {})) {
+        if (variable && variable.initial_from === name) delete variable.initial_from;
+      }
+    }
   }
 
   function addVariable(scope: string = 'variables'): void {
@@ -604,11 +704,13 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
   const removeVariable = deps.removeVariable ?? removeVariableDefault;
   const renameVariable = deps.renameVariable ?? renameVariableDefault;
   const variableReferenceCount = deps.variableReferenceCount ?? variableReferenceCountDefault;
+  /** 观看端（「变量引用」面板）确认后的强制删除：引用一并清掉。 */
+  const deleteVariable = deps.deleteVariable ?? ((scope: string, name: string) => deleteVariableDefinition(scope, name, true));
 
   return {
     renderEdgeInspector, renderLimitControl, renderWorkflowInspector, sameDefinitionValue, definitionAcceptsValue,
     changeDefinitionType, initialDefinitionValue, definitionValueControl, variableReferenceCount, convertInputToVariable,
-    removeVariable, addVariable, renderVariablesInspector, renameVariable, variableDisplayName, syncExposedInput,
+    removeVariable, deleteVariable, addVariable, renderVariablesInspector, renameVariable, variableDisplayName, syncExposedInput,
     valueBindingMenu,
   };
 }

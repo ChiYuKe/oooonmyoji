@@ -3,24 +3,44 @@
 记录时间：2026-09-16。代码状态：提交 `2f00a2e`（桌面端 workspace 阶段 2）。
 本次记录只盘点现状，不改变行为。
 
+基线更新记录：在提交 `9d33dbd` 之上整理了全部未提交改动并按功能分组（见下），
+随后跑通两端全部检查（结果见「一、检查结果」）。按约定**本次只更新基线文档，不提交**。
+
 未纳入重构清理的现有改动（保持原样）：
 
 - `README.md` 在工作区处于已删除状态。
 - `desktop/desktop-test-out.txt` 未跟踪。
+- `desktop/public/theme/theme.css` 由 `npm run build` 重新生成（浅色主题 palette 的派生产物）。
+- `workflows/*.json`：曾混入草稿文档导致 Python 校验测试失败，已从 HEAD 恢复；
+  桌面端运行中会再写工作流 JSON（当前是应用内真实编辑，属于用户的进行中内容，保持原样）。
 
 ## 一、检查结果
 
 | 检查 | 命令 | 结果 |
 |---|---|---|
-| Python 测试 | `.venv\Scripts\python.exe -m pytest -q` | 181 passed, 2 skipped |
+| Python 测试 | `.venv\Scripts\python.exe -m pytest -q` | 249 passed, 2 skipped |
 | Python Lint | `.venv\Scripts\python.exe -m ruff check .` | All checks passed |
-| Python 类型 | `.venv\Scripts\python.exe -m mypy src` | Success, 54 files |
+| Python 类型 | `.venv\Scripts\python.exe -m mypy src` | Success, 72 files |
 | 契约检查 | `.venv\Scripts\python.exe tests\contract_check.py` | 6 项全部 OK |
 | 桌面类型 | `npm run typecheck` | 通过（renderer + electron 两个 project） |
-| 桌面测试 | `npm test` | 149 pass, 0 fail（node:test + stripTypeScriptTypes） |
+| 桌面测试 | `npm test` | 385 pass, 0 fail（node:test + dist-test-renderer 编译产物；条数随工作树数据变化） |
 | 桌面构建 | `npm run build` | 通过（浅色主题生成 + typecheck + tsc + vite） |
 
 注意：`mypy .` 会检查 `tests/`，因 `disallow_untyped_defs` 报 93 个错误；CI 与验收只运行 `mypy src`。
+
+### 本次未提交改动按功能分组
+
+改动均来自 HEAD `9d33dbd` 之后的未提交工作，按 CHANGELOG「Unreleased」归纳为以下功能组（同一组内的文件属同一功能，迁移/回滚应整组处理）：
+
+1. **实时视图（live view）**：`src/oooonmyoji/runtime/live_view.py`、`desktop/src/main/liveView.ts`、`renderer/live-view.*`、`shared/contracts.ts`（LiveView 相关类型）、`main.ts`、`preload.ts`、`runtimeService.ts`、`context.py`、`runner.py`、`vite.config.mts`；测试 `tests/test_live_view*.py`、`desktop/tests/live-view.test.cjs`。
+2. **卡片固定行（card.rows）与卡内编辑**：`actions/manifest.py` 与 `manifests/*.json`（card.rows 声明）、`render/card-layout.ts`、`param-rows.ts`、`node-card.ts`、`scripts/verify-card-parameter-rows.cjs`、`public/theme` 旧 CSS、`shared/parameter-types.ts`、`workflow/parameters.ts`；测试 `action-card-manifest`/`canvas-card-layout`/`canvas-param-rows`。
+3. **节点输出引用与卡片校验**：`model/card-issues.ts`、`variable-links.ts`、`interactions/{connections,hit-test,port-menu,pointer}`、`canvas/edges.ts`、`render/render-entry.ts`、`workflows/validator.py` 与 `node_rules.py`；测试 `canvas-card-issues`/`canvas-reference-port`/`canvas-variable-links`/`canvas-variable-unbind`。
+4. **变量引用面板与悬空引用**：`renderer/variable-references.ts`、`renderer/reference-viewer.ts`（含滚轮缩放）、`docking.ts`、`editor-host.ts`；测试 `variable-references-*`、`reference-viewer`。
+5. **镜像编辑回写**：`editor-host.ts`、`main.ts`、`asset-browser.ts`、`roi-picker.ts`、`canvas-helpers.ts`；测试 `document-mirror-edits`/`canvas-roi-routing`。
+6. **画布迁移遗留 TS 化**：`canvas/**` 主体与 `canvas-*.test.cjs`（见阶段 4/4d）。
+7. **桌面工作台拆分**：`renderer/docking.ts` 与 `renderer/docking/*`、`renderer/main.ts`、新增 `renderer/delete-shortcuts.ts`、`document-lifecycle.ts`、`settings-panel.ts`、`content-browser/items.ts`、`overview/card.ts`、`content-browser.ts`、`overview.ts`；测试 `delete-shortcuts`/`content-browser-filter`/`overview-layout`/`document-mirror-edits`/`workflow-tabs`（见阶段 3b）。
+8. **Python 运行调度拆分**：新增 `runtime/ocr_dispatch.py`、`runtime/worker_lifecycle.py`、`runtime/group_wait.py`、`runtime/supervisor.py`、`tests/test_worker_lifecycle.py`、`tests/test_group_wait.py`、`tests/test_ocr_pool_shutdown.py`（见阶段 5b）。
+9. **文档**：`README.md`、`CHANGELOG.md`、`docs/refactor-baseline.md`。
 
 ## 二、Python 公开入口
 
@@ -61,9 +81,9 @@
 - 项目：`bootstrap`、`getWorkflowInit`、`saveWorkflow`、`createWorkflow`、`openWorkflowFile`、`openContentItem`、`moveContent`、`listContentFolders`、`createContentFolder`、`renameContent`、`deleteContent`、`getReferenceGraph`。
 - 运行：`runWorkflow`、`stopWorkflow`、`getDebugSettings`、`updateDebugSettings`、`listInstances`、`captureRoi`、`checkTemplate`。
 - 素材：`listAssets`、`readAssetData`、`saveTemplate`、`saveCanvas`。
-- 工具与事件：`openVisionTest`、`openReadme`、`visionStart`、`visionCommand`、`visionStop`、`onVisionEvent`、`onRuntimeOutput`、`onRuntimeState`、`onRunEvent`、`onWindowMaximized`。
+- 工具与事件：`openVisionTest`、`openLiveView`、`liveViewWatch`、`liveViewPoll`、`openReadme`、`visionStart`、`visionCommand`、`visionStop`、`onVisionEvent`、`onRuntimeOutput`、`onRuntimeState`、`onRunEvent`、`onWindowMaximized`。
 
-IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance:*`、`project:*`、`runtime:*`、`tools:open-vision-test`、`help:open-readme`、`vision:*`。
+IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance:*`、`project:*`、`runtime:*`、`tools:open-vision-test`、`tools:open-live-view`、`live-view:*`、`help:open-readme`、`vision:*`。
 
 ### iframe 消息协议
 
@@ -104,9 +124,11 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 - 文件重命名/移动后的引用更新与路径边界（Python 侧有覆盖，桌面侧缺）。
 - 两端共同校验规则的一致样例（当前只有常量级契约检查）。
 
-源切片测试（通过 `source.indexOf` 截取函数执行）需要随迁移改为导入编译产物：
+源切片测试（通过 `source.indexOf` 截取函数执行）的迁移状态：
 
-`decorator-inputs`、`delete-shortcuts`、`content-browser-filter`、`composite-inspector`、`asset-browser-portal`、`node-cards`、`overview-layout`、`port-context-menu`、`runtime-log`、`shortcuts`、`sidebar-design`、`sidebar-variable-list`、`task-parameter-pins`、`tooltip-shared`、`variable-system`、`variables-panel`、`variable-inspector`、`variable-card-delete`、`workbench`、`workflow-session`（共 20 个）。
+- 行为测试已改为导入/实例化编译产物；本轮又清掉两处已无调用路径的切片辅助（`port-context-menu` 的 `extractFunction` 回退、`task-parameter-pins` 未使用的 `extractFunction`）。
+- 仅剩 `workbench.test.cjs` 的 `renderContentBrowser` 仍按源码切片执行（原因见阶段 3b 登记）。
+- 另有若干测试读取源码文本做接线断言（`delete-shortcuts`、`workflow-tabs`、`workbench`、`sidebar-design`、`theme-settings`、`variables-panel`、`node-cards`、`editor-frame-layout` 等），断言的是结构性接线而非行为，不在此清单内。
 
 ## 六、实施进度（滚动更新）
 
@@ -131,6 +153,29 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 - 测试：`sidebar-design`、`variables-panel` 改为导入编译产物（新增 `tsconfig.renderer-tests.json` 与 `build:renderer-tests`）；新增 `editor-messages.test.cjs`；桌面测试 176 → 179 项，全部通过。
 - 已验证：桌面 typecheck、测试、生产构建通过；按项目规则重启桌面端，窗口标题与启动后写出的会话配置正常。
 
+阶段 3b：工作台拆分（完成）：
+
+停靠层（`renderer/docking.ts` 1460 → 803 行）——主文件只保留类型、面板定义、渲染器类与两个创建函数：
+
+- `renderer/docking/layout.ts`：布局存储键与读写、标签拖放覆盖模型。
+- `renderer/docking/documents.ts`：工作流文档面板（画布 iframe 容器、标签、未保存圆点、`documentUriForPanelId`）。
+- `renderer/docking/gestures.ts`：拖回主窗口/拖出弹窗/拖拽让位/标签条拖动区切换四个手势，依赖全以参数注入。
+- `renderer/docking/shared-panels.ts`：共享面板（内容浏览器/运行日志/变量引用）定义、层选择与跨层转移桥接。
+- 对外导出面不变（主文件再导出拆分符号），外部引用无需改动；类型只经 `import type` 回引，无运行时循环。
+
+壳层（`renderer/main.ts` 1344 → 959 行）——按职责抽成工厂模块，入口只组装：
+
+- `renderer/delete-shortcuts.ts`(124)：Delete/Backspace 的登记目标状态与解析（原 `deleteTarget` 与四个函数），各面板只负责登记。
+- `renderer/document-lifecycle.ts`(424)：标签/面板的打开、激活、关闭与对账；`closingDocuments/documentsReady/removingDocument/suppressDocumentRemoval/documentLoads/activatingUri` 随函数一并迁入，`workspace.ts` 只存状态。
+- `renderer/settings-panel.ts`(139)：内容视图、实例自动刷新、启动行为与 Debug 截图的控件读写与监听（含轮询定时器）。
+- `renderer/content-browser/items.ts`(44)：目录归属与递归类型过滤两个纯函数。
+- `renderer/overview/card.ts`(147)：单卡片渲染（依赖注入，`OverviewItemStatus` 一并迁入）。
+- 接线：`workspace`/`contentBrowser`/`editorHost` 的相关依赖改为转调生命周期方法；`beforeunload` 用 `settings.dispose()` 与 `lifecycle.suppressRemovals()`。
+
+测试迁移（4 个源切片改为导入编译产物）：`delete-shortcuts`、`content-browser-filter`、`overview-layout`、`document-mirror-edits`；`workflow-tabs` 改读 `document-lifecycle.ts`；`tsconfig.renderer-tests.json` 纳入上述新模块。桌面测试 361 pass、typecheck 与 build 通过。
+
+- 仍按源码切片执行：`workbench.test.cjs` 的 `renderContentBrowser`。该函数与内容浏览器十余个模块级状态耦合，单独抽工厂会引入比现在更多的间接层，暂留并在此登记。
+
 ### 阶段 4：迁移画布（进行中）
 
 入口与桥接（完成）：
@@ -150,17 +195,17 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 - `src/canvas/interactions/workflow-browser.ts`（原 `editor-workflow-browser.js`）。
 - `src/canvas/interactions/template-check.ts`（原 `editor-template-check.js`）。
 - `src/canvas/interactions/child-order-dnd.ts`（原 `child-order-dnd.js`，改为显式安装并返回 dispose）。
-- `src/canvas/toolbar.ts`（原 `editor-toolbar.js`，工厂继续设置 `window.__topbar`）。
+- `src/canvas/toolbar.ts`（原 `editor-toolbar.js`；选择器钩子随工厂返回，入口经桥接 `setTopbarControls` 转发，不再写 `window.__topbar`）。
 - `src/canvas/interactions/asset-browser.ts`（原 `editor-asset-browser.js`，测试改为实例化编译产物）。
 - `src/canvas/ui/elements.ts`（原 `ui.js`；展示页迁为 Vite 入口 `src/renderer/ui-showcase.html` + `src/canvas/ui/showcase.ts`，测试改为编译产物实例化）。
 - `src/canvas/inspector/composite-inspector.ts`（原 `editor-composite-inspector.js`；`UI` 由入口包装注入，`VariableSystem` 改为显式模块导入。`composite-inspector`/`decorator-inputs` 测试改为共享假依赖基座 `tests/helpers/composite-harness.cjs` 实例化编译产物）。
-- 迁移期以旧全局名挂载（`window.StudioEditor*`/`VariableSystem`/`NodeCards`），主编辑器完成迁移后移除。
+- 迁移期以旧全局名挂载（`window.StudioEditor*`/`VariableSystem`/`NodeCards`）的垫片已随主编辑器迁移完成全部移除（残留的只有几个模块头注释，已一并清理）。
 
 验证方式：`npm test` 188 项通过；构建通过；桌面端重启后通过 DevTools 协议只读探针确认 canvas/details iframe 中 `__canvasBridge.mode`、`__btEditor`、迁移后的全局与零控制台错误。
 
-待继续：只剩 `workflow-editor.js`。注入列表现仅该脚本；最后按 model/state/commands/history/canvas/interactions/inspector 拆分并移除全局垫片（`window.StudioEditor*`、`acquireVsCodeApi`、`__btEditor`、`__topbar`）。
+阶段 4 已完成：`workflow-editor.js` 全部业务迁出并删除，经典脚本注入与全局垫片（`window.StudioEditor*`、`acquireVsCodeApi`、`__topbar`、`__canvasBridge`）不再存在；`__btEditor` 保留为验证脚本/旧展示页的调试出口。
 
-`editor-composite-inspector.js` 迁移已完成：内部函数通过工厂返回对象对测试可见（`renderDecorator`、`decoratorField`、`decoratorVectorField`、`decoratorParameterControl`、`exposeDecoratorParameter`、`retryPublicActions`），阶段 4d 拆分 inspector 时收回。
+`editor-composite-inspector.js` 迁移已完成：内部函数通过工厂返回对象对测试可见（`renderDecorator`、`decoratorField`、`decoratorVectorField`、`decoratorParameterControl`、`exposeDecoratorParameter`、`retryPublicActions`），供编译产物测试使用。
 
 ### 阶段 4d：拆分 workflow-editor.js（进行中）
 
@@ -174,6 +219,7 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 - `src/canvas/canvas/minimap.ts`：小地图缩略节点/实例卡/变量卡与视口框。
 - `src/canvas/canvas/edges.ts`：父子连线、实例运行连线、拖拽预览（节点与变量）与 Alt 快捷断开。
 - `src/canvas/render/card-values.ts`：卡片摘要、值格式化、输入值提示与实例显示名（纯计算）。
+- `src/canvas/render/card-layout.ts`：Action 清单 `card.rows` 的规整化（端点顺序、label 覆盖、hidden、行控件与布尔状态名）；没声明卡片的 Action 返回 null，调用方退回默认卡片（纯计算）。
 - `src/canvas/interactions/pointer.ts`：节点拖拽、画布平移、框选、连线拖拽的指针生命周期与历史边界（`suppressPanContextMenu` 随模块迁移）。
 - `src/canvas/interactions/hit-test.ts`：节点端口、变量端点、实例子输入与变量卡片的就近命中（含卡片本体回退）。
 - `src/canvas/render/cards.ts`：实例运行卡与变量卡片渲染、端口事件、卡片双击计时（节点卡与运行卡共用）。
@@ -198,11 +244,23 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 - `src/canvas/state/editor-status.ts`（38 行）：脏标记广播、当前选中项描述、打开详情面板请求。
 - `src/canvas/interactions/input-bridge.ts`（约 130 行）：变量卡片拖放（含拖放幽灵）、快捷键分派（delete/copy/cut/paste/selectAll/save/undo/redo/fitView/focusNode）、小地图点击导航；监听器仅在 `install()` 时注册。
 - `src/canvas/shell/messages.ts`（145 行）：壳层全部消息处理（init/runEvent/runtimeInstances/runReplay/roiPicker*/templateSaved/assetImages*/templateCheck*/canvasImage*/instanceSelected/workflowSaved|Failed/externalChange/replaceDocument/editorCommand）。
-- `src/canvas/editor.ts`（582 行）：画布入口组装（原 `workflow-editor.js` 闭包改为直接导入各工厂）；`src/canvas/main.ts` 精简为桥接 + 拖拽排序安装 + `startCanvasEditor(bridge)`；`public/legacy/workflow-editor.js` 与 `LEGACY_SCRIPTS` 经典脚本加载已删除，`window.StudioCanvas*` 垫片不再写入。
-- 画布收尾：`src/canvas/env.d.ts` 仅保留 `__canvasBridge`/`__topbar`/`__btEditor`/`UI`（展示页）声明；桥接 API `legacyApi` 更名 `editorApi`。
+- `src/canvas/editor.ts`：画布入口组装（原 `workflow-editor.js` 闭包改为直接导入各工厂）；`src/canvas/main.ts` 精简为桥接 + 拖拽排序安装 + `startCanvasEditor(bridge)`；`public/legacy/workflow-editor.js` 与 `LEGACY_SCRIPTS` 经典脚本加载已删除，`window.StudioCanvas*` 垫片不再写入。
+- 画布收尾（完成）：`editor.ts` 不再有 `late()` 接线，改为纯组装（见下方「阶段 4d 收尾」）；`src/canvas/env.d.ts` 只保留 `UI` 与 `__btEditor`（类型化为 `CanvasEditorHandle`）声明；桥接 API `legacyApi` 更名 `editorApi`。
 - 测试适配：`node-cards`、`variable-card-delete`、`variable-system` 的切片改为编译产物；`port-context-menu` 改为经编译工厂包装 vm 依赖桩（含桩优先/模块回退与 `getNavigator` 注入），源码断言改读 `node-card.ts`/`cards.ts`/`overlays.ts`/`port-menu.ts`；新增 `canvas-state.test.cjs`、`canvas-history.test.cjs`、`canvas-commands.test.cjs`、`canvas-viewport.test.cjs`、`canvas-minimap.test.cjs`、`canvas-edges.test.cjs`、`canvas-card-values.test.cjs`、`canvas-pointer.test.cjs`、`canvas-hit-test.test.cjs`、`canvas-connections.test.cjs`；桌面测试 188 → 242 项。workflow-editor.js 4,472 行 → 入口组装 582 行的 TS 模块（业务函数全部迁出，旧文件删除）；ui-library/variable-inspector/workbench/variable-card-delete/delete-shortcuts/node-cards/port-context-menu/task-parameter-pins 测试的迁移函数改为导入编译产物。
 
 迁移注意：把函数从工作流编辑器移入模块后，原函数声明的提升消失。注入时为可能存在的先后顺序加一层箭头（如 `worldPoint: (event) => worldPoint(event)`），或先创建模块实例再解构；否则会在启动时触发 TDZ（Cannot access before initialization）。真机探针负责捕获这类只在运行时出现的问题。
+
+阶段 4d 收尾（完成）：`editor.ts` 重写为按依赖顺序组装的入口，模块依赖可顺着构造顺序读完。
+
+- 构造顺序自上而下：状态/模型 → 渲染 → 交互 → 壳层；模块间依赖直接传入，不再有 `late(() => X)` 包裹（113 处 late 归零）。
+- 仅三处跨模块互调留在入口显式接线（都在文件顶部注释里说明）：
+  - `render`/`focusNode`：重绘入口由 RenderEntry 提供；入口先建占位函数、渲染层就绪后经 `renderPieces` 赋值，各交互/渲染模块直接引用函数本身；
+  - `inspectorRenderers`：详情面板 ⇄ 各详情渲染器互调；面板先建，内容渲染器（DetailInspectors/VariableInspectors/CompositeInspector）构造后填表，面板在分派时读取；
+  - `assetHooks.requestTemplateReplacement`：素材浏览器补图 ⇄ 素材动作互调（`AssetActions` 需要解构该回调，故先给占位再赋值）。
+- 纯函数提取消除跨模块 import：`isBindingValue` 收敛到 `shared/workflow/bindings.ts`；`parameterLiteralCache`/`parameterLiteralCacheKey` 收敛到 `state/literal-cache.ts`；`normalizeRaw`（含 `reconcileVariableLinks`）收敛到 `state/normalize.ts`，`history` 的 `normalizeRaw` 依赖改为可选、默认用真实实现（测试继续传桩）。
+- 全局接口收敛：删除 `__canvasBridge` 与 `__topbar`。桥接新增 `setTopbarControls`，`desktopControl` 的 `switchWorkflow`/`selectInstance` 经它转发给工具条；`child-order-dnd` 改为 `installChildOrderDnd(post, getEditor)` 惰性取编辑器句柄。
+- 编辑器句柄：`startCanvasEditor(bridge): CanvasEditorHandle` 显式返回；`window.__btEditor` 仍挂（verify-*.cjs 与旧展示页依赖），成员与迁移前一致，类型化为 `CanvasEditorHandle`。
+- 测试适配：`canvas-bridge.test.cjs` 改经 `setTopbarControls` 注入桩；桌面测试 361 pass、typecheck 与 build 通过。
 
 ### 阶段 5：拆服务与引擎（进行中）
 
@@ -214,14 +272,18 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 - 验证：pytest 196 passed / 2 skipped；ruff、mypy 通过。
 - `stateflow.py` 464 行接近参考上限，后续如继续增改变动可再拆出 recovery 子模块。
 
-5b 运行调度（进行中）：
+5b 运行调度（完成）：
 
-- 启动收敛拆出 `runtime/reconciliation.py`(100 行)：`reconcile_stale_run_records(artifact_dir, logger, *, stale_after_seconds)` 负责把归属进程已退出的非终态 run/group 标记为中断（含实例锁可用性判断与子记录回填）；`Supervisor._reconcile_stale_run_records` 仅委托调用，公开接口不变。supervisor.py 934 → 852 行。
-- 待续：worker 生命周期（`_Worker/_Group/_instance_worker/control_loop`）、运行组协调（`_run_instance_parallel/_wait_group_poll/_persist_group` 等）、OCR 请求处理（`_handle_ocr/_recognize_reward_image`）仍留在 Supervisor 内。
-- 验证：pytest 196 passed / 2 skipped；ruff、mypy（67 文件）通过。
+- 启动收敛拆出 `runtime/reconciliation.py`(100 行)：`reconcile_stale_run_records(artifact_dir, logger, *, stale_after_seconds)` 负责把归属进程已退出的非终态 run/group 标记为中断（含实例锁可用性判断与子记录回填）；`Supervisor._reconcile_stale_run_records` 仅委托调用，公开接口不变。
+- OCR 请求处理拆出 `runtime/ocr_dispatch.py`：`OcrDispatcher` 持有共享 OCR 池、请求线程池与信号量，负责排队、执行与回包；`Supervisor._handle_ocr`/`_recognize_reward_image` 保留为委托，`supervisor.ocr_pool` 改为该池的 property 视图，调用方与测试无需改动。OCR 池的 monkeypatch 目标随之改到 `runtime.ocr_dispatch`。
+- worker 生命周期拆出 `runtime/worker_lifecycle.py`：`WorkerLifecycle` 负责按配置 spawn 实例进程、崩溃后在途 run 的 interrupted 落盘与重启，`workers`/`runs` 与 Supervisor 共用同一份字典；`Supervisor._start_worker`/`check_workers` 保留为委托。新增 `tests/test_worker_lifecycle.py`（注入假 spawn 上下文）直接验证崩溃隔离与健康实例不受影响。
+- 运行组等待拆出 `runtime/group_wait.py`：`GroupWaiter` 负责轮询整组子 run 记录、落实 `wait_for(any/all)`、失败即取消与超时收尾；`Supervisor._wait_group_poll` 保留为委托，回调全部经属性查找（`lambda: self._cancel_group_runs(group)` 等）以保留测试替换这些方法的口子，`__new__` 手工装配的实例按需补建等待器。新增 `tests/test_group_wait.py`（6 例）独立覆盖 any/all、失败取消、超时与 done/stopping 退出。
+- supervisor.py 934 → 852（阶段 5a 后）→ 639 行；`_Worker`/`_Group`/`_instance_worker` 已在 `runtime/worker.py`、`runtime/group.py`。
+- 仍留在 Supervisor 内的组协调（属于「协调逻辑」本身，按第 4 步要求保留在调度类）：`_run_instance_parallel` 的组装配与入队、`_queue_workflow_run`、`_persist_group`/`_finish_group`/`_cancel_group_runs`/`_mark_group_timeout` 与 `_runs/_groups/_run_groups` 记账、`wait_for`/`wait_for_all` 的事件队列等待。这些与公开等待 API、事件队列和实例校验强耦合，且 `test_supervisor_integration` 直接读写这些状态；如后续继续膨胀，可把注册表（`_runs/_groups/_run_groups` + 记账）整体抽成 `RunGroupRegistry`。
+- 验证：pytest 249 passed / 2 skipped；ruff、mypy（73 文件）通过。
 
 后续切片顺序（每步替换定义、调用点不变、验证后进入下一步）：
-1. canvas 渲染：SVG 节点与连线、小地图、布局计算；
-2. interactions：拖拽、框选、缩放、连线、键盘；
-3. inspector：节点、变量、工作流详情与参数控件；
-4. 收尾：workflow-editor.js 变为只负责组装的 TS 入口，移除全部迁移垫片与经典脚本注入。
+- 画布迁移四步（渲染 → interactions → inspector → 收尾）已全部完成，见阶段 4/4d。
+- 桌面工作台（第 3 步要求）：已完成，见阶段 3b（`main.ts` 959 行、`docking.ts` 803 行；仅剩 `workbench.test.cjs` 的 `renderContentBrowser` 源切片，已在阶段 3b 登记）。
+- 运行调度（第 4 步要求）：已完成，见阶段 5b（OCR 派发、worker 生命周期、运行组等待三块各自成模块并有独立测试；组装配与记账作为协调逻辑保留在 Supervisor）。
+- 若后续继续膨胀：`RunGroupRegistry`（`_runs/_groups/_run_groups` 注册表与记账）可作为下一个切片，需同步调整 `test_supervisor_integration` 直接读写这些状态的用例。

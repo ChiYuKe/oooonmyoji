@@ -1,3 +1,6 @@
+import type { AppearanceTheme } from './appearance';
+import type { ActionCardRow } from './parameter-types';
+
 export interface ParameterInfo {
   type: string;
   display_name?: string;
@@ -52,6 +55,8 @@ export interface ActionSpec {
   retrySafe: boolean;
   sideEffect: boolean;
   source: string;
+  /** 清单声明的固定卡片端点（有序）；未声明时为空，编辑器退回「必填 + 已配置」卡片。 */
+  card?: ActionCardRow[];
 }
 
 export interface ValidationIssue {
@@ -127,11 +132,20 @@ export interface MoveContentRequest {
   targetFolder: string;
 }
 
+export interface ContentRewriteDetail {
+  /** 被改写引用的文件项目相对路径（正斜杠）。 */
+  path: string;
+  /** 该文件内被替换掉的引用处数。 */
+  references: number;
+}
+
 export interface MoveContentResult {
   sourcePath: string;
   targetPath: string;
   updatedFiles: number;
   updatedReferences: number;
+  /** 被改写引用的文件明细，按引用处数降序；没有引用需要改写时为空数组。 */
+  rewritten: ContentRewriteDetail[];
 }
 
 export interface CreateContentFolderRequest {
@@ -200,6 +214,83 @@ export type VisionCommand = {
   [key: string]: unknown;
 };
 
+/** 实时视觉监视窗口：参考坐标下的一个高亮框。 */
+export interface LiveViewBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface LiveViewRoi {
+  label: string;
+  box: number[];
+}
+
+export interface LiveViewMatch {
+  confidence: number;
+  box: number[];
+  template: string | null;
+  threshold: number | null;
+}
+
+export interface LiveViewOcr {
+  text: string;
+  confidence: number;
+  box: number[];
+}
+
+/** 一次点击：参考起点 → 实际落点（都是参考分辨率坐标）。 */
+export interface LiveViewClick {
+  reference: number[];
+  actual: number[];
+  hold_ms: number;
+}
+
+export interface LiveViewOverlay {
+  rois: LiveViewRoi[];
+  matches: LiveViewMatch[];
+  ocr: LiveViewOcr[];
+  clicks: LiveViewClick[];
+}
+
+/** 运行时步骤事件里状态条需要的字段。 */
+export interface LiveViewStep {
+  step_id?: string | null;
+  name?: string | null;
+  action?: string | null;
+  node_kind?: string | null;
+  status?: string | null;
+  workflow_id?: string | null;
+  workflow_path?: string[] | null;
+  workflow_depth?: number | null;
+  duration_ms?: number | null;
+  error?: string | null;
+  error_category?: string | null;
+}
+
+/** 运行时写给桌面端的一帧“眼中的画面”。 */
+export interface LiveViewFrame {
+  seq: number;
+  ts: number;
+  instance_id: string;
+  step: LiveViewStep;
+  overlay: LiveViewOverlay;
+  /** 预览帧自身的像素尺寸。 */
+  frame_width: number;
+  frame_height: number;
+  /** 标注框所在坐标系（参考分辨率）。 */
+  reference_width: number;
+  reference_height: number;
+  /** 预览帧的 JPEG base64。 */
+  image: string;
+}
+
+export type LiveViewPollResult =
+  | { status: 'frame'; frame: LiveViewFrame }
+  | { status: 'unchanged'; seq: number }
+  | { status: 'idle'; message: string };
+
 export interface RuntimeDebugSettings {
   enabled: boolean;
   annotateScreenshots: boolean;
@@ -264,9 +355,9 @@ export interface OnmyojiDesktopApi {
   closeWindow(): Promise<void>;
   isWindowMaximized(): Promise<boolean>;
   readLayout(key: string): string | null;
-  getTheme(): 'dark' | 'light';
-  setTheme(theme: 'dark' | 'light'): 'dark' | 'light';
-  onThemeChanged(listener: (theme: 'dark' | 'light') => void): () => void;
+  getTheme(): AppearanceTheme;
+  setTheme(theme: AppearanceTheme): AppearanceTheme;
+  onThemeChanged(listener: (theme: AppearanceTheme) => void): () => void;
   writeLayout(key: string, value: string | null): void;
   bootstrap(): Promise<BootstrapData>;
   getWorkflowInit(uri: string, selectedInstance: string, canGoBack: boolean): Promise<WorkflowEditorInit>;
@@ -293,6 +384,14 @@ export interface OnmyojiDesktopApi {
   checkTemplate(request: TemplateCheckRequest): Promise<TemplateCheckResult>;
   /** 打开（或聚焦）独立的模拟器画面测试工具窗口。 */
   openVisionTest(instanceId: string): Promise<void>;
+  /** 打开（或聚焦）独立的实时视觉监视窗口。 */
+  openLiveView(instanceId: string): Promise<void>;
+  /** 实时视觉窗口内调用：开启/关闭对运行时预览帧的轮询。 */
+  liveViewWatch(watching: boolean): Promise<void>;
+  /** 实时视觉窗口内调用：设置刷新间隔（毫秒），会下发给正在运行的预览通道。 */
+  liveViewSetInterval(intervalMs: number): Promise<number>;
+  /** 实时视觉窗口内调用：取一帧最新画面（无新帧时返回 unchanged）。 */
+  liveViewPoll(): Promise<LiveViewPollResult>;
   /** 用系统默认程序打开项目 README 使用说明。 */
   openReadme(): Promise<void>;
   /** 工具窗口页面内调用：开始画面推流并订阅事件。 */

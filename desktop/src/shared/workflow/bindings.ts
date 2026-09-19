@@ -30,6 +30,12 @@ export const RUNTIME_REF_SCHEMAS: Record<string, Record<string, unknown>> = {
   'runtime.repeat.final': { type: 'boolean' },
 };
 
+/** 判断值是否为绑定对象（`{ ref: string }`，且不含其它字段）。 */
+export function isBindingValue(value: unknown): value is { ref: string } {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && typeof (value as Record<string, unknown>).ref === 'string' && Object.keys(value).length === 1;
+}
+
 export function schemaAtPath(schema: Record<string, unknown>, segments: string[]): Record<string, unknown> | undefined {
   let current = schema;
   for (const segment of segments) {

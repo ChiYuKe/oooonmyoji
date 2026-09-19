@@ -1,3 +1,4 @@
+import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTheme } from '../shared/appearance';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,6 +15,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import type {
+  LiveViewPollResult,
   RoiCaptureRequest,
   RunWorkflowRequest,
   RuntimeDebugSettings,
@@ -24,6 +26,13 @@ import type {
   VisionStreamEvent,
 } from '../shared/contracts';
 import { chooseRuntimeInstance } from './core/runtimeInstances';
+import {
+  clampLiveViewInterval,
+  createLiveViewEnvironment,
+  LIVE_VIEW_DEFAULT_INTERVAL_MS,
+  LiveViewRequest,
+  readLiveViewFrame,
+} from './liveView';
 import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
 import { VisionStream } from './visionStream';
@@ -43,11 +52,19 @@ let rendererBaseUrl = '';
 let visionTestWindow: BrowserWindow | undefined;
 let visionTestStream: VisionStream | undefined;
 let visionTestInstanceId = '';
+let liveViewWindow: BrowserWindow | undefined;
+let liveViewInstanceId = '';
+let liveViewRequest: LiveViewRequest | undefined;
+let liveViewWatching = false;
+let liveViewSeq = -1;
+let liveViewIntervalMs = LIVE_VIEW_DEFAULT_INTERVAL_MS;
 let isQuitting = false;
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 const THEME_STORE_KEY = 'onmyoji-studio.appearance';
-function readTheme(): 'dark' | 'light' {
-  return readLayoutStore()[THEME_STORE_KEY] === 'light' ? 'light' : 'dark';
+const LIVE_VIEW_INTERVAL_STORE_KEY = 'onmyoji-studio.live-view.interval-ms';
+function readTheme(): AppearanceTheme {
+  const value = readLayoutStore()[THEME_STORE_KEY];
+  return isAppearanceTheme(value) ? value : 'dark';
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -160,7 +177,7 @@ function openVisionTestWindow(instanceId: string): void {
     show: false,
     frame: false,
     title: '模拟器画面测试工具',
-    backgroundColor: readTheme() === 'light' ? '#f4f4f4' : '#141414',
+    backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -179,8 +196,7 @@ function openVisionTestWindow(instanceId: string): void {
   });
 }
 
-function startVisionTestStream(): void {
-  if (visionTestStream?.running) return;
+function startVisionTestStream(): void {  if (visionTestStream?.running) return;
   stopVisionTestStream();
   const stream = new VisionStream(project.projectRoot, visionTestInstanceId);
   visionTestStream = stream;
@@ -211,6 +227,57 @@ function startVisionTestStream(): void {
   });
 }
 
+function readLiveViewPoll(): LiveViewPollResult {
+  const request = liveViewRequest;
+  if (!request) return { status: 'idle', message: '实时视觉监视尚未初始化。' };
+  return readLiveViewFrame(request.directory, liveViewInstanceId, liveViewSeq);
+}
+
+function openLiveViewWindow(instanceId: string): void {
+  const target = instanceId || '';
+  // 刷新率是观看偏好：沿用上次的选择，并让运行时的预览通道按它起步。
+  liveViewIntervalMs = clampLiveViewInterval(readLayoutStore()[LIVE_VIEW_INTERVAL_STORE_KEY] ?? LIVE_VIEW_DEFAULT_INTERVAL_MS);
+  liveViewRequest?.setInterval(liveViewIntervalMs);
+  runtime.liveViewIntervalMs = liveViewIntervalMs;
+  if (liveViewWindow && !liveViewWindow.isDestroyed()) {
+    // 换个实例看时同一个窗口直接切过去，避免开出第二个观看窗口互相抢帧。
+    if (target && target !== liveViewInstanceId) {
+      liveViewInstanceId = target;
+      liveViewSeq = -1;
+      void liveViewWindow.loadURL(`${rendererBaseUrl}/live-view.html?instance=${encodeURIComponent(target)}`);
+    }
+    liveViewWindow.focus();
+    return;
+  }
+  liveViewInstanceId = target;
+  liveViewSeq = -1;
+  const window = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 720,
+    minHeight: 480,
+    show: false,
+    frame: false,
+    title: '实时视觉监视',
+    backgroundColor: themeBackground(readTheme()),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  liveViewWindow = window;
+  void window.loadURL(`${rendererBaseUrl}/live-view.html?instance=${encodeURIComponent(target)}`);
+  window.once('ready-to-show', () => window.show());
+  window.on('closed', () => {
+    if (liveViewWindow === window) liveViewWindow = undefined;
+    liveViewWatching = false;
+  });
+}
+
 function registerIpc(): void {
   ipcMain.handle('window:minimize', (event) => ownerWindow(event).minimize());
   ipcMain.handle('window:toggle-maximize', (event) => {
@@ -227,11 +294,11 @@ function registerIpc(): void {
   });
   ipcMain.on('appearance:read', (event) => { event.returnValue = readTheme(); });
   ipcMain.on('appearance:write', (event, value: unknown) => {
-    if (value === 'dark' || value === 'light') writeLayout(THEME_STORE_KEY, value);
+    if (isAppearanceTheme(value)) writeLayout(THEME_STORE_KEY, value);
     const theme = readTheme();
-    nativeTheme.themeSource = theme;
+    nativeTheme.themeSource = themeColorScheme(theme);
     for (const window of BrowserWindow.getAllWindows()) {
-      window.setBackgroundColor(theme === 'light' ? '#f4f4f4' : '#141414');
+      window.setBackgroundColor(themeBackground(theme));
       window.webContents.send('appearance:changed', theme);
     }
     event.returnValue = theme;
@@ -265,8 +332,15 @@ function registerIpc(): void {
   ipcMain.handle('project:save-canvas', (event, request: SaveCanvasRequest) => project.saveCanvas(ownerWindow(event), request));
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
-  ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => runtime.runWorkflow(request));
-  ipcMain.handle('runtime:stop-workflow', () => runtime.stopWorkflow());
+  ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
+    // 先把观看请求登记下去，再 spawn 运行时：否则运行时启动初期的帧会被门控丢掉。
+    liveViewRequest?.begin(request.instanceId);
+    return runtime.runWorkflow(request);
+  });
+  ipcMain.handle('runtime:stop-workflow', async () => {
+    liveViewRequest?.stop();
+    await runtime.stopWorkflow();
+  });
   ipcMain.handle('runtime:get-debug-settings', () => runtime.getDebugSettings());
   ipcMain.handle('runtime:update-debug-settings', (_event, settings: RuntimeDebugSettings) => runtime.updateDebugSettings(settings));
   ipcMain.handle('runtime:capture-roi', (_event, request: RoiCaptureRequest) => runtime.captureRoi(request));
@@ -274,6 +348,35 @@ function registerIpc(): void {
 
   ipcMain.handle('tools:open-vision-test', (_event, instanceId: string) => {
     openVisionTestWindow(typeof instanceId === 'string' ? instanceId : '');
+  });
+  ipcMain.handle('tools:open-live-view', (_event, instanceId: string) => {
+    openLiveViewWindow(typeof instanceId === 'string' ? instanceId : '');
+  });
+  ipcMain.handle('live-view:watch', (event, watching: unknown) => {
+    if (ownerWindow(event) !== liveViewWindow) return;
+    liveViewWatching = watching === true;
+    // 重新开始观看时先取一次最新帧，避免继续显示上次看过的旧序号。
+    if (liveViewWatching) liveViewSeq = -1;
+  });
+  ipcMain.handle('live-view:set-interval', (event, intervalMs: unknown) => {
+    if (ownerWindow(event) !== liveViewWindow) return liveViewIntervalMs;
+    const applied = liveViewRequest?.setInterval(intervalMs) ?? liveViewIntervalMs;
+    liveViewIntervalMs = applied;
+    runtime.liveViewIntervalMs = applied;
+    // 记住选择：下次打开窗口时运行时按同一个刷新率起步。
+    writeLayout(LIVE_VIEW_INTERVAL_STORE_KEY, String(applied));
+    return applied;
+  });
+  ipcMain.handle('live-view:poll', (event) => {
+    if (ownerWindow(event) !== liveViewWindow) return { status: 'idle', message: '窗口已关闭。' } satisfies LiveViewPollResult;
+    if (!liveViewWatching) return { status: 'idle', message: '未开始观看。' } satisfies LiveViewPollResult;
+    const result = readLiveViewPoll();
+    if (result.status === 'frame') {
+      liveViewSeq = result.frame.seq;
+      // 确实取到了新帧，说明有运行在写：续一次观看心跳。
+      liveViewRequest?.touch();
+    }
+    return result;
   });
   ipcMain.handle('help:open-readme', async () => {
     const readmePath = path.join(project.projectRoot, 'README.md');
@@ -311,7 +414,7 @@ function createWindow(): BrowserWindow {
     show: false,
     frame: false,
     title: 'Onmyoji Studio',
-    backgroundColor: readTheme() === 'light' ? '#f4f4f4' : '#141414',
+    backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -336,7 +439,7 @@ function createWindow(): BrowserWindow {
           minHeight: 220,
           frame: false,
           title: 'Onmyoji Studio',
-          backgroundColor: readTheme() === 'light' ? '#f4f4f4' : '#141414',
+          backgroundColor: themeBackground(readTheme()),
           autoHideMenuBar: true,
           webPreferences: {
             preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -375,11 +478,12 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
-  nativeTheme.themeSource = readTheme();
+  nativeTheme.themeSource = themeColorScheme(readTheme());
   const configuredRoot = process.env.ONMYOJI_PROJECT_ROOT;
   const projectRoot = configuredRoot ? path.resolve(configuredRoot) : path.resolve(app.getAppPath(), '..');
   project = new ProjectService(projectRoot);
   runtime = new RuntimeService(project);
+  liveViewRequest = new LiveViewRequest(runtime.liveViewDirectory);
 
   await protocol.handle('onmyoji-resource', (request) => {
     const file = project.resolveResourceUrl(request.url);
@@ -413,6 +517,7 @@ app.on('before-quit', (event) => {
       await runtime?.dispose();
     } finally {
       stopVisionTestStream();
+      liveViewRequest?.stop();
       rendererServer?.close();
       rendererServer = undefined;
       app.quit();

@@ -15,6 +15,7 @@ import type {
   TemplateCheckResult,
 } from '../shared/contracts';
 import { parseRuntimeInstances, pythonUtf8Environment } from './core/runtimeInstances';
+import { createLiveViewEnvironment, LIVE_VIEW_DEFAULT_INTERVAL_MS } from './liveView';
 import type { ProjectService } from './projectService';
 
 interface RuntimeEvents {
@@ -59,6 +60,14 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     }
     return path.resolve(this.project.projectRoot, configured);
   }
+
+  /** 运行时预览帧目录：与 Python ``runtime/live_view.py`` 约定的 artifacts/live。 */
+  get liveViewDirectory(): string {
+    return path.join(this.artifactDir, 'live');
+  }
+
+  /** 当前选定的预览刷新间隔（毫秒），由观看窗口设置。 */
+  liveViewIntervalMs = LIVE_VIEW_DEFAULT_INTERVAL_MS;
 
   private emitOutput(stream: RuntimeOutputEvent['stream'], text: string): void {
     this.emit('output', { stream, text, timestamp: Date.now() });
@@ -207,9 +216,14 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
       '--events-file', eventsFile,
     ];
     if (inputsFile) args.push('--inputs', inputsFile);
+    // 预览通道默认关闭：只有 artifacts/live/request.json 存在且新鲜时运行时才写帧，
+    // 该文件由主进程在运行开始时登记（见 main.ts）。
     const child = spawn(this.pythonPath, args, {
       cwd: this.project.projectRoot,
-      env: pythonUtf8Environment(process.env),
+      env: {
+        ...pythonUtf8Environment(process.env),
+        ...createLiveViewEnvironment(this.liveViewDirectory, this.liveViewIntervalMs),
+      },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

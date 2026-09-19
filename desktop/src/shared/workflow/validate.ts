@@ -146,11 +146,14 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
     const owner=typeof definition.owner==='string'?nodeMap.get(definition.owner):undefined;
     if(!owner||['task','instance_parallel'].includes(owner.type)){issues.push(issue(['variables',name,'owner'],'局部作用域必须指向复合节点','variable-scope'));continue;}
     const allowed=descendants(owner.id);
-    for(const node of info.nodes)if(!allowed.has(node.id)&&references(info.rawNodes[node.index],`variables.${name}`))issues.push(issue(['nodes',node.index],'节点越界访问局部变量：'+name,'variable-scope'));
+    for(const node of info.nodes)if(!allowed.has(node.id)&&references(info.rawNodes[node.index],`variables.${name}`))issues.push(issue(['nodes',node.id],'节点越界访问局部变量：'+name,'variable-scope'));
   }
 
   (root.nodes as unknown[] | undefined)?.forEach((rawNode, index) => {
-    const path = ['nodes', index];
+    // path 用节点 **id**（不是下标）：画布与详情栏都按 id 找节点，
+    // 报错能直接落到对应卡片上；缺 id 时才退回下标。
+    const nodeKey = isObject(rawNode) && typeof rawNode.id === 'string' && rawNode.id ? rawNode.id : index;
+    const path = ['nodes', nodeKey];
     if (!isObject(rawNode)) { issues.push(issue(path, '节点必须是对象', 'invalid-node')); return; }
     const node = info.nodes[index];
     const availableNodeIds = availableOutputNodeIds(info, node.id);
@@ -177,13 +180,37 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
         else {
           const params = rawNode.params === undefined ? {} : rawNode.params;
           if (!isObject(params)) issues.push(issue([...path, 'params'], 'params 必须是对象', 'invalid-params'));
-          else {
+          else if (!isObject(spec.inputSchema)) {
+            // 目录条目没有 inputSchema（清单没编译出来）：跳过参数结构校验，
+            // 而不是让 ajv 去编译 undefined（那会直接抛）。这是目录的问题，不算文档错误。
+          } else {
             validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema, availableNodeIds);
             const validate = workflowAjv.compile(bindingAwareParameterSchema(spec.inputSchema));
             const normalized = applyParameterDefaults(spec.parameters, params);
             if (!validate(normalized)) {
-              const primary = validate.errors?.find((error) => ['required', 'additionalProperties', 'type', 'enum', 'minimum', 'maximum'].includes(error.keyword)) ?? validate.errors?.[0];
-              issues.push(issue([...path, 'params'], `Action ${rawNode.action} 参数无效：${primary?.instancePath || '/'} ${primary?.message || 'validation failed'}`, 'invalid-params'));
+              // 每条 ajv 错误单独成一条问题，并把**出错的参数名**放进 path，
+              // 这样画布能把红标记落到具体那一行参数上，而不是只报「这个 Action 参数无效」。
+              const errors = (validate.errors ?? []).slice(0, 4);
+              const reported = new Set<string>();
+              for (const error of errors) {
+                const segments = String(error.instancePath || '').split('/').filter(Boolean);
+                const missing = error.keyword === 'required' && typeof (error.params as { missingProperty?: unknown })?.missingProperty === 'string'
+                  ? String((error.params as { missingProperty: string }).missingProperty)
+                  : '';
+                const param = missing || segments[0] || '';
+                const key = `${param}|${error.keyword}`;
+                if (reported.has(key)) continue;
+                reported.add(key);
+                const where = error.instancePath || (missing ? `/${missing}` : '/');
+                issues.push(issue(
+                  [...path, 'params', ...(param ? [param] : [])],
+                  `Action ${rawNode.action} 参数无效：${where} ${error.message || 'validation failed'}`,
+                  'invalid-params',
+                ));
+              }
+              if (!errors.length) {
+                issues.push(issue([...path, 'params'], `Action ${rawNode.action} 参数无效：validation failed`, 'invalid-params'));
+              }
             }
             const retry = node.decorators.find((decorator) => decorator.type === 'retry' && (isObject(decorator.raw.attempts) || Number(decorator.attempts) > 1));
             if (retry && !spec.retrySafe && root.retry_safe !== true) issues.push(issue([...path, 'decorators'], `Action ${rawNode.action} 不可安全重试`, 'unsafe-retry'));

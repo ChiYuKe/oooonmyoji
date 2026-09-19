@@ -3,9 +3,9 @@
  * 纯计算模块（只依赖 Ajv），主进程与画布共用。
  */
 import Ajv2020 from 'ajv/dist/2020';
-import { COLOR_PATTERN, KEY_PATTERN, NUMERIC_TYPES, PARAMETER_TYPES, STRING_TYPES } from '../parameter-types';
+import { CARD_CONTROLS, COLOR_PATTERN, KEY_PATTERN, NUMERIC_TYPES, PARAMETER_TYPES, STRING_TYPES } from '../parameter-types';
 
-export { COLOR_PATTERN, KEY_PATTERN, NUMERIC_TYPES, PARAMETER_TYPES, STRING_TYPES };
+export { CARD_CONTROLS, COLOR_PATTERN, KEY_PATTERN, NUMERIC_TYPES, PARAMETER_TYPES, STRING_TYPES };
 
 export interface ParameterInfo {
   type: string;

@@ -8,12 +8,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Ajv2020 from 'ajv/dist/2020';
 import {
+  CARD_CONTROLS,
   PARAMETER_TYPES,
   compileParameters,
   parseParameterDefinition,
   validationMessage,
   type ParameterInfo,
 } from '../../shared/workflow/parameters';
+import type { ActionCardRow } from '../../shared/parameter-types';
 
 export {
   applyParameterDefaults,
@@ -38,6 +40,8 @@ export interface ActionSpecInfo {
   retrySafe: boolean;
   sideEffect: boolean;
   source: string;
+  /** 清单声明的固定卡片端点（有序）；未声明时为空数组，编辑器退回「必填 + 已配置」卡片。 */
+  card: ActionCardRow[];
 }
 
 export interface ActionCatalog {
@@ -68,9 +72,30 @@ const ACTION_MANIFEST_SCHEMA: Record<string, unknown> = {
       },
       additionalProperties: false,
     },
+    card: {
+      type: 'object',
+      required: ['rows'],
+      properties: {
+        rows: { type: 'array', minItems: 1, items: { $ref: '#/$defs/card_row' } },
+      },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
   $defs: {
+    card_row: {
+      type: 'object',
+      required: ['param'],
+      properties: {
+        param: { type: 'string', minLength: 1 },
+        label: { type: 'string', minLength: 1 },
+        control: { enum: [...CARD_CONTROLS] },
+        hidden: { type: 'boolean' },
+        on_label: { type: 'string', minLength: 1 },
+        off_label: { type: 'string', minLength: 1 },
+      },
+      additionalProperties: false,
+    },
     parameter: {
       type: 'object',
       required: ['type'],
@@ -100,6 +125,56 @@ const validateManifestShape = schemaAjv.compile(ACTION_MANIFEST_SCHEMA);
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * 校验清单里的固定卡片声明：行顺序即卡片顺序，行必须引用已声明参数、
+ * 不重复、必填参数不能被 hidden 或漏掉。坏声明报错而不是静默降级，
+ * 否则卡片会悄悄少掉一个端点。
+ */
+export function parseActionCard(
+  name: string,
+  raw: unknown,
+  parameters: Record<string, ParameterInfo>,
+): ActionCardRow[] {
+  if (raw === undefined) return [];
+  const card = asRecord(raw);
+  const rowsRaw = Array.isArray(card.rows) ? card.rows : [];
+  const rows: ActionCardRow[] = [];
+  const seen = new Set<string>();
+  for (const item of rowsRaw) {
+    const row = asRecord(item);
+    const param = typeof row.param === 'string' ? row.param : '';
+    if (!param) throw new Error(`Action ${name}: card.rows entries need a non-empty param`);
+    if (!Object.prototype.hasOwnProperty.call(parameters, param)) {
+      throw new Error(`Action ${name}: card row references unknown parameter ${param}`);
+    }
+    if (seen.has(param)) throw new Error(`Action ${name}: card row ${param} is declared twice`);
+    seen.add(param);
+    const control = typeof row.control === 'string' ? row.control : '';
+    if (control && !(CARD_CONTROLS as readonly string[]).includes(control)) {
+      throw new Error(`Action ${name}: card row ${param} has unknown control: ${control}`);
+    }
+    const hidden = row.hidden === true;
+    if (hidden && parameters[param].required) {
+      throw new Error(`Action ${name}: required parameter ${param} cannot be hidden`);
+    }
+    rows.push({
+      param,
+      ...(typeof row.label === 'string' ? { label: row.label } : {}),
+      ...(typeof row.control === 'string' ? { control: row.control as ActionCardRow['control'] } : {}),
+      ...(hidden ? { hidden: true } : {}),
+      ...(typeof row.on_label === 'string' ? { on_label: row.on_label } : {}),
+      ...(typeof row.off_label === 'string' ? { off_label: row.off_label } : {}),
+    });
+  }
+  const missing = Object.entries(parameters)
+    .filter(([key, definition]) => definition.required === true && !seen.has(key))
+    .map(([key]) => key);
+  if (missing.length) {
+    throw new Error(`Action ${name}: card.rows must cover required parameters: ${missing.join(', ')}`);
+  }
+  return rows;
 }
 
 export function parseManifest(raw: unknown): ActionSpecInfo | undefined {
@@ -138,6 +213,7 @@ export function parseManifest(raw: unknown): ActionSpecInfo | undefined {
     retrySafe: retry === 'safe',
     sideEffect: effects.side_effect === true,
     source: '',
+    card: parseActionCard(name, obj.card, parameters),
   };
 }
 

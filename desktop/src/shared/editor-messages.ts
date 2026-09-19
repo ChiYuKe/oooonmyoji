@@ -186,9 +186,23 @@ export interface OpenReferencesMessage {
   type: 'openReferences';
 }
 
+/** 删除被引用的变量时，把引用清单交给壳层的「变量引用」面板。 */
+export interface VariableReferencesRequestedMessage {
+  type: 'variableReferencesRequested';
+  scope: 'inputs' | 'variables';
+  name: string;
+  displayName?: string;
+  entries?: unknown;
+}
+
 export interface EditorErrorMessage {
   type: 'error';
   message?: unknown;
+}
+
+/** 画布要一次最新的脚本目录（打开子工作流选择器时）。 */
+export interface RefreshWorkflowsMessage {
+  type: 'refreshWorkflows';
 }
 
 export type EditorMessage =
@@ -217,7 +231,9 @@ export type EditorMessage =
   | OpenWorkflowPickerMessage
   | OpenWorkflowTreeMessage
   | OpenReferencesMessage
-  | EditorErrorMessage;
+  | VariableReferencesRequestedMessage
+  | EditorErrorMessage
+  | RefreshWorkflowsMessage;
 
 export const EDITOR_MESSAGE_TYPES = [
   'ready',
@@ -231,6 +247,7 @@ export const EDITOR_MESSAGE_TYPES = [
   'goBackWorkflow',
   'navigateWorkflowTrail',
   'reloadRequest',
+  'refreshWorkflows',
   'runWorkflow',
   'stopWorkflow',
   'selectInstance',
@@ -245,6 +262,7 @@ export const EDITOR_MESSAGE_TYPES = [
   'openWorkflowPicker',
   'openWorkflowTree',
   'openReferences',
+  'variableReferencesRequested',
   'error',
 ] as const;
 

@@ -45,6 +45,32 @@ export const NUMERIC_TYPES = ['number', 'integer', 'duration'] as const;
 /** 接受 min_length/max_length 的类型。 */
 export const STRING_TYPES = ['string', 'asset', 'path', 'key', 'enum'] as const;
 
+/**
+ * Action 清单 `card.rows[].control` 的可选值：Python `manifest.CARD_CONTROLS` 的桌面侧真源。
+ * 缺省时按参数类型推断控件，显式声明用于「类型相同但控件不同」的场景（例如数组参数用区域框选）。
+ * `tuple` 把固定长度数组拆成 N 个输入格（随机间隔 → 最小值 / 最大值）。
+ */
+export const CARD_CONTROLS = [
+  'asset', 'rect', 'toggle', 'enum', 'number', 'integer', 'duration',
+  'string', 'key', 'color', 'point', 'tuple', 'inspector',
+] as const;
+
+export type CardControl = (typeof CARD_CONTROLS)[number];
+
+/**
+ * Action 清单里的固定卡片行。`rows` 顺序即卡片端点顺序；
+ * `label` 覆盖共享字段名，`hidden` 把可选参数挡在卡片外，
+ * `on_label`/`off_label` 给布尔行的两种状态起名。
+ */
+export interface ActionCardRow {
+  param: string;
+  label?: string;
+  control?: CardControl;
+  hidden?: boolean;
+  on_label?: string;
+  off_label?: string;
+}
+
 /** 按键选择器候选（Android keyevent 令牌）；设备仍接受清单里声明的任意令牌。 */
 export const KEY_NAMES = [
   'BACK', 'HOME', 'APP_SWITCH', 'MENU', 'ENTER', 'DEL', 'TAB', 'SPACE', 'ESCAPE',

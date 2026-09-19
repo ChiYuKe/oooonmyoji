@@ -11,6 +11,7 @@ import type {
   SaveTemplateRequest,
   MoveContentRequest,
   MoveContentResult,
+  ContentRewriteDetail,
   CreateContentFolderRequest,
   RenameContentRequest,
   WorkflowDescriptor,
@@ -597,6 +598,16 @@ export class ProjectService {
     return plans;
   }
 
+  /** 把改写计划压成面向界面的明细：项目相对路径 + 该文件内的引用处数，引用多的排前面。 */
+  private rewriteDetails(plans: RewritePlan[]): ContentRewriteDetail[] {
+    return plans
+      .map((plan) => ({
+        path: path.relative(this.projectRoot, plan.absolute).split(path.sep).join('/'),
+        references: plan.references,
+      }))
+      .sort((left, right) => right.references - left.references || left.path.localeCompare(right.path, 'zh-CN'));
+  }
+
   private async moveFile(source: ContentFileLocation, targetRelative: string): Promise<MoveContentResult> {
     const targetAbsolute = path.resolve(this.projectRoot, ...targetRelative.split('/'));
     const sourceRoot = source.kind === 'workflow' ? this.workflowRoot : this.assetsRoot;
@@ -635,6 +646,7 @@ export class ProjectService {
       targetPath: targetRelative,
       updatedFiles: plans.length,
       updatedReferences: plans.reduce((total, plan) => total + plan.references, 0),
+      rewritten: this.rewriteDetails(plans),
     };
   }
 
@@ -695,6 +707,7 @@ export class ProjectService {
       targetPath: targetRelative,
       updatedFiles: plans.length,
       updatedReferences: plans.reduce((total, plan) => total + plan.references, 0),
+      rewritten: this.rewriteDetails(plans),
     };
   }
 

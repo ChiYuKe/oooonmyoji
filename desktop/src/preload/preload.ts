@@ -1,3 +1,4 @@
+import type { AppearanceTheme } from '../shared/appearance';
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   OnmyojiDesktopApi,
@@ -25,7 +26,7 @@ const api: OnmyojiDesktopApi = {
   getTheme: () => ipcRenderer.sendSync('appearance:read'),
   setTheme: (theme) => ipcRenderer.sendSync('appearance:write', theme),
   onThemeChanged: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, theme: 'dark' | 'light') => listener(theme);
+    const handler = (_event: Electron.IpcRendererEvent, theme: AppearanceTheme) => listener(theme);
     ipcRenderer.on('appearance:changed', handler);
     return () => ipcRenderer.removeListener('appearance:changed', handler);
   },
@@ -54,6 +55,10 @@ const api: OnmyojiDesktopApi = {
   captureRoi: (request: RoiCaptureRequest) => ipcRenderer.invoke('runtime:capture-roi', request),
   checkTemplate: (request: TemplateCheckRequest) => ipcRenderer.invoke('runtime:check-template', request),
   openVisionTest: (instanceId: string) => ipcRenderer.invoke('tools:open-vision-test', instanceId),
+  openLiveView: (instanceId: string) => ipcRenderer.invoke('tools:open-live-view', instanceId),
+  liveViewWatch: (watching: boolean) => ipcRenderer.invoke('live-view:watch', watching),
+  liveViewSetInterval: (intervalMs: number) => ipcRenderer.invoke('live-view:set-interval', intervalMs),
+  liveViewPoll: () => ipcRenderer.invoke('live-view:poll'),
   openReadme: () => ipcRenderer.invoke('help:open-readme'),
   visionStart: () => ipcRenderer.invoke('vision:start'),
   visionCommand: (command: VisionCommand) => ipcRenderer.invoke('vision:command', command),

@@ -26,6 +26,7 @@ from ..workflows.engine import WorkflowEngine
 from ..workflows.loader import WorkflowLoader
 from .context import TaskContextImpl
 from .debug import DebugStepRecorder
+from .live_view import sink_from_environment
 from .logging import EventLogger
 from .records import AtomicJsonStore, RunRecord, RunStatus
 
@@ -268,6 +269,7 @@ class TaskRunner:
 
             attempts = self.config.retry.task_attempts if job.retry_enabled and workflow.retry_safe else 1
             result: Any = None
+            live_view: Any = None
             for attempt in range(attempts):
                 if attempt:
                     record.status = RunStatus.RETRYING
@@ -284,6 +286,12 @@ class TaskRunner:
                 )
                 self.logger.emit("run.device_connected", run_id=run_id, instance_id=instance.id, backend="adb" if used_adb else "mumu")
                 mapper = CoordinateMapper(workflow.resolution[0], workflow.resolution[1], device.width, device.height)
+                # 实时视觉监视通道：只有桌面端开着观看窗口时才会真正写盘。
+                live_view = sink_from_environment(
+                    instance_id=instance.id,
+                    reference_width=mapper.reference_width,
+                    reference_height=mapper.reference_height,
+                )
                 # 脚本嵌套调用：workflow.run 动作经由 context.run_subworkflow 到这里执行子工作流
                 # 栈初始包含当前工作流自身，任何形式的自调用/跨层递归都会立即被拦截
                 subworkflow_stack: list[str] = [workflow.workflow_id]
@@ -339,6 +347,7 @@ class TaskRunner:
                     run_id=run_id,
                     instance_id=instance.id,
                     reward_stats_submitter=submit_reward_statistics if event_queue is not None else None,
+                    live_view=live_view,
                 )
                 debug_recorder = (
                     DebugStepRecorder(
@@ -356,6 +365,10 @@ class TaskRunner:
                         nested_recoveries = _nested_branch_recovery_events(record.step_history, event)
                         for raw_step_event in (*nested_recoveries, event):
                             step_event = dict(raw_step_event)
+                            if live_view is not None:
+                                # 步骤收尾时强制补写一帧：这一步的判断依据必须立刻可见，
+                                # 否则点击这类不抓屏的步骤要等下一步才开始显示。
+                                live_view.record_step(step_event, context.last_frame, force=True)
                             if debug_recorder is not None:
                                 try:
                                     debug_path = debug_recorder.record(step_event)
@@ -394,6 +407,8 @@ class TaskRunner:
                         checkpoint_record()
 
                 def on_step_start(event: dict[str, Any]) -> None:
+                    if live_view is not None:
+                        live_view.record_step(event)
                     writer.write(_step_event_payload(run_id, context, event, save_screenshots=self.config.save_screenshots))
 
                 engine = WorkflowEngine(

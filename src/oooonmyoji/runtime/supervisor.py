@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import multiprocessing as mp
 import queue
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -22,11 +20,14 @@ from ..workflows.loader import WorkflowLoader
 from ..workflows.model import WorkflowNode, WorkflowSpec
 from ..workflows.resolver import ReferenceResolver
 from .group import _Group, group_payload, group_status
+from .group_wait import GroupWaiter
 from .logging import EventLogger
+from .ocr_dispatch import OcrDispatcher
 from .records import AtomicJsonStore, RunStatus
 from .reconciliation import reconcile_stale_run_records
 from .reward_stats import RewardStatsProcessor
-from .worker import _Worker, _instance_worker
+from .worker import _Worker
+from .worker_lifecycle import WorkerLifecycle
 # Keep these names importable for existing callers and cancellation tests.
 from .worker import _activate_run_cancel as _activate_run_cancel
 from .worker import _apply_cancel_request as _apply_cancel_request
@@ -39,7 +40,6 @@ class Supervisor:
         self.config = config
         self.logger = EventLogger(config.log_dir)
         self.event_queue: Any | None = None
-        self.ocr_pool: SharedOcrPool | None = None
         self.workers: dict[str, _Worker] = {}
         self._runs: dict[str, str] = {}
         self._completed: dict[str, dict[str, Any]] = {}
@@ -47,11 +47,44 @@ class Supervisor:
         self._groups: dict[str, _Group] = {}
         self._run_groups: dict[str, str] = {}
         self._group_lock = threading.RLock()
-        self._ocr_lock = threading.Lock()
-        self._ocr_executor: ThreadPoolExecutor | None = None
-        self._ocr_slots: threading.BoundedSemaphore | None = None
         self._reward_stats: RewardStatsProcessor | None = None
         self._stopping = False
+        # OCR 的池与线程池归 OcrDispatcher；self.ocr_pool 仍是它的只读/可写视图。
+        self._ocr = OcrDispatcher(config, self.logger, is_stopping=lambda: self._stopping)
+        # 工作进程的创建与崩溃重启归 WorkerLifecycle（与 self.workers 共用同一份字典）。
+        self._workers_lifecycle = WorkerLifecycle(
+            config=config,
+            logger=self.logger,
+            workers=self.workers,
+            runs=self._runs,
+            lock=self._group_lock,
+            event_queue=lambda: self.event_queue,
+        )
+        # 运行组等待循环归 GroupWaiter；回调都经属性查找，保留测试替换这些方法的口子。
+        self._group_waiter = self._create_group_waiter()
+
+    def _create_group_waiter(self) -> GroupWaiter:
+        """装配运行组等待循环；回调都经属性查找，保留测试替换这些方法的口子。"""
+
+        return GroupWaiter(
+            lock=self._group_lock,
+            is_stopping=lambda: self._stopping,
+            read_run_record=lambda run_id: self._group_store(run_id).read(default={}),
+            cancel_group_runs=lambda group: self._cancel_group_runs(group),
+            mark_group_timeout=lambda group: self._mark_group_timeout(group),
+            finish_group=lambda group: self._finish_group(group),
+            check_workers=lambda: self.check_workers(),
+        )
+
+    @property
+    def ocr_pool(self) -> SharedOcrPool | None:
+        """共享 OCR 池（由 OcrDispatcher 持有）；保留该名字供调用方与测试使用。"""
+
+        return self._ocr.pool
+
+    @ocr_pool.setter
+    def ocr_pool(self, pool: SharedOcrPool | None) -> None:
+        self._ocr.pool = pool
 
     def start(self) -> None:
         with self._group_lock:
@@ -73,17 +106,7 @@ class Supervisor:
 
 
     def _start_worker(self, context: Any, instance: InstanceConfig) -> None:
-        command_queue = context.Queue(maxsize=1)
-        control_queue = context.Queue()
-        response_queue = context.Queue()
-        process = context.Process(
-            target=_instance_worker,
-            args=(str(self.config.config_path), instance, command_queue, control_queue, self.event_queue, response_queue),
-            name=f"oooonmyoji-instance-{instance.id}",
-        )
-        process.start()
-        self.workers[instance.id] = _Worker(instance, process, command_queue, response_queue, control_queue)
-        self.logger.emit("worker.started", instance_id=instance.id, pid=process.pid)
+        self._workers_lifecycle.spawn(context, instance)
 
     def ensure_instance(self, instance: InstanceConfig) -> None:
         """Add a newly discovered instance to a running supervisor."""
@@ -360,50 +383,14 @@ class Supervisor:
             self.event_queue.put({"type": "result", "run_id": group.group_id, "status": status, "record": record})
 
     def _wait_group_poll(self, group: _Group, *, timeout_seconds: float | None) -> None:
-        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
-        terminal = {
-            RunStatus.SUCCEEDED.value,
-            RunStatus.FAILED.value,
-            RunStatus.CANCELLED.value,
-            RunStatus.INTERRUPTED.value,
-        }
-        failure_requested = False
-        while True:
-            lock = getattr(self, "_group_lock", None)
-            with lock if lock is not None else nullcontext():
-                if group.done.is_set() or getattr(self, "_stopping", False):
-                    return
-                run_ids = tuple(group.run_ids)
-                known_records = set(group.records)
-            for run_id in run_ids:
-                if run_id in known_records:
-                    continue
-                record = self._group_store(run_id).read(default={})
-                if isinstance(record, dict) and record.get("status") in terminal:
-                    with lock if lock is not None else nullcontext():
-                        group.records.setdefault(run_id, record)
-            with lock if lock is not None else nullcontext():
-                records_count = len(group.records)
-                statuses = [record.get("status") for record in group.records.values() if isinstance(record, dict)]
-            if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
-                if group.node.cancel_on_failure:
-                    self._cancel_group_runs(group)
-                self._finish_group(group)
-                return
-            if records_count == len(run_ids):
-                if group.node.cancel_on_failure and not failure_requested and any(status != RunStatus.SUCCEEDED.value for status in statuses):
-                    failure_requested = True
-                self._finish_group(group)
-                return
-            if group.node.cancel_on_failure and not failure_requested and any(status not in {None, RunStatus.SUCCEEDED.value, RunStatus.QUEUED.value, RunStatus.RUNNING.value, RunStatus.RETRYING.value} for status in statuses):
-                failure_requested = True
-                self._cancel_group_runs(group)
-            if deadline is not None and time.monotonic() >= deadline:
-                self._mark_group_timeout(group)
-                self._finish_group(group)
-                return
-            self.check_workers()
-            time.sleep(0.1)
+        """轮询整组子 run 直到结束（实现见 GroupWaiter）。"""
+
+        waiter = getattr(self, "_group_waiter", None)
+        if waiter is None:
+            # 测试会用 __new__ 手工装配实例，这里按需补建。
+            waiter = self._create_group_waiter()
+            self._group_waiter = waiter
+        waiter.wait(group, timeout_seconds=timeout_seconds)
 
     def wait_for(self, run_id: str, *, timeout_seconds: float | None = None) -> dict[str, Any] | None:
         lock = getattr(self, "_group_lock", None)
@@ -550,135 +537,19 @@ class Supervisor:
     def check_workers(self) -> None:
         """Isolate a crashed instance and restart its worker process."""
 
-        with self._group_lock:
-            workers = list(self.workers.items())
-        for instance_id, worker in workers:
-            if worker.process.is_alive():
-                continue
-            self.logger.emit("worker.crashed", level=40, instance_id=instance_id, exitcode=worker.process.exitcode)
-            with self._group_lock:
-                active_runs = list(self._runs.items())
-            for run_id, run_instance in active_runs:
-                if run_instance != instance_id:
-                    continue
-                store = AtomicJsonStore(self.config.artifact_dir / "runs" / f"{run_id}.json")
-                record = store.read(default={})
-                if not isinstance(record, dict):
-                    record = {}
-                if record.get("status") in {
-                    RunStatus.QUEUED.value,
-                    RunStatus.RUNNING.value,
-                    RunStatus.RETRYING.value,
-                } or not record:
-                    record.setdefault("run_id", run_id)
-                    record.setdefault("instance_id", instance_id)
-                    record["status"] = RunStatus.INTERRUPTED.value
-                    record["finished_at"] = datetime.now(timezone.utc).isoformat()
-                    record["error"] = "instance worker exited unexpectedly"
-                    record["error_category"] = "internal"
-                    artifacts = record.setdefault("artifacts", [])
-                    if self.config.save_screenshots:
-                        last_frame = self.config.artifact_dir / run_id / "last-frame.png"
-                        if last_frame.is_file() and str(last_frame) not in artifacts:
-                            artifacts.append(str(last_frame))
-                    interrupted_metadata = self.config.artifact_dir / run_id / "interrupted.json"
-                    interrupted_metadata.parent.mkdir(parents=True, exist_ok=True)
-                    interrupted_metadata.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-                    if str(interrupted_metadata) not in artifacts:
-                        artifacts.append(str(interrupted_metadata))
-                    store.write(record)
-                    if self.event_queue is not None:
-                        self.event_queue.put({"type": "result", "run_id": run_id, "status": RunStatus.INTERRUPTED.value, "record": record})
-            worker.process.join(timeout=0)
-            with self._group_lock:
-                # Another caller may have already isolated and restarted this
-                # worker while we were writing interruption metadata.
-                current = self.workers.get(instance_id)
-                if current is not worker:
-                    continue
-                del self.workers[instance_id]
-                context = mp.get_context("spawn")
-                command_queue = context.Queue(maxsize=1)
-                control_queue = context.Queue()
-                response_queue = context.Queue()
-                process = context.Process(
-                    target=_instance_worker,
-                    args=(str(self.config.config_path), worker.instance, command_queue, control_queue, self.event_queue, response_queue),
-                    name=f"oooonmyoji-instance-{instance_id}",
-                )
-                process.start()
-                self.workers[instance_id] = _Worker(worker.instance, process, command_queue, response_queue, control_queue)
-            self.logger.emit("worker.restarted", instance_id=instance_id, pid=process.pid)
+        self._workers_lifecycle.restart_crashed()
 
     def _handle_ocr(self, event: dict[str, Any]) -> None:
+        """把工作进程的识别请求转给 OcrDispatcher（回执写回该进程的响应队列）。"""
+
         instance_id = event.get("instance_id")
-        request_id = event.get("id")
-        if not isinstance(instance_id, str) or not isinstance(request_id, str):
-            return
-        worker = self.workers.get(instance_id)
-        if worker is None:
-            return
-        if not self.config.ocr.enabled:
-            worker.response_queue.put({"id": request_id, "error": "OCR is disabled"})
-            return
-        workers = max(1, int(getattr(self.config.ocr, "workers", 1)))
-        if self._ocr_executor is None:
-            self._ocr_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="supervisor-ocr")
-            self._ocr_slots = threading.BoundedSemaphore(workers * 2)
-        slots = self._ocr_slots
-        if slots is None or not slots.acquire(blocking=False):
-            worker.response_queue.put({"id": request_id, "error": "OCR queue is full"})
-            self.logger.emit("ocr.queue_full", instance_id=instance_id, request_id=request_id)
-            return
-        started = time.monotonic()
-        self.logger.emit("ocr.request_started", instance_id=instance_id, request_id=request_id)
-
-        def process() -> None:
-            try:
-                results = self._recognize_reward_image(event.get("image"))
-                worker.response_queue.put({"id": request_id, "results": results})
-                self.logger.emit(
-                    "ocr.request_completed",
-                    instance_id=instance_id,
-                    request_id=request_id,
-                    duration_ms=round((time.monotonic() - started) * 1000, 3),
-                )
-            except Exception as exc:
-                worker.response_queue.put({"id": request_id, "error": str(exc)})
-                self.logger.emit(
-                    "ocr.request_failed",
-                    level=40,
-                    instance_id=instance_id,
-                    request_id=request_id,
-                    duration_ms=round((time.monotonic() - started) * 1000, 3),
-                    error=str(exc),
-                )
-            finally:
-                slots.release()
-
-        try:
-            self._ocr_executor.submit(process)
-        except RuntimeError:
-            slots.release()
-            worker.response_queue.put({"id": request_id, "error": "OCR is unavailable"})
+        worker = self.workers.get(instance_id) if isinstance(instance_id, str) else None
+        self._ocr.handle(event, worker)
 
     def _recognize_reward_image(self, image: object) -> list[Any]:
-        if not self.config.ocr.enabled:
-            raise RuntimeError("OCR is disabled")
-        if self._stopping:
-            raise RuntimeError("supervisor is stopping")
-        with self._ocr_lock:
-            if self._stopping:
-                raise RuntimeError("supervisor is stopping")
-            if self.ocr_pool is None:
-                self.ocr_pool = SharedOcrPool(
-                    language=self.config.ocr.language,
-                    workers=self.config.ocr.workers,
-                    timeout_seconds=self.config.ocr.request_timeout_seconds,
-                    min_confidence=self.config.ocr.min_confidence,
-                    use_gpu=self.config.ocr.use_gpu,
-                )
-            return self.ocr_pool.recognize(image)
+        """同步识别（奖励统计复用）；池的创建与关闭在 OcrDispatcher 内。"""
+
+        return self._ocr.recognize(image)
 
     def cancel(self, run_id: str) -> None:
         with self._group_lock:
@@ -755,13 +626,7 @@ class Supervisor:
                 self._reward_stats.close(wait_seconds=2.0)
             self._reward_stats = None
         self._stopping = True
-        if self.ocr_pool is not None:
-            self.ocr_pool.close(force=True)
-            self.ocr_pool = None
-        if self._ocr_executor is not None:
-            self._ocr_executor.shutdown(wait=True)
-            self._ocr_executor = None
-            self._ocr_slots = None
+        self._ocr.close()
 
     def __enter__(self) -> "Supervisor":
         self.start()

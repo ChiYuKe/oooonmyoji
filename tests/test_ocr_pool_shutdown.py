@@ -69,7 +69,7 @@ def test_supervisor_starts_ocr_pool_only_when_requested(tmp_path, monkeypatch) -
     supervisor = Supervisor(config)  # type: ignore[arg-type]
     responses = queue.Queue()
     supervisor.workers["mumu-1"] = SimpleNamespace(response_queue=responses)  # type: ignore[assignment]
-    monkeypatch.setattr("src.oooonmyoji.runtime.supervisor.SharedOcrPool", FakeOcrPool)
+    monkeypatch.setattr("src.oooonmyoji.runtime.ocr_dispatch.SharedOcrPool", FakeOcrPool)
 
     assert created == []
     supervisor._handle_ocr({"id": "request-1", "instance_id": "mumu-1", "image": "frame"})

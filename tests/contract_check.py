@@ -10,7 +10,7 @@ SRC = PROJECT_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from oooonmyoji.actions.manifest import COLOR_PATTERN, KEY_PATTERN, PARAMETER_TYPES
+from oooonmyoji.actions.manifest import CARD_CONTROLS, COLOR_PATTERN, KEY_PATTERN, PARAMETER_TYPES
 from oooonmyoji.runtime.records import RunStatus
 from oooonmyoji.workflows.model import DECORATOR_TYPES, INSTANCE_PARALLEL_WAIT_MODES, NODE_TYPES, PARALLEL_FINISH_MODES
 
@@ -38,6 +38,7 @@ def main() -> int:
         "desktop PARALLEL_FINISH_MODES": _exported_values(desktop, "PARALLEL_FINISH_MODES") == tuple(PARALLEL_FINISH_MODES),
         "desktop INSTANCE_PARALLEL_WAIT_MODES": _exported_values(desktop, "INSTANCE_PARALLEL_WAIT_MODES") == tuple(INSTANCE_PARALLEL_WAIT_MODES),
         "desktop PARAMETER_TYPES": _exported_values(parameters, "PARAMETER_TYPES") == tuple(PARAMETER_TYPES),
+        "desktop CARD_CONTROLS": _exported_values(parameters, "CARD_CONTROLS") == tuple(CARD_CONTROLS),
         "desktop COLOR_PATTERN": _exported_string(parameters, "COLOR_PATTERN") == COLOR_PATTERN,
         "desktop KEY_PATTERN": _exported_string(parameters, "KEY_PATTERN") == KEY_PATTERN,
     }

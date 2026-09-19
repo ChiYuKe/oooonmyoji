@@ -7,6 +7,8 @@ import pytest
 
 from src.oooonmyoji.actions import build_action_registry
 from src.oooonmyoji.actions.manifest import (
+    ACTION_MANIFEST_SCHEMA,
+    CARD_CONTROLS,
     COLOR_PATTERN,
     KEY_PATTERN,
     POINT_SCHEMA,
@@ -200,6 +202,104 @@ def test_parameter_definitions_apply_nested_constraints_and_defaults() -> None:
 def test_action_definition_rejects_invalid_manifest_semantics(manifest: dict[str, object], message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         ActionDefinition.parse(manifest)
+
+
+def _card_manifest(rows: list[dict], parameters: dict | None = None) -> dict:
+    return {
+        "schema_version": 2,
+        "name": "card.demo",
+        "entry": "x.py:X",
+        "parameters": parameters if parameters is not None else {
+            "template": {"type": "asset", "required": True},
+            "timeout_seconds": {"type": "duration", "default": 5},
+            "present": {"type": "boolean", "default": True},
+        },
+        "card": {"rows": rows},
+    }
+
+
+def test_action_definition_parses_card_rows_in_declaration_order() -> None:
+    """`card.rows` 是有序的固定卡片端点：标签覆盖共享字段名，布尔行可命名两种状态。"""
+    definition = ActionDefinition.parse(_card_manifest([
+        {"param": "template", "label": "模板"},
+        {"param": "timeout_seconds", "label": "超时", "control": "number"},
+        {"param": "present", "label": "存在性", "on_label": "等待出现", "off_label": "等待消失"},
+    ]))
+    assert [row.param for row in definition.card] == ["template", "timeout_seconds", "present"]
+    assert [row.label for row in definition.card] == ["模板", "超时", "存在性"]
+    assert definition.card[1].control == "number"
+    assert (definition.card[2].on_label, definition.card[2].off_label) == ("等待出现", "等待消失")
+
+
+def test_action_definition_accepts_tuple_control_for_fixed_length_arrays() -> None:
+    """固定长度数组用 tuple 控件拆成输入格（随机间隔 → 两个输入）。"""
+    manifest = _card_manifest(
+        [{"param": "template"}, {"param": "random_interval", "control": "tuple"}],
+        parameters={
+            "template": {"type": "asset", "required": True},
+            "random_interval": {
+                "type": "array",
+                "items": {"type": "duration", "min": 0},
+                "min_items": 2,
+                "max_items": 2,
+                "default": [0, 0],
+            },
+        },
+    )
+    definition = ActionDefinition.parse(manifest)
+    assert definition.card[1].control == "tuple"
+    assert "tuple" in CARD_CONTROLS
+
+
+def test_action_definition_without_card_keeps_empty_declaration() -> None:
+    """没声明 card 的 Action 保持旧卡片行为：Python 侧只需要能通过校验。"""
+    manifest = _card_manifest([])
+    manifest.pop("card")
+    assert ActionDefinition.parse(manifest).card == ()
+
+
+@pytest.mark.parametrize(
+    "rows, message",
+    [
+        ([{"param": "nope"}], "references unknown parameter"),
+        ([{"param": "template"}, {"param": "template"}], "declared twice"),
+        ([{"param": "template", "control": "zoom"}], "unknown control"),
+        ([{"param": "timeout_seconds"}], "must cover required parameters"),
+        ([{"param": "template", "hidden": True}, {"param": "timeout_seconds"}], "cannot be hidden"),
+        (["template"], "entries must be objects"),
+        ([{"label": "模板"}], "need a non-empty param"),
+    ],
+)
+def test_action_definition_rejects_bad_card_rows(rows: list[object], message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        ActionDefinition.parse(_card_manifest(rows))
+
+
+def test_builtin_manifests_declare_cards_for_their_required_parameters() -> None:
+    """内置 manifest 的卡片声明必须与参数定义自洽（与 Registry 启动时同一套校验）。"""
+    from jsonschema import Draft202012Validator
+
+    manifests_dir = Path(__file__).resolve().parents[1] / "src" / "oooonmyoji" / "actions" / "manifests"
+    validator = Draft202012Validator(ACTION_MANIFEST_SCHEMA)
+    declared: dict[str, tuple] = {}
+    for path in sorted(manifests_dir.glob("*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        errors = list(validator.iter_errors(raw))
+        assert not errors, f"{path.name}: {errors[0].message if errors else ''}"
+        definition = ActionDefinition.parse(raw)
+        declared[definition.name] = definition.card
+
+    wait_template = [row.param for row in declared["vision.wait_template"]]
+    assert wait_template == [
+        "template", "timeout_seconds", "present", "roi", "threshold", "scale_search",
+    ]
+    assert [row.label for row in declared["vision.wait_template"]] == [
+        "模板", "超时", "存在性", "识别区域", "匹配阈值", "多尺度搜索",
+    ]
+    with_card = [name for name, rows in declared.items() if rows]
+    assert len(with_card) >= 20, f"声明卡片的 Action 太少：{with_card}"
+    # core.capture 没有参数，无法也没有必要声明卡片。
+    assert declared["core.capture"] == ()
 
 
 def test_new_parameter_types_compile_to_expected_schemas() -> None:

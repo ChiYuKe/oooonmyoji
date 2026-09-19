@@ -105,3 +105,58 @@ def test_realm_pass_tracker_anchors_then_accumulates_until_confirmation(tmp_path
     assert reached == {"estimated_owned": 30, "needs_confirmation": True, "first_detection": False}
     assert context.confirm_realm_pass_count(30, threshold=30)["should_enter"] is True
     assert context.observe_realm_pass_reward(1, threshold=30)["first_detection"] is True
+
+
+class RecordingLiveView:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.frames: list[object] = []
+        self.fail = fail
+
+    def maybe_write(self, frame: object, *, force: bool = False) -> bool:
+        if self.fail:
+            raise RuntimeError("preview encoding blew up")
+        self.frames.append(frame)
+        return True
+
+
+def test_capture_feeds_the_live_view_channel(tmp_path: Path) -> None:
+    device = FakeDevice()
+    live = RecordingLiveView()
+    context = TaskContextImpl(
+        device=device,
+        mapper=CoordinateMapper(1920, 1080, device.width, device.height),
+        template_matcher=TemplateMatcher(),
+        ocr_engine=None,
+        artifact_dir=tmp_path / "run",
+        template_root=tmp_path,
+        logger=EventLogger(tmp_path / "logs"),
+        instance_id="mumu-0",
+        live_view=live,
+    )
+
+    frame = context.capture()
+
+    assert live.frames == [frame]
+    assert live.frames[0] is device.frame
+
+
+def test_live_view_failure_never_breaks_capture(tmp_path: Path) -> None:
+    device = FakeDevice()
+    live = RecordingLiveView(fail=True)
+    context = TaskContextImpl(
+        device=device,
+        mapper=CoordinateMapper(1920, 1080, device.width, device.height),
+        template_matcher=TemplateMatcher(),
+        ocr_engine=None,
+        artifact_dir=tmp_path / "run",
+        template_root=tmp_path,
+        logger=EventLogger(tmp_path / "logs"),
+        live_view=live,
+    )
+
+    frame = context.capture()
+    second = context.capture()
+
+    # 预览通道出错只关闭它自己，工作流继续正常抓帧。
+    assert frame is device.frame and second is device.frame
+    assert context.live_view is None

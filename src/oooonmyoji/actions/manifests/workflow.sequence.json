@@ -17,6 +17,11 @@
       "description": "传给每个子工作流的输入，可含绑定引用"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "workflows", "label": "子工作流列表", "control": "inspector" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

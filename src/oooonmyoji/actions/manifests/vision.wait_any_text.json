@@ -17,6 +17,16 @@
     "roi": { "type": "rect" },
     "min_confidence": { "type": "number", "default": 0, "min": 0, "max": 1 }
   },
+  "card": {
+    "rows": [
+      { "param": "texts", "label": "文字列表", "control": "inspector" },
+      { "param": "timeout_seconds", "label": "超时" },
+      { "param": "present", "label": "存在性", "on_label": "等待出现", "off_label": "等待消失" },
+      { "param": "allow_timeout", "label": "允许超时", "on_label": "允许", "off_label": "不允许" },
+      { "param": "roi", "label": "识别区域" },
+      { "param": "min_confidence", "label": "最小置信度" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

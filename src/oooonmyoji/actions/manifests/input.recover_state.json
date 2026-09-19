@@ -63,6 +63,16 @@
     "random_offset": { "type": "integer", "default": 0, "min": 0 },
     "random_interval": { "type": "array", "items": { "type": "duration", "min": 0 }, "min_items": 2, "max_items": 2, "default": [0, 0] }
   },
+  "card": {
+    "rows": [
+      { "param": "states", "label": "状态列表", "control": "inspector" },
+      { "param": "target_states", "label": "目标状态", "control": "inspector" },
+      { "param": "transitions", "label": "状态转移", "control": "inspector" },
+      { "param": "timeout_seconds", "label": "超时（秒）" },
+      { "param": "allow_ocr", "label": "允许 OCR", "on_label": "允许", "off_label": "不允许" },
+      { "param": "max_return_attempts", "label": "最大返回次数" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

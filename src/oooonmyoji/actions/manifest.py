@@ -27,6 +27,25 @@ Optional per-parameter fields: ``required``, ``default``, ``description``,
 ``duration`` bounds), ``min_length``/``max_length`` (``string``/``asset``/
 ``path``/``key``/``enum`` bounds), ``enum`` (required for ``enum``),
 ``min_items``/``max_items``, ``items`` (array), ``properties`` (object).
+
+Optional ``card`` section
+-------------------------
+A manifest may declare the fixed layout of its editor node card:
+
+.. code-block:: json
+
+    "card": { "rows": [
+      { "param": "template", "label": "模板" },
+      { "param": "timeout_seconds", "label": "超时" },
+      { "param": "present", "on_label": "等待出现", "off_label": "等待消失" }
+    ] }
+
+``rows`` is ordered and authoritative: the editor shows exactly these
+endpoints, each directly editable on the card. ``label`` overrides the shared
+field name, ``control`` overrides the inline control, ``hidden`` keeps an
+optional parameter off the card, and ``on_label``/``off_label`` name the two
+states of a boolean row. Actions without a ``card`` keep the default card
+(required + configured parameters, expandable to the full list).
 """
 
 from __future__ import annotations
@@ -75,6 +94,23 @@ NUMERIC_TYPES = frozenset({"number", "integer", "duration"})
 #: 接受 min_length/max_length 的类型。
 STRING_TYPES = frozenset({"string", "asset", "path", "key", "enum"})
 
+#: 卡片行可选的行内控件（缺省按参数类型推断）。
+CARD_CONTROLS = (
+    "asset",
+    "rect",
+    "toggle",
+    "enum",
+    "number",
+    "integer",
+    "duration",
+    "string",
+    "key",
+    "color",
+    "point",
+    "tuple",
+    "inspector",
+)
+
 _RETRY_MODES = ("safe", "unsafe")
 _MISSING_DEFAULT = object()
 
@@ -101,9 +137,34 @@ ACTION_MANIFEST_SCHEMA: dict[str, Any] = {
             },
             "additionalProperties": False,
         },
+        "card": {
+            "type": "object",
+            "required": ["rows"],
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"$ref": "#/definitions/card_row"},
+                },
+            },
+            "additionalProperties": False,
+        },
     },
     "additionalProperties": False,
     "definitions": {
+        "card_row": {
+            "type": "object",
+            "required": ["param"],
+            "properties": {
+                "param": {"type": "string", "minLength": 1},
+                "label": {"type": "string", "minLength": 1},
+                "control": {"enum": list(CARD_CONTROLS)},
+                "hidden": {"type": "boolean"},
+                "on_label": {"type": "string", "minLength": 1},
+                "off_label": {"type": "string", "minLength": 1},
+            },
+            "additionalProperties": False,
+        },
         "parameter": {
             "type": "object",
             "required": ["type"],
@@ -379,6 +440,69 @@ def apply_parameter_defaults(
 
 
 @dataclass(frozen=True)
+class CardRow:
+    """One fixed endpoint row of an Action's editor card."""
+
+    param: str
+    label: str = ""
+    control: str = ""
+    hidden: bool = False
+    on_label: str = ""
+    off_label: str = ""
+
+    @classmethod
+    def parse(cls, raw: dict[str, Any]) -> "CardRow":
+        if not isinstance(raw, dict):
+            raise ConfigError("card.rows entries must be objects")
+        param = raw.get("param")
+        if not isinstance(param, str) or not param:
+            raise ConfigError("card.rows entries need a non-empty param")
+        control = raw.get("control", "")
+        if control and control not in CARD_CONTROLS:
+            raise ConfigError(f"card row {param}: unknown control: {control!r}")
+        return cls(
+            param=param,
+            label=str(raw.get("label", "")),
+            control=str(control),
+            hidden=bool(raw.get("hidden", False)),
+            on_label=str(raw.get("on_label", "")),
+            off_label=str(raw.get("off_label", "")),
+        )
+
+
+def parse_card(name: str, raw: Any, parameters: dict[str, ParameterDefinition]) -> tuple[CardRow, ...]:
+    """Validate the optional ``card`` section against the declared parameters."""
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"Action {name}: card must be an object")
+    rows_raw = raw.get("rows")
+    if not isinstance(rows_raw, list) or not rows_raw:
+        raise ConfigError(f"Action {name}: card.rows must be a non-empty list")
+    rows = tuple(CardRow.parse(item) for item in rows_raw)
+    seen: set[str] = set()
+    for row in rows:
+        if row.param not in parameters:
+            raise ConfigError(f"Action {name}: card row references unknown parameter {row.param!r}")
+        if row.param in seen:
+            raise ConfigError(f"Action {name}: card row {row.param!r} is declared twice")
+        seen.add(row.param)
+        if row.hidden and parameters[row.param].required:
+            raise ConfigError(f"Action {name}: required parameter {row.param!r} cannot be hidden")
+    missing = [
+        key
+        for key, definition in parameters.items()
+        if definition.required and key not in seen
+    ]
+    if missing:
+        raise ConfigError(
+            f"Action {name}: card.rows must cover required parameters: {', '.join(missing)}"
+        )
+    return rows
+
+
+@dataclass(frozen=True)
 class ActionDefinition:
     """One validated Action manifest: the shared source of truth."""
 
@@ -391,6 +515,7 @@ class ActionDefinition:
     retry: str
     side_effect: bool
     input_schema: dict[str, Any]
+    card: tuple[CardRow, ...] = ()
 
     @property
     def retry_safe(self) -> bool:
@@ -442,6 +567,7 @@ class ActionDefinition:
             retry=retry,
             side_effect=side_effect,
             input_schema=compile_parameters(parameters),
+            card=parse_card(name, manifest.get("card"), parameters),
         )
 
     def output_field_schema(self, field: str) -> dict[str, Any]:
@@ -455,6 +581,7 @@ class ActionDefinition:
 
 __all__ = [
     "ACTION_MANIFEST_SCHEMA",
+    "CARD_CONTROLS",
     "COLOR_PATTERN",
     "KEY_PATTERN",
     "NUMERIC_TYPES",
@@ -462,7 +589,9 @@ __all__ = [
     "POINT_SCHEMA",
     "STRING_TYPES",
     "ActionDefinition",
+    "CardRow",
     "ParameterDefinition",
     "apply_parameter_defaults",
     "compile_parameters",
+    "parse_card",
 ]

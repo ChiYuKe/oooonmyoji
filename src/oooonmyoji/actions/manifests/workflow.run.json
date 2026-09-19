@@ -16,6 +16,11 @@
       "description": "传给子工作流的输入（按子工作流 inputs 定义校验），可含绑定引用"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "workflow", "label": "子工作流" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

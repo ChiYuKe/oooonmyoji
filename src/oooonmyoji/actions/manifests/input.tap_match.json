@@ -67,6 +67,19 @@
       "description": "确认原模板消失的最长等待时间，默认 8 秒"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "match", "label": "匹配配置", "control": "inspector" },
+      { "param": "revalidate", "label": "重新校验", "on_label": "校验", "off_label": "跳过" },
+      { "param": "verify_gone", "label": "确认模板消失", "on_label": "校验", "off_label": "跳过" },
+      { "param": "verify_timeout_seconds", "label": "确认消失超时（秒）" },
+      { "param": "disappeared_state_timeout_seconds", "label": "消失状态超时（秒）" },
+      { "param": "hold_ms", "label": "按压时长（毫秒）" },
+      { "param": "random_offset", "label": "随机偏移（px）" },
+      { "param": "random_interval", "label": "随机间隔（秒）" },
+      { "param": "disappeared_states", "label": "消失状态列表", "control": "inspector" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

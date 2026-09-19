@@ -37,6 +37,18 @@
     "random_offset": { "type": "integer", "default": 0, "min": 0 },
     "random_interval": { "type": "array", "items": { "type": "duration", "min": 0 }, "min_items": 2, "max_items": 2, "default": [0, 0] }
   },
+  "card": {
+    "rows": [
+      { "param": "match", "label": "匹配配置", "control": "inspector" },
+      { "param": "template", "label": "模板" },
+      { "param": "timeout_seconds", "label": "超时" },
+      { "param": "threshold", "label": "匹配阈值" },
+      { "param": "max_clicks", "label": "最大点击次数" },
+      { "param": "allow_ocr", "label": "允许 OCR", "on_label": "允许", "off_label": "不允许" },
+      { "param": "post_click_delay", "label": "点击后延迟（秒）" },
+      { "param": "done_texts", "label": "完成文字", "control": "inspector" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

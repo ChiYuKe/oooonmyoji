@@ -5,6 +5,11 @@
   "entry": "builtin:TypeTextAction",
   "description": "向当前输入框输入文本。",
   "parameters": { "text": { "type": "string", "required": true } },
+  "card": {
+    "rows": [
+      { "param": "text", "label": "文本" }
+    ]
+  },
   "outputs": { "type": "object", "properties": { "text": { "type": "string" }, "length": { "type": "integer" } }, "additionalProperties": false },
   "effects": { "side_effect": true, "retry": "unsafe" }
 }

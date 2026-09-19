@@ -39,6 +39,16 @@
       "description": "是否启用多尺度搜索"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "template", "label": "模板" },
+      { "param": "timeout_seconds", "label": "超时" },
+      { "param": "present", "label": "存在性", "on_label": "等待出现", "off_label": "等待消失" },
+      { "param": "roi", "label": "识别区域" },
+      { "param": "threshold", "label": "匹配阈值" },
+      { "param": "scale_search", "label": "多尺度搜索", "on_label": "启用", "off_label": "关闭" }
+    ]
+  },
   "outputs": {
     "type": "array",
     "items": {

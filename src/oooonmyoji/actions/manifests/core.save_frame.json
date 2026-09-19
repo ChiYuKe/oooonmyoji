@@ -12,6 +12,11 @@
       "description": "保存到产物目录的文件名，如 01-launcher.png"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "name", "label": "文件名" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

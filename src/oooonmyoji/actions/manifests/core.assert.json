@@ -15,6 +15,12 @@
       "description": "断言失败时的错误信息（可选）"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "value", "label": "断言值", "control": "inspector" },
+      { "param": "message", "label": "提示信息" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

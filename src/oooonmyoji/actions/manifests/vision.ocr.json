@@ -10,6 +10,11 @@
       "description": "裁剪区域 [x, y, w, h]"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "roi", "label": "识别区域" }
+    ]
+  },
   "outputs": { "type": "array" },
   "effects": { "side_effect": false, "retry": "safe" }
 }

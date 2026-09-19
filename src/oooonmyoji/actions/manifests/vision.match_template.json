@@ -34,6 +34,15 @@
       "description": "是否启用多尺度搜索"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "template", "label": "模板" },
+      { "param": "roi", "label": "识别区域" },
+      { "param": "threshold", "label": "匹配阈值" },
+      { "param": "max_results", "label": "最大匹配数" },
+      { "param": "scale_search", "label": "多尺度搜索", "on_label": "启用", "off_label": "关闭" }
+    ]
+  },
   "outputs": {
     "type": "array",
     "minItems": 1,

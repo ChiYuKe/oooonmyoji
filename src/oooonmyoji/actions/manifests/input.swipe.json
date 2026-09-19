@@ -11,6 +11,15 @@
     "y2": { "type": "number", "required": true },
     "duration_ms": { "type": "integer", "default": 300, "min": 0 }
   },
+  "card": {
+    "rows": [
+      { "param": "x1", "label": "起点 X" },
+      { "param": "y1", "label": "起点 Y" },
+      { "param": "x2", "label": "终点 X" },
+      { "param": "y2", "label": "终点 Y" },
+      { "param": "duration_ms", "label": "滑动时长（毫秒）" }
+    ]
+  },
   "outputs": { "type": "object", "properties": { "x1": { "type": "integer" }, "y1": { "type": "integer" }, "x2": { "type": "integer" }, "y2": { "type": "integer" }, "duration_ms": { "type": "integer" } }, "additionalProperties": false },
   "effects": { "side_effect": true, "retry": "unsafe" }
 }

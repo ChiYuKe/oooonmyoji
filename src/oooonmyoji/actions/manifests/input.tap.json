@@ -36,6 +36,15 @@
       "description": "点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "x", "label": "坐标 X" },
+      { "param": "y", "label": "坐标 Y" },
+      { "param": "hold_ms", "label": "按压时长（毫秒）" },
+      { "param": "random_offset", "label": "随机偏移（px）" },
+      { "param": "random_interval", "label": "随机间隔（秒）" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

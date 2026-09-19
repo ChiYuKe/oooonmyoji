@@ -15,6 +15,12 @@
       "description": "附加结构化字段（可选）"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "message", "label": "日志内容" },
+      { "param": "fields", "label": "附加字段", "control": "inspector" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

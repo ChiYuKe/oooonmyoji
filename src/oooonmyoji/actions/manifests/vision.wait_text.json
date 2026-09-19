@@ -34,6 +34,15 @@
       "description": "OCR 置信度下限，默认 0"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "text", "label": "文字" },
+      { "param": "timeout_seconds", "label": "超时" },
+      { "param": "present", "label": "存在性", "on_label": "等待出现", "off_label": "等待消失" },
+      { "param": "roi", "label": "识别区域" },
+      { "param": "min_confidence", "label": "最小置信度" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

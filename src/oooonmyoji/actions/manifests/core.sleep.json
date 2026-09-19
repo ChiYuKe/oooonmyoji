@@ -12,6 +12,11 @@
       "description": "等待的秒数"
     }
   },
+  "card": {
+    "rows": [
+      { "param": "seconds", "label": "等待时长（秒）" }
+    ]
+  },
   "outputs": {
     "type": "object",
     "properties": {

@@ -42,9 +42,11 @@ export interface PointerDeps {
   variableCardList(): any[];
   connectionTargetAt(event: PointerEventLike): any;
   variableConnectionTargetAt(event: PointerEventLike): any;
+  referenceConnectionTargetAt(event: PointerEventLike): any;
   finishConnection(event: PointerEventLike, target: any): void;
   cancelConnection(): void;
   finishVariableConnection(event: PointerEventLike): void;
+  finishReferenceConnection(event: PointerEventLike): void;
   setDirty(value?: boolean): void;
   nodeWidth: number;
   variableCardWidth: number;
@@ -66,6 +68,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     state, graph, wrap, worldPoint, position, nodeById, nodes, nodeHeight, snapshot, render, hideMenus,
     clearVariableCardSelection, layout, variableCards, variableCardList, connectionTargetAt,
     variableConnectionTargetAt, finishConnection, cancelConnection, finishVariableConnection, setDirty,
+    referenceConnectionTargetAt, finishReferenceConnection,
     nodeWidth, variableCardWidth, variableCardHeight,
   } = deps;
 
@@ -149,6 +152,16 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       render();
       return;
     }
+    if (state.referenceConnect) {
+      if (Number.isInteger(event.pointerId) && Number.isInteger(state.referenceConnect.pointerId) && event.pointerId !== state.referenceConnect.pointerId) return;
+      autoPan(event);
+      const point = worldPoint(event);
+      state.referenceConnect.x = point.x;
+      state.referenceConnect.y = point.y;
+      state.referenceConnect.hover = referenceConnectionTargetAt(event);
+      render();
+      return;
+    }
     if (!state.drag) return;
     if (state.drag.kind === 'pan') {
       state.drag.moved = state.drag.moved || Math.abs(event.clientX - state.drag.x) + Math.abs(event.clientY - state.drag.y) > 3;
@@ -220,6 +233,11 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     if (state.variableConnect) {
       if (Number.isInteger(event.pointerId) && Number.isInteger(state.variableConnect.pointerId) && event.pointerId !== state.variableConnect.pointerId) return;
       finishVariableConnection(event);
+      return;
+    }
+    if (state.referenceConnect) {
+      if (Number.isInteger(event.pointerId) && Number.isInteger(state.referenceConnect.pointerId) && event.pointerId !== state.referenceConnect.pointerId) return;
+      finishReferenceConnection(event);
       return;
     }
     if (!state.drag) return;

@@ -17,6 +17,8 @@ export interface InputBridgeDeps {
   getShortcuts(): any;
   cancelConnection(): void;
   cancelVariableConnection(): void;
+  /** 取消「节点输出引用」拖拽（Esc）。 */
+  cancelReferenceConnection(): void;
   hideMenus(): void;
   closeAssetBrowser(): void;
   closeTemplateCheck(): void;
@@ -39,7 +41,7 @@ export interface InputBridgeDeps {
 export function createInputBridge(deps: InputBridgeDeps) {
   const {
     state, $, el, wrap, worldPoint, placeVariableCard, variableDragMime, getShortcuts,
-    cancelConnection, cancelVariableConnection, hideMenus, closeAssetBrowser, closeTemplateCheck, render,
+    cancelConnection, cancelVariableConnection, cancelReferenceConnection, hideMenus, closeAssetBrowser, closeTemplateCheck, render,
     deleteCurrentSelection, copySelection, cutSelection, pasteClipboard, executeEditorCommand, undo, redo,
     fitView, nodeById, position, nodeHeight, nodeWidth: NODE_W, bounds,
   } = deps;
@@ -93,7 +95,7 @@ export function createInputBridge(deps: InputBridgeDeps) {
     window.addEventListener('keydown', (event: any) => {
       const tag = event.target && event.target.tagName;
       const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-      if (event.key === 'Escape') { if (state.connect) cancelConnection(); if (state.variableConnect) cancelVariableConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
+      if (event.key === 'Escape') { if (state.connect) cancelConnection(); if (state.variableConnect) cancelVariableConnection(); if (state.referenceConnect) cancelReferenceConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
       if (!editing && matchesShortcut(event, 'editor.delete')) {
         event.preventDefault();
         deleteCurrentSelection();

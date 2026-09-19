@@ -43,6 +43,8 @@ export interface PortMenuDeps {
   state: CanvasState;
   startConnectionFromInput(event: PointerLike | null, nodeId: string, point: PortPoint): void;
   startConnection(event: PointerLike | null, nodeId: string, point: PortPoint): void;
+  /** 任务卡输出口：开始拖节点输出引用。 */
+  startReferenceConnection(event: PointerLike | null, nodeId: string, point: PortPoint): void;
   startVariableConnectionFromPin(event: PointerLike | null, nodeId: string, param: string, point: PortPoint): void;
   startVariableConnectionFromInstanceInput(event: PointerLike | null, nodeId: string, runIndex: number, param: string, point: PortPoint): void;
   startVariableConnectionFromCard(event: PointerLike | null, scope: string, name: string, cardId: string, point: PortPoint): void;
@@ -57,6 +59,10 @@ export interface PortMenuDeps {
   layout(): Record<string, any>;
   nodes(): any[];
   nodeVariablePins(node: any): PortPin[];
+  /** 节点输出字段（`nodes.<id>.output.<字段>`）：任务卡输出口菜单用。 */
+  nodeOutputFields(node: any): Array<{ field: string; label: string; ref: string; schema: any }>;
+  /** 断开参数上的节点输出引用。 */
+  disconnectReferenceFromPin(nodeId: string, param: string): void;
   variableCards(): Record<string, any>;
   variableLinks(): Record<string, string>;
   nextVariableCardId(): string;
@@ -83,6 +89,7 @@ export interface PortMenuDeps {
 export interface CanvasPortMenu {
   nodeInputPortMenuItems(nodeId: string, point: PortPoint): MenuEntry[];
   nodeOutputPortMenuItems(nodeId: string, point: PortPoint): MenuEntry[];
+  nodeReferencePortMenuItems(nodeId: string, point: PortPoint): MenuEntry[];
   nodeVariablePinMenuItems(nodeId: string, pin: PortPin, point: PortPoint): MenuEntry[];
   instanceRunPinMenuItems(card: PortRunCard, variable: { name: string }, point: PortPoint): MenuEntry[];
   variableCardPortMenuItems(card: PortVariableCard, point: PortPoint): MenuEntry[];
@@ -100,6 +107,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
     variableCards, variableLinks, nextVariableCardId, variableCardList, variableCardPosition,
     focusVariableCard, placeVariableCard, disconnectVariableFromPin, disconnectVariableFromInstanceInput,
     removeVariableCard, fieldLabel, toast, typeNames, nodeWidth,
+    startReferenceConnection, nodeOutputFields, disconnectReferenceFromPin,
   } = deps;
 
   function nodeInputPortMenuItems(nodeId: string, point: PortPoint): MenuEntry[] {
@@ -142,11 +150,27 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
       else items.push({ label: '创建变量卡片（Get）', run: () => placeVariableCard(pin.scope!, topName, point, { connect: false }) });
       items.push({ label: '复制变量引用', run: () => copyReference(pin.scope!, topName) });
       items.push('separator', { label: '断开变量链接', danger: true, run: () => disconnectVariableFromPin(nodeId, pin.param) });
+    } else if (pinReference(nodeId, pin.param)) {
+      // 这一行绑的是别的节点的输出：给出复制引用与断开。
+      const ref = pinReference(nodeId, pin.param)!;
+      items.push({ label: '复制引用', run: () => copyText(ref) });
+      items.push('separator', { label: '断开引用', danger: true, run: () => disconnectReferenceFromPin(nodeId, pin.param) });
     } else {
       items.push({ label: '从这里开始连线（绑定变量）', run: () => startVariableConnectionFromPin(null, nodeId, pin.param, point) });
       items.push('separator', { label: '提升为变量', run: () => promotePin(nodeId, pin.param, pin) });
     }
     return items;
+  }
+
+  /** 该端点当前是否绑着节点输出引用；是则返回引用文本。 */
+  function pinReference(nodeId: string, param: string): string | null {
+    const node = nodeById(nodeId);
+    if (!node || !node.params || typeof node.params !== 'object') return null;
+    const value = param.startsWith('inputs.')
+      ? (node.params.inputs && typeof node.params.inputs === 'object' ? node.params.inputs[param.slice('inputs.'.length)] : undefined)
+      : node.params[param];
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ref !== 'string') return null;
+    return value.ref.startsWith('nodes.') ? value.ref : null;
   }
 
   /** 实例运行卡变量端口右键菜单：绑定时可定位/创建卡片/复制/断开，未绑定时开始连线。 */
@@ -165,6 +189,108 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
       items.push({ label: '从这里开始连线（绑定变量）', run: () => startVariableConnectionFromInstanceInput(null, card.node.id, card.index, variable.name, point) });
     }
     return items;
+  }
+
+  /**
+   * 任务卡输出口右键菜单：列出这个 Action 的输出字段，每个都能从这里开始拖引用、
+   * 复制引用文本；已有引用时给出「断开全部输出引用」。
+   */
+  function nodeReferencePortMenuItems(nodeId: string, point: PortPoint): MenuEntry[] {
+    const node = nodeById(nodeId);
+    if (!node) return [];
+    const fields = nodeOutputFields(node);
+    const items: MenuEntry[] = [];
+    if (!fields.length) {
+      items.push({ label: '该 Action 没有声明输出', run: () => toast('该 Action 没有声明输出', true) });
+      return items;
+    }
+    items.push({
+      label: '从这里开始连线（绑定到参数）',
+      run: () => startReferenceConnection(null, nodeId, point),
+    });
+    items.push('separator');
+    items.push(...referenceCopyItems(fields));
+    const dependents = referenceDependents(nodeId);
+    if (dependents.length) {
+      items.push('separator');
+      items.push({
+        label: `断开全部输出引用（${dependents.length} 处）`,
+        danger: true,
+        run: () => { mutate(() => { for (const item of dependents) disconnectReferenceFromPin(item.nodeId, item.param); }); },
+      });
+    }
+    return items;
+  }
+
+  /**
+   * 「复制引用」那一组菜单项。
+   *
+   * 数组输出会展开成「每项 + 每项的字段」，平铺出来几十条没法看，
+   * 所以按第一个路径段分组：整体输出一条、对象的每个字段一条、
+   * 数组的每一项进子菜单（子菜单里第一条是整项，其余是该项的字段）。
+   */
+  function referenceCopyItems(fields: Array<{ field: string; label: string; ref: string }>): MenuEntry[] {
+    const items: MenuEntry[] = [];
+    const groups = new Map<string, { label: string; head?: MenuEntry; children: MenuEntry[] }>();
+    const groupOf = (name: string, label: string): { label: string; head?: MenuEntry; children: MenuEntry[] } => {
+      let group = groups.get(name);
+      if (!group) {
+        group = { label, children: [] };
+        groups.set(name, group);
+      }
+      return group;
+    };
+    for (const entry of fields) {
+      const segments = String(entry.field || '').split('.').filter(Boolean);
+      if (!segments.length) {
+        items.push({ label: '复制整体输出', run: () => copyText(entry.ref) });
+        continue;
+      }
+      const name = segments[0];
+      const indexed = /^\d+$/.test(name);
+      const label = indexed ? `第 ${Number(name) + 1} 项` : (fields.find((item) => item.field === name)?.label || fieldLabel(name));
+      if (segments.length === 1) {
+        if (indexed) groupOf(name, label).head = { label: `整项（${entry.ref}）`, run: () => copyText(entry.ref) };
+        else items.push({ label: `复制 ${label}`, run: () => copyText(entry.ref) });
+        continue;
+      }
+      const tail = segments.slice(1).map((segment) => fieldLabel(segment)).join('.');
+      groupOf(name, label).children.push({ label: `复制 ${tail}`, run: () => copyText(entry.ref) });
+    }
+    for (const group of groups.values()) {
+      const children = group.head ? [group.head, ...group.children] : group.children;
+      if (!children.length) continue;
+      items.push({ label: group.label, children });
+    }
+    return items;
+  }
+
+  /** 哪些参数正引用这个节点的输出。 */
+  function referenceDependents(nodeId: string): Array<{ nodeId: string; param: string }> {
+    const prefix = `nodes.${nodeId}.output`;
+    const found: Array<{ nodeId: string; param: string }> = [];
+    for (const node of nodes()) {
+      if (!node || node.type !== 'task' || !node.params || typeof node.params !== 'object') continue;
+      const visit = (value: any, param: string): void => {
+        if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ref !== 'string') return;
+        if (value.ref === prefix || value.ref.startsWith(`${prefix}.`)) found.push({ nodeId: node.id, param });
+      };
+      for (const [param, value] of Object.entries(node.params)) {
+        if (param === 'inputs' && value && typeof value === 'object' && !Array.isArray(value)) {
+          for (const [name, input] of Object.entries(value as Record<string, any>)) visit(input, `inputs.${name}`);
+        } else visit(value, param);
+      }
+    }
+    return found;
+  }
+
+  /** 复制任意文本（节点输出引用用）。 */
+  function copyText(text: string): void {
+    const owner = deps.getNavigator ? deps.getNavigator() : (typeof navigator !== 'undefined' ? navigator : undefined);
+    const clipboard = owner ? (owner as Navigator & { clipboard?: { writeText(value: string): Promise<void> } }).clipboard : undefined;
+    if (clipboard && clipboard.writeText) {
+      clipboard.writeText(text).then(() => toast(`已复制 ${text}`)).catch(() => toast(`请手动复制：${text}`, true));
+    } else toast(`请手动复制：${text}`);
   }
 
   /** 变量卡片输出端口右键菜单：开始连线、复制引用，或删除卡片。 */
@@ -301,6 +427,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
   return {
     nodeInputPortMenuItems,
     nodeOutputPortMenuItems,
+    nodeReferencePortMenuItems,
     nodeVariablePinMenuItems,
     instanceRunPinMenuItems,
     variableCardPortMenuItems,

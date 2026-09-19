@@ -38,6 +38,8 @@ export interface WorkflowBrowserDeps {
   nodeById(id: string): WorkflowBrowserNode | undefined;
   mutate(fn: () => void): void;
   toast(message: string, error?: boolean): void;
+  /** 打开弹层时向壳层要一次最新的脚本目录（别处新建/外部改动后列表不会过期）。 */
+  requestWorkflows?(): void;
 }
 
 export interface WorkflowBrowser {
@@ -47,8 +49,82 @@ export interface WorkflowBrowser {
   renderWorkflowBrowser(): void;
 }
 
+interface WorkflowBrowserPortal {
+  host: HTMLDialogElement;
+  overlay: HTMLElement;
+  originalParent: Node;
+  returnFocus: Element | null;
+}
+
 export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowser {
-  const { state, $, el, nodeById, mutate, toast } = deps;
+  const { state, $, el, nodeById, mutate, toast, requestWorkflows } = deps;
+
+  let workflowBrowserPortal: WorkflowBrowserPortal | null = null;
+
+  /** 弹层默认在画布文档里；移植到顶层后就取移植过去的那个。 */
+  function workflowBrowserOverlay(): HTMLElement {
+    return workflowBrowserPortal ? workflowBrowserPortal.overlay : $('workflow-browser');
+  }
+
+  function createStylesheets(owner: Document): HTMLLinkElement[] {
+    // 弹层挂到顶层文档、样式却来自画布文档：href 必须相对画布文档解析。
+    // workflow-editor.css 提供按钮/输入框/.overlay/.hidden 这些基础样式，弹层专用规则在其后。
+    const base = document.baseURI || 'http://localhost/canvas.html';
+    return ['./legacy/workflow-editor.css', './legacy/workflow-browser.css'].map((href) => {
+      const sheet = owner.createElement('link');
+      sheet.rel = 'stylesheet';
+      sheet.href = new URL(href, base).href;
+      return sheet;
+    });
+  }
+
+  /**
+   * 把弹层移植到顶层文档的 <dialog> + shadow root。
+   * 详情栏是窄 iframe，弹层留在里面会被挤成一条；素材浏览器就是这么做的，这里保持一致。
+   */
+  function mountWorkflowBrowser(): void {
+    if (workflowBrowserPortal) return;
+    let owner: Document = document;
+    try { owner = window.top!.document; } catch { /* Standalone / cross-origin host. */ }
+    const overlay = $('workflow-browser');
+    const originalParent = overlay.parentNode!;
+    const returnFocus = document.activeElement;
+    const host = owner.createElement('dialog');
+    host.setAttribute('aria-label', '选择子工作流');
+    host.style.cssText = 'padding:0;border:0;max-width:none;max-height:none;width:100vw;height:100vh;background:transparent;color:inherit;overflow:hidden;';
+    const surface = owner.createElement('div');
+    host.appendChild(surface);
+    const shadow = surface.attachShadow({ mode: 'open' });
+    for (const sheet of createStylesheets(owner)) shadow.appendChild(sheet);
+    shadow.appendChild(overlay);
+    // shadow root 里 :root 的变量不会继承，把弹层用到的语义变量同步到 host 上。
+    const computed = getComputedStyle(document.documentElement);
+    const variables = [
+      '--bg', '--fg', '--muted', '--panel', '--panel-2', '--border', '--accent', '--button', '--button-hover',
+      '--danger', '--vscode-input-background', '--vscode-input-foreground', '--vscode-button-foreground',
+      '--vscode-list-activeSelectionBackground',
+    ];
+    for (const name of variables) host.style.setProperty(name, computed.getPropertyValue(name));
+    host.addEventListener('cancel', (event) => { event.preventDefault(); closeWorkflowBrowser(); });
+    host.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeWorkflowBrowser(); }
+      event.stopPropagation();
+    });
+    owner.body.appendChild(host);
+    workflowBrowserPortal = { host, overlay, originalParent, returnFocus };
+    host.showModal();
+  }
+
+  function unmountWorkflowBrowser(): void {
+    const portal = workflowBrowserPortal;
+    if (!portal) return;
+    const { host, overlay, originalParent, returnFocus } = portal;
+    host.close();
+    originalParent.appendChild(overlay);
+    host.remove();
+    workflowBrowserPortal = null;
+    if (returnFocus?.isConnected) (returnFocus as HTMLElement).focus();
+  }
 
   function workflowReference(file: WorkflowBrowserFile): string {
     const rel = typeof file.rel === 'string' ? file.rel.replace(/\\/g, '/') : '';
@@ -56,10 +132,14 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
     return match ? match[1] : String(file.name || '').replace(/\\/g, '/');
   }
 
-  function workflowBrowserFiles(): Array<WorkflowBrowserFile & { reference: string }> {
+  /**
+   * 可选脚本清单：**包含当前文档**（否则「子文件夹里的脚本」会整个消失，让人以为目录漏了），
+   * 但当前文档标成 current，不允许选成自己的子工作流。
+   */
+  function workflowBrowserFiles(): Array<WorkflowBrowserFile & { reference: string; current: boolean }> {
     return (Array.isArray(state.workflows) ? state.workflows : [])
-      .filter((file) => file && file.uri !== state.docUri)
-      .map((file) => ({ ...file, reference: workflowReference(file) }))
+      .filter((file) => Boolean(file))
+      .map((file) => ({ ...file, reference: workflowReference(file), current: Boolean(state.docUri) && file.uri === state.docUri }))
       .filter((file) => file.reference);
   }
 
@@ -73,13 +153,17 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
       query: '',
       selectedReference: normalized,
     };
-    $('workflow-browser').classList.remove('hidden');
+    requestWorkflows?.();
+    mountWorkflowBrowser();
+    workflowBrowserOverlay().classList.remove('hidden');
     renderWorkflowBrowser();
+    workflowBrowserOverlay().querySelector('input')?.focus();
   }
 
   function closeWorkflowBrowser(): void {
-    const overlay = $('workflow-browser');
+    const overlay = workflowBrowserOverlay();
     if (overlay) overlay.classList.add('hidden');
+    unmountWorkflowBrowser();
     state.workflowBrowser = null;
   }
 
@@ -98,6 +182,10 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
   function applyWorkflowSelection(reference: string): void {
     const browser = state.workflowBrowser;
     if (!browser || !reference) return;
+    if (workflowBrowserFiles().some((file) => file.reference === reference && file.current)) {
+      toast('当前工作流不能作为自己的子工作流', true);
+      return;
+    }
     const node = nodeById(browser.nodeId);
     if (!node) {
       closeWorkflowBrowser();
@@ -115,7 +203,7 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
 
   function renderWorkflowBrowser(): void {
     const browser = state.workflowBrowser;
-    const overlay = $('workflow-browser');
+    const overlay = workflowBrowserOverlay();
     if (!browser || !overlay) return;
     overlay.innerHTML = '';
 
@@ -142,7 +230,7 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
     search.addEventListener('input', () => {
       browser.query = search.value;
       renderWorkflowBrowser();
-      const next = $('workflow-browser').children[0];
+      const next = workflowBrowserOverlay().children[0];
       const input = next && next.children[1] && next.children[1].children[0] as HTMLInputElement | undefined;
       if (input) {
         input.focus();
@@ -215,12 +303,13 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
       }
     };
     for (const file of visible) {
-      const item = el('button', `workflow-file${file.reference === browser.selectedReference ? ' selected' : ''}`);
+      const item = el('button', `workflow-file${file.reference === browser.selectedReference ? ' selected' : ''}${file.current ? ' current' : ''}`);
       item.dataset.reference = file.reference;
       item.title = [file.description, file.rel || file.reference].filter(Boolean).join('\n');
       item.appendChild(el('span', 'workflow-file-icon', '{ }'));
       const detail = el('span', 'workflow-file-detail');
       detail.appendChild(el('span', 'workflow-file-name', file.name || file.reference.slice(file.reference.lastIndexOf('/') + 1)));
+      if (file.current) detail.appendChild(el('span', 'workflow-file-current', '当前脚本'));
       if (file.description) detail.appendChild(el('span', 'workflow-file-description', file.description));
       detail.appendChild(el('span', 'workflow-file-path', file.reference));
       item.appendChild(detail);

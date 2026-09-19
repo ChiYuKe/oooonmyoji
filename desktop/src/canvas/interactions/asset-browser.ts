@@ -73,6 +73,17 @@ export function createAssetBrowser(deps: AssetBrowserDeps): AssetBrowser {
     return assetBrowserPortal ? assetBrowserPortal.overlay : $('asset-browser');
   }
 
+  function createStylesheet(owner: Document): HTMLLinkElement {
+    // 弹层挂到顶层文档、样式却来自画布文档：href 必须相对画布文档解析。
+    // 只写 './asset-browser.css' 会解析成 <root>/asset-browser.css（实际文件在
+    // <root>/legacy/ 下）而静默 404，弹层就退回无样式布局并铺满整个窗口。
+    const sheet = owner.createElement('link');
+    sheet.rel = 'stylesheet';
+    const base = document.baseURI || 'http://localhost/canvas.html';
+    sheet.href = new URL('./legacy/asset-browser.css', base).href;
+    return sheet;
+  }
+
   function mountAssetBrowser(): void {
     if (assetBrowserPortal) return;
     let owner: Document = document;
@@ -86,9 +97,7 @@ export function createAssetBrowser(deps: AssetBrowserDeps): AssetBrowser {
     const surface = owner.createElement('div');
     host.appendChild(surface);
     const shadow = surface.attachShadow({ mode: 'open' });
-    const sheet = owner.createElement('link');
-    sheet.rel = 'stylesheet';
-    sheet.href = new URL('./asset-browser.css', document.baseURI).href;
+    const sheet = createStylesheet(owner);
     shadow.appendChild(sheet);
     shadow.appendChild(overlay);
     const syncTheme = (): void => {

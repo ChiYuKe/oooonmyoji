@@ -1,11 +1,12 @@
 /**
  * 子节点执行顺序拖拽：在结构树/子节点列表上拖动行调整 children 顺序。
  * 原 `child-order-dnd.js`；以显式安装函数运行，通过桥接发送文档变更。
+ * 编辑器句柄经 `getEditor` 惰性取得（安装早于画布启动），不再读 window 全局。
  */
 
 export interface ChildOrderEditor {
   state: {
-    raw: { nodes?: Array<{ id?: string; children?: string[] }> };
+    raw: Record<string, any> | null;
     selected: Set<string>;
     undo: string[];
     redo: string[];
@@ -20,7 +21,10 @@ export interface ChildOrderDnd {
 
 const ROW_SELECTOR = '.child-row';
 
-export function installChildOrderDnd(postMessage: (message: unknown) => void): ChildOrderDnd {
+export function installChildOrderDnd(
+  postMessage: (message: unknown) => void,
+  getEditor: () => ChildOrderEditor | undefined,
+): ChildOrderDnd {
   let draggedChildId = '';
 
   function clearDropIndicators(): void {
@@ -41,11 +45,11 @@ export function installChildOrderDnd(postMessage: (message: unknown) => void): C
   }
 
   function bindRows(): void {
-    const editor = window.__btEditor as unknown as ChildOrderEditor | undefined;
+    const editor = getEditor();
     if (!editor || !editor.state?.raw) return;
     const selected = [...editor.state.selected];
     if (selected.length !== 1) return;
-    const node = editor.state.raw.nodes?.find((item) => item && item.id === selected[0]);
+    const node = editor.state.raw.nodes?.find((item: any) => item && item.id === selected[0]);
     if (!node || !Array.isArray(node.children)) return;
 
     document.querySelectorAll<HTMLElement>(ROW_SELECTOR).forEach((row, index) => {

@@ -31,6 +31,31 @@ export interface ReferenceViewer {
   close(): void;
 }
 
+// 缩放下限/上限与「适应」共用（见 theme.css：图形层 transform-origin 为 0 0，
+// 因此屏幕坐标 = pan + zoom × 图形坐标）。
+export const REFERENCE_ZOOM_MIN = .2;
+export const REFERENCE_ZOOM_MAX = 1.6;
+
+/** 以指针为锚点缩放：锚点下方的图形坐标保持不动，画面不会跳动。 */
+export function anchoredReferencePan(
+  pan: { x: number; y: number },
+  previousZoom: number,
+  nextZoom: number,
+  anchor: { x: number; y: number },
+): { x: number; y: number } {
+  const ratio = nextZoom / previousZoom;
+  return {
+    x: anchor.x - ratio * (anchor.x - pan.x),
+    y: anchor.y - ratio * (anchor.y - pan.y),
+  };
+}
+
+/** 滚轮位移换算成缩放倍率：向上滚放大、向下滚缩小，行/页模式先归一到像素。 */
+export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
+  const pixels = deltaY * (deltaMode === 1 ? 16 : deltaMode === 2 ? 100 : 1);
+  return Math.exp(-pixels * .0015);
+}
+
 export function createReferenceViewer(deps: ReferenceViewerDeps): ReferenceViewer {
   const { getWorkbenchFrame, getReferenceGraph, contentName, showToast, errorMessage } = deps;
 
@@ -45,6 +70,8 @@ let referenceViewerGraph: ReferenceGraph | undefined;
 let referenceViewerCanvas: HTMLElement | undefined;
 let referenceViewerZoom = 1;
 let referenceViewerQuery = '';
+let referenceViewerKind = '';
+let referenceViewerFit = true;
 let referenceViewerPan = { x: 0, y: 0 };
 let referenceViewerResizeObserver: ResizeObserver | undefined;
 let referenceViewerLocationDisposable: { dispose(): void } | undefined;
@@ -111,6 +138,7 @@ function renderReferenceTrail(doc: Document): void {
 }
 
 function referenceNodeMatches(node: ReferenceNode, query: string): boolean {
+  if (referenceViewerKind && node.kind !== referenceViewerKind) return false;
   if (!query) return true;
   const haystack = `${node.name} ${node.path} ${node.workflowId ?? ''}`.toLocaleLowerCase();
   return haystack.includes(query.toLocaleLowerCase());
@@ -125,7 +153,7 @@ function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceI
   button.style.width = `${width}px`;
   button.setAttribute('aria-label', `${referenceKindLabel(node.kind)} ${node.name}`);
   if (side !== 'target') {
-    button.title = '点击查看该内容的引用';
+    button.title = `${node.path}\n点击查看该内容的引用`;
     button.addEventListener('click', () => navigateReferenceViewer(node.path));
   }
   const icon = doc.createElement('span');
@@ -138,9 +166,9 @@ function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceI
   const pathEl = doc.createElement('small');
   pathEl.textContent = node.path;
   text.append(name, pathEl);
-  if (item && item.contexts.length) {
+  {
     const count = doc.createElement('em');
-    count.textContent = `${item.contexts.length} 处引用`;
+    count.textContent = `${referenceKindLabel(node.kind)} · ${!node.exists ? '文件缺失' : side === 'target' ? '当前资源' : `${item?.contexts.length || 0} 处引用`}`;
     text.appendChild(count);
   }
   button.append(icon, text);
@@ -149,7 +177,7 @@ function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceI
 
 function renderReferenceGraph(doc: Document, graph: ReferenceGraph): void {
   const canvas = referenceViewerCanvas;
-  if (!canvas) return;
+  if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
   const zoomControls = canvas.querySelector<HTMLElement>('.reference-zoom-controls');
   canvas.replaceChildren();
   const edges = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -158,27 +186,36 @@ function renderReferenceGraph(doc: Document, graph: ReferenceGraph): void {
   const layer = doc.createElement('div');
   layer.className = 'reference-graph-nodes';
   canvas.append(edges, layer);
-  const width = Math.max(canvas.clientWidth, 320);
-  const height = Math.max(canvas.clientHeight, 440);
-  const hasBothSides = graph.referencedBy.length > 0 && graph.references.length > 0;
-  const nodeWidth = hasBothSides
-    ? Math.min(188, Math.max(108, (width - 80) / 3))
-    : Math.min(188, Math.max(142, (width - 64) / 2));
-  const nodeHeight = 70;
   const filteredIncoming = graph.referencedBy.filter((item) => referenceNodeMatches(item.target, referenceViewerQuery));
   const filteredOutgoing = graph.references.filter((item) => referenceNodeMatches(item.target, referenceViewerQuery));
-  const centerX = hasBothSides
-    ? width / 2 - nodeWidth / 2
-    : filteredIncoming.length > 0
-      ? width * .7 - nodeWidth / 2
-      : filteredOutgoing.length > 0
-        ? width * .3 - nodeWidth / 2
-        : width / 2 - nodeWidth / 2;
+  const width = Math.max(canvas.clientWidth, 940);
+  const height = Math.max(canvas.clientHeight, Math.max(filteredIncoming.length, filteredOutgoing.length, 1) * 96 + 180);
+  const nodeWidth = 228;
+  const nodeHeight = 76;
+  const centerX = width / 2 - nodeWidth / 2;
   const centerY = height / 2 - nodeHeight / 2;
-  const sideMargin = width >= 720 ? 70 : 18;
-  const incomingX = sideMargin;
-  const outgoingX = width - nodeWidth - sideMargin;
-  const placeY = (index: number, total: number): number => Math.max(26, height / 2 - (total - 1) * 48 + index * 96 - nodeHeight / 2);
+  const incomingX = 40;
+  const outgoingX = width - nodeWidth - 40;
+  const placeY = (index: number, total: number): number => height / 2 - (total - 1) * 48 + index * 96 - nodeHeight / 2;
+  if (referenceViewerFit) {
+    referenceViewerZoom = Math.min(1, canvas.clientWidth / width, canvas.clientHeight / height);
+    referenceViewerPan = { x: (canvas.clientWidth - width * referenceViewerZoom) / 2, y: (canvas.clientHeight - height * referenceViewerZoom) / 2 };
+  }
+  for (const [x, title, count] of [[incomingX, '引用此资源', filteredIncoming.length], [centerX, '当前资源', 1], [outgoingX, '此资源依赖', filteredOutgoing.length]] as const) {
+    const heading = doc.createElement('div');
+    heading.className = 'reference-column-heading';
+    heading.style.left = x + 'px'; heading.style.width = nodeWidth + 'px';
+    heading.textContent = title + (title === '当前资源' ? '' : ' · ' + count);
+    layer.appendChild(heading);
+    if (count === 0) {
+      const empty = doc.createElement('div'); empty.className = 'reference-column-empty';
+      empty.style.left = x + 'px'; empty.style.top = centerY + 'px'; empty.style.width = nodeWidth + 'px';
+      empty.textContent = referenceViewerQuery || referenceViewerKind ? '没有符合筛选条件的资源' : '暂无' + title;
+      layer.appendChild(empty);
+    }
+  }
+  edges.style.width = layer.style.width = width + 'px';
+  edges.style.height = layer.style.height = height + 'px';
   const paths: string[] = [];
   filteredIncoming.forEach((item, index) => {
     const y = placeY(index, filteredIncoming.length);
@@ -193,6 +230,8 @@ function renderReferenceGraph(doc: Document, graph: ReferenceGraph): void {
     paths.push(`M ${centerX + nodeWidth} ${centerY + nodeHeight / 2} C ${centerX + nodeWidth + 80} ${centerY + nodeHeight / 2}, ${outgoingX - 80} ${sy}, ${outgoingX} ${sy}`);
   });
   appendReferenceNode(doc, layer, undefined, graph.target, 'target', centerX, centerY, nodeWidth);
+  const reset = zoomControls?.querySelector<HTMLButtonElement>('.reference-fit');
+  if (reset) reset.textContent = `${Math.round(referenceViewerZoom * 100)}% · 适应`;
   edges.setAttribute('viewBox', `0 0 ${width} ${height}`);
   edges.setAttribute('preserveAspectRatio', 'none');
   for (const pathData of paths) {
@@ -224,18 +263,6 @@ function observeReferenceCanvas(): void {
     });
   });
   referenceViewerResizeObserver.observe(canvas);
-}
-
-function createReferenceControl(doc: Document, label: string, value: string, type: 'number' | 'checkbox' = 'number'): HTMLElement {
-  const row = doc.createElement('label');
-  row.className = 'reference-filter-row';
-  row.appendChild(doc.createTextNode(label));
-  const input = doc.createElement('input');
-  input.type = type;
-  if (type === 'checkbox') input.checked = true;
-  else { input.value = value; input.min = '1'; input.max = '20'; }
-  row.appendChild(input);
-  return row;
 }
 
 async function renderReferenceViewer(): Promise<void> {
@@ -280,24 +307,29 @@ async function renderReferenceViewer(): Promise<void> {
   search.appendChild(createElement(Search, { width: '15', height: '15', 'aria-hidden': 'true' }));
   const searchInput = doc.createElement('input');
   searchInput.type = 'search';
-  searchInput.placeholder = '搜索...';
+  searchInput.placeholder = '搜索名称或路径';
+  searchInput.setAttribute('aria-label', '搜索关联资源');
   searchInput.value = referenceViewerQuery;
   searchInput.addEventListener('input', () => { referenceViewerQuery = searchInput.value.trim(); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
   search.appendChild(searchInput);
   sidebar.appendChild(search);
-  sidebar.appendChild(createReferenceControl(doc, '搜索引用者深度', '1'));
-  sidebar.appendChild(createReferenceControl(doc, '搜索依赖性深度', '1'));
-  sidebar.appendChild(createReferenceControl(doc, '搜索宽度限制', '20', 'checkbox'));
-  const filter = doc.createElement('label');
-  filter.className = 'reference-filter-row';
-  filter.appendChild(doc.createTextNode('集过滤器'));
+  const filter = doc.createElement('label'); filter.className = 'reference-filter-row';
+  filter.appendChild(doc.createTextNode('资源类型'));
   const select = doc.createElement('select');
-  select.innerHTML = '<option>None</option><option>工作流</option><option>模板图片</option><option>奖励目录</option>';
-  filter.appendChild(select);
-  sidebar.appendChild(filter);
+  for (const [value, label] of [['', '全部类型'], ['workflow', '工作流'], ['asset', '模板图片'], ['catalog', '奖励目录']]) {
+    const option = doc.createElement('option'); option.value = value; option.textContent = label; select.appendChild(option);
+  }
+  select.value = referenceViewerKind;
+  select.addEventListener('change', () => { referenceViewerKind = select.value; if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  filter.appendChild(select); sidebar.appendChild(filter);
   const summary = doc.createElement('div');
   summary.className = 'reference-sidebar-summary';
-  summary.innerHTML = `<strong>${graph.target.name}</strong><span>${graph.target.path}</span><span>${graph.referencedBy.length} 个引用者 · ${graph.references.length} 个依赖</span>`;
+  for (const [tag, value] of [['strong', graph.target.name], ['span', graph.target.path], ['span', graph.referencedBy.length + ' 个引用者 · ' + graph.references.length + ' 个依赖']]) {
+    const line = doc.createElement(tag); line.textContent = value; line.title = value; summary.appendChild(line);
+  }
+  const help = doc.createElement('p'); help.className = 'reference-help';
+  help.textContent = '从左向右阅读：引用者 → 当前资源 → 依赖。点击资源卡片可继续追踪其直接引用关系。';
+  summary.appendChild(help);
   sidebar.appendChild(summary);
   const canvas = doc.createElement('div');
   canvas.className = 'reference-graph-canvas';
@@ -305,6 +337,7 @@ async function renderReferenceViewer(): Promise<void> {
   let dragOrigin: { x: number; y: number; panX: number; panY: number } | undefined;
   canvas.addEventListener('pointerdown', (event) => {
     if ((event.target as HTMLElement).closest('button')) return;
+    referenceViewerFit = false;
     dragOrigin = { x: event.clientX, y: event.clientY, panX: referenceViewerPan.x, panY: referenceViewerPan.y };
     canvas.setPointerCapture(event.pointerId);
   });
@@ -321,15 +354,34 @@ async function renderReferenceViewer(): Promise<void> {
   };
   canvas.addEventListener('pointerup', stopGraphDrag);
   canvas.addEventListener('pointercancel', stopGraphDrag);
+  canvas.addEventListener('wheel', (event) => {
+    // 画布内的滚轮就是缩放：锚定在指针位置，并让在途拖拽跟着新的 pan 继续。
+    event.preventDefault();
+    const previous = referenceViewerZoom;
+    const next = Math.min(REFERENCE_ZOOM_MAX, Math.max(REFERENCE_ZOOM_MIN, previous * wheelZoomFactor(event.deltaY, event.deltaMode)));
+    if (next === previous) return;
+    const bounds = canvas.getBoundingClientRect();
+    referenceViewerFit = false;
+    referenceViewerPan = anchoredReferencePan(referenceViewerPan, previous, next, {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    });
+    referenceViewerZoom = next;
+    if (dragOrigin) dragOrigin = { ...dragOrigin, panX: referenceViewerPan.x, panY: referenceViewerPan.y };
+    if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph);
+  }, { passive: false });
   const zoom = doc.createElement('div');
   zoom.className = 'reference-zoom-controls';
   const zoomOut = doc.createElement('button');
   zoomOut.type = 'button'; zoomOut.title = '缩小'; zoomOut.appendChild(createElement(Minus, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  zoomOut.addEventListener('click', () => { referenceViewerZoom = Math.max(.6, referenceViewerZoom - .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  zoomOut.addEventListener('click', () => { referenceViewerFit = false; referenceViewerZoom = Math.max(REFERENCE_ZOOM_MIN, referenceViewerZoom - .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
   const zoomIn = doc.createElement('button');
   zoomIn.type = 'button'; zoomIn.title = '放大'; zoomIn.appendChild(createElement(Plus, { width: '14', height: '14', 'aria-hidden': 'true' }));
-  zoomIn.addEventListener('click', () => { referenceViewerZoom = Math.min(1.6, referenceViewerZoom + .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
-  zoom.append(zoomOut, zoomIn);
+  zoomIn.addEventListener('click', () => { referenceViewerFit = false; referenceViewerZoom = Math.min(REFERENCE_ZOOM_MAX, referenceViewerZoom + .1); if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  const fit = doc.createElement('button'); fit.type = 'button'; fit.className = 'reference-fit';
+  fit.title = '适应全部关系'; fit.setAttribute('aria-label', '适应全部关系');
+  fit.addEventListener('click', () => { referenceViewerFit = true; if (referenceViewerGraph) renderReferenceGraph(doc, referenceViewerGraph); });
+  zoom.append(zoomOut, fit, zoomIn);
   canvas.appendChild(zoom);
   workspace.append(sidebar, canvas);
   body.appendChild(workspace);
@@ -342,6 +394,7 @@ function openReferenceViewer(path: string, _sourceDocument: Document): void {
   const doc = document;
   referenceViewerDocument = doc;
   referenceTrail = [path];
+  referenceViewerKind = ''; referenceViewerFit = true;
 
   getWorkbenchFrame()?.show('referenceViewer');
   const host = doc.querySelector<HTMLElement>('#module-reference-viewer');
@@ -421,6 +474,7 @@ function openReferenceViewer(path: string, _sourceDocument: Document): void {
 /** 跳转到引用图中的另一个节点（层层跳转）。 */
 function navigateReferenceViewer(path: string): void {
   referenceTrail.push(path);
+  referenceViewerFit = true;
   referenceViewerQuery = '';
   referenceViewerPan = { x: 0, y: 0 };
   void renderReferenceViewer();

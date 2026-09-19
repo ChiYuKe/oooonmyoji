@@ -1,17 +1,21 @@
 /**
  * 内容浏览器：工作流 / 资源文件的树、网格、右键菜单、命名弹窗与拖放。
  * 状态由本模块持有，通过 createContentBrowser 注入实时状态与共享操作。
- * 注意：部分测试按函数名切片执行，故函数保持顶层声明。
+ * 纯条目工具（目录归属、递归类型过滤）已抽到 content-browser/items.ts。
+ * 注意：workbench.test.cjs 仍按函数名切片 renderContentBrowser，改动需同步测试。
  */
 import { Box, Copy, FileJson2, FolderOpen, FolderPlus, Image, Network, Pencil, RefreshCw, Trash2 } from 'lucide';
 import type { createElement, createIcons } from 'lucide';
 import type {
   AssetImage,
   BootstrapData,
+  MoveContentResult,
   OnmyojiDesktopApi,
   WorkflowDescriptor,
 } from '../shared/contracts';
 import type { DockingController } from './docking';
+import { contentBrowserRecursiveItems, isUnderContentFolder, nextContentBrowserZoom, CONTENT_BROWSER_ZOOM_MIN, CONTENT_BROWSER_ZOOM_MAX, type ContentBrowserItemKind } from './content-browser/items';
+import { contentRewriteReport } from './content-browser/rewrite-report';
 
 interface WorkflowDocumentTab {
   uri: string;
@@ -33,10 +37,9 @@ export interface ContentReferenceViewerPort {
 }
 
 type ContentBrowserView = 'grid' | 'list';
-type ContentBrowserItemKind = 'folder' | 'workflow' | 'asset';
 type ContentBrowserFilter = 'all' | ContentBrowserItemKind;
 
-interface ContentBrowserItem {
+export interface ContentBrowserItem {
   kind: ContentBrowserItemKind;
   path: string;
   name: string;
@@ -66,6 +69,13 @@ const contentNameInput = document.querySelector<HTMLInputElement>('#content-name
 const contentNameSubmit = document.querySelector<HTMLButtonElement>('#content-name-submit')!;
 const contentNameCancel = document.querySelector<HTMLButtonElement>('#content-name-cancel')!;
 const contentNameClose = document.querySelector<HTMLButtonElement>('#content-name-close')!;
+const contentRewriteModal = document.querySelector<HTMLElement>('#content-rewrite-modal')!;
+const contentRewriteTitle = document.querySelector<HTMLElement>('#content-rewrite-title')!;
+const contentRewriteSubtitle = document.querySelector<HTMLElement>('#content-rewrite-subtitle')!;
+const contentRewriteList = document.querySelector<HTMLElement>('#content-rewrite-list')!;
+const contentRewriteHint = document.querySelector<HTMLElement>('#content-rewrite-hint')!;
+const contentRewriteConfirm = document.querySelector<HTMLButtonElement>('#content-rewrite-confirm')!;
+const contentRewriteClose = document.querySelector<HTMLButtonElement>('#content-rewrite-close')!;
 
 let contentAssets: AssetImage[] = [];
 let contentFolderPaths: string[] = [];
@@ -111,6 +121,8 @@ let renderWorkflowSelect!: (workflows: WorkflowDescriptor[]) => void;
 let openWorkflowInNewTab!: (uri: string) => void;
 let openWorkflowTab!: (uri: string) => Promise<void>;
 let loadWorkflow!: (uri: string) => Promise<void>;
+/** 磁盘引用被改写后把受影响的打开文档重新读盘；返回因未保存修改而跳过的项目相对路径。 */
+let reloadRewrittenDocuments!: (paths: readonly string[]) => Promise<string[]>;
 let setDeleteTarget!: (target: ContentDeleteTarget | undefined) => void;
 
 function contentParent(path: string): string {
@@ -159,11 +171,6 @@ function contentBrowserAssetItems(): ContentBrowserItem[] {
   }));
 }
 
-function isUnderContentFolder(path: string, folder: string): boolean {
-  if (!folder) return true;
-  return path === folder || path.startsWith(`${folder}/`);
-}
-
 /** 搜索框：跨整个项目匹配名称或路径。 */
 function contentBrowserSearchItems(): ContentBrowserItem[] {
   const query = contentBrowserQuery.trim().toLocaleLowerCase('zh-CN');
@@ -183,26 +190,20 @@ function contentBrowserScopedItems(folder: string): ContentBrowserItem[] {
 }
 
 /**
- * 类型过滤：递归收集当前目录（含子目录）下的同类条目，
- * 这样在项目根目录按类型过滤时也能看到深层资产。
+ * 类型过滤：递归收集当前目录（含子目录）下的同类条目（实现见 content-browser/items.ts）。
  */
-function contentBrowserRecursiveItems(kind: ContentBrowserItemKind): ContentBrowserItem[] {
-  const folder = contentBrowserFolder;
-  if (kind === 'folder') {
-    return contentFolders()
-      .filter((candidate) => candidate && candidate !== folder && isUnderContentFolder(candidate, folder))
-      .map((candidate): ContentBrowserItem => ({ kind: 'folder', path: candidate, name: contentName(candidate) }));
-  }
-  const pool = kind === 'workflow' ? contentBrowserWorkflowItems() : contentBrowserAssetItems();
-  return pool.filter((item) => isUnderContentFolder(item.path, folder));
-}
-
 function contentBrowserEntries(): ContentBrowserItem[] {
   const base = contentBrowserQuery.trim()
     ? contentBrowserSearchItems()
     : contentBrowserFilter === 'all'
       ? contentBrowserScopedItems(contentBrowserFolder)
-      : contentBrowserRecursiveItems(contentBrowserFilter);
+      : contentBrowserRecursiveItems({
+          folder: contentBrowserFolder,
+          contentName,
+          contentFolders,
+          workflowItems: contentBrowserWorkflowItems,
+          assetItems: contentBrowserAssetItems,
+        }, contentBrowserFilter);
   const items = contentBrowserFilter === 'all' ? base : base.filter((item) => item.kind === contentBrowserFilter);
   return items.sort((left, right) => {
     const order: Record<ContentBrowserItemKind, number> = { folder: 0, workflow: 1, asset: 2 };
@@ -359,13 +360,10 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
         sourceWorkflowTab.uri = moved.uri;
         relocateDocument(oldUri, moved.uri);
       }
-      if (result.updatedFiles > 0 && getCurrentUri()) await loadWorkflow(getCurrentUri());
-    } else if (result.updatedFiles > 0 && getCurrentUri()) {
-      // 移动模板后，当前工作流的磁盘引用可能已被重写；重新载入以同步编辑器内存状态。
-      await loadWorkflow(getCurrentUri());
     }
-    const redirectText = result.updatedReferences > 0 ? `，已重定向 ${result.updatedReferences} 处引用` : '';
-    showToast(`已移动到 ${result.targetPath}${redirectText}`);
+    // 磁盘引用可能刚被重写：打开中的文档必须重新读盘，不能沿用内存里的旧正文。
+    const skipped = await reloadRewrittenDocuments(result.rewritten.map((detail) => detail.path));
+    reportContentRewrite(result, '移动', skipped);
   } catch (error) {
     showToast(`移动失败：${errorMessage(error)}`, true);
   }
@@ -582,12 +580,18 @@ const CONTENT_BROWSER_FILTERS: Array<{ id: ContentBrowserFilter; label: string }
 ];
 
 function renderContentBrowserFilters(): void {
-  const count = (kind: ContentBrowserItemKind): number => contentBrowserRecursiveItems(kind).length;
+  const recursiveCount = (kind: ContentBrowserItemKind): number => contentBrowserRecursiveItems({
+    folder: contentBrowserFolder,
+    contentName,
+    contentFolders,
+    workflowItems: contentBrowserWorkflowItems,
+    assetItems: contentBrowserAssetItems,
+  }, kind).length;
   const counts: Record<ContentBrowserFilter, number> = {
     all: contentBrowserScopedItems(contentBrowserFolder).length,
-    folder: count('folder'),
-    workflow: count('workflow'),
-    asset: count('asset'),
+    folder: recursiveCount('folder'),
+    workflow: recursiveCount('workflow'),
+    asset: recursiveCount('asset'),
   };
   contentBrowserFilters.replaceChildren(...CONTENT_BROWSER_FILTERS.map((filter) => {
     const button = document.createElement('button');
@@ -818,6 +822,66 @@ function requestContentName(title: string, submitLabel: string, initialValue: st
   return result;
 }
 
+function hideContentRewriteDialog(): void {
+  contentRewriteModal.classList.add('hidden');
+  contentRewriteModal.setAttribute('aria-hidden', 'true');
+}
+
+/**
+ * 汇报一次移动/重命名的引用改写结果。
+ * 没有引用需要改写时维持原来的单条 toast；有明细时再弹出列表，列出每个被改写的文件与处数。
+ * `skipped` 是有未保存修改、因而没有跟着重载的文档：保存它们会把重定向覆盖回去，必须在弹窗里点名。
+ */
+function reportContentRewrite(result: MoveContentResult, verb: '重命名' | '移动', skipped: readonly string[] = []): void {
+  const report = contentRewriteReport(result, verb);
+  if (report.rows.length === 0) {
+    showToast(report.title);
+    return;
+  }
+  showToast(`${report.title}，已重定向 ${report.references} 处引用`);
+  contentRewriteTitle.textContent = report.title;
+  contentRewriteSubtitle.textContent = report.subtitle;
+  contentRewriteHint.textContent = skipped.length > 0
+    ? `另有 ${skipped.length} 个文件有未保存修改，未自动重载：保存它们会覆盖本次重定向（${skipped.join('、')}）`
+    : '改动已写入磁盘，可用右键菜单的「引用查看器」复核';
+  contentRewriteList.replaceChildren(...report.rows.map((detail) => {
+    const row = document.createElement('div');
+    row.className = 'content-rewrite-item';
+    const path = document.createElement('span');
+    path.className = 'content-rewrite-path';
+    path.textContent = detail.path;
+    path.title = detail.path;
+    const count = document.createElement('span');
+    count.className = 'content-rewrite-count';
+    count.textContent = `${detail.references} 处`;
+    row.append(path, count);
+    return row;
+  }));
+  contentRewriteModal.classList.remove('hidden');
+  contentRewriteModal.setAttribute('aria-hidden', 'false');
+  window.setTimeout(() => contentRewriteConfirm.focus(), 0);
+}
+
+/**
+ * 文件夹改名：内部工作流全部换了路径，打开中的标签要按新旧前缀一起搬到新位置。
+ * 必须在刷新目录之后调用（新描述符此时才在 bootstrap 里），返回搬迁后的文档 URI。
+ */
+function relocateFolderDocuments(oldFolder: string, newFolder: string): string[] {
+  const folder = oldFolder.replace(/\\/g, '/').replace(/\/+$/, '');
+  const prefix = `${folder}/`;
+  const moved: string[] = [];
+  if (!folder) return moved;
+  for (const tab of getWorkflowTabs()) {
+    const relative = relativeToProject(displayFileUri(tab.uri)).replace(/\\/g, '/');
+    if (!relative.toLowerCase().startsWith(prefix.toLowerCase())) continue;
+    const target = workflowDescriptorForPath(`${newFolder}/${relative.slice(prefix.length)}`);
+    if (!target) continue;
+    relocateDocument(tab.uri, target.uri);
+    moved.push(target.uri);
+  }
+  return moved;
+}
+
 async function createContentFolderAt(parentPath: string): Promise<void> {
   if (contentFolderDraft) return;
   const normalizedParent = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -895,7 +959,11 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
     const result = await api.renameContent({ sourcePath: item.path, newName });
     selectedContentPath = result.targetPath;
     await refreshContentBrowser();
-    if (renamingCurrentWorkflow) {
+    if (item.kind === 'folder') {
+      // 文件夹改名带走了内部所有工作流：先把打开中的标签搬到新路径，再统一重新读盘。
+      const relocated = relocateFolderDocuments(item.path, result.targetPath);
+      if (relocated.includes(getCurrentUri())) await loadWorkflow(getCurrentUri());
+    } else if (renamingCurrentWorkflow) {
       const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
       if (renamed) {
         const oldUri = getCurrentUri();
@@ -910,12 +978,10 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
         renameWorkflowTab(oldUri, renamed.uri);
         relocateDocument(oldUri, renamed.uri);
       }
-      if (result.updatedFiles > 0 && getCurrentUri()) await loadWorkflow(getCurrentUri());
-    } else if (result.updatedFiles > 0 && getCurrentUri()) {
-      await loadWorkflow(getCurrentUri());
     }
-    const redirectText = result.updatedReferences > 0 ? `，已重定向 ${result.updatedReferences} 处引用` : '';
-    showToast(`已重命名为 ${result.targetPath}${redirectText}`);
+    // 磁盘引用可能刚被重写：打开中的文档必须重新读盘，不能沿用内存里的旧正文。
+    const skipped = await reloadRewrittenDocuments(result.rewritten.map((detail) => detail.path));
+    reportContentRewrite(result, '重命名', skipped);
   } catch (error) {
     showToast(`重命名失败：${errorMessage(error)}`, true);
   }
@@ -1063,12 +1129,25 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
 
 
 const CONTENT_BROWSER_VIEW_KEY = 'onmyoji-studio.content-browser-view';
+const CONTENT_BROWSER_ZOOM_KEY = 'onmyoji-studio.content-browser.zoom';
 
 /** 切换网格/列表视图并持久化。 */
 function setContentBrowserView(view: 'grid' | 'list'): void {
   contentBrowserView = view === 'list' ? 'list' : 'grid';
   window.localStorage.setItem(CONTENT_BROWSER_VIEW_KEY, contentBrowserView);
   renderContentBrowser();
+}
+
+/** 内容区条目缩放（Ctrl + 滚轮）：改 --cb-zoom 派生所有尺寸，默认 1 即原大小。 */
+function applyContentBrowserZoom(value: number, persist = true): void {
+  const zoom = Number.isFinite(value) ? Math.min(CONTENT_BROWSER_ZOOM_MAX, Math.max(CONTENT_BROWSER_ZOOM_MIN, value)) : 1;
+  contentBrowserItems.style.setProperty('--cb-zoom', String(Math.round(zoom * 100) / 100));
+  if (persist) window.localStorage.setItem(CONTENT_BROWSER_ZOOM_KEY, String(Math.round(zoom * 100) / 100));
+}
+
+function readContentBrowserZoom(): number {
+  const stored = parseFloat(window.localStorage.getItem(CONTENT_BROWSER_ZOOM_KEY) ?? '');
+  return Number.isFinite(stored) && stored > 0 ? stored : 1;
 }
 
 /** 绑定内容浏览器面板的右键菜单、命名弹窗、视图切换与拖放事件。 */
@@ -1089,6 +1168,16 @@ function bindContentBrowserUi(): void {
   contentNameModal.addEventListener('pointerdown', (event) => {
     if (event.target === contentNameModal) finishContentNameDialog(null);
   });
+  contentRewriteClose.addEventListener('click', hideContentRewriteDialog);
+  contentRewriteConfirm.addEventListener('click', hideContentRewriteDialog);
+  contentRewriteModal.addEventListener('pointerdown', (event) => {
+    if (event.target === contentRewriteModal) hideContentRewriteDialog();
+  });
+  contentRewriteModal.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    hideContentRewriteDialog();
+  });
   document.querySelector('#content-browser-up')!.addEventListener('click', () => navigateContentBrowser(contentParent(contentBrowserFolder)));
   document.querySelector('#content-browser-refresh')!.addEventListener('click', () => void refreshContentBrowser());
   bindContentDropTarget(contentBrowserItems, () => contentBrowserFolder);
@@ -1097,6 +1186,15 @@ function bindContentBrowserUi(): void {
     event.preventDefault();
     showContentContextMenu(event, contentFolderItem(contentBrowserFolder), contentBrowserItems);
   });
+  // Ctrl + 滚轮缩放条目（相当于「文件大小」）：只改 --cb-zoom，不重排 DOM。
+  applyContentBrowserZoom(readContentBrowserZoom(), false);
+  contentBrowserItems.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey && !event.metaKey) return; // Ctrl + 滚轮；macOS 的 Cmd / 触控板捏合同样走这里
+    event.preventDefault(); // 别让 Electron 缩放整个界面
+    const current = parseFloat(contentBrowserItems.style.getPropertyValue('--cb-zoom')) || readContentBrowserZoom();
+    const next = nextContentBrowserZoom(current, event.deltaY, event.deltaMode);
+    if (next !== current) applyContentBrowserZoom(next);
+  }, { passive: false });
   contentBrowserTree.addEventListener('contextmenu', (event) => {
     if (event.target instanceof Element && event.target.closest('.content-folder-row')) return;
     event.preventDefault();
@@ -1144,6 +1242,7 @@ export interface ContentBrowserDeps {
   openWorkflowInNewTab: (uri: string) => void;
   openWorkflowTab: (uri: string) => Promise<void>;
   loadWorkflow: (uri: string) => Promise<void>;
+  reloadRewrittenDocuments: (paths: readonly string[]) => Promise<string[]>;
   setDeleteTarget: (target: ContentDeleteTarget | undefined) => void;
 }
 
@@ -1190,6 +1289,7 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
   openWorkflowInNewTab = deps.openWorkflowInNewTab;
   openWorkflowTab = deps.openWorkflowTab;
   loadWorkflow = deps.loadWorkflow;
+  reloadRewrittenDocuments = deps.reloadRewrittenDocuments;
   setDeleteTarget = deps.setDeleteTarget;
   return {
     bind: bindContentBrowserUi,

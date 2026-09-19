@@ -75,7 +75,8 @@ export interface Workspace {
   displayFileUri(uri: string): string;
   // 自动保存
   setDirty(value: boolean): void;
-  cancelAutoSave(): void;
+  /** 取消排队中的自动保存；省略 uri 时作用于活动文档。 */
+  cancelAutoSave(uri?: string): void;
   scheduleAutoSave(text: string): void;
   waitForAutoSave(): Promise<void>;
   flushAutoSave(): Promise<void>;
@@ -226,8 +227,8 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     autoSave.schedule(store.activeUri(), text);
   }
 
-  function cancelAutoSave(): void {
-    autoSave.cancel(store.activeUri());
+  function cancelAutoSave(uri?: string): void {
+    autoSave.cancel(uri ?? store.activeUri());
   }
 
   function waitForAutoSave(): Promise<void> {

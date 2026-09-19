@@ -44,6 +44,7 @@
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="referenceViewer" aria-checked="false"><span>引用查看器</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="variableReferences" aria-checked="false"><span>变量引用</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitemcheckbox" data-dock-panel="structure" aria-checked="true"><span>结构</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-dock-panel="palette" aria-checked="true"><span>节点</span><span class="menu-check">✓</span></button>
@@ -70,6 +71,7 @@
             <button type="button" role="menuitem" data-editor-command="workflowSettings"><span>工作流设置</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-app-command="visionTest"><span>模拟器画面测试工具</span></button>
+            <button type="button" role="menuitem" data-app-command="liveView"><span>实时视觉监视</span></button>
           </div>
         </div>
         <div class="menu-root">
@@ -242,6 +244,8 @@
 
         <section id="module-reference-viewer" class="dock-module reference-viewer-module" aria-label="引用查看器"></section>
 
+        <section id="module-variable-references" class="dock-module variable-references-module" aria-label="变量引用"></section>
+
         <section id="module-settings" class="dock-module settings-module">
           <nav class="settings-nav" aria-label="设置分类">
             <div class="settings-nav-title">偏好设置</div>
@@ -259,8 +263,11 @@
               <h2>外观</h2><p class="settings-intro">选择工作台的配色，立即应用到所有窗口。</p>
               <h3 class="settings-section-title">颜色主题</h3>
               <div class="theme-options" role="radiogroup" aria-label="颜色主题">
-                <label class="theme-option"><input type="radio" name="appearance-theme" value="dark" checked><span class="theme-preview preview-dark" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>深色</strong><span>中性炭黑 · 当前风格</span></span></label>
+                <label class="theme-option"><input type="radio" name="appearance-theme" value="dark" checked><span class="theme-preview preview-dark" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>墨黑</strong><span>黑灰白 · 经典默认</span></span></label>
                 <label class="theme-option"><input type="radio" name="appearance-theme" value="light"><span class="theme-preview preview-light" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>浅色</strong><span>柔和浅灰 · 清晰明亮</span></span></label>
+                <label class="theme-option"><input type="radio" name="appearance-theme" value="graphite"><span class="theme-preview preview-graphite" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>柔灰</strong><span>柔和灰阶 · 低反差</span></span></label>
+                <label class="theme-option"><input type="radio" name="appearance-theme" value="warm"><span class="theme-preview preview-warm" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>暖炭</strong><span>温暖炭灰 · 米白文字</span></span></label>
+                <label class="theme-option"><input type="radio" name="appearance-theme" value="contrast"><span class="theme-preview preview-contrast" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>高对比</strong><span>近黑底色 · 明亮边界</span></span></label>
               </div>
               <p id="settings-theme-feedback" class="settings-footnote" role="status">主题自动保存，下次启动沿用。</p>
             </section>
@@ -438,6 +445,22 @@
         <footer class="content-name-footer">
           <button id="content-name-cancel" class="overview-config-button secondary" type="button">取消</button>
           <button id="content-name-submit" class="overview-config-button primary" type="button">创建</button>
+        </footer>
+      </section>
+    </div>
+    <div id="content-rewrite-modal" class="content-rewrite-modal hidden" role="presentation" aria-hidden="true">
+      <section class="content-rewrite-dialog" role="dialog" aria-modal="true" aria-labelledby="content-rewrite-title">
+        <header class="content-rewrite-header">
+          <div>
+            <strong id="content-rewrite-title">已重定向引用</strong>
+            <span id="content-rewrite-subtitle"></span>
+          </div>
+          <button id="content-rewrite-close" type="button" aria-label="关闭"><i data-lucide="x"></i></button>
+        </header>
+        <div id="content-rewrite-list" class="content-rewrite-list"></div>
+        <footer class="content-rewrite-footer">
+          <span id="content-rewrite-hint"></span>
+          <button id="content-rewrite-confirm" class="overview-config-button primary" type="button">知道了</button>
         </footer>
       </section>
     </div>

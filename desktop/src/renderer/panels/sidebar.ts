@@ -320,21 +320,20 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         flags.title = variable.type;
         const eye = document.createElement('span');
         eye.className = `variable-eye${variable.public ? '' : ' off'}`;
-        eye.setAttribute('aria-hidden', 'true');
+        eye.setAttribute('role', 'button');
+        eye.setAttribute('tabindex', '0');
+        eye.setAttribute('aria-pressed', String(variable.public));
         eye.appendChild(createTreeIcon(variable.public ? Eye : EyeOff, 'variable-eye-svg'));
-        if (scope === 'variables') {
-          eye.classList.add('toggle');
-          eye.title = variable.public
-            ? '公开：父流程可设置它的初始值（点击取消公开）'
-            : '私有：仅流程内部使用（点击公开并生成初始值输入）';
-          eye.addEventListener('click', (event) => {
-            event.stopPropagation();
-            editorCommand('setVariablePublic', { name: variable.name, scope, public: !variable.public });
-          });
-        } else {
-          eye.classList.add('fixed');
-          eye.title = '工作流输入默认公开，父流程可直接传值';
-        }
+        eye.classList.add('toggle');
+        eye.title = variable.public ? '取消公开，仅在流程内部使用' : '公开，允许父流程传值';
+        eye.setAttribute('aria-label', eye.title);
+        const togglePublic = () => editorCommand('setVariablePublic', { name: variable.name, scope, public: !variable.public });
+        eye.addEventListener('click', (event) => { event.stopPropagation(); togglePublic(); });
+        eye.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault(); event.stopPropagation(); togglePublic();
+        });
+        eye.addEventListener('mousedown', (event) => event.stopPropagation());
         row.appendChild(eye);
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {

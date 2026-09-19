@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
+  <title>实时视觉监视</title>
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css">
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Bold.css">
+  <link rel="stylesheet" href="/legacy/ui.css">
+  <link rel="stylesheet" href="/settings/settings.css">
+  <link rel="stylesheet" href="/theme/workbench-light.css">
+  <link rel="stylesheet" href="/theme/theme.css">
+  <script src="/theme/theme.js"></script>
+</head>
+<body>
+  <div id="app" class="vision-app live-app">
+    <div class="custom-titlebar">
+      <img class="titlebar-icon" src="./assets/onmyoji-icon.png" alt="阴阳师" draggable="false" />
+      <span class="vision-title-text">实时视觉监视</span>
+      <span id="live-instance-label" class="vision-instance-label"></span>
+      <span class="vision-connection">
+        <span id="live-connection-dot" class="vision-dot"></span>
+        <span id="live-connection-text">等待运行</span>
+      </span>
+      <div class="titlebar-spacer"></div>
+      <div class="window-controls" aria-label="窗口控制">
+        <button id="live-minimize" class="window-control" title="最小化" aria-label="最小化"><i data-lucide="minus"></i></button>
+        <button id="live-maximize" class="window-control" title="最大化" aria-label="最大化"><i data-lucide="square"></i></button>
+        <button id="live-close" class="window-control close" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+    </div>
+
+    <div class="live-layout">
+      <header class="live-stepbar" aria-label="当前步骤">
+        <span id="live-workflow" class="live-workflow">未在运行</span>
+        <span class="live-step-sep"></span>
+        <span id="live-step-name" class="live-step-name">—</span>
+        <span id="live-step-action" class="live-step-action"></span>
+        <span id="live-step-status" class="live-pill"></span>
+        <span id="live-step-duration" class="live-step-duration"></span>
+        <span class="live-spacer"></span>
+        <label class="live-interval">刷新率
+          <select id="live-interval" aria-label="画面刷新率" title="预览帧的写入节奏。实际帧率还受运行时抓图节奏限制：工作流等待时抓图变慢，画面也会跟着变慢。">
+            <option value="100">10 fps（100 ms）</option>
+            <option value="150">约 7 fps（150 ms）</option>
+            <option value="250" selected>约 4 fps（250 ms）</option>
+            <option value="400">约 2.5 fps（400 ms）</option>
+            <option value="600">约 1.7 fps（600 ms）</option>
+            <option value="1000">1 fps（1000 ms）</option>
+            <option value="2000">0.5 fps（2000 ms）</option>
+          </select>
+        </label>
+        <span id="live-frame-meta" class="live-frame-meta">—</span>
+      </header>
+
+      <div class="vision-body">
+        <section id="live-stage" class="vision-stage">
+          <canvas id="live-canvas"></canvas>
+          <div id="live-stage-mask" class="vision-stage-mask">
+            <div class="vision-spinner"></div>
+            <span id="live-mask-text">等待工作流运行…</span>
+          </div>
+          <div class="live-legend">
+            <span class="live-legend-item roi">ROI</span>
+            <span class="live-legend-item match">模板匹配</span>
+            <span class="live-legend-item ocr">OCR</span>
+            <span class="live-legend-item click">点击</span>
+          </div>
+        </section>
+
+        <aside class="vision-side">
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>状态</h3>
+              <button id="live-clear" class="vision-btn small" type="button" title="清空当前叠加信息">清空</button>
+            </div>
+            <button id="live-freeze" class="vision-command" type="button" title="冻结画面，便于截图或核对"><i data-lucide="pause"></i><span>冻结画面</span></button>
+            <button id="live-save" class="vision-command" type="button" title="把带标注的当前画面导出为 PNG"><i data-lucide="image-down"></i><span>保存画面</span></button>
+            <pre id="live-summary" class="vision-pre"></pre>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>模板匹配</h3>
+              <span id="live-match-count" class="live-count">0</span>
+            </div>
+            <ul id="live-match-list" class="vision-match-list"></ul>
+            <div id="live-match-empty" class="vision-muted">这一步没有模板匹配结果</div>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>OCR 文字</h3>
+              <span id="live-ocr-count" class="live-count">0</span>
+            </div>
+            <ul id="live-ocr-list" class="vision-match-list"></ul>
+            <div id="live-ocr-empty" class="vision-muted">这一步没有 OCR 结果</div>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>ROI 与点击</h3>
+            </div>
+            <ul id="live-roi-list" class="vision-match-list"></ul>
+            <div id="live-roi-empty" class="vision-muted">这一步没有 ROI</div>
+            <ul id="live-click-list" class="vision-match-list"></ul>
+            <div id="live-click-empty" class="vision-muted">这一步没有点击</div>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="vision-statusbar">
+        <span id="live-status">准备就绪</span>
+        <span class="vision-status-spacer"></span>
+        <span>A 键冻结画面 · 每一步的匹配框 / ROI / OCR / 点击都来自运行时的实时判断</span>
+      </footer>
+    </div>
+
+    <div id="live-toast" class="app-toast hidden"></div>
+  </div>
+  <script type="module" src="./live-view.ts"></script>
+</body>
+</html>

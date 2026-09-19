@@ -73,6 +73,7 @@ import {
   createWorkbenchFrame,
   connectSharedPanelDocking,
   documentUriForPanelId,
+  isSharedDockPanelId,
   setDocumentPanelDirty,
   type DockPanelId,
   type DockingController,
@@ -82,9 +83,13 @@ import {
   type WorkbenchPanelId,
 } from './docking';
 import { createReferenceViewer } from './reference-viewer';
-import { contentName, createContentBrowser, relativeToProject, type ContentBrowser } from './content-browser';
+import { createVariableReferences } from './variable-references';
+import { contentName, createContentBrowser, relativeToProject, type ContentBrowser, type ContentBrowserItem } from './content-browser';
 import { createOverview } from './overview';
 import { createRuntimeLog } from './runtime-log';
+import { createDeleteShortcuts } from './delete-shortcuts';
+import { createDocumentLifecycle } from './document-lifecycle';
+import { createSettingsPanel } from './settings-panel';
 import type { WorkflowDocumentTab } from '../shared/workspace/session';
 import { createWorkspace, type DocumentRuntime } from './workspace';
 import { createRoiPicker } from './roi-picker';
@@ -113,15 +118,6 @@ interface RuntimeLogEnvelope {
 
 
 
-
-/**
- * 桌面壳层的删除键目标：由各面板的点击处理器登记，新的一次点击会先作废上一次登记。
- * editor 表示“结构树/变量列表里选中的东西”，交给画布执行删除。
- */
-type DeleteTarget =
-  | { kind: 'content'; path: string }
-  | { kind: 'queue'; rel: string }
-  | { kind: 'editor' };
 
 const api = window.onmyoji;
 const desktopIcons = {
@@ -198,12 +194,6 @@ const structureView = document.querySelector<HTMLElement>('#structure-view')!;
 const variablesView = document.querySelector<HTMLElement>('#variables-view')!;
 const loadingMask = document.querySelector<HTMLElement>('#loading-mask')!;
 const runtimeLogFrame = document.querySelector<HTMLIFrameElement>('#runtime-log-frame')!;
-const settingsContentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
-const settingsAutoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
-const settingsDefaultWorkflow = document.querySelector<HTMLInputElement>('#settings-default-workflow')!;
-const settingsRestoreSession = document.querySelector<HTMLInputElement>('#settings-restore-session')!;
-const settingsDebugEnabled = document.querySelector<HTMLInputElement>('#settings-debug-enabled')!;
-const settingsDebugAnnotate = document.querySelector<HTMLInputElement>('#settings-debug-annotate')!;
 const roiPickerModal = document.querySelector<HTMLElement>('#roi-picker-modal')!;
 const roiPickerTitle = document.querySelector<HTMLElement>('#roi-picker-title')!;
 const roiPickerSubtitle = document.querySelector<HTMLElement>('#roi-picker-subtitle')!;
@@ -226,28 +216,39 @@ const workspace = createWorkspace({
   showToast,
   errorMessage,
   setStatus,
-  syncDocumentTabs,
+  syncDocumentTabs: () => lifecycle.syncDocumentTabs(),
 });
-/** 正在由壳层主动关闭的文档，避免 onDidRemoveDocument 重复走保存流程。 */
-const closingDocuments = new Set<string>();
-/** 会话恢复完成前忽略 Dockview 的激活事件，避免加载到错误的文档。 */
-let documentsReady = false;
-/** 关闭文档期间抑制激活事件，避免邻居面板抢先把 currentUri 切走。 */
-let removingDocument = false;
-/** 布局重置/会话对账时批量移除面板，不应触发保存与标签删除。 */
-let suppressDocumentRemoval = false;
 let toastTimer: number | undefined;
-let instanceRefreshTimer: number | undefined;
 let docking: DockingController | undefined;
 let workbenchFrame: WorkbenchFrameController | undefined;
 let sharedPanelDockBridge: SharedPanelDockBridge | undefined;
-/** 最近一次被点选的删除目标（内容项、队列行或画布选区）；Delete/Backspace 只作用于它。 */
-let deleteTarget: DeleteTarget | undefined;
-let autoRefreshInstances = true;
-let loadDefaultWorkflowOnStart = true;
-let restoreSessionOnStart = true;
 let runtimeBusy = false;
 let visionTestOpening = false;
+let liveViewOpening = false;
+
+/**
+ * 删除快捷键：登记目标的状态与解析在独立模块里，各面板只负责登记
+ * （overview/contentBrowser/roiPicker 在后续构造，经惰性箭头在调用期取得）。
+ */
+const deleteShortcuts = createDeleteShortcuts({
+  matchesShortcut: (event, id) => window.StudioShortcuts?.matchesById(event, id) ?? false,
+  overview: {
+    isSelected: (rel) => overview.isSelected(rel),
+    isRunning: () => overview.isRunning(),
+    updateSelection: (rel, checked) => overview.updateSelection(rel, checked),
+    selectQueueRow: (rel) => overview.selectQueueRow(rel),
+  },
+  roiPicker: { isOpen: () => roiPicker.isOpen() },
+  contentBrowser: {
+    resolveDeleteTarget: (path) => contentBrowser.resolveDeleteTarget(path),
+    isRootFolder: (path) => contentBrowser.isRootFolder(path),
+    deleteItem: (item) => contentBrowser.deleteItem(item as ContentBrowserItem),
+    isNameDialogOpen: () => contentBrowser.isNameDialogOpen(),
+  },
+  workspace,
+  showToast,
+});
+const { handleDeleteShortcut, performDeleteTarget, resetDeleteTargetOnPointerDown } = deleteShortcuts;
 
 let contentBrowser!: ContentBrowser;
 const overview = createOverview({
@@ -272,8 +273,11 @@ const overview = createOverview({
   getWorkbenchFrame: () => workbenchFrame,
   getDocking: () => docking,
   getSharedPanelDockBridge: () => sharedPanelDockBridge,
-  getDeleteTarget: () => (deleteTarget?.kind === 'queue' ? deleteTarget : undefined),
-  setDeleteTarget: (target) => { deleteTarget = target; },
+  getDeleteTarget: () => {
+    const target = deleteShortcuts.getDeleteTarget();
+    return target?.kind === 'queue' ? target : undefined;
+  },
+  setDeleteTarget: (target) => deleteShortcuts.setDeleteTarget(target),
 });
 
 contentBrowser = createContentBrowser({
@@ -294,18 +298,40 @@ contentBrowser = createContentBrowser({
   getReferenceViewer: () => referenceViewer,
   getDocking: () => docking,
   getDocumentRuntimes: () => workspace.getDocumentRuntimes() as Map<string, unknown>,
-  getClosingDocuments: () => closingDocuments,
+  getClosingDocuments: () => lifecycle.closingDocumentUris(),
   workflowDescriptorForPath: workspace.workflowDescriptorForPath,
-  relocateDocument,
-  syncDocumentTabs,
+  relocateDocument: (oldUri, newUri) => lifecycle.relocateDocument(oldUri, newUri),
+  syncDocumentTabs: () => lifecycle.syncDocumentTabs(),
   displayFileUri: workspace.displayFileUri,
   renderWorkflowSelect,
-  openWorkflowInNewTab,
-  openWorkflowTab,
-  loadWorkflow,
-  setDeleteTarget: (target) => { deleteTarget = target; },
+  openWorkflowInNewTab: (uri) => lifecycle.openWorkflowInNewTab(uri),
+  openWorkflowTab: (uri) => lifecycle.openWorkflowTab(uri),
+  loadWorkflow: (uri) => lifecycle.loadWorkflow(uri),
+  reloadRewrittenDocuments: async (paths) => {
+    // 主进程只回项目相对路径；这里映射到打开中的文档（URI）再交给生命周期强制读盘，
+    // 并把因未保存修改而跳过的文件按项目路径回报给调用方提示用户。
+    const relativeOf = (uri: string): string => relativeToProject(workspace.displayFileUri(uri)).replace(/\\/g, '/');
+    const wanted = new Map(paths.map((path) => [path.replace(/\\/g, '/').toLowerCase(), path]));
+    const uris = workspace.tabs()
+      .map((tab) => tab.uri)
+      .filter((uri) => wanted.has(relativeOf(uri).toLowerCase()));
+    const skipped = await lifecycle.reloadDocuments(uris);
+    return skipped.map((uri) => relativeOf(uri)).filter(Boolean);
+  },
+  setDeleteTarget: (target) => deleteShortcuts.setDeleteTarget(target),
 });
 
+
+/**
+ * 设置面板：内容视图、实例自动刷新、启动行为与 Debug 截图的读写都收在独立模块里。
+ */
+const settings = createSettingsPanel({
+  api,
+  contentBrowser,
+  showToast,
+  showPanel: () => { workbenchFrame?.show('settings'); },
+  refreshInstances: () => void refreshInstances(),
+});
 
 const runtimeLog = createRuntimeLog({ frame: runtimeLogFrame });
 runtimeLogFrame.addEventListener('load', () => runtimeLog.markReady());
@@ -313,20 +339,10 @@ if (runtimeLogFrame.contentDocument?.readyState === 'complete') window.queueMicr
 
 function desktopControl(command: string, value?: unknown): void {
   if (command === 'switchWorkflow') {
-    void switchWorkflow(String(value ?? ''));
+    void lifecycle.switchWorkflow(String(value ?? ''));
     return;
   }
   workspace.postToEditor({ type: 'desktopControl', command, value });
-}
-
-/** 顶栏选择或子流程跳转：打开/聚焦对应文档面板，并把导航栈重置为该文档自己的记录。 */
-async function switchWorkflow(uri: string, resetStack = true): Promise<void> {
-  if (!uri) return;
-  workbenchFrame?.show('workflow');
-  workspace.cancelAutoSave();
-  await workspace.waitForAutoSave();
-  if (resetStack && workspace.tab(uri)) workspace.setDocumentBackStack(uri, []);
-  await openWorkflowTab(uri);
 }
 
 async function createNewWorkflow(): Promise<void> {
@@ -335,7 +351,7 @@ async function createNewWorkflow(): Promise<void> {
   if (bootstrap) bootstrap.workflows = (await api.bootstrap()).workflows;
   overview.reconcileSelection();
   overview.render();
-  await openWorkflowTab(uri);
+  await lifecycle.openWorkflowTab(uri);
 }
 
 function matchesShortcut(event: KeyboardEvent, id: string): boolean {
@@ -388,126 +404,6 @@ const roiPicker = createRoiPicker({
   saveTemplate: (request) => api.saveTemplate(request),
 });
 
-function relocateDocument(oldUri: string, newUri: string): void {
-  if (!docking || !oldUri || oldUri === newUri) return;
-  if (docking.isDocumentOpen(oldUri)) {
-    closingDocuments.add(oldUri);
-    docking.closeDocument(oldUri);
-    closingDocuments.delete(oldUri);
-  }
-  workspace.getDocumentRuntimes().delete(oldUri);
-  workspace.renameDocument(oldUri, newUri);
-  if (!docking.isDocumentOpen(newUri)) docking.openDocument(newUri, workspace.workflowTabName(newUri));
-  syncDocumentTabs();
-}
-
-/** 恢复布局后：关掉不再存在的文档面板，并为会话里的文档补齐面板。 */
-function reconcileDocumentPanels(): void {
-  if (!docking) return;
-  const known = new Set(workspace.tabs().map((tab) => tab.uri));
-  for (const uri of docking.documentUris()) {
-    if (known.has(uri)) continue;
-    closingDocuments.add(uri);
-    docking.closeDocument(uri);
-    closingDocuments.delete(uri);
-    workspace.getDocumentRuntimes().delete(uri);
-  }
-  for (const tab of workspace.tabs()) {
-    if (!docking.isDocumentOpen(tab.uri)) docking.openDocument(tab.uri, workspace.workflowTabName(tab.uri));
-  }
-  syncDocumentTabs();
-}
-
-/** 没有任何可打开的默认工作流时，至少保证有一个画布。 */
-function ensureFallbackDocument(): void {
-  if (workspace.tabs().length > 0) return;
-  const first = bootstrap?.workflows[0];
-  if (first) void openWorkflowTab(first.uri);
-}
-
-/** 恢复默认布局：批量重建面板时抑制移除回调，随后按当前标签重新同步。 */
-function resetDockLayout(): void {
-  suppressDocumentRemoval = true;
-  try {
-    docking?.resetLayout();
-    workbenchFrame?.resetLayout();
-    sharedPanelDockBridge?.resetSurfaces();
-  } finally {
-    suppressDocumentRemoval = false;
-  }
-  syncDocumentTabs();
-}
-
-/** 把未保存状态同步到原生 Dockview 标签。 */
-function syncDocumentTabs(): void {
-  for (const tab of workspace.tabs()) {
-    const runtime = workspace.getDocumentRuntimes().get(tab.uri);
-    if (!runtime) continue;
-    setDocumentPanelDirty(runtime.panelId, tab.dirty);
-    docking?.dockviewApi.getPanel(runtime.panelId)?.api.setTitle(workspace.workflowTabName(tab.uri));
-  }
-  workspace.scheduleWorkflowSessionPersist();
-}
-
-/** 把当前激活画布的选中项/折叠状态写回运行时，切换文档时原样恢复。 */
-function rememberActiveRuntimeState(): void {
-  const runtime = workspace.activeRuntime();
-  if (!runtime) return;
-  const view = sidebar.snapshot();
-  runtime.sidebarNodes = view.nodes;
-  runtime.sidebarVariables = view.variables;
-  runtime.selectedNode = view.selectedNode;
-  runtime.selectedVariable = view.selectedVariable;
-  runtime.selectedVariableScope = view.selectedVariableScope;
-  runtime.collapsedTreeNodes = view.collapsed;
-}
-
-/** 把运行时的画布状态恢复到左侧面板，重新驱动结构树与详细信息。 */
-function applyDocumentState(uri: string, tab: WorkflowDocumentTab, runtime: DocumentRuntime): void {
-  workspace.setActiveDocument(uri);
-  sidebar.apply({
-    nodes: runtime.sidebarNodes,
-    variables: runtime.sidebarVariables,
-    selectedNode: runtime.selectedNode,
-    selectedVariable: runtime.selectedVariable,
-    selectedVariableScope: runtime.selectedVariableScope,
-    collapsed: runtime.collapsedTreeNodes,
-  });
-  if (runtime.init) {
-    selectedInstance = runtime.init.selectedInstance;
-    runtime.init.workflowTrail = workflowTrail();
-    renderWorkflowSelect(runtime.init.workflows);
-    renderInstances(runtime.init.instances, runtime.init.selectedInstance);
-    workspace.postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
-  }
-  document.querySelector<HTMLElement>('#document-path')!.textContent = workspace.displayFileUri(uri);
-  workspace.setDirty(tab.dirty);
-  overview.render();
-  sidebar.render();
-  if (runtime.inspectorSelection) {
-    workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: runtime.inspectorSelection });
-  }
-  syncDocumentTabs();
-}
-
-/** 画布握手完成后下发它自己的初始化数据；同一文档的多个面板互不影响。 */
-function sendDocumentInit(uri: string): void {
-  const runtime = workspace.getDocumentRuntimes().get(uri);
-  if (!runtime?.ready || !runtime.init) return;
-  if (uri === workspace.activeUri()) runtime.init.workflowTrail = workflowTrail();
-  workspace.postToFrame(runtime.frame, runtime.init as unknown as Record<string, unknown>);
-  if (uri === workspace.activeUri()) workspace.postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
-}
-
-function workflowTrail(): Array<{ uri: string; name: string }> {
-  const uris = [...workspace.activeBackStack(), workspace.activeUri()].filter(Boolean);
-  return uris.map((uri) => {
-    const descriptor = bootstrap?.workflows.find((item) => item.uri === uri);
-    const file = workspace.displayFileUri(uri).split(/[\\/]/).pop() || '';
-    return { uri, name: descriptor?.id || descriptor?.name?.replace(/\.json$/i, '') || file.replace(/\.json$/i, '') || '工作流' };
-  });
-}
-
 function resolveWorkflow(reference: string): WorkflowDescriptor | undefined {
   if (!bootstrap) return undefined;
   const normalized = reference.trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
@@ -521,11 +417,6 @@ function resolveWorkflow(reference: string): WorkflowDescriptor | undefined {
 
 function renderWorkflowSelect(workflows: WorkflowDescriptor[]): void {
   document.querySelector<HTMLElement>('#workflow-count')!.textContent = `${workflows.length} 个工作流`;
-}
-
-function openWorkflowInNewTab(uri: string): void {
-  workbenchFrame?.show('workflow');
-  void openWorkflowTab(uri);
 }
 
 function instanceLabelById(instanceId: string): string {
@@ -569,13 +460,47 @@ const referenceViewer = createReferenceViewer({
   errorMessage,
 });
 
+const variableReferences = createVariableReferences({
+  getSharedPanels: () => sharedPanelDockBridge,
+  focusNode: (source, nodeId) => source.post('focusNode', nodeId),
+  selectVariable: (source, scope, name) => source.post('selectVariable', { scope, name }),
+  deleteVariable: (source, scope, name) => source.post('deleteVariable', { scope, name }),
+  showToast,
+});
+
 const sidebar = createSidebar({
   structureView,
   variablesView,
   icons: desktopIcons,
   editorCommand: (command, value) => workspace.editorCommand(command, value),
   showDetailsPanel: () => { docking?.showPanel('details'); },
-  registerEditorDeleteTarget: () => { deleteTarget = { kind: 'editor' }; },
+  registerEditorDeleteTarget: () => deleteShortcuts.setDeleteTarget({ kind: 'editor' }),
+});
+
+/**
+ * 文档生命周期：标签/面板的打开、激活、关闭与对账都集中在这里，
+ * 入口只负责把各面板句柄与可变状态注入进去。
+ */
+const lifecycle = createDocumentLifecycle({
+  api,
+  workspace,
+  getDocking: () => docking,
+  getWorkbenchFrame: () => workbenchFrame,
+  getBootstrap: () => bootstrap,
+  getSelectedInstance: () => selectedInstance,
+  setSelectedInstance: (value) => { selectedInstance = value; },
+  sidebar,
+  overview,
+  contentBrowser,
+  loadingMask,
+  detailsFrame,
+  renderWorkflowSelect,
+  renderInstances,
+  setStatus,
+  showToast,
+  errorMessage,
+  setDocumentPanelDirty,
+  resetSharedPanelSurfaces: () => sharedPanelDockBridge?.resetSurfaces(),
 });
 
 const editorHost = createEditorHost({
@@ -605,239 +530,24 @@ const editorHost = createEditorHost({
     if (relative) referenceViewer.open(relative, document);
     else showToast('无法定位当前工作流的项目路径', true);
   },
+  showVariableReferences: (data, source) => variableReferences.open(data, source),
+  getDocumentFrame: (uri) => workspace.getDocumentRuntimes().get(uri)?.frame,
   getSelectedInstance: () => selectedInstance,
   createNewWorkflow,
-  switchWorkflow,
-  ensureDocument,
-  openWorkflowTab,
-  loadWorkflow,
-  loadDocumentOnce,
-  sendDocumentInit,
+  switchWorkflow: (uri, resetStack) => lifecycle.switchWorkflow(uri, resetStack),
+  ensureDocument: (uri) => lifecycle.ensureDocument(uri),
+  openWorkflowTab: (uri) => lifecycle.openWorkflowTab(uri),
+  loadWorkflow: (uri) => lifecycle.loadWorkflow(uri),
+  loadDocumentOnce: (uri) => lifecycle.loadDocumentOnce(uri),
+  sendDocumentInit: (uri) => lifecycle.sendDocumentInit(uri),
   resolveWorkflow,
   selectInstance: selectRuntimeInstance,
+  refreshWorkflows: async () => {
+    // 画布打开子工作流选择器时会要一次最新目录：同步壳层 bootstrap 与各画布的列表。
+    bootstrap = await api.bootstrap();
+    workspace.postToAllEditors({ type: 'workflows', workflows: bootstrap.workflows });
+  },
 });
-
-function isTextEditingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]') !== null;
-}
-
-/**
- * 把登记的路径解析成当前内容浏览器里的条目。
- * 用路径而不是条目对象，重命名/移动后仍能命中最新数据；找不到时回退到当前选中项。
- */
-function performDeleteTarget(origin?: KeyboardEvent): boolean {
-  const target = deleteTarget;
-  if (!target) return false;
-  if (target.kind === 'editor') {
-    origin?.preventDefault();
-    workspace.editorCommand('deleteSelection');
-    return true;
-  }
-  if (target.kind === 'queue') {
-    if (!overview.isSelected(target.rel)) {
-      deleteTarget = undefined;
-      return false;
-    }
-    if (overview.isRunning()) {
-      showToast('队列运行中，无法移出脚本', true);
-      return true;
-    }
-    origin?.preventDefault();
-    deleteTarget = undefined;
-    overview.selectQueueRow('');
-    overview.updateSelection(target.rel, false);
-    return true;
-  }
-  const item = contentBrowser.resolveDeleteTarget(target.path);
-  if (!item) {
-    deleteTarget = undefined;
-    return false;
-  }
-  if (item.kind === 'folder' && (!item.path || contentBrowser.isRootFolder(item.path))) {
-    showToast('项目根目录不能删除', true);
-    return true;
-  }
-  origin?.preventDefault();
-  deleteTarget = undefined;
-  void contentBrowser.deleteItem(item);
-  return true;
-}
-
-/** 桌面壳层的删除快捷键；没有登记目标时不拦截按键。 */
-function handleDeleteShortcut(event: KeyboardEvent): boolean {
-  if (!window.StudioShortcuts?.matchesById(event, 'global.delete')) return false;
-  if (event.defaultPrevented) return false;
-  if (isTextEditingTarget(event.target)) return false;
-  if (roiPicker.isOpen() || contentBrowser.isNameDialogOpen()) return false;
-  return performDeleteTarget(event);
-}
-
-/** 新的点击先作废上一次的删除目标，再由具体行/项的点击处理器重新登记。 */
-function resetDeleteTargetOnPointerDown(event: PointerEvent): void {
-  if (event.button !== 0) return;
-  deleteTarget = undefined;
-}
-
-/** 确保工作流文档存在标签与 Dockview 面板，新面板默认成为激活项。 */
-function ensureDocument(uri: string): WorkflowDocumentTab {
-  const tab = workspace.ensureDocument(uri);
-  if (docking && !docking.isDocumentOpen(uri)) docking.openDocument(uri, workspace.workflowTabName(uri));
-  syncDocumentTabs();
-  return tab;
-}
-
-async function loadWorkflow(uri: string): Promise<void> {
-  if (!uri) return;
-  const tab = ensureDocument(uri);
-  rememberActiveRuntimeState();
-  workspace.cancelAutoSave();
-  await workspace.waitForAutoSave();
-  loadingMask.classList.remove('hidden');
-  try {
-    const init = await api.getWorkflowInit(uri, selectedInstance, tab.backStack.length > 0);
-    const documentText = tab.text || init.document.text;
-    init.document.text = documentText;
-    if (init.document.uri !== workspace.activeUri()) sidebar.resetCollapsed();
-    workspace.setDocumentText(uri, documentText);
-    workspace.setActiveDocument(init.document.uri);
-    selectedInstance = init.selectedInstance;
-    if (bootstrap) {
-      bootstrap.workflows = init.workflows;
-      bootstrap.instances = init.instances;
-    }
-    sidebar.resetViews();
-    const runtime = workspace.getDocumentRuntimes().get(uri);
-    if (runtime) {
-      runtime.init = init;
-      runtime.sidebarNodes = [];
-      runtime.sidebarVariables = [];
-      runtime.selectedNode = '';
-      runtime.selectedVariable = '';
-      runtime.collapsedTreeNodes = sidebar.snapshot().collapsed;
-      runtime.inspectorSelection = undefined;
-    }
-    renderWorkflowSelect(init.workflows);
-    renderInstances(init.instances, init.selectedInstance);
-    overview.reconcileSelection();
-    overview.render();
-    contentBrowser.render();
-    document.querySelector<HTMLElement>('#document-path')!.textContent = workspace.displayFileUri(init.document.uri);
-    workspace.setDirty(tab.dirty);
-    sidebar.render();
-    workspace.postToFrame(detailsFrame, init as unknown as Record<string, unknown>);
-    sendDocumentInit(uri);
-    setStatus(init.issues.length > 0 ? `${init.issues.length} 个校验问题` : '工作流已载入');
-  } catch (error) {
-    showToast(errorMessage(error), true);
-    setStatus('载入失败');
-  } finally {
-    loadingMask.classList.add('hidden');
-  }
-}
-
-const documentLoads = new Map<string, Promise<void>>();
-
-/** 同一文档的加载只跑一次，标签激活与显式打开共享同一个 Promise。 */
-function loadDocumentOnce(uri: string): Promise<void> {
-  const pending = documentLoads.get(uri);
-  if (pending) return pending;
-  const load = loadWorkflow(uri).finally(() => documentLoads.delete(uri));
-  documentLoads.set(uri, load);
-  return load;
-}
-
-let activatingUri: string | undefined;
-
-async function activateWorkflowTab(uri: string): Promise<void> {
-  if (!uri) return;
-  const tab = workspace.tab(uri);
-  if (!tab) return;
-  if (uri === workspace.activeUri()) {
-    syncDocumentTabs();
-    return;
-  }
-  if (activatingUri === uri) return;
-  activatingUri = uri;
-  try {
-    docking?.focusDocument(uri);
-    rememberActiveRuntimeState();
-    workspace.cancelAutoSave();
-    await workspace.waitForAutoSave();
-    const runtime = workspace.getDocumentRuntimes().get(uri);
-    if (runtime?.init) {
-      applyDocumentState(uri, tab, runtime);
-      sendDocumentInit(uri);
-      return;
-    }
-    await loadDocumentOnce(uri);
-  } finally {
-    activatingUri = undefined;
-  }
-}
-
-async function openWorkflowTab(uri: string): Promise<void> {
-  if (!uri) return;
-  ensureDocument(uri);
-  docking?.focusDocument(uri);
-  await activateWorkflowTab(uri);
-}
-
-/** Dockview 面板被移除（关闭按钮、右键菜单或快捷键）后的收尾：保存、清状态、补默认画布。 */
-async function handleDocumentRemoved(uri: string): Promise<void> {
-  closingDocuments.delete(uri);
-  if (suppressDocumentRemoval) {
-    workspace.getDocumentRuntimes().delete(uri);
-    return;
-  }
-  removingDocument = true;
-  try {
-    const tab = workspace.tab(uri);
-    if (!tab) {
-      workspace.unregisterDocumentFrame(workspace.getDocumentRuntimes().get(uri)?.panelId ?? '');
-      workspace.getDocumentRuntimes().delete(uri);
-      return;
-    }
-    const index = workspace.tabs().indexOf(tab);
-    const wasActive = uri === workspace.activeUri();
-    try {
-      if (tab.dirty && tab.text) {
-        await api.saveWorkflow(uri, tab.text);
-        workspace.setDocumentDirty(uri, false);
-      }
-    } catch (error) {
-      showToast(`关闭工作流失败：${errorMessage(error)}`, true);
-    }
-    workspace.getDocumentRuntimes().delete(uri);
-    workspace.removeDocument(uri);
-    removingDocument = false;
-    if (workspace.tabs().length === 0) {
-      const fallback = bootstrap?.defaultWorkflow;
-      if (fallback) await openWorkflowTab(fallback);
-      else syncDocumentTabs();
-      return;
-    }
-    if (wasActive) await activateWorkflowTab(workspace.tabs()[Math.min(index, workspace.tabs().length - 1)].uri);
-    else syncDocumentTabs();
-  } finally {
-    removingDocument = false;
-  }
-}
-
-async function closeWorkflowTab(uri: string): Promise<void> {
-  if (workspace.tabs().length <= 1) {
-    showToast('至少保留一个工作流画布');
-    return;
-  }
-  if (!workspace.tab(uri)) return;
-  closingDocuments.add(uri);
-  docking?.closeDocument(uri);
-  if (closingDocuments.has(uri)) {
-    // 面板没有同步触发移除（例如还未渲染），退回到手动收尾。
-    closingDocuments.delete(uri);
-    await handleDocumentRemoved(uri);
-  }
-}
 
 async function refreshInstances(): Promise<void> {
   try {
@@ -904,8 +614,8 @@ const closeTitlebarMenus = titlebarMenus.close;
 function updateDockMenuState(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-workbench-panel]').forEach((button) => {
     const panelId = button.dataset.workbenchPanel as WorkbenchPanelId;
-    const shared = panelId === 'contentBrowser' || panelId === 'runtime';
-    const open = shared
+    // 共享面板可以停在两层中的任意一层（例如内容浏览器被拖到外层），两层都要看。
+    const open = isSharedDockPanelId(panelId)
       ? Boolean(workbenchFrame?.isOpen(panelId) || docking?.isOpen(panelId))
       : workbenchFrame?.isOpen(panelId) ?? false;
     button.setAttribute('aria-checked', String(open));
@@ -929,22 +639,6 @@ function popoutActivePanel(): void {
   else docking?.popoutActivePanel();
 }
 
-async function refreshDebugSettings(): Promise<void> {
-  const settings = await api.getDebugSettings();
-  settingsDebugEnabled.checked = settings.enabled;
-  settingsDebugAnnotate.checked = settings.annotateScreenshots;
-  settingsDebugAnnotate.disabled = !settings.enabled;
-}
-
-function openSettingsPanel(): void {
-  settingsContentView.value = contentBrowser.getView();
-  settingsAutoRefresh.checked = autoRefreshInstances;
-  settingsDefaultWorkflow.checked = loadDefaultWorkflowOnStart;
-  settingsRestoreSession.checked = restoreSessionOnStart;
-  void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
-  workbenchFrame?.show('settings');
-}
-
 /** 打开独立窗口的模拟器画面测试工具（实时画面 / 模板匹配 / ROI / 点击位置测试）。 */
 async function openVisionTest(): Promise<void> {
   if (visionTestOpening) return;
@@ -962,9 +656,28 @@ async function openVisionTest(): Promise<void> {
   }
 }
 
-/** 用系统默认程序打开项目 README 使用说明。 */
-async function openHelpReadme(): Promise<void> {
+/**
+ * 打开独立窗口的实时视觉监视：显示正在运行的工作流每一步“眼中的画面”
+ * （模板匹配框 / ROI / OCR / 点击轨迹 / 当前节点状态）。
+ */
+async function openLiveView(): Promise<void> {
+  if (liveViewOpening) return;
+  if (!selectedInstance) {
+    showToast('未检测到运行实例，请先启动 MuMu 模拟器', true);
+    return;
+  }
+  liveViewOpening = true;
   try {
+    await api.openLiveView(selectedInstance);
+  } catch (error) {
+    showToast(`打开实时视觉监视失败：${errorMessage(error)}`, true);
+  } finally {
+    liveViewOpening = false;
+  }
+}
+
+/** 用系统默认程序打开项目 README 使用说明。 */
+async function openHelpReadme(): Promise<void> {  try {
     await api.openReadme();
   } catch (error) {
     showToast(`打开使用说明失败：${errorMessage(error)}`, true);
@@ -977,22 +690,6 @@ function openAboutPage(): void {
   window.setTimeout(() => {
     document.querySelector<HTMLButtonElement>('#settings-tab-about')?.click();
   }, 0);
-}
-
-function readSettings(): void {
-  autoRefreshInstances = window.localStorage.getItem('onmyoji-studio.settings.auto-refresh') !== 'false';
-  loadDefaultWorkflowOnStart = window.localStorage.getItem('onmyoji-studio.settings.default-workflow') !== 'false';
-  restoreSessionOnStart = window.localStorage.getItem('onmyoji-studio.settings.restore-session') !== 'false';
-}
-
-function restartInstanceRefresh(): void {
-  if (instanceRefreshTimer !== undefined) {
-    window.clearInterval(instanceRefreshTimer);
-    instanceRefreshTimer = undefined;
-  }
-  if (autoRefreshInstances) {
-    instanceRefreshTimer = window.setInterval(() => void refreshInstances(), 5000);
-  }
 }
 
 function bindUi(): void {
@@ -1013,47 +710,14 @@ function bindUi(): void {
   });
   document.querySelectorAll<HTMLElement>('[data-app-command]').forEach((button) => {
     button.addEventListener('click', () => {
-      if (button.dataset.appCommand === 'settings') openSettingsPanel();
+      if (button.dataset.appCommand === 'settings') settings.openSettingsPanel();
       if (button.dataset.appCommand === 'visionTest') void openVisionTest();
+      if (button.dataset.appCommand === 'liveView') void openLiveView();
       if (button.dataset.appCommand === 'help') void openHelpReadme();
       if (button.dataset.appCommand === 'about') openAboutPage();
     });
   });
-  settingsContentView.addEventListener('change', () => contentBrowser.setView(settingsContentView.value === 'list' ? 'list' : 'grid'));
-  settingsAutoRefresh.addEventListener('change', () => {
-    autoRefreshInstances = settingsAutoRefresh.checked;
-    window.localStorage.setItem('onmyoji-studio.settings.auto-refresh', String(autoRefreshInstances));
-    restartInstanceRefresh();
-  });
-  settingsDefaultWorkflow.addEventListener('change', () => {
-    loadDefaultWorkflowOnStart = settingsDefaultWorkflow.checked;
-    window.localStorage.setItem('onmyoji-studio.settings.default-workflow', String(loadDefaultWorkflowOnStart));
-  });
-  settingsRestoreSession.addEventListener('change', () => {
-    restoreSessionOnStart = settingsRestoreSession.checked;
-    window.localStorage.setItem('onmyoji-studio.settings.restore-session', String(restoreSessionOnStart));
-  });
-  const saveDebugSettings = async (): Promise<void> => {
-    settingsDebugEnabled.disabled = true;
-    settingsDebugAnnotate.disabled = true;
-    try {
-      const settings = await api.updateDebugSettings({
-        enabled: settingsDebugEnabled.checked,
-        annotateScreenshots: settingsDebugAnnotate.checked,
-      });
-      settingsDebugEnabled.checked = settings.enabled;
-      settingsDebugAnnotate.checked = settings.annotateScreenshots;
-      showToast(settings.enabled ? 'Debug 逐步截图已开启，下次运行生效' : 'Debug 逐步截图已关闭');
-    } catch (error) {
-      showToast(`保存 Debug 设置失败：${String(error)}`);
-      await refreshDebugSettings().catch(() => undefined);
-    } finally {
-      settingsDebugEnabled.disabled = false;
-      settingsDebugAnnotate.disabled = !settingsDebugEnabled.checked;
-    }
-  };
-  settingsDebugEnabled.addEventListener('change', () => void saveDebugSettings());
-  settingsDebugAnnotate.addEventListener('change', () => void saveDebugSettings());
+  settings.bind();
   document.querySelectorAll<HTMLButtonElement>('[data-dock-panel]').forEach((button) => {
     button.addEventListener('click', () => docking?.togglePanel(button.dataset.dockPanel as DockPanelId));
   });
@@ -1062,7 +726,7 @@ function bindUi(): void {
       const panelId = button.dataset.workbenchPanel as WorkbenchPanelId;
       if (panelId === 'settings') {
         if (workbenchFrame?.isOpen('settings')) workbenchFrame.toggle('settings');
-        else openSettingsPanel();
+        else settings.openSettingsPanel();
       }
       else if (panelId === 'referenceViewer') {
         if (workbenchFrame?.isOpen('referenceViewer')) referenceViewer.close();
@@ -1070,7 +734,12 @@ function bindUi(): void {
           const relative = relativeToProject(workspace.displayFileUri(workspace.activeUri()));
           if (relative) referenceViewer.open(relative, document);
         }
-      } else if (panelId === 'contentBrowser' || panelId === 'runtime') {
+      }
+      else if (panelId === 'variableReferences') {
+        // 面板内容跟着用户当前关心的变量走：没有目标就什么都不显示，直接切换开关。
+        if (sharedPanelDockBridge?.surface('variableReferences')) variableReferences.close();
+        else showToast('这个面板跟着变量走：在变量详情里删除一个被引用的变量时，它会列出所有引用者', true);
+      } else if (isSharedDockPanelId(panelId)) {
         toggleSharedPanel(panelId);
       } else if (panelId !== 'workflow') {
         workbenchFrame?.toggle(panelId);
@@ -1084,7 +753,7 @@ function bindUi(): void {
   });
   document.querySelectorAll<HTMLButtonElement>('[data-layout-command]').forEach((button) => {
     button.addEventListener('click', () => {
-      if (button.dataset.layoutCommand === 'reset') resetDockLayout();
+      if (button.dataset.layoutCommand === 'reset') lifecycle.resetDockLayout();
     });
   });
   document.querySelectorAll<HTMLButtonElement>('.menu-trigger').forEach((trigger) => {
@@ -1192,7 +861,7 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
     return;
   }
   if (event.data?.source === 'dockview-popout' && event.data.type === 'shellContextReset') {
-    deleteTarget = undefined;
+    deleteShortcuts.setDeleteTarget(undefined);
     return;
   }
 
@@ -1228,15 +897,15 @@ async function start(): Promise<void> {
   docking = createDockingWorkspace(updateDockMenuState, showPopoutFailure, {
     onFrameCreated: (panelId, uri, frame) => workspace.registerDocumentFrame(panelId, uri, frame),
     onFrameDisposed: (panelId) => workspace.unregisterDocumentFrame(panelId),
-    onCloseRequested: (uri) => void closeWorkflowTab(uri),
+    onCloseRequested: (uri) => void lifecycle.closeWorkflowTab(uri),
   });
   // 文档面板的激活统一走 Dockview 事件，标签点击与程序化切面板都不会漏。
   docking.dockviewApi.onDidActivePanelChange((event) => {
-    if (!documentsReady || removingDocument || closingDocuments.size > 0) return;
+    if (!lifecycle.isDocumentsReady() || lifecycle.isRemovingDocument() || lifecycle.hasClosingDocuments()) return;
     const uri = event.panel ? documentUriForPanelId(event.panel.api.id) : undefined;
-    if (uri) void activateWorkflowTab(uri);
+    if (uri) void lifecycle.activateWorkflowTab(uri);
   });
-  docking.onDidRemoveDocument((uri) => void handleDocumentRemoved(uri));
+  docking.onDidRemoveDocument((uri) => void lifecycle.handleDocumentRemoved(uri));
   contentBrowser.bindWorkflowDropTarget(document.querySelector<HTMLElement>('#dock-workspace')!);
   sharedPanelDockBridge = connectSharedPanelDocking(docking, workbenchFrame, updateDockMenuState);
   updateDockMenuState();
@@ -1256,7 +925,7 @@ async function start(): Promise<void> {
     const [bootstrapData, assets, folders] = await Promise.all([api.bootstrap(), api.listAssets(), api.listContentFolders()]);
     bootstrap = bootstrapData;
     contentBrowser.setCatalog(assets, folders);
-    readSettings();
+    settings.readSettings();
     renderWorkflowSelect(bootstrap.workflows);
     renderInstances(bootstrap.instances);
     overview.reconcileSelection(true);
@@ -1266,26 +935,26 @@ async function start(): Promise<void> {
     contentBrowser.render();
     document.querySelector<HTMLElement>('#settings-project-root')!.textContent = bootstrap.projectRoot;
     setStatus('桌面端已连接');
-    const session = restoreSessionOnStart ? workspace.readWorkflowSession() : undefined;
+    const session = settings.restoreSessionOnStart() ? workspace.readWorkflowSession() : undefined;
     if (session) {
       workspace.applyWorkflowSession(session);
       // 上次退出时的未保存内容先落盘，避免恢复后标记变干净却丢失改动。
       void workspace.flushRestoredEdits();
     }
-    reconcileDocumentPanels();
-    documentsReady = true;
+    lifecycle.reconcileDocumentPanels();
+    lifecycle.setDocumentsReady();
     if (session) {
       docking.ensureLayout();
-      await activateWorkflowTab(session.activeUri);
+      await lifecycle.activateWorkflowTab(session.activeUri);
       workspace.setRestoreUri('');
       showToast(`已恢复上次的 ${session.tabs.length} 个画布`);
     } else {
-      const fallback = loadDefaultWorkflowOnStart ? bootstrap.defaultWorkflow : undefined;
-      if (fallback) await openWorkflowTab(fallback);
-      else ensureFallbackDocument();
+      const fallback = settings.loadDefaultWorkflowOnStart() ? bootstrap.defaultWorkflow : undefined;
+      if (fallback) await lifecycle.openWorkflowTab(fallback);
+      else lifecycle.ensureFallbackDocument();
       docking.ensureLayout();
     }
-    restartInstanceRefresh();
+    settings.restartInstanceRefresh();
   } catch (error) {
     loadingMask.classList.add('hidden');
     showToast(errorMessage(error), true);
@@ -1296,8 +965,8 @@ async function start(): Promise<void> {
 window.addEventListener('beforeunload', () => {
   workspace.persistWorkflowSessionNow();
   workspace.cancelAutoSave();
-  if (instanceRefreshTimer !== undefined) window.clearInterval(instanceRefreshTimer);
-  suppressDocumentRemoval = true;
+  settings.dispose();
+  lifecycle.suppressRemovals();
   sharedPanelDockBridge?.dispose();
   docking?.dispose();
   workbenchFrame?.dispose();

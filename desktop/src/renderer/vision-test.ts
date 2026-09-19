@@ -227,9 +227,7 @@ function redraw(): void {
   computeFit();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const rect = canvas.getBoundingClientRect();
-  ctx.fillStyle = '#202020';
-  ctx.fillRect(0, 0, rect.width, rect.height);
+  // Transparent margins reveal the themed stage, even while the frame is paused.
   if (!frame || !imageEl || imageEl.naturalWidth === 0) return;
   ctx.drawImage(imageEl, fit.ox, fit.oy, fit.dWidth, fit.dHeight);
 

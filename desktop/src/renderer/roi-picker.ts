@@ -13,7 +13,13 @@ export interface RoiPickerRequest {
   key: string;
   mode: 'asset' | 'rect';
   targetPath?: string;
+  /** 结果落到哪份画布：持有文档的那一份（详情栏只是镜像，收不到写权）。 */
   sourceFrame: HTMLIFrameElement;
+  /**
+   * 请求方自己的 iframe（当它与 sourceFrame 不同时）：
+   * 结果同时回给它，好让它的 ROI 状态、素材浏览器返回流程照旧收尾。
+   */
+  requestFrame?: HTMLIFrameElement;
   referenceResolution: [number, number];
   imageWidth: number;
   imageHeight: number;
@@ -74,12 +80,19 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     hint.textContent = '拖动鼠标框选区域';
   }
 
+  /** 回传结果：持有文档的画布必须收到（它才有写权），请求方自己也要收到（收尾用它）。 */
+  function reply(request: RoiPickerRequest, payload: Record<string, unknown>): void {
+    postToFrame(request.sourceFrame, payload);
+    const requester = request.requestFrame;
+    if (requester && requester !== request.sourceFrame) postToFrame(requester, payload);
+  }
+
   function cancel(): void {
     const request = state;
     if (!request || request.busy) return;
     state = undefined;
     hide();
-    postToFrame(request.sourceFrame, { type: 'roiPickerCancelled', requestId: request.requestId });
+    reply(request, { type: 'roiPickerCancelled', requestId: request.requestId });
   }
 
   function imageBounds(): { image: DOMRect; stage: DOMRect } | undefined {
@@ -152,7 +165,7 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     if (current.mode === 'rect') {
       state = undefined;
       hide();
-      postToFrame(current.sourceFrame, {
+      reply(current, {
         type: 'roiPickerResult',
         requestId: current.requestId,
         nodeId: current.nodeId,
@@ -190,7 +203,7 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
       if (state?.requestId !== current.requestId) return;
       state = undefined;
       hide();
-      postToFrame(current.sourceFrame, {
+      reply(current, {
         type: 'templateSaved',
         requestId: current.requestId,
         nodeId: current.nodeId,
@@ -201,7 +214,7 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
       if (state?.requestId === current.requestId) {
         state = undefined;
         hide();
-        postToFrame(current.sourceFrame, { type: 'roiPickerError', requestId: current.requestId, message: errorMessage(error) });
+        reply(current, { type: 'roiPickerError', requestId: current.requestId, message: errorMessage(error) });
       }
       showToast(errorMessage(error), true);
     }

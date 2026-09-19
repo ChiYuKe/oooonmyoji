@@ -9,6 +9,7 @@ import type { EditorMessage } from '../shared/editor-messages';
 import type { WorkflowDocumentTab } from '../shared/workspace/session';
 import type { RoiPicker } from './roi-picker';
 import type { Sidebar } from './panels/sidebar';
+import type { VariableReferencesData, VariableReferencesSource } from './variable-references';
 import type { InspectorSelection, Workspace } from './workspace';
 
 export interface EditorHostDeps {
@@ -24,6 +25,12 @@ export interface EditorHostDeps {
   showRuntimePanel: () => void;
   openContentBrowserSearch: () => void;
   openReferences: (uri: string) => void;
+  /** 打开「变量引用」面板，列出谁在引用某个变量。 */
+  showVariableReferences?: (data: VariableReferencesData, source: VariableReferencesSource) => void;
+  /** 重新读取脚本目录（工作流列表），并推送给所有画布。 */
+  refreshWorkflows?: () => Promise<void>;
+  /** 文档画布的 iframe：详情栏是镜像，写文档的指令要发给它。 */
+  getDocumentFrame?: (uri: string) => HTMLIFrameElement | undefined;
   getSelectedInstance: () => string;
   createNewWorkflow: () => Promise<void>;
   switchWorkflow: (uri: string, resetStack?: boolean) => Promise<void>;
@@ -44,8 +51,9 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
   const {
     api, workspace, detailsFrame, sidebar, roiPicker, showToast, errorMessage, setStatus,
     showDetailsPanel, showRuntimePanel, openContentBrowserSearch, openReferences,
+    showVariableReferences, getDocumentFrame,
     getSelectedInstance, createNewWorkflow, switchWorkflow, ensureDocument, openWorkflowTab,
-    loadWorkflow, loadDocumentOnce, sendDocumentInit, resolveWorkflow, selectInstance,
+    loadWorkflow, loadDocumentOnce, sendDocumentInit, resolveWorkflow, selectInstance, refreshWorkflows,
   } = deps;
 
   async function handleMessage(message: EditorMessage, sourceFrame: HTMLIFrameElement): Promise<void> {
@@ -81,10 +89,20 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           const text = String(message.text ?? '');
           if (!text) return;
           workspace.setDocumentText(targetUri, text);
-          if (runtime?.init) runtime.init.document.text = text;
+          // 详情栏是镜像：它报上来的正文属于活动文档，同样要写进这份文档的运行时快照，
+          // 否则镜像重载（移到独立窗口、Dockview 重挂）时会拿回旧正文。
+          const targetRuntime = runtime ?? (targetUri ? workspace.getDocumentRuntimes().get(targetUri) : undefined);
+          if (targetRuntime?.init) targetRuntime.init.document.text = text;
           if (isActiveSource || !sourceUri) {
             workspace.setDirty(message.dirty !== false);
             workspace.scheduleAutoSave(text);
+            // 详情栏是**镜像**画布：它没有文档写权（保存时会被真画布覆盖），所以镜像里的
+            // 编辑（换动作、改参数、改名字…）必须推给真正持有文档的那份画布，否则改完
+            // 卡片还停在旧值上，真画布下一次上报又会把这份改动覆盖掉。
+            const documentFrame = targetUri ? getDocumentFrame?.(targetUri) : undefined;
+            if (documentFrame && documentFrame !== sourceFrame) {
+              workspace.postToFrame(documentFrame, { type: 'replaceDocument', text, recordHistory: true });
+            }
             workspace.postToFrame(detailsFrame, { type: 'replaceDocument', text, recordHistory: true });
           } else {
             workspace.setDocumentDirty(targetUri, message.dirty !== false);
@@ -97,6 +115,32 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           if (runtime) runtime.inspectorSelection = selection;
           showDetailsPanel();
           workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
+          return;
+        }
+        case 'variableReferencesRequested': {
+          // 删被引用的变量时，详细信息面板把引用清单交过来：
+          // 打开「变量引用」面板列出所有引用者，用户可跳过去断开或直接删除。
+          if (!isActiveSource && sourceUri) return;
+          // 详细信息是**镜像**画布：它没有文档写权（保存时会被真画布覆盖），
+          // 所以后续指令一律发给这篇文档的真画布，改完再让详情栏重新同步。
+          const documentFrame = (targetUri ? getDocumentFrame?.(targetUri) : undefined) ?? sourceFrame;
+          showVariableReferences?.({
+            scope: message.scope === 'inputs' ? 'inputs' : 'variables',
+            name: String(message.name ?? ''),
+            displayName: String(message.displayName ?? message.name ?? ''),
+            entries: Array.isArray(message.entries) ? (message.entries as VariableReferencesData['entries']) : [],
+          }, {
+            frame: documentFrame,
+            post: (command, value) => {
+              workspace.postToFrame(documentFrame, { type: 'editorCommand', command, value });
+              // 详情栏的这份镜像要跟着刷新，否则面板删完了它还显示旧参数。
+              if (documentFrame !== detailsFrame) {
+                window.setTimeout(() => {
+                  workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'variablesChanged', value: undefined });
+                }, 0);
+              }
+            },
+          });
           return;
         }
         case 'sidebarStateChanged': {
@@ -184,6 +228,11 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           if (targetUri) await loadWorkflow(targetUri);
           return;
         }
+        case 'refreshWorkflows': {
+          // 画布要最新脚本目录：刷壳层 bootstrap（子流程引用解析用它）并把新列表推给所有画布。
+          await refreshWorkflows?.();
+          return;
+        }
         case 'runWorkflow': {
           const text = String(message.text ?? workspace.tab(targetUri)?.text ?? '');
           workspace.setDocumentText(targetUri, text);
@@ -205,13 +254,17 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
             ? message.referenceResolution as [number, number]
             : [1920, 1080];
           const result = await api.captureRoi({ instanceId: String(message.instanceId ?? getSelectedInstance()), referenceResolution });
+          // 框选结果要送回**持有文档**的那份画布：详情栏是镜像，没有写权，
+          // 把模板/区域发给它只会让卡片停在旧值上（真画布再覆盖回去）。
+          const documentFrame = (targetUri ? getDocumentFrame?.(targetUri) : undefined) ?? sourceFrame;
           roiPicker.open({
             requestId: String(message.requestId ?? ''),
             nodeId: String(message.nodeId ?? message.stepId ?? ''),
             key: String(message.key ?? ''),
             mode: message.mode === 'rect' ? 'rect' : 'asset',
             targetPath: typeof message.targetPath === 'string' ? message.targetPath : undefined,
-            sourceFrame,
+            sourceFrame: documentFrame,
+            requestFrame: sourceFrame === documentFrame ? undefined : sourceFrame,
             referenceResolution,
             imageWidth: result.width,
             imageHeight: result.height,

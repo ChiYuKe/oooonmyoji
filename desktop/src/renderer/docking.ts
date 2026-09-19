@@ -1,27 +1,54 @@
+/**
+ * 停靠布局：工作流 Dockview（内层）与工作台 Dockview（外层）的组装。
+ *
+ * 拆分为按职责的模块，本文件只保留类型、面板定义、渲染器类与两个创建函数：
+ * - `docking/layout.ts`：布局存储键与读写、标签拖放覆盖模型；
+ * - `docking/documents.ts`：工作流文档面板（画布容器、标签、未保存圆点）；
+ * - `docking/gestures.ts`：拖回主窗口/拖出弹窗/拖拽让位/标签条拖动区切换手势；
+ * - `docking/shared-panels.ts`：共享面板定义、层选择与跨层转移桥接。
+ * 对外导出面不变（本文件再导出拆分出的符号），外部引用无需改动。
+ */
 import {
   createDockview,
-  createCloseButton,
   DockviewGroupPanel,
   themeVisualStudio,
   type DockviewApi,
-  type DockviewDidDropEvent,
-  type DroptargetOverlayModel,
   type GroupPanelPartInitParameters,
-  type IDockviewGroupPanel,
   type IGroupHeaderProps,
   type IContentRenderer,
   type IHeaderActionsRenderer,
+  type IDockviewGroupPanel,
   type IDockviewPanel,
   type ITabRenderer,
-  type PanelTransfer,
-  type Position,
   type TabPartInitParameters,
-  positionToDirection,
 } from 'dockview';
 import { createElement, ExternalLink } from 'lucide';
+import {
+  LAYOUT_STORAGE_KEY,
+  WORKBENCH_LAYOUT_STORAGE_KEY,
+  persistLayout,
+  readPersistedLayout,
+  resolveDropOverlayModel,
+} from './docking/layout';
+import {
+  DOCUMENT_COMPONENT,
+  DOCUMENT_TAB_COMPONENT,
+  WorkflowCanvasRenderer,
+  WorkflowDocumentTab,
+  documentPanelId,
+  documentUriFromPanelId,
+  groupContainsWorkflow,
+} from './docking/documents';
+import {
+  registerDockBackGesture,
+  registerDraggedSourceGroupVacancy,
+  registerOutsidePopoutGesture,
+  installTabStripWindowDragToggle,
+} from './docking/gestures';
+import { SHARED_PANEL_DEFINITIONS } from './docking/shared-panels';
 
-export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser';
-export type SharedDockPanelId = 'contentBrowser' | 'runtime';
+export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
+export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
 export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
@@ -29,7 +56,7 @@ export type SharedDockSurface = 'inner' | 'outer';
 /** “工作流画布”面板的引用占位符：实际指向当前打开的第一个文档面板。 */
 type PanelReference = DockPanelId | WorkbenchPanelId | 'editor';
 
-interface DockPanelDefinition {
+export interface DockPanelDefinition {
   title: string;
   moduleElementId: string;
   reference?: PanelReference;
@@ -86,38 +113,11 @@ export interface SharedPanelDockBridge {
   surface(panelId: SharedDockPanelId): SharedDockSurface | undefined;
   show(panelId: SharedDockPanelId): void;
   toggle(panelId: SharedDockPanelId): void;
+  /** 关掉面板（不论它此刻在哪一层）。 */
+  close(panelId: SharedDockPanelId): void;
   resetSurfaces(): void;
   dispose(): void;
 }
-
-// 详细信息恢复为工作流内部的整高停靠列，旧布局层级不再兼容，
-// 因此通过版本号让这次结构调整使用新的默认布局。
-const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v10';
-const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v10';
-const SHARED_PANEL_SURFACE_KEYS: Record<SharedDockPanelId, string> = {
-  contentBrowser: 'onmyoji-studio.content-browser-dock-surface',
-  runtime: 'onmyoji-studio.runtime-dock-surface',
-};
-
-const DEFAULT_SHARED_PANEL_SURFACES: Record<SharedDockPanelId, SharedDockSurface> = {
-  contentBrowser: 'inner',
-  runtime: 'inner',
-};
-
-const SHARED_PANEL_DEFINITIONS: Record<SharedDockPanelId, DockPanelDefinition> = {
-  contentBrowser: {
-    title: '内容浏览器',
-    moduleElementId: 'module-content-browser',
-    minimumWidth: 280,
-    minimumHeight: 140,
-  },
-  runtime: {
-    title: '运行日志',
-    moduleElementId: 'module-runtime',
-    minimumWidth: 320,
-    minimumHeight: 110,
-  },
-};
 
 const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
   details: {
@@ -167,27 +167,15 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
     reference: 'runtime',
     direction: 'within',
   },
+  variableReferences: {
+    ...SHARED_PANEL_DEFINITIONS.variableReferences,
+    // 与内容浏览器叠成同一个标签组（和运行日志同一套路）：这就是它的默认位置。
+    reference: 'contentBrowser',
+    direction: 'within',
+  },
 };
 
 const DEFAULT_PANEL_ORDER: DockPanelId[] = ['structure', 'palette', 'variables', 'runtime', 'contentBrowser', 'details'];
-
-/** 文档面板的组件名与 id 前缀；一个工作流文档对应一个 Dockview 面板。 */
-const DOCUMENT_COMPONENT = 'workflow-canvas';
-const DOCUMENT_TAB_COMPONENT = 'workflow-document-tab';
-const DOCUMENT_PANEL_PREFIX = 'workflow:';
-
-function documentPanelId(uri: string): string {
-  return `${DOCUMENT_PANEL_PREFIX}${uri}`;
-}
-
-/** 从面板 id 还原工作流 URI；非文档面板返回 undefined。 */
-export function documentUriForPanelId(panelId: string): string | undefined {
-  return panelId.startsWith(DOCUMENT_PANEL_PREFIX) ? panelId.slice(DOCUMENT_PANEL_PREFIX.length) : undefined;
-}
-
-function documentUriFromPanelId(panelId: string): string | undefined {
-  return documentUriForPanelId(panelId);
-}
 
 const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition> = {
   workflow: {
@@ -222,6 +210,13 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     minimumWidth: 420,
     minimumHeight: 300,
   },
+  variableReferences: {
+    ...SHARED_PANEL_DEFINITIONS.variableReferences,
+    // 共享面板：默认开在内层、与内容浏览器叠成同一个标签组；被拖到外层时同样叠在
+    // 内容浏览器旁边（外层定义与内层保持一致），所以两层都写 `within`。
+    reference: 'contentBrowser',
+    direction: 'within',
+  },
   contentBrowser: {
     ...SHARED_PANEL_DEFINITIONS.contentBrowser,
     reference: 'workflow',
@@ -238,16 +233,6 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
 
 const DEFAULT_WORKBENCH_PANEL_ORDER: WorkbenchPanelId[] = ['workflow', 'overview'];
 
-// A tab is one merge target. Dockview still uses the cursor's left/right half
-// internally to decide the insertion order, but a half-width preview makes it
-// look as though the tab itself can be split into two panes.
-const WHOLE_TAB_DROP_OVERLAY_MODEL: DroptargetOverlayModel = {
-  size: { value: 100, type: 'percentage' },
-  activationSize: { value: 50, type: 'percentage' },
-  smallWidthBoundary: 0,
-  smallHeightBoundary: 0,
-};
-
 // Remove the source tab from its old slot for the duration of a drag. The
 // drag ghost remains visible under the pointer and the real tab returns only
 // when the drop (or cancellation) completes.
@@ -255,19 +240,6 @@ const ONMYOJI_DOCKVIEW_THEME = {
   ...themeVisualStudio,
   tabAnimation: 'smooth' as const,
 };
-
-function resolveDropOverlayModel(location: string): DroptargetOverlayModel | undefined {
-  return location === 'tab' ? WHOLE_TAB_DROP_OVERLAY_MODEL : undefined;
-}
-
-function readPersistedLayout(key: string): string | null {
-  const stored = window.onmyoji.readLayout(key);
-  return stored ?? window.localStorage.getItem(key);
-}
-
-function persistLayout(key: string, value: string): void {
-  window.onmyoji.writeLayout(key, value);
-}
 
 class ExistingModuleRenderer implements IContentRenderer {
   readonly element = document.createElement('div');
@@ -331,102 +303,6 @@ class FixedWorkbenchTab implements ITabRenderer {
   }
 }
 
-/** 每个工作流文档面板的独立画布容器；iframe 由壳层注册后接管消息路由。 */
-class WorkflowCanvasRenderer implements IContentRenderer {
-  readonly element = document.createElement('section');
-  private readonly frame = document.createElement('iframe');
-  private panelId = '';
-  private uri = '';
-  private attached = false;
-
-  constructor(private readonly hooks: DocumentPanelHooks) {
-    this.element.className = 'dock-module editor-surface';
-    this.frame.className = 'workflow-canvas-frame';
-    this.frame.title = '工作流节点画布';
-  }
-
-  init(parameters: GroupPanelPartInitParameters): void {
-    this.panelId = parameters.api.id;
-    this.uri = String(parameters.params?.uri ?? '');
-    if (!this.attached) {
-      this.attached = true;
-      this.frame.id = this.panelId;
-      this.frame.src = './canvas.html?mode=canvas';
-      this.element.appendChild(this.frame);
-    }
-    this.hooks.onFrameCreated(this.panelId, this.uri, this.frame);
-  }
-
-  dispose(): void {
-    this.hooks.onFrameDisposed(this.panelId);
-    if (this.frame.parentElement === this.element) this.element.removeChild(this.frame);
-    this.attached = false;
-  }
-}
-
-const documentTabRenderers = new Map<string, WorkflowDocumentTab>();
-
-/** 供壳层更新文档标签的未保存圆点。 */
-export function setDocumentPanelDirty(panelId: string, dirty: boolean): void {
-  documentTabRenderers.get(panelId)?.setDirty(dirty);
-}
-
-class WorkflowDocumentTab implements ITabRenderer {
-  readonly element = document.createElement('div');
-  private label = document.createElement('div');
-  private dirtyMark = document.createElement('div');
-  private closeButton = document.createElement('div');
-  private titleDisposable?: { dispose(): void };
-  private panelId = '';
-
-  constructor(private readonly onClose: (panelId: string) => void) {
-    this.element.className = 'dv-default-tab workflow-document-tab';
-    this.label.className = 'dv-default-tab-content workflow-document-tab-label';
-    this.dirtyMark.className = 'workflow-document-tab-dirty hidden';
-    this.dirtyMark.title = '未保存';
-    this.closeButton.className = 'dv-default-tab-action workflow-document-tab-close';
-    this.closeButton.setAttribute('role', 'button');
-    this.closeButton.tabIndex = -1;
-    this.closeButton.title = '关闭工作流画布';
-    this.closeButton.appendChild(createCloseButton());
-    // Dockview 在标签容器上监听指针拖动，关闭按钮必须隔离该手势才能稳定收到 click。
-    this.closeButton.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    this.closeButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.onClose(this.panelId);
-    });
-    this.element.append(this.label, this.dirtyMark, this.closeButton);
-  }
-
-  init(params: TabPartInitParameters): void {
-    this.panelId = params.api.id;
-    documentTabRenderers.set(this.panelId, this);
-    this.label.textContent = params.title;
-    this.titleDisposable?.dispose();
-    this.titleDisposable = params.api.onDidTitleChange((event) => {
-      this.label.textContent = event.title;
-    });
-  }
-
-  setDirty(dirty: boolean): void {
-    this.dirtyMark.classList.toggle('hidden', !dirty);
-  }
-
-  dispose(): void {
-    documentTabRenderers.delete(this.panelId);
-    this.titleDisposable?.dispose();
-    this.titleDisposable = undefined;
-  }
-}
-
-function groupContainsWorkflow(group: IDockviewGroupPanel): boolean {
-  return group.panels.some((panel) => panel.api.id === 'workflow');
-}
-
 class PopoutHeaderAction implements IHeaderActionsRenderer {
   readonly element = document.createElement('div');
   private button = document.createElement('button');
@@ -478,228 +354,6 @@ class PopoutHeaderAction implements IHeaderActionsRenderer {
     this.params = undefined;
     this.button.replaceChildren();
   }
-}
-
-function registerOutsidePopoutGesture(
-  api: DockviewApi,
-  container: HTMLElement,
-  onPopoutFailure?: () => void,
-  canPopout: (item: DockviewGroupPanel | IDockviewPanel) => boolean = () => true,
-): { markHandled(): void; dispose(): void } {
-  let draggedItem: DockviewGroupPanel | IDockviewPanel | undefined;
-  let dragUsesHtml5 = false;
-  let dragWasHandled = false;
-  let removeDragEndListener: (() => void) | undefined;
-
-  const clearDrag = (): void => {
-    draggedItem = undefined;
-    dragUsesHtml5 = false;
-    dragWasHandled = false;
-    removeDragEndListener?.();
-    removeDragEndListener = undefined;
-  };
-
-  const finishDrag = (event: Pick<MouseEvent, 'clientX' | 'clientY' | 'screenX' | 'screenY'>, wasHandled = false): void => {
-    const item = draggedItem;
-    clearDrag();
-    if (wasHandled) return;
-
-    const ownerWindow = container.ownerDocument.defaultView ?? window;
-    const root = container.getBoundingClientRect();
-    const screenLeft = ownerWindow.screenX + root.left;
-    const screenTop = ownerWindow.screenY + root.top;
-    const releasedOutside = event.screenX < screenLeft || event.screenX > screenLeft + root.width
-      || event.screenY < screenTop || event.screenY > screenTop + root.height;
-
-    let popoutItem = item;
-    if (!popoutItem || !releasedOutside) {
-      popoutItem = api.groups.find((group) => {
-        if (group.api.location.type !== 'floating') return false;
-        const box = group.api.boundingBox;
-        return Boolean(box && (box.left < -8 || box.top < -8
-          || box.left + box.width > container.clientWidth + 8
-          || box.top + box.height > container.clientHeight + 8));
-      });
-    }
-    if (!popoutItem || !canPopout(popoutItem) || popoutItem.api.location.type === 'popout') return;
-
-    const group = popoutItem instanceof DockviewGroupPanel ? popoutItem : popoutItem.group;
-    const box = group.api.boundingBox;
-    const width = Math.max(320, box?.width ?? 720);
-    const height = Math.max(220, box?.height ?? 520);
-    const position = releasedOutside ? {
-      left: event.screenX - 42,
-      top: event.screenY - 14,
-      width,
-      height,
-    } : undefined;
-    window.setTimeout(() => {
-      if (popoutItem.api.location.type === 'popout') return;
-      void api.addPopoutGroup(popoutItem, { popoutUrl: '/popout.html', position }).then((opened) => {
-        if (!opened) onPopoutFailure?.();
-      });
-    });
-  };
-
-  const rememberDrag = (
-    item: DockviewGroupPanel | IDockviewPanel,
-    nativeEvent: DragEvent | PointerEvent,
-  ): void => {
-    clearDrag();
-    if (!canPopout(item)) {
-      nativeEvent.preventDefault();
-      return;
-    }
-    draggedItem = item;
-    dragUsesHtml5 = 'dataTransfer' in nativeEvent;
-    if (!dragUsesHtml5) return;
-
-    const source = nativeEvent.target as EventTarget | null;
-    if (!source) return;
-    const dragEndListener = (event: Event): void => {
-      const dragEvent = event as DragEvent;
-      const dropEffect = dragEvent.dataTransfer?.dropEffect;
-      finishDrag(dragEvent, dragWasHandled || dropEffect !== undefined && dropEffect !== 'none');
-    };
-    source.addEventListener('dragend', dragEndListener, { once: true });
-    removeDragEndListener = () => source.removeEventListener('dragend', dragEndListener);
-  };
-
-  const panelDragDisposable = api.onWillDragPanel((event) => {
-    rememberDrag(event.panel, event.nativeEvent);
-  });
-  const groupDragDisposable = api.onWillDragGroup((event) => {
-    rememberDrag(event.group, event.nativeEvent);
-  });
-  const panelMoveDisposable = api.onDidMovePanel(() => {
-    if (draggedItem && dragUsesHtml5) dragWasHandled = true;
-  });
-  const pointerCancelListener = (): void => {
-    if (!dragUsesHtml5) clearDrag();
-  };
-  const pointerUpListener = (event: PointerEvent): void => {
-    if (dragUsesHtml5) return;
-    finishDrag(event);
-  };
-
-  document.addEventListener('pointerup', pointerUpListener);
-  document.addEventListener('pointercancel', pointerCancelListener);
-  return {
-    markHandled: () => {
-      if (draggedItem) dragWasHandled = true;
-    },
-    dispose: () => {
-      panelDragDisposable.dispose();
-      groupDragDisposable.dispose();
-      panelMoveDisposable.dispose();
-      clearDrag();
-      document.removeEventListener('pointerup', pointerUpListener);
-      document.removeEventListener('pointercancel', pointerCancelListener);
-    },
-  };
-}
-
-/**
- * Vacate the source presentation while a panel is being dragged. A single-tab
- * group is hidden so neighbouring groups occupy its space; in a multi-tab
- * group another tab is activated so the dragged panel's content is no longer
- * left behind. Cancellation restores the original presentation.
- */
-function registerDraggedSourceGroupVacancy(
-  api: DockviewApi,
-  onTemporaryLayoutChange: (active: boolean) => void,
-): { dispose(): void } {
-  let sourceGroup: DockviewGroupPanel | undefined;
-  let sourcePanelId: string | undefined;
-  let sourceWasVisible = false;
-  let sourceWasActive = false;
-  let dragGeneration = 0;
-  let finishTimer: number | undefined;
-  let removeEndListeners: (() => void) | undefined;
-
-  const finish = (): void => {
-    dragGeneration += 1;
-    if (finishTimer !== undefined) {
-      window.clearTimeout(finishTimer);
-      finishTimer = undefined;
-    }
-    removeEndListeners?.();
-    removeEndListeners = undefined;
-
-    const group = sourceGroup;
-    const panelId = sourcePanelId;
-    sourceGroup = undefined;
-    sourcePanelId = undefined;
-    if (!group || !panelId) return;
-
-    const currentPanel = api.getPanel(panelId);
-    const groupStillExists = api.groups.some((candidate) => candidate === group);
-    if (groupStillExists && currentPanel?.group === group) {
-      if (sourceWasVisible && !group.api.isVisible) group.api.setVisible(true);
-      if (sourceWasActive) currentPanel.api.setActive();
-    }
-    sourceWasVisible = false;
-    sourceWasActive = false;
-    onTemporaryLayoutChange(false);
-  };
-
-  const finishAfterDockview = (): void => {
-    if (finishTimer !== undefined) return;
-    finishTimer = window.setTimeout(finish, 0);
-  };
-
-  const dragDisposable = api.onWillDragPanel((event) => {
-    finish();
-    const group = event.panel.group;
-    const location = group.api.location.type;
-    const canHideWholeGroup = group.panels.length === 1 && location !== 'popout' && location !== 'edge';
-    const replacementPanel = group.panels.length > 1 && group.activePanel === event.panel
-      ? group.panels.find((panel) => panel !== event.panel)
-      : undefined;
-    if (!canHideWholeGroup && !replacementPanel) return;
-
-    const panelId = event.panel.api.id;
-    const replacementPanelId = replacementPanel?.api.id;
-    const generation = ++dragGeneration;
-    const ownerDocument = group.api.getWindow().document;
-    const eventTarget = event.nativeEvent.target;
-    const usesHtml5Drag = 'dataTransfer' in event.nativeEvent;
-    const endEvents = usesHtml5Drag ? ['dragend'] : ['pointerup', 'pointercancel'];
-    const listener = (): void => finishAfterDockview();
-    for (const eventName of endEvents) {
-      ownerDocument.addEventListener(eventName, listener, true);
-      if (eventTarget instanceof EventTarget) eventTarget.addEventListener(eventName, listener, true);
-    }
-    removeEndListeners = () => {
-      for (const eventName of endEvents) {
-        ownerDocument.removeEventListener(eventName, listener, true);
-        if (eventTarget instanceof EventTarget) eventTarget.removeEventListener(eventName, listener, true);
-      }
-    };
-
-    group.api.getWindow().requestAnimationFrame(() => {
-      if (generation !== dragGeneration || api.getPanel(panelId)?.group !== group) return;
-      sourceGroup = group;
-      sourcePanelId = panelId;
-      sourceWasVisible = group.api.isVisible;
-      sourceWasActive = group.activePanel === event.panel;
-      if (canHideWholeGroup && !sourceWasVisible) return;
-      onTemporaryLayoutChange(true);
-      if (canHideWholeGroup) {
-        group.api.setVisible(false);
-      } else if (replacementPanelId) {
-        const currentReplacement = api.getPanel(replacementPanelId);
-        if (currentReplacement?.group === group) currentReplacement.api.setActive();
-      }
-    });
-  });
-
-  return {
-    dispose: () => {
-      dragDisposable.dispose();
-      finish();
-    },
-  };
 }
 
 export function createDockingWorkspace(
@@ -778,7 +432,12 @@ export function createDockingWorkspace(
       position: definition.direction
         ? reference
           ? { referencePanel: reference, direction: definition.direction }
-          : { direction: definition.direction }
+          // 「within」必须有参照面板：参照当前不在（例如内容浏览器被拖到了外层）时，
+          // 交给 Dockview 放进当前活动分组，别凭空多出一个独立分组——那样面板看着
+          // 就像“跑到了别处”，而不是叠在它该在的标签组里。
+          : definition.direction === 'within'
+            ? undefined
+            : { direction: definition.direction }
         : undefined,
     });
   };
@@ -906,6 +565,7 @@ export function createDockingWorkspace(
 
   const popoutFailureDisposable = api.onDidOpenPopoutWindowFail(() => onPopoutFailure?.());
   const outsidePopoutDisposable = registerOutsidePopoutGesture(api, container, onPopoutFailure);
+  const dockBackDisposable = registerDockBackGesture(api);
   const sourceGroupVacancyDisposable = registerDraggedSourceGroupVacancy(api, (active) => {
     temporaryDragLayout = active;
     if (!active) saveLayout();
@@ -943,6 +603,7 @@ export function createDockingWorkspace(
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
       sourceGroupVacancyDisposable.dispose();
+      dockBackDisposable.dispose();
       saveLayout();
       layoutDisposable.dispose();
       panelDisposable.dispose();
@@ -951,30 +612,6 @@ export function createDockingWorkspace(
       api.dispose();
     },
   };
-}
-
-let tabStripWindowDragInstalled = false;
-
-/**
- * 外层工作区标签条空白处平时作为窗口拖动区（-webkit-app-region: drag），
- * 但 Electron 会在该区域吞掉原生拖放事件，导致面板无法拖回这里停靠。
- * 因此在原生拖拽进行期间给 body 加 dockview-dragging 类临时关闭拖动区。
- */
-function installTabStripWindowDragToggle(): void {
-  if (tabStripWindowDragInstalled) return;
-  tabStripWindowDragInstalled = true;
-  const setActive = (active: boolean): void => {
-    document.body.classList.toggle('dockview-dragging', active);
-  };
-  document.addEventListener('dragstart', () => setActive(true), true);
-  document.addEventListener('dragenter', () => setActive(true), true);
-  document.addEventListener('dragover', () => setActive(true), true);
-  document.addEventListener('drop', () => setActive(false), true);
-  document.addEventListener('dragend', () => setActive(false), true);
-  document.addEventListener('dragleave', (event) => {
-    if (!event.relatedTarget) setActive(false);
-  }, true);
-  window.addEventListener('blur', () => setActive(false));
 }
 
 export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailure?: () => void): WorkbenchFrameController {
@@ -1008,7 +645,15 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   const addPanel = (panelId: WorkbenchPanelId): void => {
     if (api.getPanel(panelId)) return;
     const definition = WORKBENCH_PANEL_DEFINITIONS[panelId];
-    const reference = definition.reference ? api.getPanel(definition.reference) : undefined;
+    // 参照面板可能还没打开（例如内容浏览器被拖到了外侧容器）：按回退链挑第一个
+    // 存在的，全都找不到时才退回工作流编辑器，避免面板静默地不出现。
+    // 本来就没有参照面板的（工作流编辑器本身）不参与这条链，否则会去参照自己。
+    const reference = definition.reference
+      ? api.getPanel(definition.reference)
+        ?? api.getPanel('contentBrowser')
+        ?? api.getPanel('runtime')
+        ?? api.getPanel('workflow')
+      : undefined;
     api.addPanel({
       id: panelId,
       title: definition.title,
@@ -1071,6 +716,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   // 引用查看器的内容依赖本次会话的当前目标；不要恢复成空白面板。
   const restoredReferenceViewer = api.getPanel('referenceViewer');
   if (restoredReferenceViewer) restoredReferenceViewer.api.close();
+  // 「变量引用」同理（它现在可以停在内层或外层），由 connectSharedPanelDocking 统一清理。
 
   const layoutDisposable = api.onDidLayoutChange(saveLayout);
   const panelDisposable = api.onDidActivePanelChange(() => {
@@ -1120,6 +766,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     temporaryDragLayout = active;
     if (!active) saveLayout();
   });
+  const dockBackDisposable = registerDockBackGesture(api);
 
   return {
     dockviewApi: api,
@@ -1137,6 +784,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
       sourceGroupVacancyDisposable.dispose();
+      dockBackDisposable.dispose();
       saveLayout();
       layoutDisposable.dispose();
       panelDisposable.dispose();
@@ -1147,180 +795,9 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   };
 }
 
-function isSharedDockPanelId(panelId: string | null | undefined): panelId is SharedDockPanelId {
-  return panelId === 'contentBrowser' || panelId === 'runtime';
-}
-
-function getTransferredSharedPanelId(
-  data: PanelTransfer | undefined,
-  sourceApi: DockviewApi,
-): SharedDockPanelId | undefined {
-  if (!data || data.viewId !== sourceApi.id) return undefined;
-  if (isSharedDockPanelId(data.panelId)) return data.panelId;
-  if (data.panelId !== null) return undefined;
-  const group = sourceApi.getGroup(data.groupId);
-  if (group?.panels.length !== 1) return undefined;
-  const panelId = group.panels[0]?.api.id;
-  return isSharedDockPanelId(panelId) ? panelId : undefined;
-}
-
-function addSharedPanelAtDrop(
-  api: DockviewApi,
-  panelId: SharedDockPanelId,
-  position: Position,
-  referencePanel?: IDockviewPanel,
-): void {
-  const definition = SHARED_PANEL_DEFINITIONS[panelId];
-  const panel = api.addPanel({
-    id: panelId,
-    title: definition.title,
-    component: 'existing-module',
-    params: { moduleElementId: definition.moduleElementId },
-    renderer: 'always',
-    minimumWidth: definition.minimumWidth,
-    minimumHeight: definition.minimumHeight,
-    position: referencePanel
-      ? { referencePanel, direction: positionToDirection(position) }
-      : undefined,
-  });
-  panel.api.setActive();
-  panel.focus();
-}
-
-export function connectSharedPanelDocking(
-  docking: DockingController,
-  workbenchFrame: WorkbenchFrameController,
-  onLayoutChange?: () => void,
-): SharedPanelDockBridge {
-  const innerApi = docking.dockviewApi;
-  const outerApi = workbenchFrame.dockviewApi;
-
-  const transfer = (
-    sourceApi: DockviewApi,
-    targetApi: DockviewApi,
-    sourceController: DockingController | WorkbenchFrameController,
-    surface: SharedDockSurface,
-    event: DockviewDidDropEvent,
-    position = event.position,
-  ): void => {
-    const data = event.getData();
-    const panelId = getTransferredSharedPanelId(data, sourceApi);
-    if (!panelId) return;
-    const sourcePanel = sourceApi.getPanel(panelId);
-    if (!sourcePanel) return;
-
-    // A stale layout can leave the same shared panel on both surfaces. When a
-    // duplicate is dragged across, keep the existing target instance and drop
-    // the source so the shared module remains single-instanced.
-    if (targetApi.getPanel(panelId)) {
-      sourceController.markDragHandled();
-      sourceApi.removePanel(sourcePanel);
-      return;
-    }
-
-    sourceController.markDragHandled();
-    const referencePanel = event.panel ?? event.group?.activePanel ?? targetApi.activePanel;
-    sourceApi.removePanel(sourcePanel);
-    addSharedPanelAtDrop(targetApi, panelId, position, referencePanel);
-    persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], surface);
-    onLayoutChange?.();
-  };
-
-  const acceptInnerDisposable = innerApi.onUnhandledDragOver((event) => {
-    if (getTransferredSharedPanelId(event.getData(), outerApi)) event.accept();
-  });
-  const acceptOuterDisposable = outerApi.onUnhandledDragOver((event) => {
-    if (getTransferredSharedPanelId(event.getData(), innerApi)) event.accept();
-  });
-  const dropInnerDisposable = innerApi.onDidDrop((event) => {
-    transfer(outerApi, innerApi, workbenchFrame, 'inner', event, event.panel ? 'center' : event.position);
-  });
-  const dropOuterDisposable = outerApi.onDidDrop((event) => {
-    transfer(innerApi, outerApi, docking, 'outer', event, event.panel ? 'center' : event.position);
-  });
-  const revealWorkflowOnSharedDragDisposable = outerApi.onWillDragPanel((event) => {
-    const panelId = event.panel.api.id;
-    if (isSharedDockPanelId(panelId) && groupContainsWorkflow(event.panel.group)) {
-      outerApi.getPanel('workflow')?.api.setActive();
-    }
-  });
-  const outerOverlayDisposable = outerApi.onWillShowOverlay((event) => {
-    const target = event.nativeEvent.target;
-    const innerContainer = document.querySelector<HTMLElement>('#dock-workspace');
-    if (!(target instanceof Node) || !innerContainer?.contains(target)) return;
-
-    const frameBounds = document.querySelector<HTMLElement>('#workbench-frame')?.getBoundingClientRect();
-    if (!frameBounds) {
-      event.preventDefault();
-      return;
-    }
-
-    const { clientX, clientY } = event.nativeEvent;
-    const outerEdgeSize = 32;
-    const isAtOuterEdge = clientX <= frameBounds.left + outerEdgeSize
-      || clientX >= frameBounds.right - outerEdgeSize
-      || clientY <= frameBounds.top + outerEdgeSize
-      || clientY >= frameBounds.bottom - outerEdgeSize;
-    if (!isAtOuterEdge) event.preventDefault();
-  });
-
-  const preferredSurface = (panelId: SharedDockPanelId): SharedDockSurface => {
-    const stored = readPersistedLayout(SHARED_PANEL_SURFACE_KEYS[panelId]);
-    return stored === 'inner' || stored === 'outer' ? stored : DEFAULT_SHARED_PANEL_SURFACES[panelId];
-  };
-
-  const surface = (panelId: SharedDockPanelId): SharedDockSurface | undefined => innerApi.getPanel(panelId)
-    ? 'inner'
-    : outerApi.getPanel(panelId)
-      ? 'outer'
-      : undefined;
-
-  const reconcileSharedPanel = (panelId: SharedDockPanelId): void => {
-    const innerPanel = innerApi.getPanel(panelId);
-    const outerPanel = outerApi.getPanel(panelId);
-    if (innerPanel && outerPanel) {
-      const keepInner = preferredSurface(panelId) === 'inner';
-      if (keepInner) outerApi.removePanel(outerPanel);
-      else innerApi.removePanel(innerPanel);
-      persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], keepInner ? 'inner' : 'outer');
-    } else if (innerPanel || outerPanel) {
-      persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], innerPanel ? 'inner' : 'outer');
-    }
-  };
-
-  for (const panelId of Object.keys(SHARED_PANEL_DEFINITIONS) as SharedDockPanelId[]) {
-    reconcileSharedPanel(panelId);
-  }
-
-  return {
-    surface,
-    show: (panelId) => {
-      reconcileSharedPanel(panelId);
-      const currentSurface = surface(panelId);
-      if (currentSurface === 'inner') docking.showPanel(panelId);
-      else if (currentSurface === 'outer') workbenchFrame.show(panelId);
-      else if (preferredSurface(panelId) === 'inner') docking.showPanel(panelId);
-      else workbenchFrame.show(panelId);
-    },
-    toggle: (panelId) => {
-      const currentSurface = surface(panelId);
-      if (currentSurface === 'inner') docking.togglePanel(panelId);
-      else if (currentSurface === 'outer') workbenchFrame.toggle(panelId);
-      else if (preferredSurface(panelId) === 'inner') docking.showPanel(panelId);
-      else workbenchFrame.show(panelId);
-    },
-    resetSurfaces: () => {
-      for (const panelId of Object.keys(DEFAULT_SHARED_PANEL_SURFACES) as SharedDockPanelId[]) {
-        persistLayout(SHARED_PANEL_SURFACE_KEYS[panelId], DEFAULT_SHARED_PANEL_SURFACES[panelId]);
-      }
-    },
-    dispose: () => {
-      acceptInnerDisposable.dispose();
-      acceptOuterDisposable.dispose();
-      dropInnerDisposable.dispose();
-      dropOuterDisposable.dispose();
-      revealWorkflowOnSharedDragDisposable.dispose();
-      outerOverlayDisposable.dispose();
-    },
-  };
-}
+// 再导出拆分出的符号，保持对外导入面不变。
+export { documentPanelId, documentUriForPanelId, documentUriFromPanelId, setDocumentPanelDirty, groupContainsWorkflow } from './docking/documents';
+export { isSharedDockPanelId, connectSharedPanelDocking } from './docking/shared-panels';
+export { registerDockBackGesture, registerOutsidePopoutGesture, registerDraggedSourceGroupVacancy, installTabStripWindowDragToggle } from './docking/gestures';
+export { LAYOUT_STORAGE_KEY, WORKBENCH_LAYOUT_STORAGE_KEY, readPersistedLayout, persistLayout, resolveDropOverlayModel } from './docking/layout';
+export { SHARED_PANEL_DEFINITIONS, DEFAULT_SHARED_PANEL_SURFACES, COMPANION_SHARED_PANELS, SHARED_PANEL_SURFACE_KEYS } from './docking/shared-panels';

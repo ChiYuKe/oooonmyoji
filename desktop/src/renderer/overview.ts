@@ -1,7 +1,7 @@
 /**
  * 脚本概览：工作流卡片、执行队列、输入配置与运行调度。
  * 状态由本模块持有，通过 createOverview 注入主窗口的实时状态读写与共享操作。
- * 注意：overview-layout.test.cjs 会按函数名切片执行，故函数保持顶层声明。
+ * 单卡片渲染在 overview/card.ts（依赖注入、可独立测试）。
  */
 import type { createIcons } from 'lucide';
 import type {
@@ -14,8 +14,7 @@ import type {
 } from '../shared/contracts';
 import type { DockingController, SharedPanelDockBridge, WorkbenchFrameController } from './docking';
 import { OVERVIEW_INPUT_LABELS, overviewInputDisplayName } from './naming';
-
-type OverviewItemStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped';
+import { renderOverviewCard, type OverviewCardDeps, type OverviewItemStatus } from './overview/card';
 
 interface OverviewRunState {
   items: Array<{ rel: string; status: OverviewItemStatus }>;
@@ -561,120 +560,22 @@ function renderOverviewInstances(): void {
   overviewInstanceSelect.disabled = getRuntimeInstances().length === 0 || Boolean(overviewRun?.active);
 }
 
-function renderOverviewCard(workflow: WorkflowDescriptor): HTMLElement {
-  const rel = workflow.rel;
-  const selectedIndex = overviewSelection.indexOf(rel);
-  const selected = selectedIndex >= 0;
-  const runItem = overviewRunItem(rel);
-  const status = runItem?.status;
-  const locked = Boolean(overviewRun?.active);
-  const card = document.createElement('article');
-  card.className = ['overview-card', selected ? 'selected' : '', status ?? ''].filter(Boolean).join(' ');
-  card.tabIndex = locked ? -1 : 0;
-  card.setAttribute('role', 'checkbox');
-  card.setAttribute('aria-checked', String(selected));
-  card.dataset.workflowRel = rel;
-
-  const header = document.createElement('div');
-  header.className = 'overview-card-header';
-  const checkbox = document.createElement('input');
-  checkbox.className = 'overview-card-check';
-  checkbox.type = 'checkbox';
-  checkbox.checked = selected;
-  checkbox.disabled = locked;
-  checkbox.setAttribute('aria-label', `选择 ${overviewWorkflowName(workflow)}`);
-  checkbox.addEventListener('change', () => updateOverviewSelection(rel, checkbox.checked));
-  const title = document.createElement('div');
-  title.className = 'overview-card-title';
-  const strong = document.createElement('strong');
-  strong.textContent = overviewWorkflowName(workflow);
-  strong.title = overviewWorkflowName(workflow);
-  const path = document.createElement('span');
-  path.textContent = rel.replace(/^workflows\//i, '');
-  path.title = rel;
-  title.append(strong, path);
-  header.append(checkbox, title);
-  if (selected) {
-    const badge = document.createElement('span');
-    badge.className = 'overview-order-badge';
-    badge.textContent = String(selectedIndex + 1);
-    badge.setAttribute('aria-label', `执行顺序 ${selectedIndex + 1}`);
-    header.appendChild(badge);
-  }
-
-  const description = document.createElement('div');
-  description.className = 'overview-card-description';
-  description.textContent = workflow.description || '暂无说明，双击或点“编辑”查看工作流。';
-  description.title = workflow.description || '';
-
-  const metadata = document.createElement('div');
-  metadata.className = 'overview-card-metadata';
-
-  const footer = document.createElement('div');
-  footer.className = 'overview-card-footer';
-  const kind = document.createElement('span');
-  kind.className = 'overview-card-tag';
-  kind.textContent = overviewWorkflowKind(workflow);
-  const inputs = document.createElement('span');
-  inputs.className = 'overview-card-tag';
-  inputs.textContent = `${workflow.inputs?.length ?? 0} 个输入`;
-  const validation = overviewWorkflowValidation(workflow);
-  const validationTag = document.createElement('span');
-  validationTag.className = `overview-card-tag workflow-validation-${validation.className}`;
-  validationTag.textContent = validation.label;
-  validationTag.title = validation.title;
-  const updated = overviewWorkflowUpdated(workflow);
-  const updatedTag = updated ? document.createElement('span') : undefined;
-  if (updatedTag && updated !== undefined) {
-    updatedTag.className = 'overview-card-tag workflow-updated';
-    updatedTag.textContent = updated;
-    updatedTag.title = `文件更新时间：${new Date(workflow.updatedAt!).toLocaleString('zh-CN')}`;
-  }
-  const configure = document.createElement('button');
-  const configured = Boolean(overviewConfiguredInputs(workflow));
-  configure.className = `overview-card-config${configured ? ' configured' : ''}`;
-  configure.type = 'button';
-  configure.textContent = configured ? '已配置' : '配置';
-  configure.disabled = locked;
-  configure.addEventListener('click', (event) => {
-    event.stopPropagation();
-    openOverviewConfiguration(workflow);
-  });
-  const open = document.createElement('button');
-  open.className = 'overview-card-open';
-  open.type = 'button';
-  open.textContent = '编辑';
-  open.addEventListener('click', (event) => {
-    event.stopPropagation();
-    openOverviewWorkflow(workflow);
-  });
-  const state = document.createElement('span');
-  state.className = 'overview-card-status';
-  state.textContent = overviewStatusLabel(status, selected);
-  metadata.append(kind, inputs, validationTag);
-  if (updatedTag) metadata.appendChild(updatedTag);
-  const actions = document.createElement('div');
-  actions.className = 'overview-card-actions';
-  actions.append(configure, open);
-  footer.append(state, actions);
-  card.append(header, description, metadata, footer);
-
-  card.addEventListener('click', (event) => {
-    if (locked || (event.target as Element).closest('button, input')) return;
-    updateOverviewSelection(rel, !selected);
-  });
-  card.addEventListener('dblclick', (event) => {
-    if ((event.target as Element).closest('button, input')) return;
-    openOverviewWorkflow(workflow);
-  });
-  card.addEventListener('keydown', (event) => {
-    if (event.target !== card) return;
-    if (locked || event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    updateOverviewSelection(rel, !selected);
-  });
-  return card;
-}
+/** 卡片渲染的依赖：本模块的状态与共享操作，实例化一次供每张卡片复用。 */
+const overviewCardDeps: OverviewCardDeps = {
+  document,
+  selectedIndex: (rel) => overviewSelection.indexOf(rel),
+  isRunning: () => Boolean(overviewRun?.active),
+  runItem: (rel) => overviewRunItem(rel),
+  workflowName: (workflow) => overviewWorkflowName(workflow),
+  workflowKind: (workflow) => overviewWorkflowKind(workflow),
+  workflowValidation: (workflow) => overviewWorkflowValidation(workflow),
+  workflowUpdated: (workflow) => overviewWorkflowUpdated(workflow),
+  configuredInputs: (workflow) => overviewConfiguredInputs(workflow),
+  statusLabel: (status, selected) => overviewStatusLabel(status, selected),
+  updateSelection: (rel, checked) => updateOverviewSelection(rel, checked),
+  openConfiguration: (workflow) => openOverviewConfiguration(workflow),
+  openWorkflow: (workflow) => openOverviewWorkflow(workflow),
+};
 
 function renderOverviewQueueRow(rel: string, index: number): HTMLElement {
   const workflow = getBootstrap()?.workflows.find((item) => item.rel === rel);
@@ -730,7 +631,7 @@ function renderOverviewQueueRow(rel: string, index: number): HTMLElement {
 function renderOverview(): void {
   renderOverviewInstances();
   const workflows = filteredOverviewWorkflows();
-  overviewWorkflowGrid.replaceChildren(...workflows.map(renderOverviewCard));
+  overviewWorkflowGrid.replaceChildren(...workflows.map((workflow) => renderOverviewCard(overviewCardDeps, workflow)));
   overviewQueueElement.replaceChildren(...overviewSelection.map(renderOverviewQueueRow));
   document.querySelector<HTMLElement>('#overview-empty')!.classList.toggle('hidden', workflows.length > 0);
   document.querySelector<HTMLElement>('#overview-queue-empty')!.classList.toggle('hidden', overviewSelection.length > 0);

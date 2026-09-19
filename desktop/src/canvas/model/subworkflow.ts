@@ -3,6 +3,7 @@
  * 原 `workflow-editor.js` 的 subWorkflowRef 至 conditionSummary 区间。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { isBindingValue } from '../../shared/workflow/bindings';
 
 export interface SubworkflowDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -11,11 +12,10 @@ export interface SubworkflowDeps {
   $(id: string): HTMLElement;
   showMenu(...args: any[]): void;
   compactValue(value: any, limit?: number): string;
-  isBindingValue(value: any): boolean;
 }
 
 export function createSubworkflowHelpers(deps: SubworkflowDeps) {
-  const { state, vscode, nodeById, $, showMenu, compactValue, isBindingValue } = deps;
+  const { state, vscode, nodeById, $, showMenu, compactValue } = deps;
   function subWorkflowRef(node: any): any {
     if (!node || node.type !== 'task' || node.action !== 'workflow.run') return '';
     const value = node.params && typeof node.params.workflow === 'string' ? node.params.workflow : '';

@@ -1,6 +1,6 @@
 /**
  * 参数/引用 JSON schema 工具：定义类型到 schema 的转换与引用类型兼容判断。
- * 纯函数，无外部依赖；迁移期间 main.ts 以 window.StudioEditorSchema 暴露给旧编辑器。
+ * 纯函数，无外部依赖。
  */
 
 export interface SchemaLike {

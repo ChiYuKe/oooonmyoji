@@ -5,6 +5,7 @@
  * 命令通过 mutate 提交历史，不直接改视图。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { parameterLiteralCache, parameterLiteralCacheKey } from './literal-cache';
 
 export interface EditorCommandsDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -18,8 +19,6 @@ export interface EditorCommandsDeps {
   variableCards(): Record<string, any>;
   variableLinks(): Record<string, any>;
   nextVariableCardId(): string;
-  parameterLiteralCache(): Record<string, any>;
-  parameterLiteralCacheKey(node: any, name: string): string;
   setVariableCardSelection(ids: any): void;
   variableInputTargetAt(...args: any[]): any;
   instanceRunCards(): any[];
@@ -36,7 +35,7 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
   const {
     state, mutate, nodeById, nodes, layout, position, clone, toast,
     variableCards, variableLinks, nextVariableCardId,
-    parameterLiteralCache, parameterLiteralCacheKey, setVariableCardSelection, variableInputTargetAt,
+    setVariableCardSelection, variableInputTargetAt,
     instanceRunCards, displayNameOfDefinition, wrap,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
     variableCardPortY: VARIABLE_CARD_PORT_Y, nodeWidth: NODE_W, runCardWidth: RUN_CARD_W,
@@ -48,33 +47,43 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
   /**
    * 解除某个端口（键为 `nodeId:param`，实例子输入为 `nodeId:runs.N.inputs.param`）的变量绑定。
    * 绑定前的字面量若已缓存则恢复，否则直接移除引用（参数回落到定义默认值）。
+   * 返回这次是否真的释放了一处引用，调用方据此给出提示。
    */
-  function releasePinBinding(key: string): void {
+  function releasePinBinding(key: string): boolean {
     const separator = typeof key === 'string' ? key.indexOf(':') : -1;
-    if (separator < 0) return;
+    if (separator < 0) return false;
     const node = nodeById(key.slice(0, separator));
     const param = key.slice(separator + 1);
-    if (!node) return;
+    if (!node) return false;
     const runMatch = /^runs\.(\d+)\.inputs\.(.+)$/.exec(param);
     if (runMatch) {
       const run = Array.isArray(node.runs) ? node.runs[Number(runMatch[1])] : null;
-      if (run && run.inputs && typeof run.inputs === 'object' && !Array.isArray(run.inputs)) delete run.inputs[runMatch[2]];
-      return;
+      if (run && run.inputs && typeof run.inputs === 'object' && !Array.isArray(run.inputs)) {
+        delete run.inputs[runMatch[2]];
+        return true;
+      }
+      return false;
     }
     const nested = param.startsWith('inputs.');
     const name = nested ? param.slice('inputs.'.length) : param;
     const holder = nested ? node.params && node.params.inputs : node.params;
-    if (!holder || typeof holder !== 'object' || Array.isArray(holder)) return;
-    const cache = parameterLiteralCache();
+    if (!holder || typeof holder !== 'object' || Array.isArray(holder)) return false;
+    const cache = parameterLiteralCache(state);
     const cacheKey = parameterLiteralCacheKey(node, name);
     if (Object.prototype.hasOwnProperty.call(cache, cacheKey)) holder[name] = clone(cache[cacheKey]);
     else delete holder[name];
     delete cache[cacheKey];
+    return true;
   }
 
   /**
    * 删除变量卡片。画布连接优先：没有卡片再引用该变量的端口会同步解除绑定，
    * 同一变量若还有别的卡片存活，则把连线改指到存活卡片上（绑定保留）。
+   *
+   * 另外要收敛**孤儿引用**：参数里的 `{ref}` 与连线映射是两份记录，
+   * `_variableLinks` 可能已经丢了这一项（旧文档、手工改过的 JSON、映射与引用不同步），
+   * 此时光看映射是找不到它的。剩下来的引用会指向已经不存在的变量，
+   * 卡片上继续显示「已连接」——所以删除卡片时按份数扫一遍参数，把引用清掉。
    */
   function removeVariableCards(ids: any): void {
     const targets = [...new Set(Array.isArray(ids) ? ids : [])]
@@ -94,23 +103,85 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
     const survivors = Object.entries(variableCards())
       .filter(([id]) => !targetSet.has(id))
       .map(([id, value]) => ({ id, ...describe(value) }));
-    const unbind = released.filter((item) => !survivors.some((card) => card.scope === item.scope && card.name === item.name));
+    // 被删卡片所代表的变量里，已经没有存活卡片的那些：它们的引用必须清掉。
+    // 这里按**卡片自己**算而不是按映射算——`_variableLinks` 可能压根没有这一项，
+    // 那种孤儿引用同样指向已被删掉的变量。
+    const orphanedRefs = new Set<string>();
+    for (const id of targets) {
+      const card = describe(variableCards()[id]);
+      if (!card.name) continue;
+      if (survivors.some((item) => item.scope === card.scope && item.name === card.name)) continue;
+      orphanedRefs.add(`${card.scope}.${card.name}`);
+    }
+    // 清引用时数一下实际清掉了几处：映射里找不到的孤儿引用也要算进提示。
+    let unbound = 0;
     mutate(() => {
       for (const id of targets) delete variableCards()[id];
       for (const [key, cardId] of Object.entries(variableLinks())) if (targetSet.has(cardId)) delete variableLinks()[key];
       for (const item of released) {
         const survivor = survivors.find((card) => card.scope === item.scope && card.name === item.name);
         if (survivor) variableLinks()[item.key] = survivor.id;
-        else releasePinBinding(item.key);
+        else {
+          releasePinBinding(item.key);
+          unbound += 1;
+        }
       }
+      unbound += revertOrphanVariableRefs(orphanedRefs);
       const selected = state.selectedVariableCardIds && typeof state.selectedVariableCardIds.forEach === 'function'
         ? [...state.selectedVariableCardIds]
         : [];
       setVariableCardSelection(selected.filter((id: any) => !targetSet.has(id)));
     });
-    toast(unbind.length
-      ? `已删除 ${targets.length} 个变量卡片，并解除 ${unbind.length} 处端口引用`
+    toast(unbound
+      ? `已删除 ${targets.length} 个变量卡片，并解除 ${unbound} 处端口引用`
       : `已删除 ${targets.length} 个变量卡片`);
+  }
+
+  /** 清掉指向已彻底删除的变量的参数引用（`${scope}.${name}` 精确匹配，子引用也算）；返回清掉的处数。 */
+  function revertOrphanVariableRefs(refs: Set<string>): number {
+    if (!refs.size) return 0;
+    let cleared = 0;
+    const links = variableLinks();
+    for (const node of nodes()) {
+      if (!node || !node.params || typeof node.params !== 'object' || Array.isArray(node.params)) continue;
+      for (const [name, value] of Object.entries(node.params)) {
+        if (isOrphanRef(value, refs)) {
+          delete node.params[name];
+          delete links[`${node.id}:${name}`];
+          cleared += 1;
+        }
+      }
+      const nested = node.params.inputs;
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        for (const [name, value] of Object.entries(nested)) {
+          if (isOrphanRef(value, refs)) {
+            delete nested[name];
+            delete links[`${node.id}:inputs.${name}`];
+            cleared += 1;
+          }
+        }
+      }
+      if (!Array.isArray(node.runs)) continue;
+      node.runs.forEach((run: any, index: number) => {
+        if (!run || !run.inputs || typeof run.inputs !== 'object' || Array.isArray(run.inputs)) return;
+        for (const [name, value] of Object.entries(run.inputs)) {
+          if (isOrphanRef(value, refs)) {
+            delete run.inputs[name];
+            delete links[`${node.id}:runs.${index}.inputs.${name}`];
+            cleared += 1;
+          }
+        }
+      });
+    }
+    return cleared;
+  }
+
+  function isOrphanRef(value: any, refs: Set<string>): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const ref = value.ref;
+    if (typeof ref !== 'string' || !ref) return false;
+    for (const candidate of refs) if (ref === candidate || ref.startsWith(`${candidate}.`)) return true;
+    return false;
   }
 
   /** 把变量卡片放到指定世界坐标；若附近有兼容端点则吸附到端点旁并建立绑定。 */

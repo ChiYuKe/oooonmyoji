@@ -41,10 +41,14 @@ export interface CanvasState {
   drag: any;
   connect: any;
   variableConnect: any;
+  /** 从任务卡输出口拖出的「节点输出引用」连线（写入 `nodes.<id>.output.<字段>`）。 */
+  referenceConnect: any;
   marquee: any;
   undo: string[];
   redo: string[];
   dirty: boolean;
+  /** 文档版本号：每次真正改动文档 +1；卡片错误标记用它给本地校验做缓存键。 */
+  docVersion: number;
   inspector: string;
   sectionCollapsed?: Record<string, boolean>;
   run: Map<string, any>;
@@ -91,10 +95,12 @@ export function createCanvasState(): CanvasState {
     drag: null,
     connect: null,
     variableConnect: null,
+    referenceConnect: null,
     marquee: null,
     undo: [],
     redo: [],
     dirty: false,
+    docVersion: 0,
     inspector: 'node',
     run: new Map(),
     roi: null,

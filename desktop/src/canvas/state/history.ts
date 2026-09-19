@@ -5,6 +5,7 @@
  * 保留既有快照语义（不引入事件溯源）；连续拖拽等由调用方合并为一次 mutate。
  */
 import type { CanvasState } from './canvas-state';
+import { normalizeRaw as defaultNormalizeRaw } from './normalize';
 
 export interface HistoryDeps {
   state: CanvasState;
@@ -12,8 +13,8 @@ export interface HistoryDeps {
   cleanupReleased(raw: Record<string, any> | null, before: Record<string, any>): string[];
   clearVariableCardSelection(): void;
   nodeById(id: string): any;
-  /** 载入/外部变更时的工作流规范化（原 normalizeRaw）。 */
-  normalizeRaw(raw: unknown): Record<string, any>;
+  /** 载入/外部变更时的工作流规范化；缺省用 `state/normalize` 的默认实现。 */
+  normalizeRaw?(raw: unknown): Record<string, any>;
   setDirty(value?: boolean): void;
   render(): void;
 }
@@ -30,7 +31,8 @@ export interface EditorHistory {
 const MAX_HISTORY = 80;
 
 export function createEditorHistory(deps: HistoryDeps): EditorHistory {
-  const { state, cleanupReleased, clearVariableCardSelection, nodeById, normalizeRaw, setDirty, render } = deps;
+  const { state, cleanupReleased, clearVariableCardSelection, nodeById, setDirty, render } = deps;
+  const normalizeRaw = deps.normalizeRaw ?? defaultNormalizeRaw;
 
   function snapshot(): string {
     return JSON.stringify(state.raw);
@@ -48,12 +50,14 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     cleanupReleased(state.raw, JSON.parse(before));
     if (snapshot() === before) return;
     pushUndo(before);
+    state.docVersion = (state.docVersion || 0) + 1;
     setDirty();
     if (options.render !== false) render();
   }
 
   function restore(text: string): void {
     state.raw = JSON.parse(text);
+    state.docVersion = (state.docVersion || 0) + 1;
     state.selected.clear();
     state.selectedEdge = null;
     state.selectedRun = null;
@@ -69,6 +73,7 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     if (JSON.stringify(next) === before) return;
     if (recordHistory) pushUndo(before);
     state.raw = next;
+    state.docVersion = (state.docVersion || 0) + 1;
     state.selected = new Set([...state.selected].filter((id) => nodeById(id)));
     if (state.selectedEdge) {
       const parent = nodeById(state.selectedEdge.parent);

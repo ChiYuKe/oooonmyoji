@@ -5,6 +5,11 @@
  * 只读文档与模型，不做文档修改；布局常量由调用方传入。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { cardRowLabel, cardRowOf, cardRowParams, hasCardLayout } from '../render/card-layout';
+
+/** 数组输出最多给到第几项的下标引用；单层对象字段最多展开几个。 */
+const REFERENCE_INDEX_LIMIT = 4;
+const REFERENCE_FIELD_LIMIT = 12;
 
 export interface CanvasWorkflowModelDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -33,6 +38,8 @@ export interface CanvasWorkflowModelDeps {
   workflowNodeInputs(node: any): any[];
   nextVariableCardId(): string;
   workflowReference(...args: any[]): any;
+  /** 每个节点自己的参数行高；缺省时全部用 runVariableHeight。 */
+  nodeRowHeight?(node: any): number;
   nodeVariablePins?(node: any): any[];
 }
 
@@ -47,6 +54,13 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     runCardGapX: RUN_CARD_GAP_X, runCardGapY: RUN_CARD_GAP_Y,
     catalogByName, fieldLabel, workflowNodeInputs, nextVariableCardId, workflowReference,
   } = deps;
+  /** 节点参数行的行高：清单声明了固定卡片的节点用双行行样式（更高）。 */
+  const rowHeightOf = deps.nodeRowHeight ?? (() => RUN_VARIABLE_H);
+  /** 参数行的世界坐标 Y（与 editor.nodeHeight 同一套公式，端点/连线才不会错位）。 */
+  function rowCenterY(node: any, index: number): number {
+    return position(node).y + BASE_H + index * rowHeightOf(node) + rowHeightOf(node) / 2;
+  }
+
   function variableTypeOf(scope: string, name: string): string {
     const definition = state.raw[scope] && state.raw[scope][name];
     return definition && typeof definition === 'object' && definition.type ? definition.type : 'any';
@@ -55,10 +69,12 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   const { displayNameOfDefinition, variableDisplayNameOf } = Model;
 
   /**
-   * 卡片参数行显示哪些参数：默认「必填 + 已配置」；
-   * 节点卡片箭头展开后显示动作定义里的全部参数（UE 的显示隐藏引脚）。
+   * 卡片参数行显示哪些参数：清单声明了固定卡片的 Action 用声明里的端点顺序；
+   * 其余默认「必填 + 已配置」，节点卡片箭头展开后显示动作定义里的全部参数。
    */
   function paramRowNames(node: any): string[] {
+    const declared = cardRowParams(node && node.action ? catalogByName(node.action) : null);
+    if (declared) return declared;
     const names = inputParameterNames(node);
     const expanded = paramRowsExpandedSet(state).has(node && node.id);
     if (!expanded) return names;
@@ -73,6 +89,7 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     const params = node.params && typeof node.params === 'object' && !Array.isArray(node.params) ? node.params : {};
     const pins = [];
     const spec = catalogByName(node.action);
+    const card = spec && hasCardLayout(spec) ? spec : null;
     for (const param of paramRowNames(node)) {
       if (!spec || !spec.parameters || !spec.parameters[param]) continue;
       const value = params[param];
@@ -80,16 +97,20 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
       const scope = ref.startsWith('variables.') ? 'variables' : 'inputs';
       const variable = ref.startsWith(`${scope}.`) ? ref.slice(scope.length + 1) : '';
       const definition = spec && spec.parameters ? spec.parameters[param] : null;
+      const row = cardRowOf(card, param);
       pins.push({
         param,
         variable,
         scope,
         type: variable ? variableTypeOf(scope, variable) : definition && definition.type || 'any',
-        label: fieldLabel(param),
+        label: cardRowLabel(row, fieldLabel(param)),
         definition,
         configured: Object.prototype.hasOwnProperty.call(params, param),
         required: Boolean(definition && definition.required),
         value,
+        ...(row && row.control ? { control: row.control } : {}),
+        ...(row && row.on_label ? { onLabel: row.on_label } : {}),
+        ...(row && row.off_label ? { offLabel: row.off_label } : {}),
       });
     }
     for (const variable of workflowNodeInputs(node)) {
@@ -140,7 +161,7 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     const pos = position(node);
     const left = pos.x - VARIABLE_CARD_W - 56;
     const x = left >= 24 ? left : pos.x + NODE_W + 56;
-    const pinY = pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2;
+    const pinY = rowCenterY(node, index);
     return {
       x: Math.round(x / 8) * 8,
       y: Math.max(24, Math.round((pinY - VARIABLE_CARD_PORT_Y) / 8) * 8),
@@ -215,8 +236,7 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   }
 
   function variablePinPosition(node: any, index: number): { x: number; y: number } {
-    const pos = position(node);
-    return { x: pos.x + VARIABLE_PIN_X, y: pos.y + BASE_H + index * RUN_VARIABLE_H + RUN_VARIABLE_H / 2 };
+    return { x: position(node).x + VARIABLE_PIN_X, y: rowCenterY(node, index) };
   }
 
   function variableCompatibleWithPin(scope: string, variableName: string, node: any, param: any): boolean {
@@ -231,6 +251,94 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     if (!definition) return true;
     const variableDefinition = state.raw[scope] && state.raw[scope][variableName];
     return compatibleRefType(definitionSchema(definition), definitionSchema(variableDefinition));
+  }
+
+  /**
+   * 节点输出候选：对象输出逐字段给出引用，数组输出给出整体 + 前几项（元素及其字段），
+   * 其余输出只有整体一个候选。`ref` 就是写进参数的引用文本。
+   *
+   * 数组为什么要给到「项」：`vision.wait_template` 这类输出是匹配数组，而目标参数
+   * （例如 `input.tap_match.match`）只要一个对象——运行时的引用语法支持下标
+   * （`nodes.<id>.output.0`），所以拖过去应该能连，只是要选第几项。
+   */
+  function nodeOutputFields(node: any): Array<{ field: string; label: string; schema: any; ref: string }> {
+    if (!node || !node.id) return [];
+    const spec = node.action ? catalogByName(node.action) : null;
+    const schema = spec && spec.outputSchema ? spec.outputSchema : null;
+    if (!schema || typeof schema !== 'object') return [];
+    const base = `nodes.${node.id}.output`;
+    const candidates: Array<{ field: string; label: string; schema: any; ref: string }> = [];
+    const push = (field: string, label: string, child: any): void => {
+      candidates.push({ field, label, schema: child, ref: field ? `${base}.${field}` : base });
+    };
+    const objectFields = (child: any): Array<[string, any]> => {
+      const properties = child && typeof child === 'object' && child.properties && typeof child.properties === 'object' && !Array.isArray(child.properties)
+        ? child.properties as Record<string, any>
+        : {};
+      return Object.entries(properties).slice(0, REFERENCE_FIELD_LIMIT);
+    };
+    if (schema.type === 'object' && objectFields(schema).length) {
+      for (const [field, child] of objectFields(schema)) {
+        push(field, fieldLabel(field), child);
+        // 再展开一层对象字段（例如 match.x），字段数有上限，避免菜单爆炸。
+        if (child && child.type === 'object') {
+          for (const [nested, nestedSchema] of objectFields(child)) push(`${field}.${nested}`, `${fieldLabel(field)} · ${fieldLabel(nested)}`, nestedSchema);
+        }
+      }
+      return candidates;
+    }
+    push('', '输出', schema);
+    if (schema.type !== 'array') return candidates;
+    const itemSchema = Array.isArray(schema.prefixItems) && schema.prefixItems.length
+      ? schema.prefixItems[0]
+      : (schema.items && typeof schema.items === 'object' ? schema.items : null);
+    // 元素类型未知（没有 items）时不瞎给下标：那种引用在运行时也解析不出字段。
+    if (!itemSchema || !itemSchema.type) return candidates;
+    const declared = Array.isArray(schema.prefixItems) && schema.prefixItems.length
+      ? schema.prefixItems.length
+      : (typeof schema.maxItems === 'number' ? schema.maxItems : REFERENCE_INDEX_LIMIT);
+    const indexes = Math.max(1, Math.min(REFERENCE_INDEX_LIMIT, declared));
+    for (let index = 0; index < indexes; index += 1) {
+      push(String(index), `第 ${index + 1} 项`, itemSchema);
+      if (itemSchema.type === 'object') {
+        for (const [field, child] of objectFields(itemSchema)) push(`${index}.${field}`, `第 ${index + 1} 项 · ${fieldLabel(field)}`, child);
+      }
+    }
+    return candidates;
+  }
+
+  /** 某个输出字段能否绑到目标参数/实例输入上（按值类型比较）。 */
+  function referenceCompatibleWithPin(sourceNode: any, field: string, targetNode: any, param: string): boolean {
+    if (!sourceNode || !targetNode) return false;
+    const candidate = nodeOutputFields(sourceNode).find((item) => item.field === (field || ''))
+      || nodeOutputFields(sourceNode)[0];
+    if (!candidate) return false;
+    const spec = targetNode.action ? catalogByName(targetNode.action) : null;
+    let definition = spec && spec.parameters ? spec.parameters[param] : undefined;
+    if (!definition && typeof param === 'string' && param.startsWith('inputs.')) {
+      const workflowInput = workflowNodeInputs(targetNode).find((item: any) => `inputs.${item.name}` === param);
+      definition = workflowInput && workflowInput.definition;
+    }
+    if (!definition) return true;
+    return compatibleRefType(definitionSchema(definition), definitionSchema(candidate.schema));
+  }
+
+  /** 目标参数能接受源节点输出里的哪些字段（按清单顺序）。 */
+  function referenceFieldsForPin(sourceNode: any, targetNode: any, param: string): Array<{ field: string; label: string; schema: any; ref: string }> {
+    return nodeOutputFields(sourceNode).filter((candidate) => referenceCompatibleWithPin(sourceNode, candidate.field, targetNode, param));
+  }
+
+  /** 节点输出引用的显示名：`nodes.<id>.output.<字段>` → `<节点名>.<字段>`，数组下标写作 `[n]`。 */
+  function referenceDisplayName(reference: unknown): string {
+    const text = typeof reference === 'string' ? reference : '';
+    const match = /^nodes\.([^\.]+)\.output(?:\.(.+))?$/.exec(text);
+    if (!match) return text;
+    const source = nodes().find((item: any) => item && item.id === match[1]);
+    const name = source ? (source.name || source.id) : match[1];
+    if (!match[2]) return name;
+    return match[2].split('.').reduce((label, segment) => (
+      /^\d+$/.test(segment) ? `${label}[${segment}]` : `${label}.${fieldLabel(segment)}`
+    ), name);
   }
 
   function variableCompatibleWithInstanceInput(scope: string, variableName: string, card: any, input: any): boolean {
@@ -301,6 +409,7 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     paramRowsExpanded: () => paramRowsExpandedSet(state),
     syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition, variableCompatibleWithPin,
     variableCompatibleWithInstanceInput, workflowDescriptor, workflowInputs, instanceRunCards, instanceRunInputPosition,
+    nodeOutputFields, referenceCompatibleWithPin, referenceFieldsForPin, referenceDisplayName,
   };
 }
 

@@ -6,6 +6,7 @@
  * 所有文档修改都通过注入的 mutate（History）完成，命令本身不渲染。
  */
 import type { CanvasState } from './canvas-state';
+import { reconcileVariableLinks } from '../model/variable-links';
 
 export interface PointerPoint {
   x: number;
@@ -282,6 +283,9 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       state.selected = new Set(created);
       state.selectedRun = null;
       state.inspector = 'node';
+      // 粘贴出来的节点带着参数的变量引用，但连线项是按节点 id 记的：
+      // 不补上的话同一个绑定会出现两种说法（新节点只显示「引用」）。
+      reconcileVariableLinks(state.raw);
     });
     toast(`已粘贴 ${idMap.size} 个节点`);
     return true;

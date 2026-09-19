@@ -50,17 +50,6 @@ export function createRunEvents(deps: RunEventsDeps) {
     render();
   }
 
-  function normalizeRaw(raw: any): any {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {
-      schema_version: 4, id: 'new_behavior_tree', version: '4.0.0', description: '', resolution: [1920, 1080], root: 'root', inputs: {}, variables: {},
-      nodes: [{ id: 'root', type: 'root', children: ['main'] }, { id: 'main', type: 'sequence', children: ['task_1'] }, { id: 'task_1', type: 'task', action: 'core.capture', params: {} }],
-    };
-    if (!raw.inputs || typeof raw.inputs !== 'object' || Array.isArray(raw.inputs)) raw.inputs = {};
-    if (!raw.variables || typeof raw.variables !== 'object' || Array.isArray(raw.variables)) raw.variables = {};
-    if (!raw._layout || typeof raw._layout !== 'object') raw._layout = {};
-    return raw;
-  }
-
   /**
    * 删除当前选区：实例运行项 → 变量 → 连线/节点。
    * 画布 Delete 键、详情面板 Delete 键与标题栏“删除所选”命令都走这一入口，保证行为一致。
@@ -88,5 +77,5 @@ export function createRunEvents(deps: RunEventsDeps) {
     deleteSelection();
   }
 
-  return { handleRunEvent, normalizeRaw, deleteCurrentSelection };
+  return { handleRunEvent, deleteCurrentSelection };
 }

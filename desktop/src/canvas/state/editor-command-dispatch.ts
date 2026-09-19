@@ -25,11 +25,14 @@ export interface EditorCommandDispatchDeps {
   searchNodeByName(...args: any[]): void;
   exportFullCanvasImage(...args: any[]): void;
   addVariable(scope?: string): void;
+  /** 「变量引用」面板确认后的强制删除：引用一并清掉。 */
+  deleteVariable(scope: string, name: string): void;
   clearVariableCardSelection(): void;
   deleteCurrentSelection(): void;
   renderInspector(): void;
   addVariableCardCommand(value: any): void;
   VariableSystem: any;
+  convertInputToVariable(name: string): void;
 }
 
 export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
@@ -37,6 +40,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     state, mutate, nodes, nodeById, undo, redo, fitView, autoLayout, copySelection, cutSelection,
     pasteClipboard, deleteSelection, addNode, render, focusNode, searchNodeByName, exportFullCanvasImage,
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
+    deleteVariable,
     VariableSystem,
   } = deps;
   function executeEditorCommand(command: string, value?: any): any {
@@ -84,6 +88,20 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     }
     else if (command === 'setVariablePublic') {
       const name = String(value && value.name !== undefined ? value.name : value ?? '');
+      if (value?.scope === 'inputs') {
+        if (value.public) return;
+        const input = state.raw.inputs?.[name];
+        if (!input) return;
+        if (input._autoPublished === true) {
+          mutate(() => {
+            for (const item of Object.values<any>(state.raw.variables || {})) {
+              if (item?.initial_from === name) delete item.initial_from;
+            }
+            delete state.raw.inputs[name];
+          });
+        } else deps.convertInputToVariable(name);
+        return;
+      }
       const definition = state.raw.variables && Object.prototype.hasOwnProperty.call(state.raw.variables, name)
         ? state.raw.variables[name]
         : null;
@@ -94,6 +112,16 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       });
     }
     else if (command === 'addVariable') addVariable('variables');
+    else if (command === 'variablesChanged') {
+      // 文档被别处改过（例如「变量引用」面板里删了变量）：重新渲染变量详情。
+      renderInspector();
+    }
+    else if (command === 'deleteVariable') {
+      // 「变量引用」面板确认后的强制删除：引用一并清掉，参数回落到动作默认值。
+      const scope = value && value.scope === 'inputs' ? 'inputs' : 'variables';
+      const name = String(value && value.name !== undefined ? value.name : '');
+      if (name) deleteVariable(scope, name);
+    }
     else if (command === 'addVariableCard') addVariableCardCommand(value);
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {

@@ -1,8 +1,7 @@
 /**
  * 画布工作流模型：文档数据访问、节点关系与编辑器私有元数据（原 workflow-editor.js 的模型层）。
  *
- * 迁移期以 `window.StudioCanvasModel(state)` 注入旧编辑器；边界类型暂时保持宽松，
- * 待 commands/history/canvas 拆出后再收紧为明确的 WorkflowDocument 类型。
+ * 边界类型暂时保持宽松，待命令/历史等模块收紧后统一定义 WorkflowDocument 类型。
  */
 
 export interface CanvasModelState {

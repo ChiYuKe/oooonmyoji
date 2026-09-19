@@ -1,4 +1,94 @@
 /* Shared semantic palette. Load after component and layout styles. */
+/* Neutral monochrome: recessed canvas, gray panels and white interaction accents. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  background: #141414; color: #dedede;
+  --dark-chrome: #181818; --dark-canvas: #141414; --dark-header: #292929;
+  --dark-selection: #414141; --dark-selection-text: #f2f2f2;
+  --ui-bg: #1c1c1c; --ui-panel: #232323; --ui-field: #191919;
+  --ui-surface: #303030; --ui-hover: #383838; --ui-selected: var(--dark-selection);
+  --ui-line: #343434; --ui-text: #dedede; --ui-muted: #a8a8a8;
+  --ui-danger: #ed9098; --ui-focus: #bfbfbf;
+  --ui-tooltip-bg: #333333; --ui-tooltip-text: #eeeeee;
+  --ui-tooltip-shadow: 0 4px 14px #0005;
+  --bg: var(--dark-canvas); --surface: var(--ui-panel); --surface-raised: var(--ui-surface); --surface-hover: var(--ui-hover);
+  --panel: var(--ui-panel); --panel-2: var(--ui-surface); --border: #484848; --border-soft: var(--ui-line);
+  --text: var(--ui-text); --fg: var(--ui-text); --muted: var(--ui-muted); --status: var(--dark-chrome);
+  --blue: #bfbfbf; --blue-strong: #eeeeee; --accent: var(--ui-focus);
+  --button: #4a4a4a; --button-hover: #595959;
+  --green: #8bc6a4; --red: #ed9098; --yellow: #dbbc7e;
+  --success: var(--green); --danger: var(--red); --warning: var(--yellow); --info: var(--blue);
+  --wire: #aaaaaa; --grid: rgba(255,255,255,.035);
+  --vscode-editor-background: var(--dark-canvas); --vscode-sideBar-background: var(--ui-panel);
+  --vscode-editorWidget-background: var(--ui-surface); --vscode-panel-border: var(--border);
+  --vscode-foreground: var(--ui-text); --vscode-descriptionForeground: var(--ui-muted);
+  --vscode-focusBorder: var(--ui-focus); --vscode-button-background: var(--button); --vscode-button-hoverBackground: var(--button-hover);
+  --vscode-input-background: var(--ui-field); --vscode-list-hoverBackground: var(--ui-hover);
+  --vscode-list-activeSelectionBackground: var(--dark-selection); --vscode-menu-background: var(--ui-panel);
+  --vscode-menu-selectionBackground: var(--dark-selection);
+  --card-bg: #2a2a2a; --card-head: #333333; --card-selected: #343434; --card-selected-head: #444444;
+  --card-line: #595959; --card-rule: #414141; --card-text: #ebebeb; --card-secondary: #c4c4c4;
+  --card-muted: #b0b0b0; --card-icon-bg: #414141; --card-icon: #d6d6d6; --card-port: #bbbbbb;
+}
+:root[data-theme="dark"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) {
+  --dv-group-view-background-color: var(--ui-panel); --dock-tab-row-background: var(--dark-chrome);
+  --dock-panel-background: var(--ui-panel); --dock-panel-header-background: var(--ui-panel);
+  --dv-tabs-and-actions-container-background-color: var(--dark-chrome);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--ui-panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--ui-panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--dark-chrome);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--dark-chrome);
+  --dv-tab-divider-color: var(--ui-line); --dv-separator-border: #141414;
+  --dv-floating-titlebar-background-color: var(--dark-chrome); --dv-floating-border: 1px solid var(--border);
+  --dv-activegroup-visiblepanel-tab-color: #f2f2f2; --dv-inactivegroup-visiblepanel-tab-color: #c4c4c4;
+  --dv-activegroup-hiddenpanel-tab-color: #a8a8a8; --dv-inactivegroup-hiddenpanel-tab-color: #a8a8a8;
+}
+:root[data-theme="dark"] :is(.custom-titlebar, .app-header, .status-bar, .popout-titlebar) { background: var(--dark-chrome); color: var(--ui-text); }
+:root[data-theme="dark"] .status-bar { border-top: 1px solid var(--ui-line); }
+:root[data-theme="dark"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) .dv-tab.dv-inactive-tab { background: transparent; color: var(--ui-muted); }
+:root[data-theme="dark"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) .dv-tab.dv-inactive-tab:hover { background: var(--ui-surface); color: var(--ui-text); }
+:root[data-theme="dark"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) .dv-tab.dv-active-tab { background: var(--ui-panel); color: var(--dark-selection-text); box-shadow: inset 0 2px var(--ui-focus); }
+:root[data-theme="dark"] .dv-tab .dv-default-tab .dv-default-tab-content { color: inherit; }
+:root[data-theme="dark"] :is(.module-command-strip, .content-browser-toolbar, .content-browser-pane-header, .ui-section-header, .source-tabs, #topbar) { background: var(--dark-header); border-color: var(--ui-line); }
+:root[data-theme="dark"] :is(.content-browser-tree, .content-browser-items, .tree-content, .variables-module) { background: var(--ui-panel); }
+:root[data-theme="dark"] :is(.content-item.selected, .content-item.editing, .content-folder-row.selected, .tree-row.selected, .overview-queue-row.selected, .settings-nav-item.active) { background: var(--dark-selection); color: var(--dark-selection-text); }
+:root[data-theme="dark"] :is(.content-item:hover, .step-overview:hover, .step-details) { background: var(--ui-surface); }
+:root[data-theme="dark"] .content-item.selected:hover { background: var(--dark-selection); }
+:root[data-theme="dark"] :is(.content-folder-row, .content-item) { color: var(--ui-text); }
+:root[data-theme="dark"] :is(.content-folder-row > svg, .content-item.folder .content-item-preview svg) { color: #bdbdbd; }
+:root[data-theme="dark"] :is(.content-browser-search, .content-browser-pane-search, .ui-input, .ui-dropdown-button) { background: var(--ui-field); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme="dark"] :is(.content-browser-search, .content-browser-pane-search):focus-within { border-color: var(--ui-focus); }
+:root[data-theme="dark"] :is(.ui-input, .content-browser-search input, .content-browser-pane-search input)::placeholder { color: var(--ui-muted); }
+:root[data-theme="dark"] .ui-segmented .ui-segment.active { background: var(--dark-selection); color: var(--dark-selection-text); }
+:root[data-theme="dark"] .ui-checkbox { border-color: #808080; }
+:root[data-theme="dark"] .ui-checkbox:checked { background: #bfbfbf; border-color: #bfbfbf; }
+:root[data-theme="dark"] .ui-checkbox:checked::after { border-color: #141414; }
+:root[data-theme="dark"] #module-workbench #run-button { background: var(--button); color: #ffffff; }
+:root[data-theme="dark"] #module-workbench #run-button:hover:not(:disabled) { background: var(--button-hover); }
+:root[data-theme="dark"] :is(.titlebar-dropdown, .desktop-more-menu, .instance-menu, .content-context-menu) { background: var(--ui-panel); border-color: var(--border); }
+:root[data-theme="dark"] :is(.titlebar-dropdown button, .desktop-more-menu button, .instance-option, .content-context-menu button):is(:hover, :focus-visible) { background: var(--dark-selection); color: var(--dark-selection-text); }
+:root[data-theme="dark"] :is(.menu-trigger:hover, .menu-root.open > .menu-trigger, .window-control:not(.close):hover) { background: var(--ui-hover); }
+:root[data-theme="dark"] :is(.menu-separator, .desktop-more-separator) { background: var(--ui-line); }
+:root[data-theme="dark"] :is(.reference-graph, #canvas-wrap) { background-color: var(--dark-canvas); }
+:root[data-theme="dark"] #canvas-wrap { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
+:root[data-theme="dark"] #workflow-breadcrumb { background: rgba(28,28,28,.92); color: var(--ui-muted); }
+:root[data-theme="dark"] #minimap { background: #1e1e1e; border: 1px solid var(--border); box-shadow: none; }
+:root[data-theme="dark"] .mini-node { fill: #777777; stroke: #aaaaaa; }
+:root[data-theme="dark"] .mini-viewport { fill: rgba(255,255,255,.07); stroke: #bfbfbf; }
+:root[data-theme="dark"] #viewport-tools { background: var(--ui-panel); border-color: var(--border); }
+:root[data-theme="dark"] #inspector-body .section-header { background: var(--dark-header); color: var(--ui-text); border-color: var(--ui-line); }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background-color: #505050; }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background-color: #686868; }
+:root[data-theme="dark"] .content-item.folder .content-item-preview svg { fill: rgba(255,255,255,.06); }
+:root[data-theme="dark"] :is(.content-item-preview svg, .content-item.current .content-item-name, .instance-option-check, .titlebar-dropdown .menu-check) { color: #d0d0d0; }
+:root[data-theme="dark"] :is(.content-item.editing, .content-item.editing:hover) { background: var(--dark-selection); box-shadow: inset 0 0 0 1px var(--ui-focus); }
+:root[data-theme="dark"] .content-item-name-edit { border-color: var(--ui-focus); background: var(--ui-field); color: var(--ui-text); }
+:root[data-theme="dark"] :is(.onmyoji-dockview, .dockview-popout-host) {
+  --dv-drag-over-background-color: rgba(255,255,255,.08);
+  --dv-drag-over-border: 1px solid #999999; --dv-edge-dock-indicator-color: #bfbfbf;
+}
+:root[data-theme="dark"] :is(.onmyoji-dockview, .dockview-popout-host) .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled)::after { background: #bfbfbf; box-shadow: 0 0 6px #ffffff20; }
+
 :root[data-theme="light"] {
   color-scheme: light;
   --light-chrome: #e7eaed; --light-canvas: #dfe4e8; --light-header: #e9edf0;
@@ -31,6 +121,11 @@
 :root[data-theme="light"] .ui-segmented .ui-segment:hover:not(:disabled) { background: var(--ui-hover); }
 :root[data-theme="light"] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) {
   --dv-group-view-background-color: var(--ui-panel); --dock-tab-row-background: var(--light-chrome);
+  --dv-tabs-and-actions-container-background-color: var(--light-chrome);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--ui-panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--ui-panel);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--light-chrome);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--light-chrome);
   --dock-panel-background: var(--ui-panel); --dock-panel-header-background: var(--ui-panel);
   --dv-tab-divider-color: var(--ui-line); --dv-separator-border: #c8d0d7;
   --dv-floating-titlebar-background-color: var(--light-chrome); --dv-floating-border: 1px solid var(--border);
@@ -77,3 +172,203 @@
 :root[data-theme="light"] :is(.step-overview:hover, .step-details) { background: #eaf0f4; }
 :root[data-theme="light"] .source-tabs .ui-button.active { background: var(--light-selection); color: var(--light-selection-text); }
 /* Screenshots and assets retain their actual pixels. No image inversion filters. */
+
+/* Palette variants retain the dark component rules and switch semantic tokens. */
+:root[data-theme="dark"][data-palette="graphite"] {
+  --dark-chrome: #252525; --dark-canvas: #262626; --dark-header: #363636;
+  --dark-selection: #535353; --dark-selection-text: #ffffff;
+  --ui-bg: #2b2b2b; --ui-panel: #303030; --ui-field: #272727;
+  --ui-surface: #3b3b3b; --ui-hover: #454545; --ui-line: #484848;
+  --ui-text: #e4e4e4; --ui-muted: #b5b5b5; --ui-focus: #d0d0d0; --border: #626262;
+  --button: #555555; --button-hover: #666666;
+  --card-bg: #373737; --card-head: #404040; --card-selected: #464646; --card-selected-head: #535353;
+  --card-line: #737373; --card-rule: #505050; --card-text: #eeeeee; --card-secondary: #d0d0d0; --card-muted: #bcbcbc;
+}
+:root[data-theme="dark"][data-palette="warm"] {
+  --dark-chrome: #211e1b; --dark-canvas: #211e1b; --dark-header: #35302b;
+  --dark-selection: #51473a; --dark-selection-text: #fff3df;
+  --ui-bg: #28241f; --ui-panel: #2d2924; --ui-field: #231f1b;
+  --ui-surface: #3a342d; --ui-hover: #463e34; --ui-line: #463d33;
+  --ui-text: #e9dfd1; --ui-muted: #b9ad9d; --ui-focus: #d0b892; --border: #625445;
+  --button: #61503e; --button-hover: #736049; --wire: #b9a78c;
+  --card-bg: #342e27; --card-head: #41382e; --card-selected: #443a2d; --card-selected-head: #564736;
+  --card-line: #75634f; --card-rule: #514536; --card-text: #f3e7d7; --card-secondary: #d6c6b1;
+  --card-muted: #bcad99; --card-icon: #dfc8a6; --card-port: #cfb68f;
+}
+:root[data-theme="dark"][data-palette="contrast"] {
+  --dark-chrome: #080808; --dark-canvas: #080808; --dark-header: #202020;
+  --dark-selection: #505050; --dark-selection-text: #ffffff;
+  --ui-bg: #101010; --ui-panel: #161616; --ui-field: #080808;
+  --ui-surface: #292929; --ui-hover: #3b3b3b; --ui-line: #666666;
+  --ui-text: #ffffff; --ui-muted: #cccccc; --ui-focus: #ffffff; --border: #909090;
+  --button: #505050; --button-hover: #666666; --wire: #dddddd;
+  --card-bg: #1b1b1b; --card-head: #282828; --card-selected: #333333; --card-selected-head: #484848;
+  --card-line: #aaaaaa; --card-rule: #666666; --card-text: #ffffff; --card-secondary: #e6e6e6;
+  --card-muted: #cccccc; --card-icon: #ffffff; --card-port: #eeeeee;
+}
+/* Use the chosen palette on secondary surfaces as well as the main panels. */
+:root[data-theme="dark"][data-palette] { background: var(--dark-canvas); color: var(--ui-text); --ui-tooltip-bg: var(--ui-surface); --ui-tooltip-text: var(--ui-text); }
+:root[data-theme="dark"][data-palette] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) { --dv-separator-border: var(--dark-canvas); }
+:root[data-theme="dark"][data-palette] #minimap { background: var(--ui-bg); }
+:root[data-theme="dark"][data-palette] #workflow-breadcrumb { background: var(--ui-bg); }
+:root[data-theme="dark"][data-palette] .mini-viewport { stroke: var(--ui-focus); }
+:root[data-theme="dark"][data-palette] .dv-tab.dv-active-tab { color: var(--dark-selection-text); }
+
+/* Vision tools share the workbench palette, including their detached windows. */
+:root[data-theme] :is(.vision-toolbar, .live-stepbar, .vision-browser-head) { background: var(--ui-surface); border-color: var(--ui-line); }
+:root[data-theme] .vision-side { background: var(--ui-bg); border-color: var(--ui-line); }
+:root[data-theme] .vision-stage { background: var(--bg); }
+:root[data-theme] .vision-stage-mask { background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--ui-muted); }
+:root[data-theme] :is(.vision-title-text, .vision-card h3, .vision-browser-title, .vision-browser-group-title, .vision-browser-item-name, .vision-match-list li, .vision-pre, .live-workflow, .live-step-name) { color: var(--ui-text); }
+:root[data-theme] #vision-hint { color: var(--ui-muted); }
+:root[data-theme] :is(.vision-row input[type="text"], .vision-row label input, .vision-inline select, .live-interval select) { background: var(--ui-field); border-color: var(--border); color: var(--ui-text); }
+:root[data-theme] .vision-row input::placeholder { color: var(--ui-muted); }
+:root[data-theme] .vision-inline input { accent-color: var(--ui-focus); }
+:root[data-theme] .vision-app :is(button, input, select):focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+:root[data-theme] :is(.vision-mode-btn.active, .vision-command.primary, .vision-command.active, .vision-match-list li.selected) { background: var(--ui-selected); border-color: var(--ui-focus); color: var(--ui-text); }
+:root[data-theme] :is(.vision-command, .vision-mode-btn, .vision-btn):hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] .vision-spinner { border-color: var(--ui-line); border-top-color: var(--ui-focus); }
+:root[data-theme] .vision-template-preview { background: var(--ui-field); }
+:root[data-theme] .vision-browser-panel { background: var(--ui-panel); border-color: var(--border); }
+:root[data-theme] .vision-browser-backdrop { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+:root[data-theme] .vision-browser-item:hover { border-color: var(--ui-focus); }
+:root[data-theme] .vision-browser-item img { background: repeating-conic-gradient(var(--ui-field) 0% 25%, var(--ui-surface) 0% 50%) 0 0 / 14px 14px; }
+:root[data-theme] .live-legend { background: var(--ui-panel); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme] :is(.live-pill, .live-pill.cancelled) { background: var(--ui-surface); color: var(--ui-muted); border-color: var(--border); }
+:root[data-theme] .live-pill.running { background: var(--ui-selected); color: var(--ui-text); border-color: var(--ui-focus); }
+:root[data-theme] .live-pill.succeeded { background: color-mix(in srgb, var(--success) 12%, var(--ui-panel)); color: var(--success); border-color: var(--success); }
+:root[data-theme] :is(.live-pill.failed, .vision-btn.danger) { background: color-mix(in srgb, var(--danger) 12%, var(--ui-panel)); color: var(--danger); border-color: var(--danger); }
+:root[data-theme] .vision-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 22%, var(--ui-panel)); color: var(--danger); }
+:root[data-theme] .live-pill.branch_miss { background: color-mix(in srgb, var(--warning) 12%, var(--ui-panel)); color: var(--warning); border-color: var(--warning); }
+:root[data-theme] .vision-match-list li.miss { color: var(--warning); }
+:root[data-theme] .vision-statusbar #vision-status.error { color: var(--danger); }
+
+/* Overview and its configuration dialog use the same palette in every window. */
+:root[data-theme] .overview-module { background: var(--ui-bg); color: var(--ui-text); }
+:root[data-theme] :is(.overview-toolbar, .overview-section-header, .overview-config-header, .overview-config-footer) { background: var(--ui-surface); border-color: var(--ui-line); }
+:root[data-theme] :is(.overview-queue-panel, .overview-config-dialog, .overview-card) { background: var(--ui-panel); color: var(--ui-text); border-color: var(--ui-line); }
+:root[data-theme] :is(.overview-library, .overview-card-footer, .overview-queue-row, .overview-queue-summary) { border-color: var(--ui-line); }
+:root[data-theme] :is(.overview-title strong, .overview-section-header strong, .overview-card-title strong, .overview-queue-main strong, .overview-queue-summary strong, .overview-config-header strong, .overview-config-field-heading label > span, .overview-config-empty strong) { color: var(--ui-text); }
+:root[data-theme] :is(.overview-title > svg, .overview-title span, .overview-search svg, .overview-instance-field, .overview-section-header span, .overview-card-title span, .overview-card-description, .overview-card-tag, .overview-card-tag.workflow-updated, .overview-card-status, .overview-queue-main span, .overview-queue-summary, .overview-empty, .overview-config-header span, .overview-config-field-heading label > code, .overview-config-field-heading span, .overview-config-field p, .overview-config-field small, .overview-config-rect label, .overview-config-switch em, .overview-config-empty, .overview-config-empty svg, .overview-config-footer > span) { color: var(--ui-muted); }
+:root[data-theme] :is(.overview-search, .overview-instance-field select, .overview-config-control, .overview-config-rect input) { background: var(--ui-field); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme] .overview-search input { color: var(--ui-text); }
+:root[data-theme] .overview-search input::placeholder { color: var(--ui-muted); }
+:root[data-theme] .overview-search:focus-within { border-color: var(--ui-focus); }
+:root[data-theme] :is(.overview-config-control:focus, .overview-config-rect input:focus) { border-color: var(--ui-focus); box-shadow: 0 0 0 1px var(--ui-focus); }
+:root[data-theme] :is(.overview-module, .overview-config-dialog) :is(button, select, input[type="checkbox"]):focus-visible,
+:root[data-theme] .overview-card:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+:root[data-theme] :is(.overview-command, .overview-card-config, .overview-card-open, .overview-config-button, .overview-config-button.secondary) { background: var(--ui-surface); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme] :is(.overview-command.primary, .overview-config-button.primary, .overview-order-badge) { background: var(--ui-selected); color: var(--ui-text); border-color: var(--ui-focus); }
+:root[data-theme] :is(.overview-command, .overview-command.primary, .overview-card-config, .overview-card-open, .overview-config-button, .overview-config-button.primary, .overview-config-button.secondary):hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); border-color: var(--ui-focus); }
+:root[data-theme] :is(.overview-selection-actions button, .overview-queue-actions button, .overview-config-header button) { color: var(--ui-muted); }
+:root[data-theme] :is(.overview-selection-actions button, .overview-queue-actions button, .overview-config-header button):hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] .overview-card:hover { background: var(--ui-surface); border-color: var(--border); }
+:root[data-theme] .overview-card.selected { background: var(--ui-selected); border-color: var(--ui-focus); }
+:root[data-theme] .overview-card-check { accent-color: var(--ui-focus); }
+:root[data-theme] .overview-queue-row.current { background: var(--ui-surface); }
+:root[data-theme] .overview-queue-row.selected { background: var(--ui-selected); color: var(--ui-text); }
+:root[data-theme] .overview-queue-index { background: var(--ui-surface); color: var(--ui-text); }
+:root[data-theme] :is(.overview-card-tag.workflow-validation-valid, .overview-card.succeeded .overview-card-status) { color: var(--success); }
+:root[data-theme] :is(.overview-card-tag.workflow-validation-invalid, .overview-card.failed .overview-card-status) { color: var(--danger); }
+:root[data-theme] :is(.overview-card-tag.workflow-validation-unknown, .overview-card.running .overview-card-status, .overview-card-config.configured) { color: var(--warning); }
+:root[data-theme] .overview-queue-row.running .overview-queue-index { background: color-mix(in srgb, var(--warning) 12%, var(--ui-panel)); color: var(--warning); }
+:root[data-theme] .overview-queue-row.succeeded .overview-queue-index { background: color-mix(in srgb, var(--success) 12%, var(--ui-panel)); color: var(--success); }
+:root[data-theme] .overview-queue-row.failed .overview-queue-index { background: color-mix(in srgb, var(--danger) 12%, var(--ui-panel)); color: var(--danger); }
+:root[data-theme] .overview-command.danger { background: color-mix(in srgb, var(--danger) 12%, var(--ui-panel)); color: var(--danger); border-color: var(--danger); }
+:root[data-theme] .overview-command.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 22%, var(--ui-panel)); color: var(--danger); border-color: var(--danger); }
+:root[data-theme] .overview-config-modal { background: color-mix(in srgb, var(--bg) 75%, transparent); }
+:root[data-theme] .overview-config-field { background: var(--ui-bg); border-color: var(--ui-line); }
+:root[data-theme] .overview-config-switch > span { background: var(--border); }
+:root[data-theme] .overview-config-switch > span::after { background: var(--ui-text); }
+:root[data-theme] .overview-config-switch input:checked + span { background: var(--ui-focus); }
+:root[data-theme] .overview-config-switch input:checked + span::after { background: var(--ui-field); }
+:root[data-theme] .overview-config-switch input:focus-visible + span { box-shadow: 0 0 0 2px var(--ui-focus); }
+
+/* Reference viewer: three-column reading order and palette-aware resource cards. */
+:root[data-theme] :is(.reference-viewer, .reference-viewer-module) { background: var(--ui-bg); color: var(--ui-text); }
+:root[data-theme] .reference-viewer { container-type: inline-size; }
+:root[data-theme] .reference-viewer-header { min-height: 46px; background: var(--ui-panel); border-color: var(--ui-line); padding-inline: 12px; }
+:root[data-theme] .reference-viewer-trail { flex: 1; min-width: 0; overflow-x: auto; border: 0; background: transparent; padding: 0; gap: 4px; }
+:root[data-theme] .reference-trail-crumb { flex: 0 0 auto; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ui-muted); font: 11px/26px var(--ui-font); }
+:root[data-theme] .reference-trail-crumb.current { background: var(--ui-selected); color: var(--ui-text); }
+:root[data-theme] .reference-trail-crumb:hover { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] .reference-trail-sep { color: var(--ui-muted); margin: 0 2px; }
+:root[data-theme] .reference-workspace { grid-template-columns: 224px minmax(0, 1fr); }
+:root[data-theme] .reference-sidebar { padding: 16px 12px; overflow-y: auto; background: var(--ui-panel); border-color: var(--ui-line); }
+:root[data-theme] .reference-search { height: 32px; border-radius: 5px; background: var(--ui-field); border-color: var(--border); color: var(--ui-muted); }
+:root[data-theme] .reference-search input { color: var(--ui-text); }
+:root[data-theme] .reference-search input::placeholder { color: var(--ui-muted); }
+:root[data-theme] .reference-search:focus-within { border-color: var(--ui-focus); }
+:root[data-theme] .reference-filter-row { margin-top: 12px; color: var(--ui-muted); }
+:root[data-theme] .reference-filter-row select { height: 28px; background: var(--ui-field); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme] .reference-sidebar-summary { margin-top: 22px; padding: 16px 0; border-color: var(--ui-line); color: var(--ui-muted); line-height: 1.7; }
+:root[data-theme] .reference-sidebar-summary strong { color: var(--ui-text); font-size: 13px; margin-bottom: 8px; }
+:root[data-theme] .reference-sidebar-summary span { white-space: normal; overflow-wrap: anywhere; margin-bottom: 8px; }
+:root[data-theme] .reference-help { margin-top: 24px; font-size: 11px; line-height: 1.8; color: var(--ui-muted); }
+:root[data-theme] .reference-graph-canvas { background-color: var(--bg); background-image: radial-gradient(var(--ui-line) 1px, transparent 1px); background-size: 20px 20px; }
+:root[data-theme] :is(.reference-graph-edges, .reference-graph-nodes) { transform-origin: 0 0; }
+:root[data-theme] .reference-graph-edge { stroke: var(--wire); opacity: .65; }
+:root[data-theme] .reference-graph-node { height: 76px; min-height: 76px; border-radius: 8px; padding: 12px; background: var(--ui-panel); border-color: var(--border); color: var(--ui-text); gap: 10px; }
+:root[data-theme] .reference-graph-node::before { background: var(--ui-muted); width: 2px; }
+:root[data-theme] .reference-graph-node.target { background: var(--ui-selected); border-color: var(--ui-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-focus) 10%, transparent); }
+:root[data-theme] .reference-graph-node.target::before { background: var(--ui-focus); }
+:root[data-theme] .reference-graph-node.missing { border-color: var(--danger); }
+:root[data-theme] .reference-graph-node.missing::before { background: var(--danger); }
+:root[data-theme] .reference-graph-node:hover:not(.target) { background: var(--ui-hover); border-color: var(--ui-focus); }
+:root[data-theme] .reference-graph-node .reference-graph-node-icon { background: var(--ui-field); color: var(--ui-text); border-radius: 6px; width: 32px; height: 32px; }
+:root[data-theme] .reference-graph-node-text strong { color: var(--ui-text); font-size: 12px; }
+:root[data-theme] :is(.reference-graph-node-text small, .reference-graph-node-text em) { color: var(--ui-muted); }
+:root[data-theme] .reference-column-heading { position: absolute; top: 36px; color: var(--ui-muted); font-size: 12px; font-weight: 600; padding-bottom: 12px; border-bottom: 1px solid var(--ui-line); }
+:root[data-theme] .reference-column-empty { position: absolute; padding: 24px 10px; border: 1px dashed var(--border); border-radius: 8px; text-align: center; color: var(--ui-muted); font-size: 11px; }
+:root[data-theme] .reference-zoom-controls { border-radius: 6px; background: var(--ui-panel); border-color: var(--border); gap: 4px; padding: 5px; }
+:root[data-theme] .reference-zoom-controls button { color: var(--ui-text); border-radius: 3px; }
+:root[data-theme] .reference-zoom-controls button:hover { background: var(--ui-hover); }
+:root[data-theme] .reference-zoom-controls .reference-fit { width: 86px; font-size: 11px; }
+:root[data-theme] .reference-viewer :is(button, select):focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+:root[data-theme] .reference-viewer-footer { height: 28px; flex-basis: 28px; line-height: 28px; background: var(--ui-panel); border-color: var(--ui-line); color: var(--ui-muted); }
+:root[data-theme] :is(.reference-loading, .reference-section-empty) { color: var(--ui-muted); }
+@container (max-width: 650px) {
+  :root[data-theme] .reference-workspace { grid-template-columns: 168px minmax(0, 1fr); }
+  :root[data-theme] .reference-sidebar { padding: 12px 8px; }
+  :root[data-theme] .reference-filter-row { flex-direction: column; align-items: stretch; gap: 6px; }
+  :root[data-theme] .reference-filter-row select { width: 100%; }
+}
+
+/* Variable references are workbench UI, not the theme-independent graph cards. */
+:root[data-theme] :is(.variable-references-module, .variable-references, .variable-references-body) { background: var(--ui-panel); color: var(--ui-text); }
+:root[data-theme] :is(.variable-references-header, .variable-references-footer) { background: var(--ui-surface); border-color: var(--ui-line); }
+:root[data-theme] :is(.variable-references-heading strong, .variable-reference-text strong) { color: var(--ui-text); }
+:root[data-theme] :is(.variable-references-heading small, .variable-reference-text small, .variable-reference-icon, .variable-references-hint) { color: var(--ui-muted); }
+:root[data-theme] .variable-reference-row { background: var(--ui-bg); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme] .variable-reference-row.linked { border-left-color: var(--ui-focus); }
+:root[data-theme] .variable-reference-row.initializer { border-left-color: var(--warning); }
+:root[data-theme] .variable-reference-row:hover { background: var(--ui-hover); border-color: var(--ui-focus); }
+:root[data-theme] .variable-reference-badge { background: var(--ui-surface); border-color: var(--ui-line); color: var(--ui-muted); }
+:root[data-theme] .variable-reference-badge.linked { background: var(--ui-selected); border-color: var(--border); color: var(--ui-text); }
+:root[data-theme] .variable-references .panel-action { color: var(--ui-text); }
+:root[data-theme] .variable-references .panel-action:hover:not(:disabled) { background: var(--ui-hover); }
+:root[data-theme] .variable-references button:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+:root[data-theme] .variable-references-footer .panel-action.danger { background: color-mix(in srgb, var(--danger) 12%, var(--ui-panel)); border-color: var(--danger); color: var(--danger); }
+:root[data-theme] .variable-references-footer .panel-action.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 22%, var(--ui-panel)); border-color: var(--danger); color: var(--danger); }
+
+/* Detached windows own their Dockview theme root; do not inherit library chrome. */
+:root[data-theme] .dockview-popout-host .popout-titlebar { border-color: var(--ui-line); }
+:root[data-theme] .dockview-popout-host :is(.popout-title, .popout-window-controls button) { color: var(--ui-text); }
+:root[data-theme] .dockview-popout-host .popout-window-controls button:not(:last-child):hover { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] .dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container { background-color: var(--dock-tab-row-background); }
+
+/* Nested inspector values belong to the UI palette, not graph node palettes. */
+:root[data-theme] #inspector-body .object-array-card { background: var(--ui-bg); color: var(--ui-text); border: 1px solid var(--ui-line); }
+:root[data-theme] #inspector-body .object-array-head { background: var(--ui-surface); border-color: var(--ui-line); }
+:root[data-theme] #inspector-body .object-array-head:hover { background: var(--ui-hover); }
+:root[data-theme] #inspector-body .object-array-title { color: var(--ui-text); }
+:root[data-theme] #inspector-body :is(.object-array-fold, .object-array-fold.folded, .object-array-move, .object-array-remove, .scalar-array-remove) { color: var(--ui-muted); }
+:root[data-theme] #inspector-body :is(.object-array-fold, .object-array-move, .object-array-remove, .scalar-array-remove):hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] #inspector-body :is(.object-array-remove, .scalar-array-remove):hover:not(:disabled) { color: var(--ui-danger); }
+:root[data-theme] #inspector-body :is(.structured-add, .structured-mode-toggle, .field-binding-toggle) { background: var(--ui-surface); border-color: var(--ui-line); color: var(--ui-text); }
+:root[data-theme] #inspector-body :is(.structured-add, .structured-mode-toggle, .field-binding-toggle):hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] #inspector-body :is(.object-array, .scalar-array, .structured-shell) :is(input:not([type="checkbox"]):not([type="color"]), select, textarea) { background: var(--ui-field); color: var(--ui-text); border-color: var(--border); }
+:root[data-theme] #inspector-body :is(.object-array, .scalar-array, .structured-shell) :is(input, select, textarea, button):focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
+:root[data-theme] #inspector-body .parameter-bound-note { color: var(--ui-muted); }
+:root[data-theme] #inspector-body .section-header:hover { background: var(--ui-hover); }
+:root[data-theme] #inspector-body .danger:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-danger) 12%, var(--ui-panel)); color: var(--ui-danger); }

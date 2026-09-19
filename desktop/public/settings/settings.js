@@ -27,7 +27,7 @@
     if (!choice.checked) return;
     const saved = theme.set(choice.value);
     sync(theme.get());
-    root.querySelector('#settings-theme-feedback').textContent = saved ? `已切换到${theme.get() === 'light' ? '浅色' : '深色'}，下次启动沿用。` : '主题保存失败，已保留原设置。';
+    root.querySelector('#settings-theme-feedback').textContent = saved ? `已切换到${theme.name(theme.get())}，下次启动沿用。` : '主题保存失败，已保留原设置。';
   }));
 
   const shortcuts = window.StudioShortcuts;

@@ -1,18 +1,41 @@
-/* Studio SVG cards: shared across tasks, instance runs and variable sources.
- * Load after theme adapters; no layout dimensions or port coordinates here. */
-:root {
-  --card-bg: #25282b; --card-head: #2e3338; --card-selected: #2c353d; --card-selected-head: #394b59;
-  --card-line: #424a51; --card-rule: #353c42; --card-text: #e2e7ec; --card-secondary: #b1bdc7;
-  --card-muted: #95a4b0; --card-icon-bg: #384149; --card-icon: #adc0cf; --card-port: #a2b3c1;
+/* Cards own the --card-* palette: theme palettes on :root must never set --card-* directly.
+ * 卡面底色取自当前界面主题的语义表面色 --ui-*（默认/石墨/暖色/对比/浅色都自动跟随），
+ * 分类色只落在标题带、左侧色条、图标与描边上——卡身保持中性，一屏几十张卡也不花。 */
+.studio-card {
+  --card-tint: #98a6bc;
+  --card-bg: var(--ui-panel, #22262d);
+  --card-head: color-mix(in srgb, var(--card-tint) 32%, var(--ui-surface, #2b313a));
+  --card-line: color-mix(in srgb, var(--card-tint) 30%, var(--ui-line, #454e5a));
+  --card-field: var(--ui-field, #1a1f27);
+  --card-text: var(--ui-text, #f1f4fa);
+  --card-secondary: color-mix(in srgb, var(--ui-text, #f1f4fa) 70%, var(--ui-muted, #aab7c9));
+  --card-muted: var(--ui-muted, #aab7c9);
+  --card-icon-bg: color-mix(in srgb, var(--card-tint) 16%, var(--card-head));
+  --card-icon: color-mix(in srgb, var(--card-tint) 72%, var(--ui-text, #ffffff));
+  --card-port: color-mix(in srgb, var(--card-tint) 78%, var(--ui-text, #b8cce6));
+  --success: var(--green, #8cd4a3); --warning: var(--yellow, #f0c977); --danger: var(--red, #f1939e);
 }
-:root[data-theme="light"] {
-  --card-bg: #fbfcfd; --card-head: #edf2f6; --card-selected: #f1f6fa; --card-selected-head: #d8e5ef;
-  --card-line: #b6c4cf; --card-rule: #dde5eb; --card-text: #293d4b; --card-secondary: #425d70;
-  --card-muted: #5e7282; --card-icon-bg: #dde7ef; --card-icon: #526e84; --card-port: #6e899e;
+/* 分类只改 --card-tint：标题带/色条/图标按它派生，卡身不动。 */
+.studio-card.type-root { --card-tint: #c1849a; }
+.studio-card.type-sequence { --card-tint: #c6a765; }
+.studio-card.type-selector { --card-tint: #7fb894; }
+.studio-card:is(.type-parallel, .type-simple_parallel) { --card-tint: #74aec2; }
+.studio-card:is(.type-branch, .type-switch) { --card-tint: #bd87b0; }
+.studio-card.type-repeat_until { --card-tint: #c98f68; }
+.studio-card:is(.category-vision) { --card-tint: #7f9fd6; }
+.studio-card:is(.category-wait) { --card-tint: #79b6b8; }
+.studio-card:is(.category-input) { --card-tint: #d09a6e; }
+.studio-card:is(.category-workflow, .type-instance_parallel, .instance-run-card) { --card-tint: #a495d4; }
+.studio-card.category-utility { --card-tint: #a3aebd; }
+.studio-card.variable-card { --card-tint: #9fbe8a; }
+.studio-card {
+  --card-selected: color-mix(in srgb, var(--card-tint) 18%, var(--card-bg));
+  --card-selected-head: color-mix(in srgb, var(--card-tint) 26%, var(--card-head));
+  --card-rule: color-mix(in srgb, var(--card-tint) 14%, var(--card-bg));
 }
 :root[data-theme] .studio-card .card-body { fill: var(--card-bg); stroke: var(--card-line); stroke-width: 1; filter: none; }
 :root[data-theme] .studio-card .card-head { fill: var(--card-head); filter: none; }
-:root[data-theme] .studio-card.selected .card-body { fill: var(--card-selected); stroke: var(--card-line); stroke-width: 1; filter: none; }
+:root[data-theme] .studio-card.selected .card-body { fill: var(--card-selected); stroke: var(--card-tint); stroke-width: 2; filter: none; }
 :root[data-theme] .studio-card.selected .card-head { fill: var(--card-selected-head); }
 :root[data-theme] .studio-card .card-title { fill: var(--card-text); font-weight: 600; }
 :root[data-theme] .studio-card .card-description { fill: var(--card-secondary); font-size: 11px; font-weight: 400; }
@@ -53,6 +76,24 @@
 :root[data-theme] .studio-card .param-row-check.checked { fill: var(--card-port); }
 :root[data-theme] .studio-card .param-row-swatch { stroke: var(--card-rule); stroke-width: 1; pointer-events: none; }
 :root[data-theme] .studio-card .param-row-check-mark { stroke: var(--card-bg); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+/* 固定卡片的值行：可见的输入框/控件。点开时行内浮层贴在同一个矩形上，静止用同一
+ * 套 card-head / card-line，聚焦时只把描边轻微提亮（见 ui.css 的 :focus-within），
+ * 读起来就是「这个框获得了焦点」，而不是换成一个亮青色控件。
+ * 只有需要去详情栏编辑的结构体用虚线：留在卡片上改的行一律实线。 */
+:root[data-theme] .studio-card .param-row-field { fill: var(--card-field); stroke: var(--card-line); stroke-width: 1; pointer-events: none; }
+:root[data-theme] .studio-card .param-row-field.goes-inspector { stroke-dasharray: 3 2; }
+:root[data-theme] .studio-card .param-row-caret { fill: var(--card-muted); font-size: 11px; font-weight: 600; pointer-events: none; }
+/* 拖拽中的落点行（变量绑定或节点输出引用）：值框描边与热区都亮起来，明确「会绑到这一行」。 */
+:root[data-theme] .studio-card .param-row-field.target { stroke: var(--success, #7ed28a); stroke-width: 2; stroke-dasharray: none; }
+:root[data-theme] .studio-card .param-row-hit.target { fill: rgba(126, 210, 138, .18); }
+/* 校验错误：出错的那一行参数标红（标签、引脚、值框），卡片整体描边也点红。 */
+:root[data-theme] .studio-card .param-row-label.error { fill: var(--danger, #e06c75); font-weight: 600; }
+:root[data-theme] .studio-card .param-row-field.error { stroke: var(--danger, #e06c75); stroke-width: 1.5; stroke-dasharray: none; }
+:root[data-theme] .studio-card .param-row-hit.invalid { fill: rgba(224, 108, 117, .14); }
+:root[data-theme] .studio-card .port-variable.invalid { fill: var(--danger, #e06c75); stroke: var(--danger, #e06c75); }
+:root[data-theme] .studio-card.node-invalid .card-body { stroke: var(--danger, #e06c75); }
+:root[data-theme] .studio-card .node-error-dot { fill: var(--danger, #e06c75); }
+:root[data-theme] .studio-card .param-row-hit.kind-picker { cursor: pointer; }
 :root[data-theme] .studio-card .param-row-hit { fill: rgba(0, 0, 0, 0); cursor: text; pointer-events: all; }
 :root[data-theme] .studio-card .param-row-hit:hover { fill: rgba(162, 179, 193, .16); }
 :root[data-theme] .studio-card .param-row-hit.tone-bound { cursor: pointer; }
@@ -62,3 +103,9 @@
 :root[data-theme] .studio-card .param-rows-toggle.expanded { fill: var(--card-text); }
 :root[data-theme] .studio-card .port-variable.configured { fill: var(--card-port); }
 :root[data-theme] .studio-card .port-variable.bound { stroke: var(--card-text); stroke-width: 2; }
+
+:root[data-theme] .studio-card .card-accent { fill: var(--card-tint); }
+:root[data-theme] .studio-card .run-dot { fill: var(--warning); }
+:root[data-theme] .studio-card:is(.run-succeeded, .run-matched) .run-dot { fill: var(--success); }
+:root[data-theme] .studio-card.run-failed .run-dot { fill: var(--danger); }
+:root[data-theme] .studio-card:is(.run-cancelled, .run-branch_miss) .run-dot { fill: var(--card-muted); }

@@ -70,3 +70,12 @@
   .theme-preview { height: 68px; }
 }
 @media (max-width: 420px) { #module-settings.settings-module { grid-template-columns: 86px minmax(0,1fr); } }
+
+/* Each preview uses its palette's actual chrome, panel, canvas and selection. */
+.preview-dark { --preview-top: #181818; --preview-side: #232323; --preview-body: #141414; --preview-row: #414141; }
+.preview-graphite { --preview-top: #252525; --preview-side: #303030; --preview-body: #262626; --preview-row: #535353; }
+.preview-warm { --preview-top: #211e1b; --preview-side: #2d2924; --preview-body: #211e1b; --preview-row: #51473a; }
+.preview-contrast { --preview-top: #080808; --preview-side: #161616; --preview-body: #080808; --preview-row: #909090; }
+.theme-options { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-width: none; }
+.theme-option:has(:checked) { box-shadow: inset 0 0 0 1px var(--ui-focus); }
+.theme-caption { padding-right: 18px; }

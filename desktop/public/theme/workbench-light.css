@@ -867,6 +867,47 @@
     border-top: 1px solid #dddddd;
     background: #ebebeb
 }
+:root[data-theme="light"] .content-rewrite-modal {
+    background: rgba(251, 251, 251, 0.72)
+}
+:root[data-theme="light"] .content-rewrite-dialog {
+    border: 1px solid #d7d7d7;
+    background: #eeeeee
+}
+:root[data-theme="light"] .content-rewrite-header {
+    border-bottom: 1px solid #dddddd;
+    background: #ebebeb
+}
+:root[data-theme="light"] .content-rewrite-header strong {
+    color: #232323
+}
+:root[data-theme="light"] .content-rewrite-header span {
+    color: #696969
+}
+:root[data-theme="light"] .content-rewrite-header button {
+    color: #696969
+}
+:root[data-theme="light"] .content-rewrite-header button:hover {
+    background: #e1e1e1;
+    color: #232323
+}
+:root[data-theme="light"] .content-rewrite-item {
+    border: 1px solid #dddddd;
+    background: #f0f0f0
+}
+:root[data-theme="light"] .content-rewrite-path {
+    color: #2a2a2a
+}
+:root[data-theme="light"] .content-rewrite-count {
+    color: #456171
+}
+:root[data-theme="light"] .content-rewrite-footer {
+    border-top: 1px solid #dddddd;
+    background: #ebebeb
+}
+:root[data-theme="light"] .content-rewrite-footer > span {
+    color: #696969
+}
 :root[data-theme="light"] .roi-picker-modal {
     background: rgba(251, 251, 251, 0.78)
 }
@@ -1130,6 +1171,90 @@
 :root[data-theme="light"] #vision-hint {
     color: #696969
 }
+:root[data-theme="light"] .live-stepbar {
+    background: #f2f2f2
+}
+:root[data-theme="light"] .live-workflow {
+    color: #555555
+}
+:root[data-theme="light"] .live-step-name {
+    color: #232323
+}
+:root[data-theme="light"] .live-pill {
+    border: 1px solid #dadada;
+    background: #ebebeb;
+    color: #363636
+}
+:root[data-theme="light"] .live-pill.succeeded {
+    background: #e8e8e8;
+    color: #48634f
+}
+:root[data-theme="light"] .live-pill.failed {
+    background: #ededed;
+    color: #7b5356
+}
+:root[data-theme="light"] .live-pill.running {
+    background: #e0e3e6;
+    color: #232323
+}
+:root[data-theme="light"] .live-pill.branch_miss {
+    background: #e9e9e9;
+    color: #675c40
+}
+:root[data-theme="light"] .live-pill.cancelled {
+    border-color: #d6d6d6;
+    background: #eaeaea;
+    color: #464646
+}
+:root[data-theme="light"] .live-legend {
+    background: rgba(245, 245, 245, 0.78);
+    color: #383838
+}
+:root[data-theme="light"] .live-legend-item::before {
+    background: #cccccc
+}
+:root[data-theme="light"] .live-legend-item.roi::before {
+    background: #fff9ea
+}
+:root[data-theme="light"] .live-legend-item.match::before {
+    background: #e2f9ec
+}
+:root[data-theme="light"] .live-legend-item.ocr::before {
+    background: #e8f6fc
+}
+:root[data-theme="light"] .live-legend-item.click::before {
+    background: #ffe8e8
+}
+:root[data-theme="light"] .vision-command.active {
+    background: #e8e8e8;
+    color: #675b48
+}
+:root[data-theme="light"] .vision-match-list li.miss {
+    color: #6e5a3b
+}
+:root[data-theme="light"] .variable-references-module {
+    background: #f2f2f2
+}
+:root[data-theme="light"] .variable-references-header {
+    background: #f0f0f0
+}
+:root[data-theme="light"] .variable-reference-badge {
+    background: #ebebeb
+}
+:root[data-theme="light"] .variable-reference-badge.linked {
+    background: #e9e9e9;
+    color: #4d5f67
+}
+:root[data-theme="light"] .variable-references-footer {
+    background: #f0f0f0
+}
+:root[data-theme="light"] .variable-references-footer .panel-action.danger {
+    background: #ebebeb;
+    color: #715658
+}
+:root[data-theme="light"] .variable-references-footer .panel-action.danger:hover:not(:disabled) {
+    background: #e6e6e6
+}
 :root[data-theme="light"] .vision-browser-backdrop {
     background: rgba(249, 249, 249, 0.62)
 }
@@ -1194,11 +1319,32 @@
     scrollbar-color: #696969 transparent
 }
 :root[data-theme="light"] .inline-param-editor {
-    border: 1px solid var(--card-port, #b2b2b2);
+    border: 1px solid var(--card-line, #d7d7d7);
     background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] {
+    --inline-focus-line: #696969
+}
+:root[data-theme="light"] .inline-param-editor:focus-within {
+    border-color: var(--inline-focus-line, #bbbbbb)
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-input {
     color: var(--card-text, #232323)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input:focus {
+    outline: 1px solid var(--inline-focus-line, #bbbbbb)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input:focus:not(:focus-visible) {
+    outline-color: var(--inline-focus-line, #bbbbbb)
+}
+:root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple {
+    --inline-cell-line: var(--card-line, #696969)
+}
+:root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple .inline-param-input {
+    background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] .inline-param-editor.inline-param-tuple .inline-param-input:focus {
+    --inline-cell-line: var(--inline-focus-line, #696969)
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-axis-label {
     color: var(--card-muted, #696969)

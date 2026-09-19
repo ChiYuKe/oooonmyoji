@@ -152,6 +152,85 @@
 :root[data-theme="light"] .variable-edge {
     stroke: #396478
 }
+:root[data-theme="light"] .variable-edge-hit:hover + .variable-edge {
+    stroke: color-mix(in srgb, #396478 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge {
+    stroke: #6c5b32
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-0 {
+    stroke: color-mix(in srgb, #7e5163 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-1 {
+    stroke: color-mix(in srgb, #466353 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-2 {
+    stroke: color-mix(in srgb, #6c5b32 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-3 {
+    stroke: color-mix(in srgb, #465f7a 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-4 {
+    stroke: color-mix(in srgb, #6b547b 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-5 {
+    stroke: color-mix(in srgb, #3d6469 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-6 {
+    stroke: color-mix(in srgb, #7d5639 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-7 {
+    stroke: color-mix(in srgb, #545c77 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-8 {
+    stroke: color-mix(in srgb, #516242 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-9 {
+    stroke: color-mix(in srgb, #824f6e 62%, #232323)
+}
+:root[data-theme="light"] .reference-edge.tone-0 {
+    stroke: #7e5163
+}
+:root[data-theme="light"] .reference-edge.tone-1 {
+    stroke: #466353
+}
+:root[data-theme="light"] .reference-edge.tone-2 {
+    stroke: #6c5b32
+}
+:root[data-theme="light"] .reference-edge.tone-3 {
+    stroke: #465f7a
+}
+:root[data-theme="light"] .reference-edge.tone-4 {
+    stroke: #6b547b
+}
+:root[data-theme="light"] .reference-edge.tone-5 {
+    stroke: #3d6469
+}
+:root[data-theme="light"] .reference-edge.tone-6 {
+    stroke: #7d5639
+}
+:root[data-theme="light"] .reference-edge.tone-7 {
+    stroke: #545c77
+}
+:root[data-theme="light"] .reference-edge.tone-8 {
+    stroke: #516242
+}
+:root[data-theme="light"] .reference-edge.tone-9 {
+    stroke: #824f6e
+}
+:root[data-theme="light"] .reference-connection-preview {
+    stroke: #6c5b32
+}
+:root[data-theme="light"] .reference-connection-preview.snapped {
+    stroke: #3e6744
+}
+:root[data-theme="light"] .port-out-reference {
+    fill: #696969;
+    stroke: #6d5b34
+}
+:root[data-theme="light"] .port-out-reference:hover, :root[data-theme="light"] .port-out-reference.active {
+    fill: #6d5b34
+}
 :root[data-theme="light"] .node-box {
     fill: #ececec;
     stroke: #696969
@@ -583,19 +662,6 @@
 :root[data-theme="light"] .asset-preview {
     background: #f3f3f3
 }
-:root[data-theme="light"] .workflow-folder:hover:not(:disabled), :root[data-theme="light"] .workflow-folder.selected {
-    background: var(--vscode-list-activeSelectionBackground, #dde5eb)
-}
-:root[data-theme="light"] .workflow-file.selected {
-    background: #e1e1e1
-}
-:root[data-theme="light"] .workflow-file-icon {
-    color: #3c6283;
-    background: #f3f3f3
-}
-:root[data-theme="light"] .workflow-file-description {
-    color: #3a3a3a
-}
 :root[data-theme="light"] .template-check-status.error {
     color: #7c5356
 }
@@ -793,6 +859,19 @@
     background: var(--ui-selected, #dedede);
     color: var(--ui-text, #262626)
 }
+:root[data-theme="light"] .workflow-folder:hover:not(:disabled), :root[data-theme="light"] .workflow-folder.selected {
+    background: var(--vscode-list-activeSelectionBackground, #dde5eb)
+}
+:root[data-theme="light"] .workflow-file.selected {
+    background: #e1e1e1
+}
+:root[data-theme="light"] .workflow-file-icon {
+    color: #3c6283;
+    background: #f3f3f3
+}
+:root[data-theme="light"] .workflow-file-description {
+    color: #3a3a3a
+}
 :root[data-theme="light"] {
     --ui-bg: #f3f3f3;
     --ui-panel: #eeeeee;
@@ -834,11 +913,32 @@
     scrollbar-color: #696969 transparent
 }
 :root[data-theme="light"] .inline-param-editor {
-    border: 1px solid var(--card-port, #b2b2b2);
+    border: 1px solid var(--card-line, #d7d7d7);
     background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] {
+    --inline-focus-line: #696969
+}
+:root[data-theme="light"] .inline-param-editor:focus-within {
+    border-color: var(--inline-focus-line, #bbbbbb)
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-input {
     color: var(--card-text, #232323)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input:focus {
+    outline: 1px solid var(--inline-focus-line, #bbbbbb)
+}
+:root[data-theme="light"] .inline-param-editor .inline-param-input:focus:not(:focus-visible) {
+    outline-color: var(--inline-focus-line, #bbbbbb)
+}
+:root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple {
+    --inline-cell-line: var(--card-line, #696969)
+}
+:root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple .inline-param-input {
+    background: var(--card-head, #e6e6e6)
+}
+:root[data-theme="light"] .inline-param-editor.inline-param-tuple .inline-param-input:focus {
+    --inline-cell-line: var(--inline-focus-line, #696969)
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-axis-label {
     color: var(--card-muted, #696969)
@@ -862,6 +962,9 @@
 }
 :root[data-theme="light"] #inspector-body .section-header:hover {
     background: #e2e2e2
+}
+:root[data-theme="light"] #inspector-body .parameter-bound-note {
+    color: #696969
 }
 :root[data-theme="light"] #inspector-body .danger:hover:not(:disabled) {
     background: #e9e9e9;

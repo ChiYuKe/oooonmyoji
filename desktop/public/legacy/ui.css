@@ -164,19 +164,45 @@
 .ui-dropdown.open .ui-dropdown-button::after { transform: rotate(180deg); }
 
 /* 卡片参数行的行内编辑器：纯 SVG 画布没有原生控件，浮层贴在参数行上。
- * 层级低于右键菜单（260）与 toast（300），高于画布浮层（200）。 */
+ * 层级低于右键菜单（260）与 toast（300），高于画布浮层（200）。
+ * 静止态与卡片上的值框同色（card-head / card-line）：点开时看起来是「同一个框
+ * 获得了焦点」，而不是换了一个控件——用 card-port 会又亮又偏青，和卡片不在一个
+ * 色系里。 */
 .inline-param-editor {
   position: fixed; z-index: 250; display: flex; align-items: center;
-  padding: 1px 2px; border: 1px solid var(--card-port, #a2b3c1); border-radius: 4px;
-  background: var(--card-head, #2e3338); box-shadow: 0 3px 12px rgba(0, 0, 0, .35);
+  padding: 1px 2px; border: 1px solid var(--card-line, #424a51); border-radius: 4px;
+  background: var(--card-head, #2e3338); box-shadow: none;
+  transition: border-color .1s ease, box-shadow .1s ease;
 }
+/* 焦点用同色系的加粗描边，而不是换成亮青色（card-port）——那会让同一行看起来像
+ * 换了个控件；但只把 1px 边框提亮一点对比度又太低，看不出已经进入编辑，
+ * 所以在值框内侧再画一圈同色描边，读起来是「这个框获得了焦点」。
+ * 写具体色值而不是只写变量：浅色主题由 light-palette 构建脚本按规则换算。 */
+:root { --inline-focus-line: #8b98a5; }
+.inline-param-editor:focus-within { border-color: var(--inline-focus-line, #8b98a5); }
 .inline-param-editor .inline-param-input {
   width: 100%; height: 100%; min-height: 0; padding: 0 6px; border: 0; border-radius: 3px;
   background: transparent; color: var(--card-text, #e2e7ec); font-size: 11px; text-align: right;
 }
-.inline-param-editor .inline-param-input:focus { outline: none; }
-/* 坐标点：两个数值输入并排，X/Y 用小标签分隔。 */
-.inline-param-editor .inline-param-axis { width: 46px; flex: 0 0 auto; text-align: center; }
+/* 内描边画在 input 自己身上（不是 shell 的 box-shadow）：不受拖动、动画或裁剪影响。 */
+.inline-param-editor .inline-param-input:focus { outline: 1px solid var(--inline-focus-line, #8b98a5); outline-offset: -1px; }
+.inline-param-editor .inline-param-input:focus:not(:focus-visible) { outline-color: var(--inline-focus-line, #8b98a5); }
+/* 固定卡片的值行在框内左对齐：浮层要用同一种对齐，点开才看不出跳变。 */
+.inline-param-editor.value-align-left .inline-param-input { text-align: left; }
+/* 固定长度数组：浮层本身就是 N 个输入格，盒子与卡片上的输入格逐格重合（18px 高、4px 间隔）。 */
+:root[data-theme] .inline-param-editor.inline-param-tuple {
+  padding: 0; gap: 4px; border: 0; background: transparent; box-shadow: none;
+  --inline-cell-line: var(--card-line, #424a51);
+}
+:root[data-theme] .inline-param-editor.inline-param-tuple .inline-param-input {
+  flex: 1 1 0; min-width: 0; height: 100%; padding: 0 8px;
+  border: 1px solid var(--inline-cell-line); border-radius: 4px;
+  background: var(--card-head, #2e3338);
+}
+/* 数组小格的聚焦态与单格值框一致：只提亮正在编辑的那一格，而不是整行都跟着亮。 */
+.inline-param-editor.inline-param-tuple .inline-param-input:focus { --inline-cell-line: var(--inline-focus-line, #8b98a5); }
+/* 坐标点/区域：多个数值输入并排，X/Y/宽/高 用小标签分隔；等分浮层宽度，四坐标也能放进一格宽的框。 */
+.inline-param-editor .inline-param-axis { flex: 1 1 0; min-width: 0; text-align: center; }
 .inline-param-editor .inline-param-axis-label {
   flex: 0 0 auto; padding: 0 2px 0 6px; color: var(--card-muted, #8f9aa3); font-size: 9px; font-weight: 700;
 }

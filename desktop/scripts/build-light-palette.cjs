@@ -55,7 +55,7 @@ function convert(value, role) {
 }
 const groups = {
   workbench:['src/renderer/styles.css','public/legacy/ui.css'],
-  editor:['public/legacy/workflow-editor.css','public/legacy/ui.css','public/legacy/inspector.css','public/legacy/child-order-dnd.css'],
+  editor:['public/legacy/workflow-editor.css','public/legacy/workflow-browser.css','public/legacy/ui.css','public/legacy/inspector.css','public/legacy/child-order-dnd.css'],
   log:['public/legacy/ui.css','public/runtime-log/run-log.css'],
 };
 function generate(files) {

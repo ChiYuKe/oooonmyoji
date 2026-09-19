@@ -280,7 +280,44 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .connection-preview { fill: none; stroke: #58b7e4; stroke-width: 3; stroke-dasharray: 7 5; pointer-events: none; }
 .connection-preview.snapped { stroke: #7ed28a; stroke-dasharray: none; }
 .instance-run-edge-line { fill: none; stroke: #7aaabd; stroke-width: 2.25; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.variable-edge { fill: none; stroke: #5b9fc0; stroke-width: 1.75; stroke-dasharray: 5 4; opacity: 0.85; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
+.variable-edge { fill: none; stroke: #5b9fc0; stroke-width: 1.75; stroke-dasharray: 5 4; opacity: 0.85; pointer-events: none; vector-effect: non-scaling-stroke; }
+/* 细线不好点：可见线不接收事件，命中交给下面这条透明加粗线（屏幕空间恒定宽度，
+ * 缩放后命中范围不变），Alt + 左键点在它上面即断开。 */
+.variable-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
+.variable-edge-hit:hover + .variable-edge { stroke-width: 2.75; opacity: 1; stroke: color-mix(in srgb, #5b9fc0 62%, #ffffff); }
+/* 节点输出引用：从任务卡右侧输出口连到参数行。实线、比执行连线（.edge-line 2px）细，
+ * 按「源输出字段」上色——不同变量拉出来的线颜色不同，同一个变量始终同色。 */
+.reference-edge { fill: none; stroke: #c8a95c; stroke-width: 1.5; opacity: 0.95; pointer-events: none; vector-effect: non-scaling-stroke; }
+/* 同上：引用线的命中由这条透明加粗线负责（14px，屏幕空间恒定）。 */
+.reference-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
+/* 悬停（指针在命中范围内）时把细线提亮 + 略加粗，明确「这条线可以 Alt 点击断开」。
+ * 用显式颜色而不是 filter：浅色主题由 build-light-palette 生成加深版本。 */
+.reference-edge-hit:hover + .reference-edge { stroke-width: 2.5; opacity: 1; }
+.reference-edge-hit:hover + .reference-edge.tone-0 { stroke: color-mix(in srgb, #c9829f 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-1 { stroke: color-mix(in srgb, #86bfa0 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-2 { stroke: color-mix(in srgb, #c8a95c 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-3 { stroke: color-mix(in srgb, #7ba7d6 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-4 { stroke: color-mix(in srgb, #b58fd0 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-5 { stroke: color-mix(in srgb, #6fb6c0 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-6 { stroke: color-mix(in srgb, #d08f5f 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-7 { stroke: color-mix(in srgb, #98a7d8 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-8 { stroke: color-mix(in srgb, #9dbd7f 62%, #ffffff); }
+.reference-edge-hit:hover + .reference-edge.tone-9 { stroke: color-mix(in srgb, #d07fb0 62%, #ffffff); }
+.reference-edge.tone-0 { stroke: #c9829f; }
+.reference-edge.tone-1 { stroke: #86bfa0; }
+.reference-edge.tone-2 { stroke: #c8a95c; }
+.reference-edge.tone-3 { stroke: #7ba7d6; }
+.reference-edge.tone-4 { stroke: #b58fd0; }
+.reference-edge.tone-5 { stroke: #6fb6c0; }
+.reference-edge.tone-6 { stroke: #d08f5f; }
+.reference-edge.tone-7 { stroke: #98a7d8; }
+.reference-edge.tone-8 { stroke: #9dbd7f; }
+.reference-edge.tone-9 { stroke: #d07fb0; }
+.reference-connection-preview { fill: none; stroke: #c8a95c; stroke-width: 1.75; stroke-dasharray: none; pointer-events: none; vector-effect: non-scaling-stroke; }
+.reference-connection-preview.snapped { stroke: #7ed28a; }
+/* 任务卡的输出口（右侧）：数据口画成空心小圆，拖出去就是绑定引用。 */
+.port-out-reference { fill: #222629; stroke: #c2a15c; stroke-width: 2; cursor: crosshair; }
+.port-out-reference:hover, .port-out-reference.active { fill: #c2a15c; }
 
 .node { cursor: default; }
 .node-box { fill: #222629; stroke: #4b5259; stroke-width: 1; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .3)); cursor: move; }
@@ -621,64 +658,8 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .asset-selected-path { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .asset-browser-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 
-.workflow-browser-dialog {
-  width: min(760px, 92vw);
-  height: min(620px, 82vh);
-  min-height: 380px;
-  display: grid;
-  grid-template-rows: 44px 46px minmax(0, 1fr) 52px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5);
-}
-.workflow-browser-head, .workflow-browser-toolbar, .workflow-browser-footer { display: flex; align-items: center; }
-.workflow-browser-head { justify-content: space-between; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--border); }
-.workflow-browser-title { font-size: 14px; font-weight: 600; }
-.workflow-browser-toolbar { gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
-.workflow-search { max-width: 460px; }
-.workflow-total { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.workflow-browser-content { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
-.workflow-folders { min-width: 0; overflow: auto; padding: 7px 5px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 82%, var(--bg)); }
-.workflow-folder {
-  width: 100%;
-  min-height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  text-align: left;
-}
-.workflow-folder:hover:not(:disabled), .workflow-folder.selected { background: var(--vscode-list-activeSelectionBackground, #094771); }
-.workflow-folder-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-folder-count { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-.workflow-list { min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg); }
-.workflow-file {
-  width: 100%;
-  min-height: 56px;
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: 4px;
-  background: var(--panel-2);
-  text-align: left;
-}
-.workflow-file:hover:not(:disabled) { background: color-mix(in srgb, var(--panel-2) 82%, var(--accent)); }
-.workflow-file.selected { border-color: var(--border); outline: 0; background: #383d42; }
-.workflow-file-icon { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 3px; color: #75beff; background: #17181b; font-size: 11px; font-weight: 700; }
-.workflow-file-detail { min-width: 0; display: grid; gap: 4px; }
-.workflow-file-name, .workflow-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-file-name { color: var(--fg); font-size: 12px; }
-.workflow-file-description { overflow: hidden; color: #c7c9ce; font-size: 11px; line-height: 15px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.workflow-file-path { color: var(--muted); font-size: 10px; }
-.workflow-browser-status { margin: auto; color: var(--muted); }
-.workflow-browser-footer { min-width: 0; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border); }
-.workflow-selected-path { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.workflow-browser-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+/* 子工作流选择弹层的样式已移到 legacy/workflow-browser.css：
+ * 弹层会移植到顶层文档的 shadow root，样式需要能单独 link 过去。 */
 
 .template-check-dialog {
   width: min(980px, 92vw);
@@ -733,9 +714,6 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
   .asset-browser-content { grid-template-columns: 1fr; grid-template-rows: 118px minmax(0, 1fr); }
   .asset-folders { border-right: 0; border-bottom: 1px solid var(--border); }
   .asset-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); padding: 8px; }
-  .workflow-browser-dialog { width: 94vw; height: 88vh; min-height: 350px; grid-template-rows: 42px 46px minmax(0, 1fr) 50px; }
-  .workflow-browser-content { grid-template-columns: 1fr; grid-template-rows: 108px minmax(0, 1fr); }
-  .workflow-folders { border-right: 0; border-bottom: 1px solid var(--border); }
   .template-check-dialog { width: 94vw; max-height: 92vh; }
   .template-check-summary { overflow-x: auto; }
   .template-check-viewport { padding: 8px; }

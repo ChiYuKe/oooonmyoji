@@ -77,6 +77,10 @@
 }
 #inspector-body .parameter-enable:has(:checked) { color: var(--ui-text); }
 #inspector-body .field-hint, #inspector-body .description { margin: 2px 0 5px; padding: 0; color: var(--ui-muted); font-size: 10px; line-height: 1.4; border: 0; background: transparent; }
+/* 已连接的参数：详情栏不再有「固定值 / 变量」模式切换与引用下拉，只如实说明连的是什么，
+ * 改动回画布上做（卡片端口或变量卡片拖线）。用连线蓝区分于普通说明文字；
+ * 写具体色值而不是只写变量，浅色主题才换得出来。 */
+#inspector-body .parameter-bound-note { color: #82929d; }
 #inspector-body .asset-missing-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; margin: 4px 0 1px; color: var(--ui-danger); font-size: 10px; line-height: 1.4; }
 #inspector-body .asset-missing-hint > span { flex: 1 1 auto; min-width: 90px; }
 #inspector-body .asset-missing-hint .small-command { min-height: 22px; height: 22px; padding: 0 6px; color: var(--ui-danger); }

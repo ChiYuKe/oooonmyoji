@@ -2,7 +2,9 @@
 (() => {
   'use strict';
   const key = 'onmyoji-studio.appearance';
-  const normalize = value => value === 'light' ? 'light' : 'dark';
+  const names = { dark: '墨黑', graphite: '柔灰', warm: '暖炭', contrast: '高对比', light: '浅色' };
+  const valid = value => Object.prototype.hasOwnProperty.call(names, value);
+  const normalize = value => valid(value) ? value : 'dark';
   const listeners = new Set();
   let host;
   try { host = window.onmyoji || window.parent?.onmyoji || window.opener?.onmyoji; } catch { /* isolated preview */ }
@@ -10,8 +12,9 @@
   try { current = normalize(host?.getTheme ? host.getTheme() : localStorage.getItem(key)); } catch { /* default dark */ }
   function apply(value) {
     current = normalize(value);
-    document.documentElement.dataset.theme = current;
-    document.documentElement.style.colorScheme = current;
+    document.documentElement.dataset.palette = current;
+    document.documentElement.dataset.theme = current === 'light' ? 'light' : 'dark';
+    document.documentElement.style.colorScheme = current === 'light' ? 'light' : 'dark';
     for (const listener of listeners) listener(current);
   }
   apply(current);
@@ -20,8 +23,9 @@
   window.addEventListener('pagehide', () => unsubscribe?.(), { once: true });
   window.StudioTheme = {
     get: () => current,
+    name: value => names[value] || names.dark,
     set(value) {
-      if (value !== 'dark' && value !== 'light') return false;
+      if (!valid(value)) return false;
       try {
         if (host?.setTheme) {
           const saved = host.setTheme(value);

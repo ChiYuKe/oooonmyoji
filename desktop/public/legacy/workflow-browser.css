@@ -1,0 +1,69 @@
+/* 子工作流选择弹层的样式。独立成文件的原因与 asset-browser.css 相同：
+ * 弹层会移植到顶层文档的 <dialog> + shadow root 里，样式必须能单独 link 过去。
+ */
+.workflow-browser-dialog {
+  width: min(760px, 92vw);
+  height: min(620px, 82vh);
+  min-height: 380px;
+  display: grid;
+  grid-template-rows: 44px 46px minmax(0, 1fr) 52px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5);
+}
+.workflow-browser-head, .workflow-browser-toolbar, .workflow-browser-footer { display: flex; align-items: center; }
+.workflow-browser-head { justify-content: space-between; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--border); }
+.workflow-browser-title { font-size: 14px; font-weight: 600; }
+.workflow-browser-toolbar { gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.workflow-search { max-width: 460px; }
+.workflow-total { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.workflow-browser-content { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
+.workflow-folders { min-width: 0; overflow: auto; padding: 7px 5px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 82%, var(--bg)); }
+.workflow-folder {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.workflow-folder:hover:not(:disabled), .workflow-folder.selected { background: var(--vscode-list-activeSelectionBackground, #094771); }
+.workflow-folder-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-folder-count { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.workflow-list { min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg); }
+.workflow-file {
+  width: 100%;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  text-align: left;
+}
+.workflow-file:hover:not(:disabled) { background: color-mix(in srgb, var(--panel-2) 82%, var(--accent)); }
+.workflow-file.selected { border-color: var(--border); outline: 0; background: #383d42; }
+.workflow-file-icon { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 3px; color: #75beff; background: #17181b; font-size: 11px; font-weight: 700; }
+.workflow-file-detail { min-width: 0; display: grid; gap: 4px; }
+.workflow-file-name, .workflow-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-file-name { color: var(--fg); font-size: 12px; }
+.workflow-file.current { border: 1px dashed var(--border); }
+.workflow-file-current { width: fit-content; padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 26%, var(--panel-2)); color: var(--fg); font-size: 10px; }
+.workflow-file-description { overflow: hidden; color: #c7c9ce; font-size: 11px; line-height: 15px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.workflow-file-path { color: var(--muted); font-size: 10px; }
+.workflow-browser-status { margin: auto; color: var(--muted); }
+.workflow-browser-footer { min-width: 0; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.workflow-selected-path { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-browser-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+
+@media (max-width: 680px) {
+  .workflow-browser-dialog { width: 94vw; height: 88vh; min-height: 350px; grid-template-rows: 42px 46px minmax(0, 1fr) 50px; }
+  .workflow-browser-content { grid-template-columns: 1fr; grid-template-rows: 108px minmax(0, 1fr); }
+  .workflow-folders { border-right: 0; border-bottom: 1px solid var(--border); }
+}

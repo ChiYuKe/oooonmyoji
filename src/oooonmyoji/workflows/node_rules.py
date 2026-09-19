@@ -17,6 +17,19 @@ from .resolver import is_binding
 OPTIONAL_DECORATOR_FIELDS = {"retry": {"delay_seconds"}, "do_once": {"reset_on_failure"}}
 
 
+def node_label(index: int, item: Any) -> str:
+    """节点在错误信息里的标识：索引 + id，方便直接回画布上找到那个节点。
+
+    ``nodes[1]`` 这种只报下标的写法在卡片编辑器里没法定位；带上 id 后是
+    ``nodes[1] (task_1)``，和左侧结构树/节点标题对得上。
+    """
+
+    node_id = item.get("id") if isinstance(item, dict) else None
+    if isinstance(node_id, str) and node_id:
+        return f"nodes[{index}] ({node_id})"
+    return f"nodes[{index}]"
+
+
 def parse_decorators(
     raw: list[Any],
     *,
@@ -142,7 +155,7 @@ def build_output_schemas(
         if item["type"] == "task":
             action = item.get("action")
             if not isinstance(action, str) or not action:
-                raise ConfigError(f"nodes[{index}] task must define action")
+                raise ConfigError(f"{node_label(index, item)} task must define action")
             action_specs[item["id"]] = registry.get(action)
             output_schemas[item["id"]] = action_specs[item["id"]].output_schema
         else:

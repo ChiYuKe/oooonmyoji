@@ -38,6 +38,7 @@ class TaskContextImpl:
         run_id: str | None = None,
         instance_id: str | None = None,
         reward_stats_submitter: Callable[[dict[str, Any]], None] | None = None,
+        live_view: Any | None = None,
     ) -> None:
         self.device = device
         self.mapper = mapper
@@ -55,6 +56,8 @@ class TaskContextImpl:
         self.run_id = run_id
         self.instance_id = instance_id
         self.reward_stats_submitter = reward_stats_submitter
+        # 实时视觉监视：只在桌面端打开观看窗口时真正写盘（见 runtime/live_view.py）。
+        self.live_view = live_view
         self._last_frame: DeviceFrame | None = None
         self._action_local = threading.local()
         self._state_lock = threading.RLock()
@@ -85,6 +88,14 @@ class TaskContextImpl:
         )
         with self._state_lock:
             self._last_frame = frame
+        # 预览帧就挂在这一次抓取上：不额外开采集连接，也不额外增加设备往返。
+        live_view = self.live_view
+        if live_view is not None:
+            try:
+                live_view.maybe_write(frame)
+            except Exception:
+                # 观看通道的任何问题都不允许影响正在跑的工作流。
+                self.live_view = None
         return frame
 
     def find_template(

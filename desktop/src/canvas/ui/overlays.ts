@@ -64,18 +64,21 @@ export function createCanvasOverlays(deps: OverlaysDeps): CanvasOverlays {
       closeSubmenus();
       const q = (query || '').trim().toLowerCase();
       if (q) {
-        // 搜索时把子菜单打平，全部动作一起过滤（UE 的 Search 行为）
-        const walk = (item: MenuEntry): void => {
+        // 搜索时把子菜单打平，全部动作一起过滤（UE 的 Search 行为）。
+        // 打平后必须带上父级标签：分组里的同名子项（例如数组每项下都有的
+        // 「复制 置信度」）单看自己分不清来自哪一组，也没法按「第 N 项」搜。
+        const walk = (item: MenuEntry, prefix: string): void => {
           if (item === 'separator') return;
           const label = String(item.label || '');
-          if (item.children && item.children.length) { for (const child of item.children) walk(child); return; }
-          if (!label.toLowerCase().includes(q)) return;
-          const button = el('button', item.danger ? 'danger' : '', label);
+          const path = prefix && label ? `${prefix} · ${label}` : (label || prefix);
+          if (item.children && item.children.length) { for (const child of item.children) walk(child, path); return; }
+          if (!path.toLowerCase().includes(q)) return;
+          const button = el('button', item.danger ? 'danger' : '', path);
           button.addEventListener('click', () => { hideMenus(); item.run?.(); });
           button.addEventListener('mouseenter', () => highlight(visibleButtons().indexOf(button as HTMLButtonElement)));
           list.appendChild(button);
         };
-        for (const item of items) walk(item);
+        for (const item of items) walk(item, '');
       } else {
         for (const item of items) {
           if (item === 'separator') { list.appendChild(el('div', 'menu-separator')); continue; }

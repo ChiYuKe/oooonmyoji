@@ -26,6 +26,8 @@ export interface RenderEntryDeps {
   renderInstanceRunEdge(...args: any[]): any;
   renderConnection(...args: any[]): any;
   renderVariableConnection(...args: any[]): any;
+  renderReferenceConnection(...args: any[]): any;
+  renderReferenceEdges(...args: any[]): any;
   renderVariableEdges(...args: any[]): any;
   renderMinimap(...args: any[]): any;
   renderInspector(): void;
@@ -44,7 +46,8 @@ export function createRenderEntry(deps: RenderEntryDeps) {
   const {
     state, $, graph, wrap, svgEl, UI, nodes, nodeById, position, nodeHeight, instanceRunCards, variableCardList,
     renderNode, renderInstanceRunCard, renderVariableCard, renderEdge, renderInstanceRunEdge, renderConnection,
-    renderVariableConnection, renderVariableEdges, renderMinimap, renderInspector, postSidebarState, updateIssueBadge,
+    renderVariableConnection, renderReferenceConnection, renderReferenceEdges, renderVariableEdges, renderMinimap,
+    renderInspector, postSidebarState, updateIssueBadge,
     ensureLayout, syncLegacyInputParameters, syncLegacyVariableCards, setDirty, nodeWidth: NODE_W,
   } = deps;
   const afterRender = deps.afterRender;
@@ -67,12 +70,14 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     if (state.connect) renderConnection(wires);
     const variableEdges = svgEl('g', { class: 'variable-edges' }, root);
     renderVariableEdges(variableEdges);
+    renderReferenceEdges(svgEl('g', { class: 'reference-edges' }, root));
     const cards = svgEl('g', { class: 'cards' }, root);
     nodes().forEach((node) => renderNode(cards, node));
     runCards.forEach((card) => renderInstanceRunCard(cards, card));
     const variableLayer = svgEl('g', { class: 'variable-cards' }, root);
     variableCardList().forEach((card) => renderVariableCard(variableLayer, card));
     if (state.variableConnect) renderVariableConnection(variableLayer);
+    if (state.referenceConnect) renderReferenceConnection(variableLayer);
     if (state.marquee) {
       const box = state.marquee;
       svgEl('rect', { class: 'marquee', x: Math.min(box.x1, box.x2), y: Math.min(box.y1, box.y2), width: Math.abs(box.x2 - box.x1), height: Math.abs(box.y2 - box.y1) }, root);

@@ -128,7 +128,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     group.dataset.runKey = card.key;
     svgEl('rect', { class: 'instance-run-card-box card-body', width: runCardWidth, height: card.height, rx: 5 }, group);
     svgEl('rect', { class: 'instance-run-card-head card-head', x: 1, y: 1, width: runCardWidth - 2, height: 32, rx: 4 }, group);
-    svgEl('rect', { class: 'instance-run-card-accent card-accent', x: 1, y: 10, width: 3, height: 14, rx: 1 }, group);
+    svgEl('rect', { class: 'instance-run-card-accent card-accent', x: 1, y: 3, width: 3, height: 27, rx: 1 }, group);
     svgEl('line', { class: 'instance-run-card-header-rule', x1: 1, y1: 33, x2: runCardWidth - 1, y2: 33 }, group);
     svgEl('rect', { class: 'instance-run-card-icon-plate', x: 10, y: 7, width: 20, height: 20, rx: 4 }, group);
     svgEl('text', { class: 'instance-run-card-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = '▣';
@@ -203,7 +203,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     group.dataset.variable = card.name;
     svgEl('rect', { class: 'variable-card-box card-body', width: variableCardWidth, height: variableCardHeight, rx: 5 }, group);
     svgEl('rect', { class: 'variable-card-head card-head', x: 1, y: 1, width: variableCardWidth - 2, height: 32, rx: 4 }, group);
-    svgEl('rect', { class: 'variable-card-accent card-accent', x: 1, y: 10, width: 3, height: 14, rx: 1 }, group);
+    svgEl('rect', { class: 'variable-card-accent card-accent', x: 1, y: 3, width: 3, height: 27, rx: 1 }, group);
     svgEl('line', { class: 'variable-card-header-rule', x1: 1, y1: 33, x2: variableCardWidth - 1, y2: 33 }, group);
     svgEl('circle', { class: `variable-card-dot type-${type}`, cx: 15, cy: 18, r: 4.5 }, group);
     nodeCards.text(group, { className: 'variable-card-name card-title', x: 27, y: 22, value: definition.display_name || card.name, width: variableCardWidth - 39, size: 11 });

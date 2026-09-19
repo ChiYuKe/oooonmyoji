@@ -1,6 +1,7 @@
 /**
  * 标题栏工具条：实例/工作流选择器、面包屑、按钮事件与按 name 搜索卡片。
- * 原 `editor-toolbar.js`；主编辑器通过工厂注入状态与 DOM 依赖，工厂设置 window.__topbar。
+ * 原 `editor-toolbar.js`；主编辑器通过工厂注入状态与 DOM 依赖，
+ * 选择器钩子（setWorkflow/setInstance）随工厂返回，由入口交给桥接转发。
  */
 
 export interface ToolbarInstance {
@@ -94,6 +95,9 @@ export interface ToolbarController {
   renderWorkflowBreadcrumb(): void;
   bindToolbar(): void;
   searchNodeByName(value: string): void;
+  /** 顶栏工作流/实例选择器：由桥接在收到 desktopControl 时转发。 */
+  setWorkflow(value: string): void;
+  setInstance(value: string): void;
 }
 
 export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
@@ -289,17 +293,16 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     toast(`卡片 ${index + 1}/${matches.length}：${String(target.name).trim()}`);
   }
 
-  window.__topbar = {
-    setWorkflow(uri) {
-      state.docUri = String(uri || '');
-      renderWorkflowPicker();
-    },
-    setInstance(instanceId) {
-      state.instanceId = String(instanceId || '');
-      renderInstancePicker();
-      vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
-    },
-  };
+  function setWorkflow(uri: string): void {
+    state.docUri = String(uri || '');
+    renderWorkflowPicker();
+  }
 
-  return { renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, bindToolbar, searchNodeByName };
+  function setInstance(instanceId: string): void {
+    state.instanceId = String(instanceId || '');
+    renderInstancePicker();
+    vscode.postMessage({ type: 'selectInstance', instanceId: state.instanceId });
+  }
+
+  return { renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, bindToolbar, searchNodeByName, setWorkflow, setInstance };
 }

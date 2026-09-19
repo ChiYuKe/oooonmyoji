@@ -15,6 +15,8 @@ export interface CanvasHelpersDeps {
   wrap: HTMLElement;
   variableCardWidth: number;
   variableCardHeight: number;
+  /** 本地校验出的错误数（画布自己跑的工作流校验，比宿主的快照新）。 */
+  localErrorCount?(): number;
 }
 
 export function createCanvasHelpers(deps: CanvasHelpersDeps) {
@@ -24,7 +26,9 @@ export function createCanvasHelpers(deps: CanvasHelpersDeps) {
   } = deps;
   function updateIssueBadge(): void {
     const local = localIssueCount();
-    const count = Math.max(local, Array.isArray(state.issues) ? state.issues.filter((item) => item.severity === 'error').length : 0);
+    const fromHost = Array.isArray(state.issues) ? state.issues.filter((item) => item.severity === 'error').length : 0;
+    const fromCanvas = deps.localErrorCount ? deps.localErrorCount() : 0;
+    const count = Math.max(local, fromHost, fromCanvas);
     const badge = $('issue-badge');
     badge.textContent = count ? `${count} 个问题` : '结构有效';
     badge.classList.toggle('error', count > 0);

@@ -20,6 +20,7 @@ export interface CanvasMessagesDeps {
   renderInstancePicker(...args: any[]): any;
   renderWorkflowPicker(...args: any[]): any;
   renderWorkflowBreadcrumb(...args: any[]): any;
+  renderWorkflowBrowser?(...args: any[]): any;
   renderInspector(): void;
   renderAssetBrowser(...args: any[]): any;
   closeAssetBrowser(...args: any[]): any;
@@ -39,6 +40,7 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
   const {
     state, $, mutate, nodeById, normalizeRaw, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
     renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, renderInspector, renderAssetBrowser,
+    renderWorkflowBrowser,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
     normalizedAssetPath, handleRunEvent, setExportBusy, replaceDocument, executeEditorCommand, toast,
   } = deps;
@@ -54,6 +56,7 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
     state.assetsBaseUri = typeof message.assetsBaseUri === 'string' ? message.assetsBaseUri.replace(/\/?$/, '/') : '';
     state.refs = message.refs || { inputs: [], variables: [], nodes: [] }; state.issues = message.issues || [];
+    state.docVersion = (state.docVersion || 0) + 1;
     state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item: any) => item && typeof item.uri === 'string') : [];
     state.docUri = message.document.uri || '';
     state.documentName = message.document.name || '';
@@ -65,6 +68,11 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
     requestAssetInventory();
     setTimeout(() => { if (!sameDocument) fitView(); }, 0);
+  } else if (message.type === 'workflows') {
+    // 脚本目录在别处变了（新建工作流、外部改动）：就地换掉列表并刷新选择器，不重载文档。
+    state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item: any) => item && typeof item.uri === 'string') : state.workflows;
+    renderWorkflowPicker();
+    if (state.workflowBrowser) renderWorkflowBrowser?.();
   } else if (message.type === 'runEvent') handleRunEvent(message.event);
   else if (message.type === 'runtimeInstances') {
     state.instances = Array.isArray(message.instances) ? message.instances.filter((item: any) => item && typeof item.id === 'string' && item.id) : [];
@@ -81,36 +89,51 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     if (request && request.returnToAssetBrowser) restoreAssetBrowserAfterRoi();
     if (message.message) toast(message.message, true);
   }
-  else if (message.type === 'roiPickerResult' && state.roi && state.roi.requestId === message.requestId) {
-    const request = state.roi;
+  else if (message.type === 'roiPickerResult' && (state.roi && state.roi.requestId === message.requestId || message.nodeId)) {
+    // 请求可能来自**另一个**画布：详情栏是镜像，框选是在那里点的，
+    // 但值必须落到真正持有文档的那份画布上（镜像没有写权）。
+    // 所以这里按消息里的 nodeId/key 落值，本地 state.roi 只用来收浮层。
+    const request = state.roi && state.roi.requestId === message.requestId ? state.roi : null;
     const roi = Array.isArray(message.roi) ? message.roi.map(Number) : [];
     if (roi.length !== 4 || roi.some((item: any) => !Number.isFinite(item))) return;
-    const node = nodeById(request.nodeId);
-    if (typeof request.applyValue === 'function') mutate(() => request.applyValue(roi));
-    else if (node) mutate(() => { node.params[request.key] = roi; });
-    state.roi = null;
-    const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden');
+    const nodeId = request ? request.nodeId : message.nodeId;
+    const key = request ? request.key : message.key;
+    const node = nodeById(nodeId);
+    if (typeof request?.applyValue === 'function') mutate(() => request.applyValue(roi));
+    else if (!node || typeof key !== 'string' || !key) return;
+    else mutate(() => { node.params[key] = roi; });
+    if (request) {
+      state.roi = null;
+      const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden');
+    }
     toast('区域已更新');
   }
-  else if (message.type === 'templateSaved' && state.roi && state.roi.requestId === message.requestId) {
-    const request = state.roi;
-    const browser = request.returnToAssetBrowser ? state.assetBrowser : null;
+  else if (message.type === 'templateSaved' && (state.roi && state.roi.requestId === message.requestId || message.nodeId)) {
+    const request = state.roi && state.roi.requestId === message.requestId ? state.roi : null;
+    const browser = request && request.returnToAssetBrowser ? state.assetBrowser : null;
     if (typeof message.path === 'string') {
     if (!state.assetPaths) state.assetPaths = new Set();
     state.assetPaths.add(normalizedAssetPath(message.path));
     }
-    if (typeof request.applyValue === 'function') mutate(() => request.applyValue(message.path));
+    if (typeof request?.applyValue === 'function') mutate(() => request.applyValue(message.path));
     else if (browser && typeof browser.applyValue === 'function') mutate(() => browser.applyValue(message.path));
     else {
-    const node = nodeById(message.nodeId); if (node) mutate(() => { node.params[message.key] = message.path; });
+    // 没有本地请求（值来自别的画布，例如详情栏镜像里点的「截取」）时，
+    // 按消息里的 nodeId/key 落到这篇文档上。
+    const nodeId = request ? request.nodeId : message.nodeId;
+    const key = request ? request.key : message.key;
+    const node = nodeById(nodeId);
+    if (typeof key === 'string' && key) mutate(() => { if (node) node.params[key] = message.path; });
     }
+    if (request) {
     state.roi = null;
     if (request.returnToAssetBrowser && state.assetBrowser) {
     state.assetBrowser.selectedPath = message.path;
     state.assetBrowser.cacheBust = Date.now();
     restoreAssetBrowserAfterRoi();
     }
-    toast(request.targetPath ? '模板已重新截取' : '模板已保存');
+    }
+    toast(request && request.targetPath ? '模板已重新截取' : '模板已保存');
   }
   else if (message.type === 'assetImages' && state.assetInventoryRequestId === message.requestId) {
     state.assetInventoryRequestId = '';

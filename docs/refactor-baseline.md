@@ -23,7 +23,7 @@
 | Python 类型 | `.venv\Scripts\python.exe -m mypy src` | Success, 72 files |
 | 契约检查 | `.venv\Scripts\python.exe tests\contract_check.py` | 6 项全部 OK |
 | 桌面类型 | `npm run typecheck` | 通过（renderer + electron 两个 project） |
-| 桌面测试 | `npm test` | 385 pass, 0 fail（node:test + dist-test-renderer 编译产物；条数随工作树数据变化） |
+| 桌面测试 | `npm test` | 403 pass, 0 fail（node:test + dist-test-renderer 编译产物；条数随工作树数据变化） |
 | 桌面构建 | `npm run build` | 通过（浅色主题生成 + typecheck + tsc + vite） |
 
 注意：`mypy .` 会检查 `tests/`，因 `disallow_untyped_defs` 报 93 个错误；CI 与验收只运行 `mypy src`。

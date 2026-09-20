@@ -23,12 +23,20 @@ class Element {
     };
   }
   setAttribute(name, value) { this.attrs[name] = value; }
-  append(...nodes) { this.children.push(...nodes); }
+  append(...nodes) { for (const node of nodes) node.parent = this; this.children.push(...nodes); }
   appendChild(node) { this.append(node); return node; }
   replaceChildren() { this.children = []; }
+  replaceWith(node) {
+    const parent = this.parent;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index >= 0) parent.children[index] = node;
+    node.parent = parent;
+  }
+  focus() {} select() {}
   set innerHTML(html) {
     this.children = [...html.matchAll(/<span class="([^"]+)"><\/span>/g)].map(([, cls]) => {
-      const node = new Element('span'); node.className = cls; return node;
+      const node = new Element('span'); node.className = cls; node.parent = this; return node;
     });
   }
   querySelector(selector) {
@@ -76,7 +84,8 @@ test('variable groups show counts once and rows keep complete names, types and s
   assert.equal(h.rows()[0].querySelector('.variable-flags').textContent, '整数');
   assert.equal(h.rows()[2].querySelector('.variable-flags').textContent, 'custom<type>');
   assert.equal(h.rows()[1].querySelector('.variable-name').textContent, '长名称'.repeat(12));
-  assert(h.rows()[1].title.includes('长名称'.repeat(12)));
+  assert.equal(h.rows()[1].querySelector('.variable-name').title, '长名称'.repeat(12));
+  assert.equal(h.rows()[1].title, '拖到画布创建引用卡片\nF2 重命名\nDelete 删除');
   assert.equal(h.list.scrollTop, 96);
   assert.equal(h.rows()[0].attrs['aria-pressed'], 'true'); assert.equal(h.rows()[2].attrs['aria-pressed'], 'false');
 });
@@ -138,9 +147,48 @@ test('已连接画布的变量在列表里标记出来，未连接的没有标�
   assert(chip, '已连接的变量必须有标记');
   assert.equal(chip.textContent, '已连接');
   assert.equal(chip.title, '画布上的节点端口已经引用该变量');
-  assert(h.rows()[0].title.includes('已连接'));
+  assert.equal(h.rows()[0].title, '拖到画布创建引用卡片\nF2 重命名\nDelete 删除');
   assert.equal(nameNode(h.rows()[1]).children.filter((item) => item.className === 'variable-on-card').length, 0);
-  assert.equal(h.rows()[1].title.includes('已连接'), false);
+  assert.equal(h.rows()[1].title, h.rows()[0].title, '悬浮提示不再重复行内已有的状态');
+});
+
+test('F2 在变量行原地改名：行内输入框 + 画布改名命令', () => {
+  const h = harness([{name: '运行轮数', scope: 'inputs', type: 'integer'}, {name: '未用', scope: 'variables', type: 'string'}]);
+  assert.equal(h.sidebar.isRenaming(), false);
+  assert.equal(h.sidebar.startVariableRename('不存在', 'inputs'), undefined);
+  assert.equal(h.sidebar.isRenaming(), false, '目标不存在时不得进入改名态');
+
+  h.sidebar.startVariableRename('运行轮数', 'inputs');
+  assert.equal(h.sidebar.isRenaming(), true);
+  const input = h.rows()[0].querySelector('.row-name-edit');
+  assert.ok(input, '名称单元格原地换成输入框');
+  assert.equal(input.value, '运行轮数');
+  assert.equal(input.attrs['aria-label'], '变量名称');
+  assert.equal(h.rows()[0].className.includes('renaming'), true);
+
+  // 输入框里的点击/按键不得冒泡回行（否则会重新选中并重建列表）。
+  let stopped = 0;
+  input.events.click({stopPropagation: () => { stopped += 1; }});
+  input.value = '轮数';
+  input.events.keydown({key: 'Enter', preventDefault() {}, stopPropagation() { stopped += 1; }});
+  assert.equal(stopped, 2);
+  assert.deepEqual(h.commands.at(-1), ['renameVariable', {scope: 'inputs', oldName: '运行轮数', name: '轮数'}]);
+  assert.equal(h.sidebar.isRenaming(), false, '提交后退出改名态');
+
+  // Esc 取消：不发命令，退回普通行。
+  h.sidebar.startVariableRename('未用', 'variables');
+  const cancelled = h.rows()[1].querySelector('.row-name-edit');
+  const before = h.commands.length;
+  cancelled.events.keydown({key: 'Escape', preventDefault() {}, stopPropagation() {}});
+  assert.equal(h.commands.length, before, '取消不得发改名命令');
+  assert.equal(h.sidebar.isRenaming(), false);
+  assert.equal(h.rows()[1].querySelector('.variable-name').textContent, '未用');
+
+  // 外部取消（Esc 落在壳层时走 cancelRename）。
+  h.sidebar.startVariableRename('未用', 'variables');
+  h.sidebar.cancelRename();
+  assert.equal(h.sidebar.isRenaming(), false);
+  assert.equal(h.rows()[1].querySelector('.variable-name').textContent, '未用');
 });
 
 test('custom categories collapse without losing rows or drag identity', () => {

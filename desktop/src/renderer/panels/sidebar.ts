@@ -53,8 +53,11 @@ export interface SidebarDeps {
   icons: NonNullable<Parameters<typeof createIcons>[0]>['icons'];
   editorCommand: (command: string, value?: unknown) => void;
   showDetailsPanel: () => void;
-  /** 选中结构树/变量行后登记删除目标，让 Delete 交给画布执行。 */
-  registerEditorDeleteTarget: () => void;
+  /** 选中结构树/变量行后登记删除目标（Delete 交给画布执行），并带上名称信息供 F2 原地改名。 */
+  registerEditorDeleteTarget: (target?: {
+    nodeId?: string;
+    variable?: { name: string; scope: 'inputs' | 'variables' };
+  }) => void;
 }
 
 export interface Sidebar {
@@ -67,6 +70,13 @@ export interface Sidebar {
   updateFromMessage(message: SidebarStateChangedMessage): void;
   /** 展开或收起全部结构树分支。 */
   setAllBranches(open: boolean): void;
+  /** F2：结构树里这一行原地变成输入框。 */
+  startNodeRename(nodeId: string): void;
+  /** F2：变量列表里这一行原地变成输入框。 */
+  startVariableRename(name: string, scope: 'inputs' | 'variables'): void;
+  /** 是否有行正在行内改名（F2/Delete 守卫用）。 */
+  isRenaming(): boolean;
+  cancelRename(): void;
 }
 
 /** 结构树节点类型 → Lucide 图标与语义色（保持低饱和，遵循设计规则）。 */
@@ -114,6 +124,68 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
   let selectedVariable = '';
   let selectedVariableScope: 'inputs' | 'variables' = 'inputs';
   let collapsed = new Set<string>();
+  /** 行内改名草稿（F2）：命中的那一行渲染成输入框，Enter/失焦提交、Esc 取消。 */
+  let nodeRenameDraft = '';
+  let variableRenameDraft: { name: string; scope: 'inputs' | 'variables' } | undefined;
+
+  /** 行内改名输入框：把「输入 → 提交/取消」的按键与失焦语义收在一处。 */
+  function createRowNameInput(
+    value: string,
+    commit: (next: string) => void,
+    cancel: () => void,
+  ): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'row-name-edit';
+    input.value = value;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    const stop = (event: Event): void => event.stopPropagation();
+    input.addEventListener('click', stop);
+    input.addEventListener('pointerdown', stop);
+    input.addEventListener('dblclick', stop);
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit(input.value);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener('blur', () => { setTimeout(() => commit(input.value), 0); });
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    return input;
+  }
+
+  function startNodeRename(nodeId: string): void {
+    if (!nodeId || !nodes.some((node) => node.id === nodeId)) return;
+    variableRenameDraft = undefined;
+    nodeRenameDraft = nodeId;
+    // render() 同时重建变量列表，顺手收掉可能遗留的变量输入框。
+    render();
+  }
+
+  function startVariableRename(name: string, scope: 'inputs' | 'variables'): void {
+    if (!name || !variables.some((variable) => variable.name === name && variable.scope === scope)) return;
+    const hadNodeDraft = Boolean(nodeRenameDraft);
+    nodeRenameDraft = '';
+    variableRenameDraft = { name, scope };
+    // 结构树里若还留着节点输入框，必须整棵重建才会收掉。
+    if (hadNodeDraft) render();
+    else renderVariables();
+  }
+
+  function cancelRename(): void {
+    const hadNodeDraft = Boolean(nodeRenameDraft);
+    const hadVariableDraft = Boolean(variableRenameDraft);
+    if (!hadNodeDraft && !hadVariableDraft) return;
+    nodeRenameDraft = '';
+    variableRenameDraft = undefined;
+    if (hadNodeDraft) render();
+    if (hadVariableDraft) renderVariables();
+  }
 
   /** 内联创建 Lucide SVG，供动态树行使用（data-lucide + createIcons 无法覆盖局部更新）。 */
   function createTreeIcon(icon: IconComponent, className: string): SVGSVGElement {
@@ -145,7 +217,7 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       const row = document.createElement('button');
       row.type = 'button';
       row.className = `tree-row${node.id === selectedNode ? ' selected' : ''}`;
-      row.title = `${node.name}\n${node.meta}\nDelete 删除该节点`;
+      row.title = `${node.name}\n${node.meta}\nF2 重命名\nDelete 删除该节点`;
       row.dataset.nodeId = node.id;
       if (hasChildren) row.setAttribute('aria-expanded', String(branchOpen));
 
@@ -160,10 +232,6 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       const label = document.createElement('span');
       label.className = 'tree-label';
 
-      const name = document.createElement('span');
-      name.className = 'tree-name';
-      name.textContent = node.name;
-
       const meta = document.createElement('span');
       meta.className = 'tree-meta';
       meta.textContent = node.meta;
@@ -171,7 +239,24 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       const children = document.createElement('div');
       children.className = 'tree-children';
 
-      label.append(name, meta);
+      if (node.id === nodeRenameDraft) {
+        // F2：这一行原地改名。提交改的是显示名（node.name），节点 id 保持稳定。
+        row.classList.add('renaming');
+        const input = createRowNameInput(node.name, (next) => {
+          const value = next.trim();
+          nodeRenameDraft = '';
+          if (value && value !== node.name) editorCommand('renameNodeName', { nodeId: node.id, name: value });
+          render();
+        }, () => { nodeRenameDraft = ''; render(); });
+        input.setAttribute('aria-label', '节点名称');
+        label.appendChild(input);
+      } else {
+        const name = document.createElement('span');
+        name.className = 'tree-name';
+        name.textContent = node.name;
+        label.append(name);
+      }
+      label.append(meta);
       row.append(chevron, icon, label);
       const count = document.createElement('span');
       count.className = 'tree-child-count';
@@ -186,8 +271,8 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         }
         showDetailsPanel();
         editorCommand('focusNode', node.id);
-        // 结构树选中即等价于画布选中：Delete 交由画布执行删除。
-        registerEditorDeleteTarget();
+        // 结构树选中即等价于画布选中：Delete 交由画布执行删除；F2 在这一行原地改名。
+        registerEditorDeleteTarget({ nodeId: node.id });
       });
       container.append(row, children);
       if (hasChildren) {
@@ -297,7 +382,8 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         row.hidden = collapsedGroups.has(group);
         row.className = `variable-row scope-${scope}${variable.name === selectedVariable && scope === selectedVariableScope ? ' selected' : ''}`;
         row.setAttribute('aria-pressed', String(variable.name === selectedVariable && scope === selectedVariableScope));
-        row.title = `${variable.displayName || overviewInputDisplayName(variable.name)} (${variable.name})\n类型：${variable.type}\n${variable.public ? '公开：引用此流程的节点可见' : '私有：仅流程内部使用'}${variable.onCard ? '\n已连接：画布上已有端口引用它' : ''}\n拖到画布可创建引用卡片\nDelete 删除该变量`;
+        // 名称、类型、公开状态与「已连接」都已在行内可见，悬浮提示只保留隐藏操作。
+        row.title = '拖到画布创建引用卡片\nF2 重命名\nDelete 删除';
         row.dataset.variableName = variable.name;
         row.dataset.variableScope = scope;
         row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
@@ -306,14 +392,32 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         icon.classList.add(variableGlyph.className);
         icon.appendChild(createTreeIcon(variableGlyph.icon, 'variable-icon-svg'));
         const nameNode = row.querySelector<HTMLElement>('.variable-name')!;
-        nameNode.textContent = variable.displayName || overviewInputDisplayName(variable.name);
-        if (variable.onCard) {
-          // 变量已经连在某个节点卡片端口上：在名字后标出“已连接”，避免看起来像是没用上。
-          const onCard = document.createElement('span');
-          onCard.className = 'variable-on-card';
-          onCard.textContent = '已连接';
-          onCard.title = '画布上的节点端口已经引用该变量';
-          nameNode.appendChild(onCard);
+        const renaming = variableRenameDraft !== undefined
+          && variableRenameDraft.name === variable.name
+          && variableRenameDraft.scope === scope;
+        if (renaming) {
+          // F2：这一行原地改名。提交走详情栏同一个改名实现（公开镜像输入一起同步）。
+          row.classList.add('renaming');
+          const input = createRowNameInput(variable.displayName || variable.name, (next) => {
+            const value = next.trim();
+            variableRenameDraft = undefined;
+            if (value) editorCommand('renameVariable', { scope, oldName: variable.name, name: value });
+            renderVariables();
+          }, () => { variableRenameDraft = undefined; renderVariables(); });
+          input.setAttribute('aria-label', '变量名称');
+          nameNode.replaceWith(input);
+        } else {
+          nameNode.textContent = variable.displayName || overviewInputDisplayName(variable.name);
+          // 名称可能因侧栏宽度被截断，只在名称本身上提供完整内容。
+          nameNode.title = nameNode.textContent;
+          if (variable.onCard) {
+            // 变量已经连在某个节点卡片端口上：在名字后标出“已连接”，避免看起来像是没用上。
+            const onCard = document.createElement('span');
+            onCard.className = 'variable-on-card';
+            onCard.textContent = '已连接';
+            onCard.title = '画布上的节点端口已经引用该变量';
+            nameNode.appendChild(onCard);
+          }
         }
         const flags = row.querySelector<HTMLElement>('.variable-flags')!;
         flags.textContent = variableTypeLabels[variable.type.toLowerCase()] ?? variable.type;
@@ -345,8 +449,8 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         row.addEventListener('click', () => {
           showDetailsPanel();
           editorCommand('selectVariable', { name: variable.name, scope });
-          // 变量行选中即等价于画布选中该变量：Delete 交由画布执行删除。
-          registerEditorDeleteTarget();
+          // 变量行选中即等价于画布选中该变量：Delete 交由画布执行删除；F2 在这一行原地改名。
+          registerEditorDeleteTarget({ variable: { name: variable.name, scope } });
         });
         variablesView.appendChild(row);
       }
@@ -427,5 +531,9 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         children.classList.toggle('closed', !open);
       });
     },
+    startNodeRename,
+    startVariableRename,
+    isRenaming: () => Boolean(nodeRenameDraft || variableRenameDraft),
+    cancelRename,
   };
 }

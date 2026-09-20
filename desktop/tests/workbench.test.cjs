@@ -246,7 +246,8 @@ test('content browser keeps item instances, draft editing and flat grid/list ren
   const ctx = vm.createContext({contentFolders: () => [''], contentBrowserFolder: '', contentBrowserQuery: '',
     renderContentBrowserTree() {}, renderContentBrowserBreadcrumbs() {}, renderContentBrowserFilters() {},
     contentBrowserEntries: () => [...entries],
-    contentFolderDraft: {parentPath:'',name:'新建文件夹'}, contentBrowserItems:container, contentBrowserView:'grid', selectedContentPath:'',
+    contentFolderDraft: {parentPath:'',name:'新建文件夹'}, contentRenameDraft: null,
+    contentBrowserItems:container, contentBrowserView:'grid', selectedContentPath:'',
     createContentItem(item, draft) { const result = {...element(), item, draft}; created.push(result); return result; },
     document: {createElement: element, querySelector: element, querySelectorAll: () => []}, createIconsRef() {}, desktopIconsRef: {}});
   vm.runInContext(js, ctx); ctx.renderContentBrowser();
@@ -257,4 +258,17 @@ test('content browser keeps item instances, draft editing and flat grid/list ren
   assert.deepEqual(container.children.map(item => item.item.kind), ['folder', 'asset', 'workflow', 'folder']);
   ctx.contentBrowserView = 'list'; ctx.contentFolderDraft = null; created.length = 0;
   ctx.renderContentBrowser(); assert.deepEqual(container.children, created); assert.equal(container.children.length, 3);
+  // 行内重命名：目标条目原地进入编辑态。
+  ctx.contentRenameDraft = {item: entries[1], name: 'main', busy: false}; created.length = 0;
+  ctx.renderContentBrowser();
+  assert.equal(container.children.find(el => el.item.path === 'main.json').draft, true);
+  assert.equal(container.children.filter(el => el.draft).length, 1);
+  // 被筛选/目录藏起来的重命名目标补进网格，保证输入框出现。
+  ctx.contentRenameDraft = {item: {kind:'workflow', name:'hidden', path:'workflows/hidden.json'}, name: 'hidden', busy: false};
+  created.length = 0;
+  ctx.renderContentBrowser();
+  assert.equal(container.children.length, 4);
+  assert.equal(container.children[0].item.path, 'workflows/hidden.json');
+  assert.equal(container.children[0].draft, true);
+  ctx.contentRenameDraft = null;
 });

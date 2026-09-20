@@ -57,6 +57,13 @@ interface ContentFolderDraft {
   busy: boolean;
 }
 
+/** 行内重命名草稿：条目名称在网格里原地变成输入框，Enter 提交、Escape 取消。 */
+interface ContentRenameDraft {
+  item: ContentBrowserItem;
+  name: string;
+  busy: boolean;
+}
+
 const contentBrowserTree = document.querySelector<HTMLElement>('#content-browser-tree')!;
 const contentBrowserItems = document.querySelector<HTMLElement>('#content-browser-items')!;
 const contentBrowserBreadcrumbs = document.querySelector<HTMLElement>('#content-browser-breadcrumbs')!;
@@ -87,6 +94,7 @@ let contentBrowserFolderQuery = '';
 /** 结构树手动收起的目录；重渲染时保持折叠状态。 */
 let collapsedContentFolders = new Set<string>();
 let contentFolderDraft: ContentFolderDraft | undefined;
+let contentRenameDraft: ContentRenameDraft | undefined;
 let selectedContentPath = '';
 let contentNameDialogState: ContentNameDialogState | undefined;
 
@@ -313,6 +321,7 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
     showToast('请先保存当前工作流，再移动内容', true);
     return;
   }
+  if (contentRenameDraft) contentRenameDraft = undefined;
   const sourceWorkflow = workflowDescriptorForPath(source);
   const sourceWorkflowTab = sourceWorkflow
     ? getWorkflowTabs().find((tab) => tab.uri === sourceWorkflow.uri)
@@ -405,7 +414,10 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
     image.loading = 'lazy';
     preview.appendChild(image);
   } else {
-    preview.innerHTML = `<i data-lucide="${item.kind === 'folder' ? 'folder' : 'file-json-2'}"></i>`;
+    const icon = document.createElement('i');
+    icon.className = `content-item-icon ph-duotone ${item.kind === 'folder' ? 'ph-folder-simple' : 'ph-file-code'}`;
+    icon.setAttribute('aria-hidden', 'true');
+    preview.appendChild(icon);
   }
   const kind = document.createElement('span');
   kind.className = 'content-item-kind';
@@ -419,7 +431,7 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
     input.value = item.name;
     input.autocomplete = 'off';
     input.spellcheck = false;
-    input.setAttribute('aria-label', '文件夹名称');
+    input.setAttribute('aria-label', item.kind === 'folder' ? '文件夹名称' : '名称');
   } else {
     label.textContent = item.name;
   }
@@ -435,24 +447,28 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
     input.addEventListener('dblclick', stop);
     input.addEventListener('input', () => {
       if (contentFolderDraft) contentFolderDraft.name = input.value;
+      if (contentRenameDraft) contentRenameDraft.name = input.value;
     });
     input.addEventListener('keydown', (event) => {
       event.stopPropagation();
       if (event.key === 'Enter') {
         event.preventDefault();
-        void commitContentFolderDraft();
+        if (contentFolderDraft) void commitContentFolderDraft();
+        else if (contentRenameDraft) void commitContentRenameDraft();
       } else if (event.key === 'Escape') {
         event.preventDefault();
-        cancelContentFolderDraft();
+        if (contentFolderDraft) cancelContentFolderDraft();
+        else if (contentRenameDraft) cancelContentRenameDraft();
       }
     });
     input.addEventListener('blur', () => {
       window.setTimeout(() => {
         if (contentFolderDraft && !contentFolderDraft.busy) void commitContentFolderDraft();
+        else if (contentRenameDraft && !contentRenameDraft.busy) void commitContentRenameDraft();
       }, 0);
     });
     window.setTimeout(() => {
-      if (contentFolderDraft && !contentFolderDraft.busy) {
+      if ((contentFolderDraft && !contentFolderDraft.busy) || (contentRenameDraft && !contentRenameDraft.busy)) {
         input.focus();
         input.select();
       }
@@ -503,7 +519,8 @@ function createContentFolderRow(folder: string, depth: number, hasChildren: bool
   chevron.className = `content-folder-chevron${hasChildren ? '' : ' leaf'}${collapsed ? ' collapsed' : ''}`;
   if (hasChildren) chevron.innerHTML = '<i data-lucide="chevron-right"></i>';
   const icon = document.createElement('i');
-  icon.setAttribute('data-lucide', folder === contentBrowserFolder ? 'folder-open' : 'folder');
+  icon.className = `content-folder-icon ph-duotone ${folder === contentBrowserFolder ? 'ph-folder-open' : 'ph-folder-simple'}`;
+  icon.setAttribute('aria-hidden', 'true');
   const label = document.createElement('span');
   label.textContent = folder ? contentName(folder) : '项目内容';
   button.append(chevron, icon, label);
@@ -651,8 +668,18 @@ function renderContentBrowser(): void {
       name: contentFolderDraft.name,
     });
   }
+  if (contentRenameDraft && !entries.some((entry) => entry.path === contentRenameDraft!.item.path)) {
+    // 筛选（例如只看工作流）会把重命名目标藏起来：补进网格保证输入框出现。
+    entries.unshift(contentRenameDraft.item);
+  }
   contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
-  const renderedEntries = entries.map((item, index) => ({ item, element: createContentItem(item, Boolean(contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder'))) }));
+  const renderedEntries = entries.map((item, index) => {
+    const editing = Boolean(
+      (contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder'))
+      || (contentRenameDraft && item.path === contentRenameDraft.item.path),
+    );
+    return { item, element: createContentItem(item, editing) };
+  });
   contentBrowserItems.replaceChildren(...renderedEntries.map((entry) => entry.element));
   document.querySelector<HTMLElement>('#content-browser-empty')!.classList.toggle('hidden', entries.length > 0);
   document.querySelector<HTMLElement>('#content-browser-summary')!.textContent = `${entries.length} 项`;
@@ -884,6 +911,7 @@ function relocateFolderDocuments(oldFolder: string, newFolder: string): string[]
 
 async function createContentFolderAt(parentPath: string): Promise<void> {
   if (contentFolderDraft) return;
+  contentRenameDraft = undefined;
   const normalizedParent = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (contentBrowserFolder !== normalizedParent) navigateContentBrowser(normalizedParent);
   selectedContentPath = '';
@@ -938,53 +966,107 @@ async function copyContentPath(path: string): Promise<void> {
   }
 }
 
+/**
+ * 行内重命名入口（F2 与右键菜单「重命名」共用）：条目名称原地变成输入框。
+ * 已有未保存修改时先提示，避免重命名把磁盘引用改写叠在脏内容上。
+ */
 async function renameContentItem(item: ContentBrowserItem): Promise<void> {
   if (isDirty()) {
     showToast('请先保存当前工作流，再重命名内容', true);
     return;
   }
-  const newName = await requestContentName('重命名', '保存', item.name);
-  if (newName === null || !newName.trim() || newName.trim() === item.name) return;
+  if (contentRenameDraft || contentFolderDraft) return;
+  // 搜索/筛选可能把目标条目藏起来：跳到它的父目录，保证输入框出现在网格里。
+  const parent = contentParent(item.path);
+  if (parent !== contentBrowserFolder) navigateContentBrowser(parent);
+  selectedContentPath = item.path;
+  contentRenameDraft = { item, name: item.name, busy: false };
+  renderContentBrowser();
+}
+
+function cancelContentRenameDraft(): void {
+  if (!contentRenameDraft || contentRenameDraft.busy) return;
+  contentRenameDraft = undefined;
+  renderContentBrowser();
+}
+
+async function commitContentRenameDraft(): Promise<void> {
+  const draft = contentRenameDraft;
+  if (!draft || draft.busy) return;
+  const input = contentBrowserItems.querySelector<HTMLInputElement>('.content-item-name-edit');
+  const name = (input?.value ?? draft.name).trim();
+  if (!name) {
+    input?.focus();
+    return;
+  }
+  if (name === draft.item.name) {
+    // 名字没变：直接收掉输入框，不做任何磁盘操作。
+    contentRenameDraft = undefined;
+    renderContentBrowser();
+    return;
+  }
+  draft.name = name;
+  draft.busy = true;
+  input?.setAttribute('aria-busy', 'true');
+  if (input) input.disabled = true;
+  try {
+    await performContentRename(draft.item, name);
+    contentRenameDraft = undefined;
+    // performContentRename 内部已刷新过一遍（重命名后要按新路径重定位标签）；
+    // 这里再刷一次把残留的编辑态输入框收掉。
+    await refreshContentBrowser();
+  } catch (error) {
+    draft.busy = false;
+    if (contentRenameDraft === draft) {
+      renderContentBrowser();
+      const nextInput = contentBrowserItems.querySelector<HTMLInputElement>('.content-item-name-edit');
+      nextInput?.focus();
+      nextInput?.select();
+    }
+    showToast(`重命名失败：${errorMessage(error)}`, true);
+  }
+}
+
+/**
+ * 执行一次真实的重命名：写盘、刷新目录、重定位打开的标签并重定向磁盘引用。
+ * 失败抛错由调用方提示（commitContentRenameDraft）。
+ */
+async function performContentRename(item: ContentBrowserItem, newName: string): Promise<void> {
   const sourceWorkflow = item.kind === 'workflow' ? workflowDescriptorForPath(item.path) : undefined;
   const sourceWorkflowTab = sourceWorkflow
     ? getWorkflowTabs().find((tab) => tab.uri === sourceWorkflow.uri)
     : undefined;
   if (sourceWorkflowTab?.dirty) {
-    showToast('请先保存该工作流，再重命名它', true);
-    return;
+    throw new Error('请先保存该工作流，再重命名它');
   }
   const currentRelative = getCurrentUri() ? relativeToProject(displayFileUri(getCurrentUri())).replace(/\\/g, '/') : '';
   const renamingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
-  try {
-    const result = await api.renameContent({ sourcePath: item.path, newName });
-    selectedContentPath = result.targetPath;
-    await refreshContentBrowser();
-    if (item.kind === 'folder') {
-      // 文件夹改名带走了内部所有工作流：先把打开中的标签搬到新路径，再统一重新读盘。
-      const relocated = relocateFolderDocuments(item.path, result.targetPath);
-      if (relocated.includes(getCurrentUri())) await loadWorkflow(getCurrentUri());
-    } else if (renamingCurrentWorkflow) {
-      const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
-      if (renamed) {
-        const oldUri = getCurrentUri();
-        renameWorkflowTab(oldUri, renamed.uri);
-        relocateDocument(oldUri, renamed.uri);
-        await loadWorkflow(renamed.uri);
-      }
-    } else if (sourceWorkflowTab) {
-      const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
-      if (renamed) {
-        const oldUri = sourceWorkflowTab.uri;
-        renameWorkflowTab(oldUri, renamed.uri);
-        relocateDocument(oldUri, renamed.uri);
-      }
+  const result = await api.renameContent({ sourcePath: item.path, newName });
+  selectedContentPath = result.targetPath;
+  await refreshContentBrowser();
+  if (item.kind === 'folder') {
+    // 文件夹改名带走了内部所有工作流：先把打开中的标签搬到新路径，再统一重新读盘。
+    const relocated = relocateFolderDocuments(item.path, result.targetPath);
+    if (relocated.includes(getCurrentUri())) await loadWorkflow(getCurrentUri());
+  } else if (renamingCurrentWorkflow) {
+    const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
+    if (renamed) {
+      const oldUri = getCurrentUri();
+      renameWorkflowTab(oldUri, renamed.uri);
+      relocateDocument(oldUri, renamed.uri);
+      await loadWorkflow(renamed.uri);
     }
-    // 磁盘引用可能刚被重写：打开中的文档必须重新读盘，不能沿用内存里的旧正文。
-    const skipped = await reloadRewrittenDocuments(result.rewritten.map((detail) => detail.path));
-    reportContentRewrite(result, '重命名', skipped);
-  } catch (error) {
-    showToast(`重命名失败：${errorMessage(error)}`, true);
+  } else if (sourceWorkflowTab) {
+    const renamed = getBootstrap()?.workflows.find((workflow) => workflow.rel.replace(/\\/g, '/').toLowerCase() === result.targetPath.toLowerCase());
+    if (renamed) {
+      const oldUri = sourceWorkflowTab.uri;
+      renameWorkflowTab(oldUri, renamed.uri);
+      relocateDocument(oldUri, renamed.uri);
+    }
   }
+  // 磁盘引用可能刚被重写：打开中的文档必须重新读盘，不能沿用内存里的旧正文。
+  const skipped = await reloadRewrittenDocuments(result.rewritten.map((detail) => detail.path));
+  reportContentRewrite(result, '重命名', skipped);
 }
 
 async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
@@ -992,6 +1074,7 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
     showToast('请先保存当前工作流，再删除内容', true);
     return;
   }
+  if (contentRenameDraft) contentRenameDraft = undefined;
   if (!window.confirm(`确定删除“${item.name}”吗？`)) return;
   const sourceWorkflow = item.kind === 'workflow' ? workflowDescriptorForPath(item.path) : undefined;
   const sourceWorkflowTab = sourceWorkflow
@@ -1256,8 +1339,12 @@ export interface ContentBrowser {
   setView(view: 'grid' | 'list'): void;
   bindWorkflowDropTarget(element: HTMLElement): void;
   resolveDeleteTarget(path: string): ContentBrowserItem | undefined;
+  /** 重命名快捷键用的条目解析：与删除共用同一份路径→条目回退逻辑。 */
+  resolveRenameTarget(path: string): ContentBrowserItem | undefined;
   isRootFolder(path: string): boolean;
   deleteItem(item: ContentBrowserItem): Promise<void>;
+  /** 打开重命名对话框并执行重命名（右键菜单「重命名」的同一入口）。 */
+  renameItem(item: ContentBrowserItem): Promise<void>;
   isNameDialogOpen(): boolean;
   cancelNameDialog(): void;
 }
@@ -1301,10 +1388,16 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
     setView: setContentBrowserView,
     bindWorkflowDropTarget: bindWorkflowTabDropTarget,
     resolveDeleteTarget: resolveContentDeleteTarget,
+    resolveRenameTarget: resolveContentDeleteTarget,
     isRootFolder: isContentRootFolder,
     deleteItem: deleteContentItem,
-    isNameDialogOpen: () => Boolean(contentNameDialogState),
-    cancelNameDialog: () => finishContentNameDialog(null),
+    renameItem: renameContentItem,
+    // 行内重命名草稿对快捷键守卫来说等价于一个打开的命名对话框。
+    isNameDialogOpen: () => Boolean(contentNameDialogState) || Boolean(contentRenameDraft),
+    cancelNameDialog: () => {
+      finishContentNameDialog(null);
+      if (contentRenameDraft) cancelContentRenameDraft();
+    },
   };
 }
 

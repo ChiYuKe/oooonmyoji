@@ -57,8 +57,9 @@ export interface DocumentLifecycleController {
   loadDocumentOnce(uri: string): Promise<void>;
   /** 画布握手完成后下发它自己的初始化数据；同一文档的多个面板互不影响。 */
   sendDocumentInit(uri: string): void;
-  activateWorkflowTab(uri: string): Promise<void>;
-  openWorkflowTab(uri: string): Promise<void>;
+  /** preserveNavigation 只用于“沿子工作流面包屑跳转”；普通标签激活会清除旧路径。 */
+  activateWorkflowTab(uri: string, preserveNavigation?: boolean): Promise<void>;
+  openWorkflowTab(uri: string, preserveNavigation?: boolean): Promise<void>;
   openWorkflowInNewTab(uri: string): void;
   /** 顶栏选择或子流程跳转：打开/聚焦对应文档面板，并把导航栈重置为该文档自己的记录。 */
   switchWorkflow(uri: string, resetStack?: boolean): Promise<void>;
@@ -102,6 +103,8 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
   let removingDocument = false;
   /** 布局重置/会话对账时批量移除面板，不应触发保存与标签删除。 */
   let suppressDocumentRemoval = false;
+  /** setActive 可能同步触发 Dockview 激活事件；标记这些激活来自面包屑导航。 */
+  const preservingNavigation = new Set<string>();
 
   function relocateDocument(oldUri: string, newUri: string): void {
     const docking = getDocking();
@@ -217,16 +220,23 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
     runtime.ready = true;
     if (uri === workspace.activeUri()) runtime.init.workflowTrail = workflowTrail();
     workspace.postToFrame(runtime.frame, runtime.init as unknown as Record<string, unknown>);
+    // 新画布（含刚从会话恢复的）也要拿到当前剪贴板，否则跨画布粘贴在它上面没有入口。
+    const clipboard = workspace.canvasClipboard();
+    if (clipboard) workspace.postToFrame(runtime.frame, { type: 'clipboard', clipboard });
     if (uri === workspace.activeUri()) workspace.postToFrame(detailsFrame, runtime.init as unknown as Record<string, unknown>);
   }
 
-  function workflowTrail(): Array<{ uri: string; name: string }> {
-    const uris = [...workspace.activeBackStack(), workspace.activeUri()].filter(Boolean);
+  function workflowTrailFor(uri: string): Array<{ uri: string; name: string }> {
+    const uris = [...(workspace.tab(uri)?.backStack ?? []), uri].filter(Boolean);
     return uris.map((uri) => {
       const descriptor = getBootstrap()?.workflows.find((item) => item.uri === uri);
       const file = workspace.displayFileUri(uri).split(/[\\/]/).pop() || '';
       return { uri, name: descriptor?.id || descriptor?.name?.replace(/\.json$/i, '') || file.replace(/\.json$/i, '') || '工作流' };
     });
+  }
+
+  function workflowTrail(): Array<{ uri: string; name: string }> {
+    return workflowTrailFor(workspace.activeUri());
   }
 
   function openWorkflowInNewTab(uri: string): void {
@@ -344,14 +354,23 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
 
   let activatingUri: string | undefined;
 
-  async function activateWorkflowTab(uri: string): Promise<void> {
+  async function activateWorkflowTab(uri: string, preserveNavigation = preservingNavigation.has(uri)): Promise<void> {
     if (!uri) return;
     const tab = workspace.tab(uri);
     if (!tab) return;
+    const clearedNavigation = !preserveNavigation && tab.backStack.length > 0;
+    if (clearedNavigation) workspace.setDocumentBackStack(uri, []);
     // 只有「已经加载过」的活动文档才能只同步标签：启动恢复会话时
     // activeUri 已经被设为它，但运行时还没有 init，这里必须继续往下加载，
     // 否则首屏画布会一直空白，直到用户手动切一次标签。
     if (uri === workspace.activeUri() && workspace.getDocumentRuntimes().get(uri)?.init) {
+      if (clearedNavigation) {
+        const runtime = workspace.getDocumentRuntimes().get(uri)!;
+        runtime.init!.workflowTrail = workflowTrailFor(uri);
+        workspace.postToFrame(runtime.frame, {
+          type: 'workflowTrail', workflowTrail: runtime.init!.workflowTrail, canGoBack: false,
+        });
+      }
       syncDocumentTabs();
       return;
     }
@@ -374,11 +393,16 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
     }
   }
 
-  async function openWorkflowTab(uri: string): Promise<void> {
+  async function openWorkflowTab(uri: string, preserveNavigation = false): Promise<void> {
     if (!uri) return;
     ensureDocument(uri);
-    getDocking()?.focusDocument(uri);
-    await activateWorkflowTab(uri);
+    if (preserveNavigation) preservingNavigation.add(uri);
+    try {
+      getDocking()?.focusDocument(uri);
+      await activateWorkflowTab(uri, preserveNavigation);
+    } finally {
+      preservingNavigation.delete(uri);
+    }
   }
 
   /** Dockview 面板被移除（关闭按钮、右键菜单或快捷键）后的收尾：保存、清状态、补默认画布。 */

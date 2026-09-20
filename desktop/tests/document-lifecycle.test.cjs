@@ -27,7 +27,7 @@ function makeRuntime(uri, options = {}) {
 function harness(options = {}) {
   const activeUri = options.activeUri ?? ACTIVE;
   const tabs = new Map([
-    [ACTIVE, {uri: ACTIVE, text: options.activeText ?? '', dirty: false, backStack: []}],
+    [ACTIVE, {uri: ACTIVE, text: options.activeText ?? '', dirty: false, backStack: [...(options.activeBackStack ?? [])]}],
     [OTHER, {uri: OTHER, text: '', dirty: false, backStack: []}],
   ]);
   const runtimes = new Map([
@@ -61,7 +61,11 @@ function harness(options = {}) {
     unregisterDocumentFrame: () => {},
     workflowTabName: (uri) => uri,
     activeBackStack: () => [],
+    setDocumentBackStack: (uri, stack) => { tabs.get(uri).backStack = [...stack]; },
     restoreUri: () => '',
+    // 跨画布剪贴板：初始化下发时会附带当前剪贴板（新画布才有粘贴入口）。
+    canvasClipboard: () => undefined,
+    setCanvasClipboard: () => {},
   };
   const lifecycle = createDocumentLifecycle({
     api: {
@@ -104,6 +108,7 @@ function harness(options = {}) {
     setTabText: (uri, text) => { tabs.get(uri).text = text; },
     setTabDirty: (uri, dirty) => { tabs.get(uri).dirty = dirty; },
     tabText: (uri) => tabs.get(uri).text,
+    tabBackStack: (uri) => [...tabs.get(uri).backStack],
   };
 }
 
@@ -130,6 +135,29 @@ test('已经加载过的活动文档只同步标签，不重复拉取', async ()
   assert.deepEqual(h.calls.loads, []);
   assert.equal(h.calls.tabSyncs, 1);
   assert.deepEqual(h.calls.posts, []);
+});
+
+test('直接激活已有标签会清掉上次进入子工作流留下的面包屑', async () => {
+  const init = {document: {uri: ACTIVE, text: '{}'}, workflows: [], instances: [], selectedInstance: '', issues: []};
+  const h = harness({activeInit: init, activeReady: true, activeBackStack: [OTHER]});
+
+  await h.lifecycle.activateWorkflowTab(ACTIVE);
+
+  assert.deepEqual(h.tabBackStack(ACTIVE), []);
+  const trailUpdate = h.calls.posts.find(([, payload]) => payload.type === 'workflowTrail');
+  assert.ok(trailUpdate, '当前画布应立即收到清理后的面包屑，不需要重载文档');
+  assert.deepEqual(trailUpdate[1].workflowTrail.map(item => item.uri), [ACTIVE]);
+  assert.equal(trailUpdate[1].canGoBack, false);
+});
+
+test('沿子工作流导航激活标签时保留父级路径', async () => {
+  const init = {document: {uri: ACTIVE, text: '{}'}, workflows: [], instances: [], selectedInstance: '', issues: []};
+  const h = harness({activeInit: init, activeReady: true, activeBackStack: [OTHER]});
+
+  await h.lifecycle.activateWorkflowTab(ACTIVE, true);
+
+  assert.deepEqual(h.tabBackStack(ACTIVE), [OTHER]);
+  assert.equal(h.calls.posts.some(([, payload]) => payload.type === 'workflowTrail'), false);
 });
 
 test('非活动文档照常加载', async () => {

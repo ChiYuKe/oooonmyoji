@@ -4,8 +4,9 @@
  * 壳层通过状态访问器读写文档，通过命令式方法修改（setText/setDirty/...），
  * 画布 iframe 只接收消息，不再由入口维护一套镜像状态。
  */
-import type { BootstrapData, WorkflowEditorInit, WorkflowDescriptor } from '../shared/contracts';
+import type { BootstrapData, ParameterInfo, WorkflowEditorInit, WorkflowDescriptor } from '../shared/contracts';
 import type { InspectorSelection, SidebarNode, SidebarVariable } from '../shared/editor-messages';
+import type { CanvasClipboardPayload } from '../shared/editor-messages';
 import { createAutoSaveQueue } from '../shared/workspace/autosave';
 import { createDocumentStore } from '../shared/workspace/documents';
 import { parseWorkflowSession, reconcileWorkflowSession, serializeWorkflowSession, type WorkflowDocumentTab, type WorkflowSession } from '../shared/workspace/session';
@@ -69,6 +70,11 @@ export interface Workspace {
   postToEditor(payload: Record<string, unknown>): void;
   postToEditors(payload: Record<string, unknown>): void;
   postToAllEditors(payload: Record<string, unknown>): void;
+  /** 广播到持有文档的画布（详情栏镜像除外）。 */
+  postToDocumentEditors(payload: Record<string, unknown>): void;
+  /** 画布剪贴板：一台窗口一份，所有画布共用。 */
+  canvasClipboard(): CanvasClipboardPayload | undefined;
+  setCanvasClipboard(payload: CanvasClipboardPayload | undefined): void;
   editorCommand(command: string, value?: unknown): void;
   registerDocumentFrame(panelId: string, uri: string, frame: HTMLIFrameElement): void;
   unregisterDocumentFrame(panelId: string): void;
@@ -84,6 +90,8 @@ export interface Workspace {
   workflowReference(file: WorkflowDescriptor): string;
   workflowTabName(uri: string): string;
   workflowDescriptorForPath(relativePath: string): WorkflowDescriptor | undefined;
+  /** 用当前编辑正文刷新工作流摘要，并同步给所有已打开画布。 */
+  syncWorkflowDescriptor(uri: string, text: string): void;
   restoreUri(): string;
   setRestoreUri(uri: string): void;
   readWorkflowSession(): WorkflowSession | undefined;
@@ -106,6 +114,8 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
   const documentFrameUris = new WeakMap<HTMLIFrameElement, string>();
   let restoreWorkflowUri = '';
   let workflowSessionTimer: number | undefined;
+  /** 画布剪贴板（本窗口一份）：跨画布粘贴的唯一来源。 */
+  let canvasClipboardPayload: CanvasClipboardPayload | undefined;
 
   const autoSave = createAutoSaveQueue({
     delayMs: AUTO_SAVE_DELAY_MS,
@@ -168,6 +178,20 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
   function postToAllEditors(payload: Record<string, unknown>): void {
     for (const runtime of documentRuntimes.values()) postToFrame(runtime.frame, payload);
     postToFrame(detailsFrame, payload);
+  }
+
+  /** 广播到「持有文档」的画布，不含详情栏镜像：镜像没有写权，拿到剪贴板只会误导。 */
+  function postToDocumentEditors(payload: Record<string, unknown>): void {
+    for (const runtime of documentRuntimes.values()) postToFrame(runtime.frame, payload);
+  }
+
+  /** 画布剪贴板：一台窗口一份，所有画布共用，所以卡片能跨画布（含弹出面板）粘贴。 */
+  function canvasClipboard(): CanvasClipboardPayload | undefined {
+    return canvasClipboardPayload;
+  }
+
+  function setCanvasClipboard(payload: CanvasClipboardPayload | undefined): void {
+    canvasClipboardPayload = payload;
   }
 
   function editorCommand(command: string, value?: unknown): void {
@@ -255,6 +279,42 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     return getBootstrap()?.workflows.find((workflow) => workflowReference(workflow).toLowerCase() === normalized);
   }
 
+  function syncWorkflowDescriptor(uri: string, text: string): void {
+    const bootstrap = getBootstrap();
+    const index = bootstrap?.workflows.findIndex((workflow) => workflow.uri === uri) ?? -1;
+    if (!bootstrap || index < 0) return;
+    let document: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      document = parsed as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const current = bootstrap.workflows[index];
+    const inputRecord = document.inputs && typeof document.inputs === 'object' && !Array.isArray(document.inputs)
+      ? document.inputs as Record<string, unknown>
+      : {};
+    const inputs = Object.entries(inputRecord)
+      .filter(([, definition]) => Boolean(definition) && typeof definition === 'object' && !Array.isArray(definition))
+      .map(([name, definition]) => ({ name, definition: definition as ParameterInfo }));
+    const { id: _oldId, description: _oldDescription, inputs: _oldInputs, ...base } = current;
+    const id = typeof document.id === 'string' ? document.id.trim() : '';
+    const description = typeof document.description === 'string' ? document.description.trim() : '';
+    const next: WorkflowDescriptor = {
+      ...base,
+      ...(id ? { id } : {}),
+      ...(description ? { description } : {}),
+      ...(inputs.length ? { inputs } : {}),
+    };
+    if (JSON.stringify([current.id, current.description, current.inputs]) === JSON.stringify([next.id, next.description, next.inputs])) return;
+    bootstrap.workflows = bootstrap.workflows.map((workflow, workflowIndex) => workflowIndex === index ? next : workflow);
+    for (const runtime of documentRuntimes.values()) {
+      if (runtime.init) runtime.init.workflows = bootstrap.workflows;
+    }
+    postToAllEditors({ type: 'workflows', workflows: bootstrap.workflows });
+  }
+
   function readWorkflowSession(): WorkflowSession | undefined {
     const known = getBootstrap()?.workflows.map((workflow) => workflow.uri) ?? [];
     return reconcileWorkflowSession(parseWorkflowSession(window.onmyoji.readLayout(WORKFLOW_SESSION_KEY)), known);
@@ -327,6 +387,9 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     postToEditor,
     postToEditors,
     postToAllEditors,
+    postToDocumentEditors,
+    canvasClipboard,
+    setCanvasClipboard,
     editorCommand,
     registerDocumentFrame,
     unregisterDocumentFrame,
@@ -339,6 +402,7 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     workflowReference,
     workflowTabName,
     workflowDescriptorForPath,
+    syncWorkflowDescriptor,
     restoreUri: () => restoreWorkflowUri,
     setRestoreUri: (uri) => { restoreWorkflowUri = uri; },
     readWorkflowSession,

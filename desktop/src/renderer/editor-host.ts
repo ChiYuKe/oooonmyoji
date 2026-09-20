@@ -6,6 +6,7 @@
  */
 import type { OnmyojiDesktopApi, WorkflowDescriptor } from '../shared/contracts';
 import type { EditorMessage } from '../shared/editor-messages';
+import { parseCanvasClipboard } from '../shared/editor-messages';
 import type { WorkflowDocumentTab } from '../shared/workspace/session';
 import type { RoiPicker } from './roi-picker';
 import type { Sidebar } from './panels/sidebar';
@@ -35,7 +36,7 @@ export interface EditorHostDeps {
   createNewWorkflow: () => Promise<void>;
   switchWorkflow: (uri: string, resetStack?: boolean) => Promise<void>;
   ensureDocument: (uri: string) => WorkflowDocumentTab;
-  openWorkflowTab: (uri: string) => Promise<void>;
+  openWorkflowTab: (uri: string, preserveNavigation?: boolean) => Promise<void>;
   loadWorkflow: (uri: string) => Promise<void>;
   loadDocumentOnce: (uri: string) => Promise<void>;
   sendDocumentInit: (uri: string) => void;
@@ -80,6 +81,15 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           if (sourceUri === workspace.activeUri() || (!workspace.activeUri() && sourceUri === workspace.restoreUri())) await loadDocumentOnce(sourceUri);
           return;
         }
+        case 'clipboardWrite': {
+          // 画布复制/剪切后把内容交给壳层保管：同一窗口的所有画布共用这份剪贴板，
+          // 于是卡片可以跨画布粘贴（弹出到独立窗口的面板也走同一条通道）。
+          const clipboard = parseCanvasClipboard(message.clipboard);
+          if (!clipboard) return;
+          workspace.setCanvasClipboard(clipboard);
+          workspace.postToDocumentEditors({ type: 'clipboard', clipboard });
+          return;
+        }
         case 'createVariableNode': {
           if (message.scope !== 'inputs' && message.scope !== 'variables') return;
           workspace.postToFrame(sourceFrame, { type: 'editorCommand', command: 'addVariableCard', value: { name: String(message.name ?? ''), scope: message.scope } });
@@ -89,6 +99,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           const text = String(message.text ?? '');
           if (!text) return;
           workspace.setDocumentText(targetUri, text);
+          workspace.syncWorkflowDescriptor(targetUri, text);
           // 详情栏是镜像：它报上来的正文属于活动文档，同样要写进这份文档的运行时快照，
           // 否则镜像重载（移到独立窗口、Dockview 重挂）时会拿回旧正文。
           const targetRuntime = runtime ?? (targetUri ? workspace.getDocumentRuntimes().get(targetUri) : undefined);
@@ -115,6 +126,13 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           if (runtime) runtime.inspectorSelection = selection;
           showDetailsPanel();
           workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: selection });
+          return;
+        }
+        case 'inspectorRenameRequested': {
+          // 文档画布按了 F2：可见的名称输入框在详细信息镜像里，转给它聚焦。
+          if (!isActiveSource && sourceUri) return;
+          showDetailsPanel();
+          workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'renameSelection' });
           return;
         }
         case 'variableReferencesRequested': {
@@ -195,7 +213,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           const parent = workspace.tab(targetUri);
           const target = ensureDocument(resolved.uri);
           workspace.setDocumentBackStack(target.uri, [...(parent?.backStack ?? []), targetUri]);
-          await openWorkflowTab(resolved.uri);
+          await openWorkflowTab(resolved.uri, true);
           return;
         }
         case 'goBackWorkflow': {
@@ -206,7 +224,10 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
             workspace.setDocumentText(targetUri, message.saveText);
           }
           const previous = workspace.popDocumentBackStack(targetUri);
-          if (previous) await openWorkflowTab(previous);
+          if (previous) {
+            workspace.setDocumentBackStack(previous, [...(workspace.tab(targetUri)?.backStack ?? [])]);
+            await openWorkflowTab(previous, true);
+          }
           return;
         }
         case 'navigateWorkflowTrail': {
@@ -221,7 +242,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           }
           const target = ensureDocument(trail[index]);
           workspace.setDocumentBackStack(target.uri, trail.slice(0, index));
-          await openWorkflowTab(trail[index]);
+          await openWorkflowTab(trail[index], true);
           return;
         }
         case 'reloadRequest': {

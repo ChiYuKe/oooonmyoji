@@ -15,6 +15,7 @@ function harness() {
     activeUri: () => 'file:///w.json',
     getDocumentRuntimes: () => new Map([['file:///w.json', runtime]]),
     setDocumentText: (uri, text) => posts.push(['text', uri, text]),
+    syncWorkflowDescriptor: (uri, text) => posts.push(['descriptor', uri, text]),
     setDirty: (value) => posts.push(['dirty', value]),
     setDocumentDirty: (uri, value) => posts.push(['documentDirty', uri, value]),
     scheduleAutoSave: (text) => posts.push(['autosave', text]),
@@ -58,6 +59,7 @@ test('详情栏换动作/改参数：改动推给持有文档的画布', async (
     h.posts.filter(([kind]) => kind !== 'post').map(([kind, value]) => [kind, value]),
     [
       ['text', 'file:///w.json'],
+      ['descriptor', 'file:///w.json'],
       ['dirty', true],
       ['autosave', '{"nodes":[{"id":"tap","action":"vision.wait_template"}]}\n'],
     ],

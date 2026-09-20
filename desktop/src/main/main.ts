@@ -45,6 +45,8 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | undefined;
+/** 画布性能基准窗口（仅 `ONMYOJI_BENCHMARK=1` 时创建）。 */
+let benchmarkWindow: BrowserWindow | undefined;
 let project: ProjectService;
 let runtime: RuntimeService;
 let rendererServer: Server | undefined;
@@ -405,6 +407,40 @@ function isRendererUrl(url: string): boolean {
   }
 }
 
+/**
+ * 画布性能基准窗口：隐藏的基准宿主页。
+ *
+ * 只在 `ONMYOJI_BENCHMARK=1` 时创建；窗口不可见、不接收输入，
+ * 由 `desktop/scripts/canvas-benchmark.cjs` 通过调试端口读取测量结果。
+ * 桌面端设计规则不允许「操控窗口做验证」，所以这里只提供一个可编程入口，不做鼠标模拟。
+ */
+function createBenchmarkWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 1920,
+    height: 1080,
+    // 不可见 + 不抢焦点：基准不参与正常使用，也不需要鼠标/键盘输入。
+    show: false,
+    frame: false,
+    title: 'Onmyoji Studio Canvas Benchmark',
+    backgroundColor: '#141414',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      // 基准窗口永远不该被当成「后台标签」节流，否则帧间隔数据不可用。
+      backgroundThrottling: false,
+    },
+  });
+  // 隐藏窗口在部分平台上仍然拿不到渲染帧；基准不依赖帧间隔判定，但把窗口
+  // 标成不节流 + 允许渲染，能让帧间隔数据在与真实使用接近的条件下产生。
+  window.webContents.setBackgroundThrottling(false);
+  void window.loadURL(`${rendererBaseUrl}/canvas-benchmark.html`);
+  return window;
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1560,
@@ -497,7 +533,13 @@ app.whenReady().then(async () => {
   runtime.on('runEvent', (event) => mainWindow?.webContents.send('runtime:run-event', event));
   const devUrl = process.env.ONMYOJI_DESKTOP_DEV_URL;
   rendererBaseUrl = devUrl ? new URL(devUrl).origin : await startRendererServer(path.join(app.getAppPath(), 'dist', 'renderer'));
-  mainWindow = createWindow();
+  // 画布性能基准：只加载基准宿主页（隐藏窗口），不创建主工作台窗口。
+  // 由 desktop/scripts/canvas-benchmark.cjs 通过调试端口驱动，不参与正常使用。
+  if (process.env.ONMYOJI_BENCHMARK === '1') {
+    benchmarkWindow = createBenchmarkWindow();
+  } else {
+    mainWindow = createWindow();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();

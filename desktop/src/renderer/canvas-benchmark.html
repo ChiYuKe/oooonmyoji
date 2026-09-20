@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>画布性能基准</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #141414; color: #d7dce0; font: 12px/1.5 Consolas, monospace; }
+    #frame { display: block; width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <!--
+    画布性能基准宿主页：把工作流画布放进与真实编辑器一致的 iframe 里，
+    然后由 scripts/canvas-benchmark.cjs 通过 window.__canvasBenchmark 驱动。
+    这个页面只在基准运行时加载（主进程带 ONMYOJI_BENCHMARK=1 时创建），不参与正常使用。
+  -->
+  <iframe id="frame" src="./canvas.html?mode=canvas" title="画布基准"></iframe>
+  <script type="module" src="../canvas/benchmark-host.ts"></script>
+</body>
+</html>

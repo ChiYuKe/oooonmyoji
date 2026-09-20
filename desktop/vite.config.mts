@@ -20,6 +20,7 @@ export default defineConfig({
         'vision-test': path.resolve(import.meta.dirname, 'src/renderer/vision-test.html'),
         'live-view': path.resolve(import.meta.dirname, 'src/renderer/live-view.html'),
         canvas: path.resolve(import.meta.dirname, 'src/renderer/canvas.html'),
+        'canvas-benchmark': path.resolve(import.meta.dirname, 'src/renderer/canvas-benchmark.html'),
         'ui-showcase': path.resolve(import.meta.dirname, 'src/renderer/ui-showcase.html'),
       },
     },

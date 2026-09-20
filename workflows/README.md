@@ -5,8 +5,8 @@
 
 ## 目录
 
-- `entrypoints/`：可直接运行的入口工作流，文件名保留实例或业务含义，例如
-  `new_workflow.json`。
+- `entrypoints/`：可直接运行的入口工作流，文件名保留实例或业务含义。这个目录不随仓库提交，
+  在编辑器里「新建工作流」时按需生成。
 - 根目录：当前活动副本循环 `活动副本.json`（工作流 ID `activity_loop`），按页面
   状态处理挑战页与结算页，轮数由 `inputs.运行轮数` 控制。
 - `generated/`：编辑器与工具生成的临时工作流，可随时重建。
@@ -14,7 +14,7 @@
 ## 引用规则
 
 `workflow.run.params.workflow` 使用相对于本目录的 POSIX 路径，例如
-`entrypoints/new_workflow.json`；直接运行时也可以用工作流 ID 或唯一文件名，
+`活动副本.json`；直接运行时也可以用工作流 ID 或唯一文件名，
 例如 `run-workflow activity_loop`。
 
 ## 输入与变量
@@ -49,8 +49,8 @@ schema v4 把外部参数和运行状态分开：
       "wait_for": "all",
       "cancel_on_failure": true,
       "runs": [
-        { "instance": "mumu-0", "workflow": "entrypoints/new_workflow.json", "inputs": {} },
-        { "instance": "mumu-1", "workflow": "entrypoints/new_workflow.json", "inputs": {} }
+        { "instance": "mumu-0", "workflow": "活动副本.json", "inputs": {} },
+        { "instance": "mumu-1", "workflow": "活动副本.json", "inputs": {} }
       ]
     }
   ]

@@ -4,7 +4,11 @@ export interface TitlebarMenus {
   toggleMore(button: HTMLButtonElement): void;
 }
 
-const MORE_ACTIONS: Array<{ label: string; type: string } | 'separator'> = [
+export interface TitlebarMenuOptions {
+  runtimeEdgePreviewEnabled?(): boolean;
+}
+
+const MORE_ACTIONS: Array<{ label: string; type: string; checkable?: boolean } | 'separator'> = [
   { label: '新建工作流', type: 'newWorkflow' },
   { label: '选择其他工作流…', type: 'openWorkflowPicker' },
   { label: '打开 JSON', type: 'openFile' },
@@ -13,10 +17,12 @@ const MORE_ACTIONS: Array<{ label: string; type: string } | 'separator'> = [
   'separator',
   { label: '查看引用', type: 'openReferences' },
   'separator',
+  { label: '运行连线预览', type: 'toggleRuntimeEdgePreview', checkable: true },
+  'separator',
   { label: '重新加载', type: 'reloadRequest' },
 ];
 
-export function createTitlebarMenus(onAction: (type: string) => void): TitlebarMenus {
+export function createTitlebarMenus(onAction: (type: string) => void, options: TitlebarMenuOptions = {}): TitlebarMenus {
   let moreMenu: { menu: HTMLElement; dismiss: (event: Event) => void; keyHandler: (event: KeyboardEvent) => void } | undefined;
 
   function closeMore(): void {
@@ -47,8 +53,15 @@ export function createTitlebarMenus(onAction: (type: string) => void): TitlebarM
       }
       const entry = document.createElement('button');
       entry.type = 'button';
-      entry.setAttribute('role', 'menuitem');
-      entry.textContent = action.label;
+      if (action.checkable) {
+        const checked = options.runtimeEdgePreviewEnabled?.() !== false;
+        entry.setAttribute('role', 'menuitemcheckbox');
+        entry.setAttribute('aria-checked', String(checked));
+        entry.textContent = `${checked ? '✓' : '　'} ${action.label}`;
+      } else {
+        entry.setAttribute('role', 'menuitem');
+        entry.textContent = action.label;
+      }
       entry.addEventListener('click', () => {
         closeMore();
         onAction(action.type);

@@ -45,13 +45,14 @@ window.addEventListener('message', relayFrameMessage);
 
 /**
  * Dockview 把面板 DOM 搬进这个窗口后，主窗口 document 上的快捷键与点击清理都不再触发。
- * 把删除键和指针事件转回主窗口，让它用同一套删除目标逻辑处理。
+ * 把删除/重命名键和指针事件转回主窗口，让它用同一套目标逻辑处理。
  */
 document.addEventListener('pointerdown', () => {
   sendToOpener({ type: 'shellContextReset' });
 }, true);
 document.addEventListener('keydown', (event) => {
-  if (!window.StudioShortcuts?.matchesById(event, 'global.delete')) return;
+  if (!window.StudioShortcuts?.matchesById(event, 'global.delete')
+    && !window.StudioShortcuts?.matchesById(event, 'global.rename')) return;
   const target = event.target;
   if (target instanceof Element && target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
   event.preventDefault();

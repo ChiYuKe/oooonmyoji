@@ -14,6 +14,7 @@
     "src/renderer/variable-references.ts",
     "src/renderer/reference-viewer.ts",
     "src/renderer/delete-shortcuts.ts",
+    "src/renderer/rename-shortcuts.ts",
     "src/renderer/content-browser/items.ts",
     "src/renderer/content-browser/rewrite-report.ts",
     "src/renderer/overview/card.ts",

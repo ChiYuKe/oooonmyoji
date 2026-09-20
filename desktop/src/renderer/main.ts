@@ -88,6 +88,7 @@ import { contentName, createContentBrowser, relativeToProject, type ContentBrows
 import { createOverview } from './overview';
 import { createRuntimeLog } from './runtime-log';
 import { createDeleteShortcuts } from './delete-shortcuts';
+import { createRenameShortcuts } from './rename-shortcuts';
 import { createDocumentLifecycle } from './document-lifecycle';
 import { createSettingsPanel } from './settings-panel';
 import type { WorkflowDocumentTab } from '../shared/workspace/session';
@@ -98,6 +99,10 @@ import { createEditorHost } from './editor-host';
 import { createInstancePicker, instanceLabel } from './instance-picker';
 import { createTitlebarMenus } from './titlebar-menus';
 import { parseEditorMessage } from '../shared/editor-messages';
+import {
+  readRuntimeEdgePreview,
+  writeRuntimeEdgePreview,
+} from '../shared/runtime-edge-preview';
 import './styles.css';
 
 interface EditorEnvelope {
@@ -249,6 +254,30 @@ const deleteShortcuts = createDeleteShortcuts({
   showToast,
 });
 const { handleDeleteShortcut, performDeleteTarget, resetDeleteTargetOnPointerDown } = deleteShortcuts;
+
+/**
+ * 重命名快捷键（F2）：复用删除快捷键登记的最近点选目标。
+ * 内容条目在网格里原地改名；结构树/变量列表在选中的那一行原地改名；
+ * 画布选区交给详细信息镜像聚焦名称输入框。
+ */
+const renameShortcuts = createRenameShortcuts({
+  matchesShortcut: (event, id) => window.StudioShortcuts?.matchesById(event, id) ?? false,
+  getDeleteTarget: () => deleteShortcuts.getDeleteTarget(),
+  roiPicker: { isOpen: () => roiPicker.isOpen() },
+  contentBrowser: {
+    resolveRenameTarget: (path) => contentBrowser.resolveRenameTarget(path),
+    isRootFolder: (path) => contentBrowser.isRootFolder(path),
+    renameItem: (item) => void contentBrowser.renameItem(item as ContentBrowserItem),
+    isNameDialogOpen: () => contentBrowser.isNameDialogOpen(),
+  },
+  panels: {
+    renameNode: (nodeId) => sidebar.startNodeRename(nodeId),
+    renameVariable: (name, scope) => sidebar.startVariableRename(name, scope),
+  },
+  workspace,
+  showToast,
+});
+const { handleRenameShortcut } = renameShortcuts;
 
 let contentBrowser!: ContentBrowser;
 const overview = createOverview({
@@ -474,7 +503,7 @@ const sidebar = createSidebar({
   icons: desktopIcons,
   editorCommand: (command, value) => workspace.editorCommand(command, value),
   showDetailsPanel: () => { docking?.showPanel('details'); },
-  registerEditorDeleteTarget: () => deleteShortcuts.setDeleteTarget({ kind: 'editor' }),
+  registerEditorDeleteTarget: (target) => deleteShortcuts.setDeleteTarget({ kind: 'editor', ...target }),
 });
 
 /**
@@ -604,12 +633,24 @@ function updateMaximizedState(maximized: boolean): void {
   createIcons({ icons: desktopIcons, root: button });
 }
 
+let runtimeEdgePreviewEnabled = readRuntimeEdgePreview(window.localStorage);
 const titlebarMenus = createTitlebarMenus((type) => {
+  if (type === 'toggleRuntimeEdgePreview') {
+    runtimeEdgePreviewEnabled = !runtimeEdgePreviewEnabled;
+    writeRuntimeEdgePreview(window.localStorage, runtimeEdgePreviewEnabled);
+    workspace.postToAllEditors({
+      type: 'desktopControl',
+      command: 'setRuntimeEdgePreview',
+      value: runtimeEdgePreviewEnabled,
+    });
+    showToast(`运行连线预览已${runtimeEdgePreviewEnabled ? '开启' : '关闭'}`);
+    return;
+  }
   const frame = workspace.activeRuntime()?.frame;
   if (!frame) return;
   const parsed = parseEditorMessage({ type });
   if (parsed) void editorHost.handleMessage(parsed, frame);
-});
+}, { runtimeEdgePreviewEnabled: () => runtimeEdgePreviewEnabled });
 const closeTitlebarMenus = titlebarMenus.close;
 function updateDockMenuState(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-workbench-panel]').forEach((button) => {
@@ -814,6 +855,7 @@ function bindUi(): void {
   document.addEventListener('pointerdown', resetDeleteTargetOnPointerDown, true);
   document.addEventListener('keydown', (event) => {
     if (handleDeleteShortcut(event)) return;
+    if (handleRenameShortcut(event)) return;
     if (event.key === 'Escape') {
       if (roiPicker.isOpen()) {
         event.preventDefault();
@@ -823,6 +865,11 @@ function bindUi(): void {
       if (contentBrowser.isNameDialogOpen()) {
         event.preventDefault();
         contentBrowser.cancelNameDialog();
+        return;
+      }
+      if (sidebar.isRenaming()) {
+        event.preventDefault();
+        sidebar.cancelRename();
         return;
       }
       if (overview.isConfigurationOpen()) overview.closeConfiguration();
@@ -855,9 +902,15 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
   }
 
   // 面板被拖动到独立窗口后，DOM 仍在，但主窗口 document 收不到键盘事件；
-  // 独立窗口把删除键与指针事件转回来，复用同一套删除目标逻辑。
+  // 独立窗口把删除/重命名键与指针事件转回来，复用同一套目标逻辑。
   if (event.data?.source === 'dockview-popout' && event.data.type === 'shellShortcut') {
-    performDeleteTarget();
+    // 转发事件只被目标解析消费（读取 key / 调用 preventDefault），不读 defaultPrevented。
+    const forwarded = {
+      key: String(event.data.key ?? ''),
+      target: null,
+      preventDefault() {},
+    } as KeyboardEvent;
+    if (!handleRenameShortcut(forwarded)) performDeleteTarget(forwarded);
     return;
   }
   if (event.data?.source === 'dockview-popout' && event.data.type === 'shellContextReset') {
@@ -945,7 +998,7 @@ async function start(): Promise<void> {
     lifecycle.setDocumentsReady();
     if (session) {
       docking.ensureLayout();
-      await lifecycle.activateWorkflowTab(session.activeUri);
+      await lifecycle.activateWorkflowTab(session.activeUri, true);
       workspace.setRestoreUri('');
       showToast(`已恢复上次的 ${session.tabs.length} 个画布`);
     } else {

@@ -39,6 +39,8 @@ test('默认绑定覆盖全部可配置命令并带多组合', () => {
   assert.equal(api.get('editor.undo'), 'ctrl+z');
   assert.equal(api.get('editor.redo'), 'ctrl+shift+z|ctrl+y');
   assert.equal(api.get('global.delete'), 'delete|backspace');
+  assert.equal(api.get('global.rename'), 'f2');
+  assert.equal(api.get('editor.rename'), 'f2');
   assert.equal(api.get('editor.save'), 'ctrl+s');
   assert.equal(api.format('ctrl+shift+z|ctrl+y'), 'Ctrl+Shift+Z / Ctrl+Y');
   assert.equal(api.format('delete|backspace'), 'Delete / Backspace');
@@ -55,6 +57,7 @@ test('匹配区分修饰键、多组合与删除别名', () => {
   assert.equal(api.matches(key('Backspace'), 'delete|backspace'), true);
   assert.equal(api.matches(key('Delete', {ctrlKey: true}), 'delete|backspace'), false);
   assert.equal(api.matches(key('F6', {shiftKey: true}), 'shift+f6'), true);
+  assert.equal(api.matches(key('F2'), 'f2'), true);
   assert.equal(api.matches(key('Home'), 'home'), true);
 });
 

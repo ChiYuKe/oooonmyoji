@@ -230,7 +230,7 @@ test('画布、标题栏命令与独立窗口共用同一个删除入口', () =>
   assert.match(shell, /if \(handleDeleteShortcut\(event\)\) return;/);
   assert.match(shell, /document\.addEventListener\('pointerdown', resetDeleteTargetOnPointerDown, true\)/);
   assert.match(overviewSrc, /setDeleteTarget\(\{ kind: 'queue', rel \}\);/);
-  assert.match(shell, /setDeleteTarget\(\{ kind: 'editor' \}\)/);
+  assert.match(shell, /setDeleteTarget\(\{ kind: 'editor', \.\.\.target \}\)/);
   assert.match(popout, /sendToOpener\(\{ type: 'shellShortcut', key: event\.key \}\)/);
   assert.match(shell, /event\.data\.type === 'shellShortcut'/);
 });

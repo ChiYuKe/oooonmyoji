@@ -17,6 +17,7 @@
 
   const DEFINITIONS = [
     { id: 'global.delete', group: 'global', label: '删除当前选中项', defaultBinding: 'delete|backspace' },
+    { id: 'global.rename', group: 'global', label: '重命名当前选中项', defaultBinding: 'f2' },
     { id: 'global.popout', group: 'global', label: '当前模块移到独立窗口', defaultBinding: 'shift+f6' },
     { id: 'editor.undo', group: 'editor', label: '撤销', defaultBinding: 'ctrl+z' },
     { id: 'editor.redo', group: 'editor', label: '重做', defaultBinding: 'ctrl+shift+z|ctrl+y' },
@@ -26,6 +27,7 @@
     { id: 'editor.selectAll', group: 'editor', label: '全选节点', defaultBinding: 'ctrl+a' },
     { id: 'editor.save', group: 'editor', label: '保存工作流', defaultBinding: 'ctrl+s' },
     { id: 'editor.delete', group: 'editor', label: '删除所选节点、连线或变量', defaultBinding: 'delete|backspace' },
+    { id: 'editor.rename', group: 'editor', label: '重命名所选节点', defaultBinding: 'f2' },
     { id: 'editor.fitView', group: 'editor', label: '适应画布', defaultBinding: 'home' },
     { id: 'editor.focusNode', group: 'editor', label: '聚焦到唯一选中的节点', defaultBinding: 'f' },
   ];

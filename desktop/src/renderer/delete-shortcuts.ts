@@ -7,12 +7,19 @@
  * 依赖全部注入（面板句柄经惰性箭头传入，避免构造期互相引用），可独立测试。
  */
 
+/** 画布选区的名称信息：登记它的面板行知道自己在改哪个变量/节点（F2 行内改名要用）。 */
+export interface EditorSelectionRef {
+  nodeId?: string;
+  variable?: { name: string; scope: 'inputs' | 'variables' };
+}
+
 /** 桌面壳层的删除键目标：由各面板的点击处理器登记，新的一次点击会先作废上一次登记。
- * editor 表示“结构树/变量列表里选中的东西”，交给画布执行删除。 */
+ * editor 表示“结构树/变量列表里选中的东西”，交给画布执行删除；附带名称信息时，
+ * F2 由登记它的面板行原地改名。 */
 export type DeleteTarget =
   | { kind: 'content'; path: string }
   | { kind: 'queue'; rel: string }
-  | { kind: 'editor' };
+  | ({ kind: 'editor' } & EditorSelectionRef);
 
 export interface DeleteShortcutDeps {
   matchesShortcut(event: KeyboardEvent, id: string): boolean;

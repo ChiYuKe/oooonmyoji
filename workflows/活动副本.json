@@ -9,9 +9,9 @@
   ],
   "root": "root",
   "inputs": {
-    "v_e9e2ee318a1e4a84abbe42e1d9a77690": {
+    "v_3a3d58354dbf4aeb8a85bf05bc703c2c": {
       "type": "integer",
-      "default": 9999,
+      "default": 1100,
       "min": 1,
       "description": "循环执行次数。",
       "display_name": "运行轮数",
@@ -21,11 +21,11 @@
   "variables": {
     "v_10a5b9e6f0724cae9fddae2b177a86af": {
       "type": "integer",
-      "default": 9999,
+      "default": 1100,
       "min": 1,
       "description": "循环执行次数。",
       "display_name": "运行轮数",
-      "initial_from": "v_e9e2ee318a1e4a84abbe42e1d9a77690"
+      "initial_from": "v_3a3d58354dbf4aeb8a85bf05bc703c2c"
     }
   },
   "nodes": [
@@ -333,15 +333,15 @@
   ],
   "_layout": {
     "root": {
-      "x": 643,
+      "x": 602,
       "y": 0
     },
     "repeat_rounds": {
-      "x": 643,
+      "x": 602,
       "y": 208
     },
     "round": {
-      "x": 643,
+      "x": 602,
       "y": 416
     },
     "wait_round_state": {
@@ -349,7 +349,7 @@
       "y": 624
     },
     "round_state_selector": {
-      "x": 1287,
+      "x": 1204,
       "y": 624
     },
     "start_round": {
@@ -357,8 +357,8 @@
       "y": 832
     },
     "continue_round": {
-      "x": 1826,
-      "y": 832
+      "x": 1168,
+      "y": -216
     },
     "tap_challenge": {
       "x": 332,
@@ -381,15 +381,38 @@
       "y": 1248
     },
     "tap_exit_from_settlement": {
-      "x": 1660,
-      "y": 1040
+      "x": 996,
+      "y": 0
     },
     "wait_challenge_after_settlement": {
-      "x": 1992,
-      "y": 1040
+      "x": 1328,
+      "y": 0
+    },
+    "node_group_1": {
+      "x": 1660,
+      "y": 832
+    },
+    "__node_group_interface__:node_group_1": {
+      "x": 1168,
+      "y": -400
+    },
+    "__node_group_variables__:node_group_1": {
+      "x": 520,
+      "y": 0
     }
   },
   "_inputParams": {},
   "_variableLinks": {},
-  "_variableCards": {}
+  "_variableCards": {},
+  "_nodeGroups": {
+    "node_group_1": {
+      "name": "节点组 1",
+      "nodeIds": [
+        "continue_round",
+        "tap_exit_from_settlement",
+        "wait_challenge_after_settlement"
+      ],
+      "pins": []
+    }
+  }
 }

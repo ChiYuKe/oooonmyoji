@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -245,6 +246,67 @@ def test_all_workflow_scripts_have_catalog_descriptions() -> None:
     assert missing == []
 
 
+def _resolve_workflow_reference(project_root: Path, reference: str) -> Path | None:
+    """把工作流引用（文件名 / 工作流 ID / workflows 下的路径）解析到实际文件。
+
+    复刻桌面端 `matchWorkflowReference` + `resolveWorkflowReference` 的语义：先按路径/文件名匹配，
+    没命中再把引用当成工作流 ID 读文件内容比对。绑定到 inputs 的引用（对象形式）不在这里处理。
+    """
+    ref = str(reference or "").replace("\\", "/").strip()
+    if not ref:
+        return None
+    with_ext = ref if ref.lower().endswith(".json") else f"{ref}.json"
+    without_ext = ref[:-5] if ref.lower().endswith(".json") else ref
+    for path in sorted((project_root / "workflows").rglob("*.json")):
+        rel = path.relative_to(project_root).as_posix()
+        rootless = re.sub(r"^workflows/", "", rel, flags=re.IGNORECASE)
+        for name in (rel, rootless, path.name):
+            if ref in (name, without_ext) or with_ext == name:
+                return path
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(raw, dict) and raw.get("id") == ref:
+            return path
+    return None
+
+
+def test_all_workflow_references_resolve_to_existing_files() -> None:
+    """工作流之间互相引用的名字必须真能解析到文件。
+
+    重命名工作流后如果哪里的引用（画布上写回的字面引用、instance_parallel 的 runs[].workflow）
+    还留着旧名字，这里会直接报出来——这类残留以前只能靠人眼在画布上发现。
+    """
+    project_root = Path(__file__).resolve().parents[1]
+    dangling: list[str] = []
+    for workflow_path in sorted((project_root / "workflows").rglob("*.json")):
+        raw = json.loads(workflow_path.read_text(encoding="utf-8"))
+        nodes = raw.get("nodes") if isinstance(raw, dict) else None
+        if not isinstance(nodes, list):
+            continue
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            raw_params = node.get("params")
+            params = raw_params if isinstance(raw_params, dict) else {}
+            references: list[Any] = []
+            if node.get("type") == "task" and node.get("action") == "workflow.run":
+                references.append(params.get("workflow"))
+            if node.get("type") == "instance_parallel":
+                raw_runs = node.get("runs")
+                runs = raw_runs if isinstance(raw_runs, list) else []
+                for run in runs:
+                    if isinstance(run, dict):
+                        references.append(run.get("workflow"))
+            for reference in references:
+                if not isinstance(reference, str) or not reference.strip():
+                    continue  # 对象形式（绑定到 inputs）在运行时才解析
+                if _resolve_workflow_reference(project_root, reference) is None:
+                    dangling.append(f"{workflow_path.relative_to(project_root).as_posix()} 节点 {node.get('id')} → {reference}")
+    assert dangling == []
+
+
 def test_validator_enforces_simple_parallel_shape_and_decorators() -> None:
     actions = registry(action_spec(EchoAction()))
     valid = tree([
@@ -271,26 +333,31 @@ def test_validator_enforces_simple_parallel_shape_and_decorators() -> None:
 
 def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindings() -> None:
     actions = registry(action_spec(EchoAction()))
+    # 子工作流的输入键由编辑器生成（例如 v_<hash>），按实际声明取，避免改一次数据就红。
+    child_workflow = Path(__file__).resolve().parents[1] / "workflows" / "活动副本.json"
+    child_inputs = list(json.loads(child_workflow.read_text(encoding="utf-8")).get("inputs", {}))
+    assert child_inputs, "活动副本应当至少声明一个输入"
+    child_input = child_inputs[0]
     valid = tree([
         {
             "id": "run_all",
             "type": "instance_parallel",
             "runs": [
-                {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json", "inputs": {"子工作流": {"ref": "inputs.子工作流"}}},
-                {"instance": "mumu-1", "workflow": "entrypoints/new_workflow.json", "inputs": {}},
+                {"instance": "mumu-0", "workflow": "活动副本.json", "inputs": {child_input: {"ref": "inputs.运行轮数"}}},
+                {"instance": "mumu-1", "workflow": "活动副本.json", "inputs": {}},
             ],
             "wait_for": "all",
             "cancel_on_failure": True,
         },
-    ], "run_all", inputs={"子工作流": {"type": "string", "default": "活动副本.json"}})
+    ], "run_all", inputs={"运行轮数": {"type": "integer", "default": 1}})
     parsed = validate(valid, actions)
     assert parsed.node_map["run_all"].runs[0].instance == "mumu-0"
     assert parsed.node_map["run_all"].wait_for == "all"
 
     duplicate = tree([
         {"id": "run_all", "type": "instance_parallel", "runs": [
-            {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json"},
-            {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json"},
+            {"instance": "mumu-0", "workflow": "活动副本.json"},
+            {"instance": "mumu-0", "workflow": "活动副本.json"},
         ]},
     ], "run_all")
     with pytest.raises(ConfigError, match="more than once"):
@@ -298,7 +365,7 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
 
     output_binding = tree([
         {"id": "run_all", "type": "instance_parallel", "runs": [
-            {"instance": "mumu-0", "workflow": "entrypoints/new_workflow.json", "inputs": {"子工作流": {"ref": "nodes.some.output.value"}}},
+            {"instance": "mumu-0", "workflow": "活动副本.json", "inputs": {child_input: {"ref": "nodes.some.output.value"}}},
         ]},
     ], "run_all")
     with pytest.raises(ConfigError, match="only reference inputs"):

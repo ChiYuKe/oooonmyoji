@@ -32,6 +32,8 @@ export interface InlineEditorDeps {
   fieldLabel(name: string): string;
   /** 素材浏览器：选中后通过 applyValue 直接写回卡片行。 */
   openAssetBrowser?(nodeId: string, key: string, currentPath: string, applyValue?: ((value: string) => void) | null): void;
+  /** 工作流浏览器：选中后通过 applyValue 写回卡片行。 */
+  openWorkflowBrowser?(nodeId: string, key: string, currentReference: string, applyValue?: (value: string) => void): void;
   /** ROI 拾取：mode='asset' 截取模板图，mode='rect' 框选区域。 */
   requestRoi?(nodeId: string, key: string, mode: 'asset' | 'rect', options?: Record<string, unknown>): void;
 }
@@ -64,7 +66,7 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
   const {
     state, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
     showMenu, nodeVariablePinMenuItems, requestInspector, toast, enumOption, fieldLabel,
-    openAssetBrowser, requestRoi,
+    openAssetBrowser, openWorkflowBrowser, requestRoi,
   } = deps;
 
   let active: ActiveEditor | null = null;
@@ -190,6 +192,7 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     anchor: () => ParamRowRect,
     kind: ParamRowKind,
     valueAlign: 'left' | 'right' = 'right',
+    initialInputIndex = 0,
   ): void {
     closeInlineEditor();
     const definition = pin.definition || {};
@@ -233,7 +236,7 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
         shell.appendChild(input);
         return input;
       });
-      primary = fields[0];
+      primary = fields[Math.max(0, Math.min(fields.length - 1, initialInputIndex))];
       read = () => parseParamLiteral('rect', fields.map((input) => input.value.trim()).join(', '), definition);
     } else if (kind === 'tuple') {
       // 固定长度数组：每个元素一个输入格（随机间隔 → 最小值 / 最大值），回车一次提交整行。
@@ -410,24 +413,8 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     showMenu(clientX, clientY, items);
   }
 
-  /** 区域参数：直接在当前画面上框选，或手输四个坐标。 */
-  function openRectMenu(node: any, pin: ParamRowLike, clientX: number, clientY: number, anchor: () => ParamRowRect, valueAlign: 'left' | 'right' = 'right'): void {
-    const param = String(pin.param);
-    const write = (value: unknown): void => writeParamLiteral(node, param, value);
-    const items: MenuEntry[] = [];
-    if (requestRoi) {
-      items.push({
-        label: '在当前画面上框选…',
-        run: () => requestRoi(node.id, param, 'rect', { applyValue: write }),
-      });
-    }
-    items.push({ label: '手动输入四坐标…', run: () => openLiteralInput(node, pin, anchor, 'rect', valueAlign) });
-    items.push(...appendedRowItems(node, pin, pin.configured === true));
-    showMenu(clientX, clientY, items);
-  }
-
   function openParamEditor(request: NodeParamEditorRequest): void {
-    const { node, pin, rect, clientX, clientY, world, valueAlign } = request;
+    const { node, pin, rect, clientX, clientY, world, valueAlign, inputIndex } = request;
     const param = String(pin && pin.param ? pin.param : '');
     if (!node || !param) return;
     const align = valueAlign === 'left' ? 'left' : 'right';
@@ -453,9 +440,15 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
         closeInlineEditor();
         openAssetMenu(node, pin, clientX, clientY);
         return;
-      case 'roi-menu':
+      case 'workflow-menu': {
         closeInlineEditor();
-        openRectMenu(node, pin, clientX, clientY, () => rect, align);
+        const current = paramEditorCurrentValue(pin);
+        openWorkflowBrowser?.(node.id, param, typeof current === 'string' ? current : '');
+        return;
+      }
+      case 'roi-menu':
+        // 卡片已经把区域显示成四个输入格：单击直接编辑，并聚焦实际点中的坐标。
+        openLiteralInput(node, pin, () => rect, 'rect', align, inputIndex);
         return;
       case 'input': {
         const kind = paramRowKindOf(pin, pin.definition);

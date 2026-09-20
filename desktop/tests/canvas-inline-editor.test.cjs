@@ -43,7 +43,7 @@ function harness(options = {}) {
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
   };
   const { createCanvasInlineEditor } = require(path.join('..', 'dist-test-renderer', 'canvas', 'interactions', 'inline-editor.js'));
-  const calls = { menus: [], inspectors: [], toasts: [], remembered: [], cleared: [], mutations: 0, assets: [], rois: [] };
+  const calls = { menus: [], inspectors: [], toasts: [], remembered: [], cleared: [], mutations: 0, assets: [], workflows: [], rois: [] };
   const state = { zoom: 1, panX: 0, panY: 0 };
   const links = {};
   const editor = createCanvasInlineEditor({
@@ -63,6 +63,9 @@ function harness(options = {}) {
     openAssetBrowser: options.openAssetBrowser === undefined
       ? (nodeId, key, current, applyValue) => calls.assets.push([nodeId, key, current, applyValue])
       : options.openAssetBrowser,
+    openWorkflowBrowser: options.openWorkflowBrowser === undefined
+      ? (nodeId, key, current, applyValue) => calls.workflows.push([nodeId, key, current, applyValue])
+      : options.openWorkflowBrowser,
     requestRoi: options.requestRoi === undefined
       ? (nodeId, key, mode, roiOptions) => calls.rois.push([nodeId, key, mode, roiOptions])
       : options.requestRoi,
@@ -131,6 +134,17 @@ test('已绑定变量的参数行走端口菜单', () => {
   assert.equal(calls.menus[0][0], 40);
   assert.equal(body.children.length, 0);
   assert.equal(calls.mutations, 0);
+});
+
+test('工作流参数点值区直接打开工作流浏览器', () => {
+  const { editor, calls, body } = harness();
+  const node = { id: 'run_child', action: 'workflow.run', params: { workflow: 'old.json' } };
+  editor.openParamEditor(request(node, {
+    param: 'workflow', definition: { type: 'workflow', required: true }, configured: true, value: 'old.json',
+  }));
+  assert.deepEqual(calls.workflows, [['run_child', 'workflow', 'old.json', undefined]]);
+  assert.equal(body.children.length, 0);
+  assert.equal(editor.inlineEditorOpen(), false);
 });
 
 test('枚举参数弹出选项菜单，支持恢复默认与转详情栏', () => {
@@ -432,24 +446,13 @@ test('模板参数在卡片上直接选素材图或从当前画面截取', () =>
   assert.equal('template' in configured.params, false);
 });
 
-test('识别区域参数在卡片上直接框选或手输四坐标', () => {
+test('识别区域参数单击直接编辑四坐标，并聚焦点中的输入格', () => {
   const { editor, calls, body } = harness();
   const node = { id: 'wait', params: {} };
   const pin = { param: 'roi', definition: { type: 'rect' }, configured: true, value: [10, 20, 200, 80] };
-  editor.openParamEditor(request(node, pin));
-  assert.equal(body.children.length, 0, '区域参数先出菜单，不直接开输入框');
-  const items = calls.menus[0][2];
-  assert.deepEqual(items.map((item) => (typeof item === 'string' ? item : item.label)),
-    ['在当前画面上框选…', '手动输入四坐标…', 'separator', '清除本行取值', 'separator', '在详情栏编辑']);
-  // 框选：ROI 拾取 rect 模式，确认后由 applyValue 写回四坐标。
-  items[0].run();
-  assert.deepEqual(calls.rois.map(([nodeId, key, mode]) => [nodeId, key, mode]), [['wait', 'roi', 'rect']]);
-  calls.rois[0][3].applyValue([60, 120, 300, 90]);
-  assert.deepEqual(node.params.roi, [60, 120, 300, 90]);
-  assert.deepEqual(calls.remembered, [['wait', 'roi', [60, 120, 300, 90]]]);
-  assert.equal(calls.mutations, 0);
-  // 手输：X/Y/宽/高 四个输入框，回车一次提交整个区域。
-  items[1].run();
+  editor.openParamEditor(request(node, pin, { inputIndex: 2 }));
+  assert.equal(calls.menus.length, 0, '区域参数不再先弹操作菜单');
+  // 单击直接出现 X/Y/宽/高 四个输入框，inputIndex 对应用户实际点中的格子。
   const shell = body.children[0];
   assert.equal(shell.className, 'inline-param-editor');
   const axisLabels = shell.children.filter((child) => child.className === 'inline-param-axis-label').map((child) => child.textContent);
@@ -457,15 +460,16 @@ test('识别区域参数在卡片上直接框选或手输四坐标', () => {
   const inputs = shell.children.filter((child) => child.tag === 'input');
   assert.deepEqual(inputs.map((input) => input.value), ['10', '20', '200', '80']);
   assert.deepEqual(inputs.map((input) => input.min), [undefined, undefined, '0', '0']);
-  assert.equal(inputs[0].focused, true);
+  assert.equal(inputs[2].focused, true);
+  assert.equal(inputs[2].selected, true);
   inputs[2].value = '320';
   inputs[3].value = '96';
-  inputs[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
+  inputs[2].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
   assert.deepEqual(node.params.roi, [10, 20, 320, 96]);
   assert.equal(editor.inlineEditorOpen(), false);
   assert.equal(calls.mutations, 1);
   // 非法输入留在浮层里并提示，不写盘。
-  items[1].run();
+  editor.openParamEditor(request(node, pin));
   const bad = body.children[0].children.filter((child) => child.tag === 'input');
   bad[1].value = 'x';
   bad[0].events.keydown[0]({ key: 'Enter', stopPropagation: () => {}, preventDefault: () => {} });
@@ -481,12 +485,12 @@ test('识别区域参数在卡片上直接框选或手输四坐标', () => {
 });
 
 test('卡片声明的 control 覆盖参数类型：数组参数也能用区域控件', () => {
-  const { editor, calls } = harness();
+  const { editor, calls, body } = harness();
   const node = { id: 'patrol', params: {} };
   const pin = { param: 'target_rois', control: 'rect', definition: { type: 'array', items: { type: 'number' } }, configured: true, value: [1, 2, 3, 4] };
   editor.openParamEditor(request(node, pin));
-  assert.deepEqual(calls.menus[0][2].map((item) => (typeof item === 'string' ? item : item.label)).slice(0, 2),
-    ['在当前画面上框选…', '手动输入四坐标…']);
+  assert.equal(calls.menus.length, 0);
+  assert.deepEqual(body.children[0].children.filter((child) => child.tag === 'input').map((input) => input.value), ['1', '2', '3', '4']);
   // control 声明成 inspector 时回到详情栏。
   const forced = harness();
   forced.editor.openParamEditor(request({ id: 'wait', params: {} }, { param: 'match', control: 'inspector', definition: { type: 'object' }, configured: false }));

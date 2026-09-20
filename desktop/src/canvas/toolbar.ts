@@ -87,6 +87,9 @@ export interface ToolbarDeps {
   toast(message: string, error?: boolean): void;
   nodes(): ToolbarNode[];
   focusNode(id: string): void;
+  currentNodeGroup?(): { id: string; name: string } | null;
+  leaveNodeGroup?(): boolean;
+  groupSelection?(): boolean;
 }
 
 export interface ToolbarController {
@@ -200,8 +203,11 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     const nav = $('workflow-breadcrumb');
     if (!nav) return;
     nav.innerHTML = '';
-    const trail = Array.isArray(state.workflowTrail) ? state.workflowTrail : [];
-    if (!trail.length) {
+    const group = deps.currentNodeGroup?.() || null;
+    let trail = Array.isArray(state.workflowTrail) ? state.workflowTrail.slice() : [];
+    $('btn-back')?.classList.toggle('hidden', !group && trail.length < 2);
+    if (group && !trail.length) trail = [{ uri: state.docUri, name: state.documentName || '当前工作流' }];
+    if (!trail.length && !group) {
       nav.classList.add('hidden');
       return;
     }
@@ -209,22 +215,35 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     nav.appendChild(el('span', 'workflow-breadcrumb-mark', '◆'));
     trail.forEach((item, index) => {
       if (index > 0) nav.appendChild(el('span', 'workflow-breadcrumb-separator', '›'));
-      const current = index === trail.length - 1;
+      const current = index === trail.length - 1 && !group;
       const button = el('button', `workflow-crumb${current ? ' current' : ''}`, item.name || '工作流') as HTMLButtonElement;
       button.type = 'button';
       button.title = item.uri || item.name || '工作流';
       if (current) {
         button.disabled = true;
         button.setAttribute('aria-current', 'page');
-      } else button.addEventListener('click', () => navigateWorkflowTrail(index));
+      } else if (group && index === trail.length - 1) button.addEventListener('click', () => deps.leaveNodeGroup?.());
+      else button.addEventListener('click', () => navigateWorkflowTrail(index));
       nav.appendChild(button);
     });
+    if (group) {
+      nav.appendChild(el('span', 'workflow-breadcrumb-separator', '›'));
+      const button = el('button', 'workflow-crumb current node-group-crumb', group.name) as HTMLButtonElement;
+      button.type = 'button';
+      button.disabled = true;
+      button.setAttribute('aria-current', 'page');
+      nav.appendChild(button);
+    }
   }
 
   function bindToolbar(): void {
     $('btn-zoom-in').addEventListener('click', () => zoomAt(1.2));
     $('btn-zoom-out').addEventListener('click', () => zoomAt(1 / 1.2));
     $('btn-back').addEventListener('click', () => {
+      if (deps.currentNodeGroup?.()) {
+        deps.leaveNodeGroup?.();
+        return;
+      }
       const goBack = (saveText?: string): void => vscode.postMessage({ type: 'goBackWorkflow', saveText });
       if (state.dirty) {
         const rect = $('btn-back').getBoundingClientRect();
@@ -252,6 +271,8 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     $('btn-more').addEventListener('click', () => {
       const rect = $('btn-more').getBoundingClientRect();
       showMenu(rect.right, rect.bottom + 4, [
+        { label: '将所选节点打组', run: () => deps.groupSelection?.() },
+        'separator',
         { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
         { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },
         { label: '打开 JSON', run: () => vscode.postMessage({ type: 'openFile' }) },

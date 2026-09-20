@@ -6,6 +6,7 @@
  * 所有文档修改通过状态写入与注入回调完成；连续拖拽只在指针抬起时形成一次历史。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { createWrapMeasurement } from '../canvas/wrap-measurement';
 
 export interface PointerPoint {
   x: number;
@@ -28,6 +29,8 @@ export interface PointerDeps {
   state: CanvasState;
   graph: Element;
   wrap: HTMLElement;
+  /** 视口尺寸测量（缓存读）；缺省按 `wrap` 自行创建。 */
+  measurement?: { read(): { width: number; height: number; left: number; top: number } };
   worldPoint(event: { clientX: number; clientY: number }): PointerPoint;
   position(node: any): PointerPoint;
   nodeById(id: string): any;
@@ -35,6 +38,13 @@ export interface PointerDeps {
   nodeHeight(node: any): number;
   snapshot(): string;
   render(): void;
+  /**
+   * 带标记的同步重绘：框选矩形要跟着指针走，不能延后到下一帧。
+   * 缺省退化为无标记的 `render()`。
+   */
+  renderWith?(flags: { viewport?: boolean; interaction?: boolean; selection?: boolean }): void;
+  /** 高频路径的重绘：合并到本帧，最多执行一次；缺省退化为 render()。 */
+  coalesce?(flags?: { viewport?: boolean; interaction?: boolean }): void;
   hideMenus(): void;
   clearVariableCardSelection(): void;
   layout(): Record<string, any>;
@@ -48,6 +58,8 @@ export interface PointerDeps {
   finishVariableConnection(event: PointerEventLike): void;
   finishReferenceConnection(event: PointerEventLike): void;
   setDirty(value?: boolean): void;
+  /** 连线重连旋钮的指针捕获；缺省表示该画布不支持从连线旋钮重连。 */
+  pointerCapture?(event: PointerEventLike): number | null;
   nodeWidth: number;
   variableCardWidth: number;
   variableCardHeight: number;
@@ -56,11 +68,13 @@ export interface PointerDeps {
 export interface CanvasPointer {
   startNodeDrag(event: PointerEventLike, id: string): void;
   onPointerDown(event: PointerEventLike): void;
-  autoPan(event: PointerEventLike): void;
+  autoPan(event: PointerEventLike): boolean;
   onPointerMove(event: PointerEventLike): void;
   onPointerUp(event: PointerEventLike): void;
   /** 右键平移拖拽结束后应吞掉紧随的 contextmenu；读取即消费。 */
   contextMenuSuppressedByPan(): boolean;
+  /** 从连线旋钮拖出重连时捕获指针；没有注入捕获能力时返回 null。 */
+  captureConnectionPointer(event: PointerEventLike): number | null;
 }
 
 export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
@@ -71,6 +85,13 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     referenceConnectionTargetAt, finishReferenceConnection,
     nodeWidth, variableCardWidth, variableCardHeight,
   } = deps;
+
+  // 高频路径（指针移动、滚轮）合并到本帧；没有注入调度器时保持同步重绘。
+  const coalesce = deps.coalesce ?? ((flags) => { void flags; render(); });
+  // 框选专用的同步重绘：没有注入时退化为普通 render()（测试替身多半不关心标记）。
+  const renderWith = deps.renderWith ?? (() => render());
+  // 自动平移每帧都要知道画布边缘在哪：缓存读，避免和 DOM 写入互相触发强制布局。
+  const measurement = deps.measurement ?? createWrapMeasurement(wrap as any);
 
   let suppressPanContextMenu = false;
 
@@ -115,20 +136,24 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     }
   }
 
-  function autoPan(event: PointerEventLike): void {
-    if (!state.drag && !state.connect) return;
-    const rect = wrap.getBoundingClientRect();
+  /**
+   * 自动平移：指针贴着画布边缘时推动视野。返回本帧是否真的移动过，
+   * 便于调用方只在需要时安排重绘。
+   */
+  function autoPan(event: PointerEventLike): boolean {
+    if (!state.drag && !state.connect) return false;
+    const rect = measurement.read();
     const margin = 36;
     let dx = 0;
     let dy = 0;
     if (event.clientX - rect.left < margin) dx = 12;
-    else if ((rect as DOMRect).right !== undefined && (rect as DOMRect).right - event.clientX < margin) dx = -12;
     else if (event.clientX > rect.left + rect.width - margin) dx = -12;
     if (event.clientY - rect.top < margin) dy = 12;
-    else if ((rect as DOMRect).bottom !== undefined && (rect as DOMRect).bottom - event.clientY < margin) dy = -12;
     else if (event.clientY > rect.top + rect.height - margin) dy = -12;
+    if (!dx && !dy) return false;
     state.panX += dx;
     state.panY += dy;
+    return true;
   }
 
   function onPointerMove(event: PointerEventLike): void {
@@ -139,7 +164,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       state.connect.x = point.x;
       state.connect.y = point.y;
       state.connect.hover = connectionTargetAt(event);
-      render();
+      coalesce({ viewport: true, interaction: true });
       return;
     }
     if (state.variableConnect) {
@@ -149,7 +174,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       state.variableConnect.x = point.x;
       state.variableConnect.y = point.y;
       state.variableConnect.hover = variableConnectionTargetAt(event);
-      render();
+      coalesce({ viewport: true, interaction: true });
       return;
     }
     if (state.referenceConnect) {
@@ -159,7 +184,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       state.referenceConnect.x = point.x;
       state.referenceConnect.y = point.y;
       state.referenceConnect.hover = referenceConnectionTargetAt(event);
-      render();
+      coalesce({ viewport: true, interaction: true });
       return;
     }
     if (!state.drag) return;
@@ -182,10 +207,13 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       const dx = point.x - state.drag.start.x;
       const dy = point.y - state.drag.start.y;
       state.drag.moved = state.drag.moved || Math.abs(dx) + Math.abs(dy) > 2;
-      const card = variableCards()[state.drag.id];
-      if (card) {
-        card.x = Math.round((state.drag.origin.x + dx) / 8) * 8;
-        card.y = Math.round((state.drag.origin.y + dy) / 8) * 8;
+      // 整组选中一起拖：每张卡片按自己的起点加同一个位移（和节点拖拽同一套语义）。
+      const cards = variableCards();
+      for (const [id, origin] of Object.entries(state.drag.origins || {}) as Array<[string, PointerPoint]>) {
+        const card = cards[id];
+        if (!card) continue;
+        card.x = Math.round((origin.x + dx) / 8) * 8;
+        card.y = Math.round((origin.y + dy) / 8) * 8;
       }
     } else if (state.drag.kind === 'marquee' && state.marquee) {
       const point = worldPoint(event);
@@ -219,7 +247,15 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
         state.inspector = 'node';
       }
     }
-    render();
+    // 框选矩形是用户「正在画」的反馈，必须跟着指针走：延后到下一帧画会明显落后一拍，
+    // 快速拖拽时甚至只在抬起时闪一下。因此框选帧走同步重绘，其余高频路径仍按帧合并。
+    // 标记只给视口与交互：框选不改文档，不能因此触发连线整体重建。
+    if (state.drag && state.drag.kind === 'marquee') {
+      renderWith({ viewport: true, interaction: true, selection: true });
+      return;
+    }
+    // 拖拽、平移只影响视口与相关元素：同一帧内合并成一次局部更新。
+    coalesce({ viewport: true, interaction: true });
   }
 
   function onPointerUp(event: PointerEventLike): void {
@@ -265,5 +301,12 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     return Boolean(state.drag && state.drag.kind === 'pan' && state.drag.moved);
   }
 
-  return { startNodeDrag, onPointerDown, autoPan, onPointerMove, onPointerUp, contextMenuSuppressedByPan };
+  function captureConnectionPointer(event: PointerEventLike): number | null {
+    return deps.pointerCapture ? deps.pointerCapture(event) : null;
+  }
+
+  return {
+    startNodeDrag, onPointerDown, autoPan, onPointerMove, onPointerUp,
+    contextMenuSuppressedByPan, captureConnectionPointer,
+  };
 }

@@ -10,7 +10,7 @@
  * - duration 秒数（数值，带 min/max）
  */
 
-export const PARAMETER_TYPES = ['string', 'number', 'integer', 'boolean', 'rect', 'asset', 'path', 'array', 'object', 'any', 'point', 'enum', 'key', 'color', 'duration'] as const;
+export const PARAMETER_TYPES = ['string', 'number', 'integer', 'boolean', 'rect', 'asset', 'path', 'array', 'object', 'any', 'point', 'enum', 'key', 'color', 'duration', 'workflow'] as const;
 
 export type ParameterType = (typeof PARAMETER_TYPES)[number];
 
@@ -31,6 +31,7 @@ export const PARAMETER_TYPE_LABELS: Record<string, string> = {
   key: '按键',
   color: '颜色',
   duration: '时长',
+  workflow: '工作流',
 };
 
 /** `color` 的值形状：`#rrggbb`。 */
@@ -43,7 +44,7 @@ export const KEY_PATTERN = '^[A-Za-z0-9_]+$';
 export const NUMERIC_TYPES = ['number', 'integer', 'duration'] as const;
 
 /** 接受 min_length/max_length 的类型。 */
-export const STRING_TYPES = ['string', 'asset', 'path', 'key', 'enum'] as const;
+export const STRING_TYPES = ['string', 'asset', 'path', 'workflow', 'key', 'enum'] as const;
 
 /**
  * Action 清单 `card.rows[].control` 的可选值：Python `manifest.CARD_CONTROLS` 的桌面侧真源。

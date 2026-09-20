@@ -21,11 +21,12 @@ Parameter ``type`` is one of:
 * ``key`` — Android keyevent token (``BACK``, ``DPAD_UP``, ``4`` …)
 * ``color`` — ``#rrggbb`` colour string
 * ``duration`` — seconds as a number (accepts ``min``/``max`` like ``number``)
+* ``workflow`` — workflow id or path (workflow browser control)
 
 Optional per-parameter fields: ``required``, ``default``, ``description``,
 ``editor`` (control hint), ``min``/``max`` (``number``/``integer``/
 ``duration`` bounds), ``min_length``/``max_length`` (``string``/``asset``/
-``path``/``key``/``enum`` bounds), ``enum`` (required for ``enum``),
+``path``/``workflow``/``key``/``enum`` bounds), ``enum`` (required for ``enum``),
 ``min_items``/``max_items``, ``items`` (array), ``properties`` (object).
 
 Optional ``card`` section
@@ -72,6 +73,7 @@ PARAMETER_TYPES = (
     "key",
     "color",
     "duration",
+    "workflow",
 )
 
 #: `point` 的值形状：参考分辨率下的整数坐标点 `{"x": int, "y": int}`。
@@ -92,7 +94,7 @@ KEY_PATTERN = "^[A-Za-z0-9_]+$"
 NUMERIC_TYPES = frozenset({"number", "integer", "duration"})
 
 #: 接受 min_length/max_length 的类型。
-STRING_TYPES = frozenset({"string", "asset", "path", "key", "enum"})
+STRING_TYPES = frozenset({"string", "asset", "path", "workflow", "key", "enum"})
 
 #: 卡片行可选的行内控件（缺省按参数类型推断）。
 CARD_CONTROLS = (
@@ -335,7 +337,7 @@ class ParameterDefinition:
                 schema["minimum"] = self.min
             if self.max is not None:
                 schema["maximum"] = self.max
-        elif self.type in {"asset", "path"}:
+        elif self.type in {"asset", "path", "workflow"}:
             schema["type"] = "string"
             if self.min_length is not None:
                 schema["minLength"] = self.min_length

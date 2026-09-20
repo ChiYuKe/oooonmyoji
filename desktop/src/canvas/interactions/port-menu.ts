@@ -77,6 +77,9 @@ export interface PortMenuDeps {
   toast(message: string, error?: boolean): void;
   typeNames: Record<string, string>;
   nodeWidth: number;
+  /** 组内端点按需暴露：null 表示当前不在可编辑的节点组内。 */
+  nodeGroupPinExposure?(nodeId: string, param: string): boolean | null;
+  setNodeGroupPinExposed?(nodeId: string, param: string, exposed: boolean): boolean;
   /** 可选覆盖：测试或宿主希望替换默认实现（菜单项调用覆盖实现，公开 API 仍是默认实现）。 */
   copyVariableReference?(scope: string, name: string): void;
   insertNodeAbove?(childId: string, type: string): void;
@@ -158,6 +161,12 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
     } else {
       items.push({ label: '从这里开始连线（绑定变量）', run: () => startVariableConnectionFromPin(null, nodeId, pin.param, point) });
       items.push('separator', { label: '提升为变量', run: () => promotePin(nodeId, pin.param, pin) });
+    }
+    const exposed = deps.nodeGroupPinExposure?.(nodeId, pin.param);
+    if (exposed !== null && exposed !== undefined && deps.setNodeGroupPinExposed) {
+      items.push('separator', exposed
+        ? { label: '从组接口移除', danger: true, run: () => deps.setNodeGroupPinExposed!(nodeId, pin.param, false) }
+        : { label: '添加到组接口', run: () => deps.setNodeGroupPinExposed!(nodeId, pin.param, true) });
     }
     return items;
   }
@@ -354,6 +363,17 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
    * 端点提升为变量：变量定义沿用清单里的参数定义（数组元素、对象字段、取值边界），
    * 这样变量详情能用结构化控件编辑——rect 四个坐标、固定长度数组按元素个数给输入框。
    */
+  /**
+   * 提升为变量时的名字：清单/标签表里有就用它；子工作流输入行的字段名是 `inputs.v_<uuid>`，
+   * 标签表里查不到，这时用子工作流声明的 display_name（如「运行轮数」），别把自动生成的 id 当名字。
+   */
+  function promotedLabel(pin: PortPin, param: string): string {
+    const field = fieldLabel(param);
+    if (field && field !== param) return field;
+    const definition = pin.definition && typeof pin.definition === 'object' ? pin.definition as Record<string, unknown> : {};
+    return typeof definition.display_name === 'string' ? definition.display_name.trim() : '';
+  }
+
   function promotedVariableDefinition(pin: PortPin, current: any): Record<string, unknown> {
     const source = pin.definition && typeof pin.definition === 'object' ? pin.definition : {};
     const definition: Record<string, unknown> = {};
@@ -361,8 +381,8 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
       if (source[key] !== undefined) definition[key] = copyValue(source[key]);
     }
     if (definition.type === undefined) definition.type = pin.type || 'any';
-    const label = fieldLabel(pin.param);
-    if (label && label !== pin.param) definition.display_name = label;
+    const label = promotedLabel(pin, pin.param);
+    if (label) definition.display_name = label;
     // 端口上的字面量优先当默认值；没有就用清单默认值，避免变量卡片空着。
     const seed = current !== undefined ? current : source.default;
     if (seed !== undefined) definition.default = copyValue(seed);
@@ -385,7 +405,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
     if (pin.variable || isBindingObject(current)) { toast('该端口已绑定变量，不能重复提取', true); return; }
     const inputs = state.raw && state.raw.inputs;
     if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) { toast('缺少工作流输入区', true); return; }
-    const base = String(fieldLabel(param) || param.replace(/^inputs\./, '') || '变量')
+    const base = String(promotedLabel(pin, param) || param.replace(/^inputs\./, '') || '变量')
       .replace(/[^\w\u4e00-\u9fa5]+/g, '_')
       .replace(/^_+|_+$/g, '') || '变量';
     let name = base;

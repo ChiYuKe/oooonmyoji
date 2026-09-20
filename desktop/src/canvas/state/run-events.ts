@@ -11,7 +11,9 @@ export interface RunEventsDeps {
   nodes(): any[];
   nodeById(id: string): any;
   clone<T>(value: T): T;
-  render(): void;
+  render(flags?: { selection?: boolean; panels?: boolean }): void;
+  /** 只改运行态连线 class，不重建整层；省略 id 表示运行开始时清空全部旧状态。 */
+  patchRunEdgeStates?(nodeId?: string): number;
   deleteSelection(): void;
   removeVariableCards(ids: any): void;
   removeVariableCard(id: string): void;
@@ -20,12 +22,57 @@ export interface RunEventsDeps {
 }
 
 export function createRunEvents(deps: RunEventsDeps) {
-  const { state, nodes, nodeById, clone, render, deleteSelection, removeVariableCards, removeVariableCard, removeInstanceRun, removeVariable } = deps;
+  const { state, nodes, nodeById, clone, render, patchRunEdgeStates, deleteSelection, removeVariableCards, removeVariableCard, removeInstanceRun, removeVariable } = deps;
+
+  /**
+   * 循环再次经过同一段结构时，后续节点还带着上一轮的 succeeded/failed。
+   * 当前节点一进入 running，就把它内部与各级“后续兄弟”整棵子树的旧状态清掉；
+   * 当前节点之前的兄弟属于本轮已经走过的路径，继续保留。
+   */
+  function clearPendingRunStates(stepId: string): boolean {
+    const all = nodes();
+    const parentByChild = new Map<string, any>();
+    for (const node of all) {
+      for (const childId of Array.isArray(node?.children) ? node.children : []) {
+        if (!parentByChild.has(String(childId))) parentByChild.set(String(childId), node);
+      }
+    }
+    const pending = new Set<string>();
+    const addTree = (id: string): void => {
+      if (!id || pending.has(id)) return;
+      pending.add(id);
+      const node = nodeById(id);
+      for (const childId of Array.isArray(node?.children) ? node.children : []) addTree(String(childId));
+    };
+
+    const current = nodeById(stepId);
+    for (const childId of Array.isArray(current?.children) ? current.children : []) addTree(String(childId));
+
+    const visited = new Set<string>();
+    let cursor = stepId;
+    while (cursor && !visited.has(cursor)) {
+      visited.add(cursor);
+      const parent = parentByChild.get(cursor);
+      if (!parent) break;
+      const siblings = Array.isArray(parent.children) ? parent.children.map(String) : [];
+      const index = siblings.indexOf(cursor);
+      if (index >= 0) for (const siblingId of siblings.slice(index + 1)) addTree(siblingId);
+      cursor = String(parent.id || '');
+    }
+
+    let changed = false;
+    for (const id of pending) changed = state.run.delete(id) || changed;
+    return changed;
+  }
+
   function handleRunEvent(event: any): void {
     if (!event || typeof event !== 'object') return;
+    let resetRunEdges = false;
+    let patchAllRunEdges = false;
+    let changedNodeId = '';
     if (event.type === 'run_started') {
       state.variableSnapshots ||= {}; delete state.variableSnapshots[event.instance_id || 'default'];
-      if(!event.instance_id || !state.instanceId || event.instance_id===state.instanceId){state.run.clear(); state.variableValues = null;}
+      if(!event.instance_id || !state.instanceId || event.instance_id===state.instanceId){state.run.clear(); state.variableValues = null; resetRunEdges = true;}
     }
     if (event.type === 'step' && event.step_id) {
       const step = event.step || {};
@@ -37,6 +84,7 @@ export function createRunEvents(deps: RunEventsDeps) {
       let status = String(step.status || '');
       if (status === 'succeeded' && step.action === 'vision.match_template') status = 'matched';
       if (status === 'failed' && step.error_category === 'not_matched') status = 'not_matched';
+      if (status === 'running') patchAllRunEdges = clearPendingRunStates(String(event.step_id));
       state.run.set(String(event.step_id), {
         status,
         engineStatus: step.status,
@@ -46,8 +94,11 @@ export function createRunEvents(deps: RunEventsDeps) {
         thumbnail: event.thumbnail,
         screenshot: event.screenshot,
       });
+      changedNodeId = String(event.step_id);
     }
-    render();
+    if (resetRunEdges || patchAllRunEdges) patchRunEdgeStates?.();
+    else if (changedNodeId) patchRunEdgeStates?.(changedNodeId);
+    render({ selection: true, panels: true });
   }
 
   /**

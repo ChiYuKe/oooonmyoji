@@ -4,7 +4,7 @@
  * variableValueSummary/runtimeInstanceLabel。
  */
 
-import { paramDurationText, paramPointParts } from './param-rows';
+import { paramAssetName, paramDurationText, paramPointParts } from './param-rows';
 
 export interface CardValueNode {
   type?: string;
@@ -66,6 +66,7 @@ export function variableValueSummary(definition: unknown): string {
       return `${parts.x},${parts.y}`;
     }
     if (type === 'duration') return paramDurationText(record.default);
+    if (type === 'workflow') return paramAssetName(record.default);
     return compactValue(record.default, Infinity);
   }
   if (record && record.required === true) return '必填';

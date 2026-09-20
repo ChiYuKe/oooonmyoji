@@ -30,7 +30,7 @@ export interface ParamRowLike {
   [key: string]: any;
 }
 
-export type ParamRowKind = 'enum' | 'boolean' | 'integer' | 'number' | 'duration' | 'string' | 'key' | 'color' | 'point' | 'asset' | 'rect' | 'tuple' | 'complex';
+export type ParamRowKind = 'enum' | 'boolean' | 'integer' | 'number' | 'duration' | 'string' | 'workflow' | 'key' | 'color' | 'point' | 'asset' | 'rect' | 'tuple' | 'complex';
 
 /** 固定长度数组在卡片上最多拆成几个输入格（再多就回详情栏）：一格最多容纳三格。 */
 export const PARAM_TUPLE_MAX = 3;
@@ -106,6 +106,7 @@ export function paramRowKind(definition: ParamRowDefinition | null | undefined):
   if (def.type === 'number') return 'number';
   if (def.type === 'duration') return 'duration';
   if (def.type === 'string') return 'string';
+  if (def.type === 'workflow') return 'workflow';
   if (def.type === 'key') return 'key';
   if (def.type === 'color') return 'color';
   if (def.type === 'point') return 'point';
@@ -169,7 +170,7 @@ export function paramFieldWidth(rowWidth: number, columns: number = PARAM_FIELD_
 
 /** 需要展开选择器/菜单/详情栏的行：卡片上给一个 `›` 提示，光标也换成手型。 */
 export function paramRowOpensPicker(kind: ParamRowKind): boolean {
-  return kind === 'asset' || kind === 'rect' || kind === 'enum' || kind === 'key' || kind === 'color' || kind === 'point' || kind === 'complex';
+  return kind === 'workflow' || kind === 'asset' || kind === 'rect' || kind === 'enum' || kind === 'key' || kind === 'color' || kind === 'point' || kind === 'complex';
 }
 
 export function paramRowGeometry(options: {
@@ -348,6 +349,7 @@ function paramValueText(kind: ParamRowKind, value: unknown, compact: (value: unk
   if (kind === 'rect') return paramRectText(value);
   if (kind === 'tuple') return paramTupleText(definition, value);
   if (kind === 'asset') return paramAssetName(value);
+  if (kind === 'workflow') return paramAssetName(value);
   if (kind === 'color') return compact(paramColorText(value) || '未设置', 18);
   if (kind === 'key') return compact(paramKeyText(value) || '未设置', 18);
   return compact(value, 18);
@@ -528,7 +530,7 @@ export function paramEnumOptions(
   return values.map((value) => ({ value, label: label(String(value)) }));
 }
 
-export type ParamEditorAction = 'binding-menu' | 'toggle' | 'enum-menu' | 'input' | 'asset-menu' | 'roi-menu' | 'inspector';
+export type ParamEditorAction = 'binding-menu' | 'toggle' | 'enum-menu' | 'input' | 'workflow-menu' | 'asset-menu' | 'roi-menu' | 'inspector';
 
 /**
  * 点击行内值区时该做什么：绑定变量 → 端口菜单；布尔 → 直接切换；
@@ -540,6 +542,7 @@ export function paramEditorAction(pin: ParamRowLike): ParamEditorAction {
   const kind = paramRowKindOf(pin, pin.definition || {});
   if (kind === 'boolean') return 'toggle';
   if (kind === 'enum') return 'enum-menu';
+  if (kind === 'workflow') return 'workflow-menu';
   if (kind === 'asset') return 'asset-menu';
   if (kind === 'rect') return 'roi-menu';
   if (paramRowEditable(kind)) return 'input';

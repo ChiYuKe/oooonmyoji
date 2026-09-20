@@ -56,6 +56,8 @@ function createPortMenuFor(ctx) {
     fieldLabel: (param) => (typeof ctx.fieldLabel === 'function' ? ctx.fieldLabel(param) : param),
     toast: (...args) => call(ctx, 'toast', ...args),
     typeNames: ctx.TYPE_NAMES || {},
+    nodeGroupPinExposure: (...args) => typeof ctx.nodeGroupPinExposure === 'function' ? ctx.nodeGroupPinExposure(...args) : null,
+    setNodeGroupPinExposed: (...args) => call(ctx, 'setNodeGroupPinExposed', ...args),
     get nodeWidth() { return typeof ctx.NODE_W === 'number' ? ctx.NODE_W : 260; },
     getNavigator: () => ctx.navigator,
   });
@@ -232,6 +234,27 @@ test('变量端口菜单：已绑定但没有卡片时提供创建变量卡片�
   assert.equal(items[0].label, '创建变量卡片（Get）');
   items[0].run();
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), ['place-card', 'inputs', 'boss', { x: 11, y: 12 }, { connect: false }]);
+});
+
+test('组内变量端点由用户通过右键菜单按需添加和移除', () => {
+  const calls = [];
+  let exposed = false;
+  const context = contextWith({
+    variableCardList: () => [],
+    nodeGroupPinExposure: () => exposed,
+    setNodeGroupPinExposed: (nodeId, param, value) => { calls.push([nodeId, param, value]); exposed = value; },
+  });
+  const nodeVariablePinMenuItems = runFunction('nodeVariablePinMenuItems', context);
+  let items = nodeVariablePinMenuItems('task_1', { param: 'count', variable: '', scope: 'inputs' }, { x: 0, y: 0 });
+  assert.equal(items.at(-1).label, '添加到组接口');
+  items.at(-1).run();
+  assert.deepEqual(calls[0], ['task_1', 'count', true]);
+
+  items = nodeVariablePinMenuItems('task_1', { param: 'count', variable: '', scope: 'inputs' }, { x: 0, y: 0 });
+  assert.equal(items.at(-1).label, '从组接口移除');
+  assert.equal(items.at(-1).danger, true);
+  items.at(-1).run();
+  assert.deepEqual(calls[1], ['task_1', 'count', false]);
 });
 
 test('实例运行卡变量端口菜单：绑定与未绑定两种形态', () => {
@@ -440,6 +463,55 @@ test('提升为变量：数组元素、对象字段与边界一起带过去，�
   assert.deepEqual(JSON.parse(JSON.stringify(freshContext.state.raw.inputs.random_interval)), {
     type: 'array', items: { type: 'duration' }, min_items: 2, max_items: 2, default: [0, 0],
   });
+});
+
+test('提升为变量：子工作流输入行用子工作流声明的显示名，而不是自动生成的 id', () => {
+  // 子工作流输入行的字段名是 `inputs.v_<uuid>`（标签表里没有），变量名要看子工作流声明的 display_name。
+  const key = 'v_e9e2ee318a1e4a84abbe42e1d9a77690';
+  const node = { id: 'capture', type: 'task', action: 'workflow.run', params: { inputs: { [key]: 9999 } } };
+  const cards = {};
+  const links = {};
+  const calls = [];
+  const context = contextWith({
+    nodeById: () => node,
+    fieldLabel: (name) => name,
+    variableCards: () => cards,
+    variableLinks: () => links,
+    nextVariableCardId: () => 'card_new',
+    variableCardPosition: () => ({ x: 10, y: 20 }),
+    nodeVariablePins: () => [{ param: `inputs.${key}` }],
+    toast: (message) => calls.push(['toast', message]),
+    state: { raw: { inputs: {} } },
+  });
+  const promotePinToVariable = runFunction('promotePinToVariable', context);
+  promotePinToVariable('capture', `inputs.${key}`, {
+    param: `inputs.${key}`, type: 'integer',
+    definition: { type: 'integer', min: 1, description: '循环执行次数。', display_name: '运行轮数', _autoPublished: true },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.raw.inputs['运行轮数'])), {
+    type: 'integer', min: 1, description: '循环执行次数。', default: 9999, display_name: '运行轮数',
+  }, '变量键与显示名都用子工作流声明的「运行轮数」');
+  assert.deepEqual(JSON.parse(JSON.stringify(node.params.inputs[key])), { ref: 'inputs.运行轮数' });
+  assert.deepEqual(JSON.parse(JSON.stringify(cards.card_new)), { name: '运行轮数', scope: 'inputs', x: 10, y: 20 });
+  assert.equal(links[`capture:inputs.${key}`], 'card_new');
+  assert.deepEqual(calls, [['toast', '已创建变量「运行轮数」并连接端口']]);
+
+  // 清单/标签表里有名字时照旧用它，不受这次改动影响。
+  const labeled = { id: 'task_1', type: 'task', params: { template: 'assets/a.png' } };
+  const labeledContext = contextWith({
+    nodeById: () => labeled,
+    fieldLabel: (name) => ({ template: '模板' }[name] || name),
+    variableCards: () => ({}),
+    variableLinks: () => ({}),
+    nextVariableCardId: () => 'card_t',
+    variableCardPosition: () => ({ x: 0, y: 0 }),
+    nodeVariablePins: () => [{ param: 'template' }],
+    toast: () => {},
+    state: { raw: { inputs: {} } },
+  });
+  runFunction('promotePinToVariable', labeledContext)('task_1', 'template', { param: 'template', type: 'asset' });
+  assert.equal(labeledContext.state.raw.inputs['模板'].display_name, '模板');
 });
 
 test('提升为变量：已绑定端口不允许重复提取，重名时自动编号', () => {

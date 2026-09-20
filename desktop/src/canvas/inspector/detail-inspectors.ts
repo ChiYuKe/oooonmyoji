@@ -25,6 +25,7 @@ export interface DetailInspectorsDeps {
   enumOption(value: string): string;
   runtimeInstanceLabel(instanceId: string, fallback?: string): string;
   workflowInputs(reference: any): any[];
+  resolveWorkflowRef?(value: any): string;
   workflowReference(...args: any[]): any;
   requestOpenWorkflowReference(...args: any[]): void;
   definitionSchema(definition: any): any;
@@ -49,6 +50,7 @@ export function createDetailInspectors(deps: DetailInspectorsDeps) {
     definitionSchema, compatibleRefType, selectInput, textInput, field, section, clearInspector,
     actionDropdown, renderParameter, complexValueControl, displayNameOfDefinition, compactValue, renderInspector,
   } = deps;
+  const resolveWorkflowRef = deps.resolveWorkflowRef || ((value: any) => typeof value === 'string' ? value.trim() : '');
   function renderTaskInspector(body: UiNode, node: any): void {
     section(body, '动作');
     const row = field(body, '实现');
@@ -65,7 +67,7 @@ export function createDetailInspectors(deps: DetailInspectorsDeps) {
       if (node.action === 'workflow.run' && name === 'inputs') continue;
       renderParameter(body, node, name, definition);
     }
-    if (node.action === 'workflow.run') renderPublicWorkflowInputs(body, node.params, node.params.workflow, true, `${node.id}:inputs:`);
+    if (node.action === 'workflow.run') renderPublicWorkflowInputs(body, node.params, resolveWorkflowRef(node.params.workflow), true, `${node.id}:inputs:`);
   }
 
   function removeInstanceRun(node: any, index: number): void {

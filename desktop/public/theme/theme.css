@@ -19,6 +19,10 @@
   --green: #8bc6a4; --red: #ed9098; --yellow: #dbbc7e;
   --success: var(--green); --danger: var(--red); --warning: var(--yellow); --info: var(--blue);
   --wire: #aaaaaa; --grid: rgba(255,255,255,.035);
+  --content-folder-icon: #d0d0d0; --content-folder-tile: #303030;
+  --content-file-icon: #c3c3c3; --content-file-tile: #2b2b2b;
+  --content-selection-surface: rgba(255,255,255,.07); --content-selection-frame: #666666;
+  --content-selection-border: #d0d0d0; --content-selection-tile: #424242; --content-selection-text: #ffffff;
   --vscode-editor-background: var(--dark-canvas); --vscode-sideBar-background: var(--ui-panel);
   --vscode-editorWidget-background: var(--ui-surface); --vscode-panel-border: var(--border);
   --vscode-foreground: var(--ui-text); --vscode-descriptionForeground: var(--ui-muted);
@@ -54,8 +58,10 @@
 :root[data-theme="dark"] :is(.content-item.selected, .content-item.editing, .content-folder-row.selected, .tree-row.selected, .overview-queue-row.selected, .settings-nav-item.active) { background: var(--dark-selection); color: var(--dark-selection-text); }
 :root[data-theme="dark"] :is(.content-item:hover, .step-overview:hover, .step-details) { background: var(--ui-surface); }
 :root[data-theme="dark"] .content-item.selected:hover { background: var(--dark-selection); }
+:root[data-theme="dark"] .content-browser-items.grid .content-item:hover { background: transparent; }
+:root[data-theme="dark"] .content-browser-items.grid :is(.content-item.selected, .content-item.selected:hover) { background: var(--content-selection-surface); }
 :root[data-theme="dark"] :is(.content-folder-row, .content-item) { color: var(--ui-text); }
-:root[data-theme="dark"] :is(.content-folder-row > svg, .content-item.folder .content-item-preview svg) { color: #bdbdbd; }
+:root[data-theme="dark"] :is(.content-folder-icon, .content-item.folder .content-item-icon) { color: var(--content-folder-icon); }
 :root[data-theme="dark"] :is(.content-browser-search, .content-browser-pane-search, .ui-input, .ui-dropdown-button) { background: var(--ui-field); color: var(--ui-text); border-color: var(--border); }
 :root[data-theme="dark"] :is(.content-browser-search, .content-browser-pane-search):focus-within { border-color: var(--ui-focus); }
 :root[data-theme="dark"] :is(.ui-input, .content-browser-search input, .content-browser-pane-search input)::placeholder { color: var(--ui-muted); }
@@ -105,6 +111,10 @@
   --blue: #27698f; --blue-strong: #27698f; --green: #397747; --red: #a63e46; --yellow: #806323;
   --success: #397747; --danger: #a63e46; --warning: #806323; --info: #386c88;
   --wire: #8192a0; --grid: rgba(67,86,103,.045);
+  --content-folder-icon: #515b64; --content-folder-tile: #e4e8eb;
+  --content-file-icon: #53616c; --content-file-tile: #e8ecef;
+  --content-selection-surface: rgba(38,45,51,.075); --content-selection-frame: #9aa2a8;
+  --content-selection-border: #515a61; --content-selection-tile: #d8dde0; --content-selection-text: #171b1e;
   --vscode-editor-background: var(--light-canvas); --vscode-sideBar-background: var(--ui-panel);
   --vscode-editorWidget-background: var(--ui-surface); --vscode-panel-border: var(--border);
   --vscode-foreground: var(--ui-text); --vscode-descriptionForeground: var(--ui-muted);
@@ -144,6 +154,8 @@
 :root[data-theme="light"] :is(.content-browser-tree, .content-browser-items, .tree-content, .variables-module) { background: var(--ui-panel); }
 :root[data-theme="light"] :is(.content-item-preview, .reference-graph-stage) { background-color: var(--ui-bg); }
 :root[data-theme="light"] :is(.content-item.selected, .content-folder-row.selected, .tree-row.selected, .overview-queue-row.selected) { background: var(--light-selection); color: var(--light-selection-text); }
+:root[data-theme="light"] .content-browser-items.grid .content-item:hover { background: transparent; }
+:root[data-theme="light"] .content-browser-items.grid :is(.content-item.selected, .content-item.selected:hover) { background: var(--content-selection-surface); }
 :root[data-theme="light"] :is(.reference-graph, #canvas-wrap) { background-color: var(--light-canvas); }
 :root[data-theme="light"] #canvas-wrap { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
 

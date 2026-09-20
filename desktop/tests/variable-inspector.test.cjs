@@ -12,7 +12,7 @@ function harness(definition,scope='inputs') {
     appendChild(child){this.children.push(child);return child;},addEventListener(name,fn){this.events[name]=fn;}});
   // 颜色控件用原生 input[type=color]，模块读的是全局 document。
   globalThis.document=globalThis.document||{createElement:(tag)=>el(tag)};
-  const body=el('div'), removed=[], renames=[], toasts=[], exposed=[];
+  const body=el('div'), removed=[], renames=[], toasts=[], exposed=[], workflows=[];
   const raw={[scope]:{value:definition}};
   const state={selectedVariable:'value',selectedVariableScope:scope,raw};
   const ctx=vm.createContext({el,state,
@@ -27,17 +27,17 @@ function harness(definition,scope='inputs') {
     variableDisplayName:(_scope,id)=>id,
     variableCards:()=>(state.raw._variableCards||(state.raw._variableCards={})),
     changeDefinitionType:(target,type)=>{target.type=type;},
-    bindAssetPreview:()=>{},openAssetBrowser:()=>{},
+    bindAssetPreview:()=>{},openAssetBrowser:()=>{},openWorkflowBrowser:(...args)=>workflows.push(args),
     VariableSystem:{expose:(rawDoc,id)=>{rawDoc.variables[id].initial_from='auto_input';exposed.push(id);return 'auto_input';},
       label:(rawDoc,scope,id)=>rawDoc?.[scope]?.[id]?.display_name||id,
       create:(rawDoc,scope,name,definition,value)=>{const id='v_new';const entry=JSON.parse(JSON.stringify(definition));entry.display_name=name;delete entry.required;delete entry.owner;delete entry.initial_from;if(value!==undefined)entry.default=JSON.parse(JSON.stringify(value));rawDoc[scope]||={};rawDoc[scope][id]=entry;return id;}},
     UI:{button:options=>Object.assign(el('button',options.className,options.label),{onClick:options.onClick})},
-    DEFINITION_TYPES:['string','number','integer','boolean','rect','asset','path','array','object','any']});
+    DEFINITION_TYPES:['string','number','integer','boolean','rect','asset','workflow','path','array','object','any']});
   const detail=require('../dist-test-renderer/canvas/inspector/variable-inspectors.js').createVariableInspectors({
     state, mutate:fn=>ctx.mutate(fn), UI:ctx.UI, el:ctx.el, clone:ctx.clone, toast:(...a)=>ctx.toast(...a),
     defaultValue:references.defaultValue, allRefs:(...a)=>ctx.allRefs?ctx.allRefs(...a):[], referenceLabel:ref=>ref,
     fieldLabel:name=>name, disconnect:()=>{},
-    bindAssetPreview:(...a)=>ctx.bindAssetPreview(...a), openAssetBrowser:(...a)=>ctx.openAssetBrowser(...a),
+    bindAssetPreview:(...a)=>ctx.bindAssetPreview(...a), openAssetBrowser:(...a)=>ctx.openAssetBrowser(...a), openWorkflowBrowser:(...a)=>ctx.openWorkflowBrowser(...a),
     variableCards:()=>ctx.variableCards(), variableLinks:()=>({}), clearVariableCardSelection:()=>{},
     renameVariable:(...a)=>ctx.renameVariable(...a), removeVariable:(...a)=>ctx.removeVariable(...a), variableReferenceCount:()=>0,
     VariableSystem:ctx.VariableSystem,
@@ -46,7 +46,7 @@ function harness(definition,scope='inputs') {
   });
   for(const name of ['initialDefinitionValue','definitionValueControl','sameDefinitionValue','convertInputToVariable','syncExposedInput','renderVariablesInspector']) ctx[name]=detail[name];
   const all=node=>[node,...node.children.flatMap(all)];
-  return {ctx,body,removed,renames,toasts,exposed,raw,
+  return {ctx,body,removed,renames,toasts,exposed,workflows,raw,
     all:()=>all(body),find:cls=>all(body).find(x=>x.className===cls),
     rows:()=>all(body).filter(x=>x.className==='field'),
     sections:()=>all(body).filter(x=>x.className==='section-header'),
@@ -126,6 +126,19 @@ test('运行变量默认值编辑保留 false、数组与对象',()=>{
   }
 });
 
+test('工作流变量改选脚本后清除所绑定节点的旧输入',()=>{
+  const definition={type:'workflow',default:'old.json'};
+  const h=harness(definition,'variables');
+  h.raw.nodes=[{id:'run',type:'task',action:'workflow.run',params:{workflow:{ref:'variables.value'},inputs:{旧参数:1}}}];
+  h.ctx.renderVariablesInspector();
+  const control=h.rows().at(-1).children[0];
+  control.children[1].events.click();
+  assert.equal(h.workflows.length,1);
+  h.workflows[0][3]('entrypoints/new.json');
+  assert.equal(definition.default,'entrypoints/new.json');
+  assert.deepEqual(h.raw.nodes[0].params.inputs,{});
+});
+
 test('固定长度数组变量按元素给输入框，不出现 JSON 文本框',()=>{
   const definition={type:'array',items:{type:'duration',min:0},min_items:2,max_items:2,default:[0.2,0.6]};
   const h=harness(definition,'variables');h.ctx.renderVariablesInspector();
@@ -133,9 +146,12 @@ test('固定长度数组变量按元素给输入框，不出现 JSON 文本框',
   const control=h.rows().at(-1).children[0];
   assert.equal(control.className,'variable-array-value');
   assert.equal(control.children.length,2,'固定长度数组正好两个元素输入框');
-  assert.ok(control.children.every(row=>row.children.length===1),'固定长度不提供增删按钮');
+  assert.ok(control.children.every(row=>row.children.length===2),'每个元素 = 控件 + 标题行');
+  assert.ok(control.children.every(row=>row.children[1].className==='variable-array-item-head'),'标题行放序号与折叠按钮');
+  assert.ok(control.children.every(row=>!row.children[1].children.some(child=>child.textContent==='删除')),'固定长度不提供增删按钮');
   assert.deepEqual(control.children.map(row=>String(row.children[0].children[0].value)),['0.2','0.6']);
   assert.equal(control.children[0].children[0].children[1].textContent,'秒','元素控件用 duration（带秒单位）');
+  assert.deepEqual(control.children.map(row=>row.children[1].children[0].textContent),['▾ 元素 1','▾ 元素 2']);
   // 连续改两个元素时互不覆盖。
   control.children[0].children[0].children[0].onChange('1.5');
   control.children[1].children[0].children[0].onChange('2.5');
@@ -155,7 +171,7 @@ test('不定长数组与未声明元素类型的数组也走元素输入框',()=
   assert.deepEqual(definition.default,[9,5]);
   control.children.at(-1).onClick();
   assert.deepEqual(definition.default,[9,5,0]);
-  control.children[0].children[1].onClick();
+  control.children[0].children[1].children.find(child=>child.textContent==='删除').onClick();
   assert.deepEqual(definition.default,[5,0]);
   // 没写 items：按默认值推断成数值输入，而不是 JSON。
   const inferred={type:'array',default:[1,2]};
@@ -165,6 +181,57 @@ test('不定长数组与未声明元素类型的数组也走元素输入框',()=
   assert.equal(inferredControl.children.length,3);
   inferredControl.children[0].children[0].onChange('7');
   assert.deepEqual(inferred.default,[7,2]);
+});
+
+test('数组元素可以逐个折叠，参数再多也不会拉得很长',()=>{
+  const definition={type:'array',items:{type:'object',properties:{名称:{type:'string'},模板:{type:'asset'}}},default:[{名称:'a'},{名称:'b'}]};
+  const h=harness(definition,'variables');h.ctx.renderVariablesInspector();
+  const control=h.rows().find(row=>row.textContent==='默认值'&&row.children.length===1).children[0];
+  const first=control.children[0], second=control.children[1];
+  assert.equal(first.children[1].children[0].textContent,'▾ 元素 1','默认展开并带序号');
+
+  // 折叠第 1 个元素：只切 class 与箭头，DOM 不重建（控件仍在原位）。
+  const controlBefore=first.children[0];
+  first.children[1].children[0].events.click();
+  assert.equal(first.className,'variable-array-item collapsed');
+  assert.equal(first.children[1].children[0].textContent,'▸ 元素 1');
+  assert.equal(first.children[0],controlBefore,'折叠不重建控件');
+  assert.equal(second.className,'variable-array-item','只折叠被点的那一个');
+
+  // 折叠状态要在详情栏重渲染后保留（每次编辑都会重建 DOM）。
+  h.ctx.renderVariablesInspector();
+  const again=h.rows().find(row=>row.textContent==='默认值'&&row.children.length===1).children[0];
+  assert.equal(again.children[0].className,'variable-array-item collapsed','重渲染后仍保持折叠');
+  assert.equal(again.children[1].className,'variable-array-item');
+
+  // 再点一次展开，避免状态泄漏到其它用例。
+  again.children[0].children[1].children[0].events.click();
+  assert.equal(again.children[0].className,'variable-array-item');
+
+  // 样式上：折叠时隐藏元素控件，标题行放上面（控件仍是第一个子节点）。
+  const css=fs.readFileSync(path.join(__dirname,'../public/legacy/inspector.css'),'utf8');
+  assert.match(css,/#inspector-body \.variable-array-item\.collapsed > :first-child \{ display: none; \}/,'折叠时要隐藏控件');
+  assert.match(css,/#inspector-body \.variable-array-item > :first-child \{ grid-area: body/,'控件占 body 区');
+  assert.match(css,/#inspector-body \.variable-array-item-head \{ grid-area: title/,'标题行占 title 区');
+  assert.match(css,/#inspector-body \.variable-array-item-toggle/,'折叠按钮要有自己的样式');
+});
+
+test('数组元素之间要有可见的分隔与序号，元素多了也能区分',()=>{
+  const css=fs.readFileSync(path.join(__dirname,'../public/legacy/inspector.css'),'utf8');
+  const item=/#inspector-body \.variable-array-item \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  assert.match(item,/border: 1px solid var\(--ui-line\)/,'每个元素要有边框');
+  assert.match(item,/background: var\(--ui-surface\)/,'每个元素要有底以区别于面板');
+  assert.match(item,/grid-template-areas: 'title' 'body'/,'标题行与元素控件各占其位');
+  const list=/#inspector-body \.variable-array-value \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  assert.match(list,/gap: 10px/,'元素之间要留出间距');
+  // 序号在标题行的折叠按钮上（可点击折叠），DOM 里控件仍是元素的第一个子节点。
+  const definition={type:'array',items:{type:'integer'},default:[1,2]};
+  const h=harness(definition,'variables');h.ctx.renderVariablesInspector();
+  const control=h.rows().at(-1).children[0];
+  assert.equal(control.className,'variable-array-value');
+  assert.ok(control.children.slice(0,2).every(row=>row.className==='variable-array-item'));
+  assert.deepEqual(control.children.slice(0,2).map(row=>row.children[1].children[0].textContent),['▾ 元素 1','▾ 元素 2']);
+  assert.equal(typeof control.children[0].children[0].onChange,'function','元素控件仍是第一个子节点');
 });
 
 test('无字段声明的对象变量按字段行编辑，可增删改名且不出现 JSON',()=>{
@@ -221,14 +288,15 @@ test('公开变量的自动输入镜像同步名称/类型/说明/默认值',()=
   assert.equal(h.raw.inputs.auto_input.type,'number');
 });
 
-test('变量类型下拉覆盖全部 15 种类型并显示中文标签',()=>{
+test('变量类型下拉覆盖全部 16 种类型并显示中文标签',()=>{
   const definition={type:'integer',default:0};
   const h=harness(definition,'variables');
   h.ctx.renderVariablesInspector();
   const select=h.rows()[1].children[0];
-  assert.equal(select.options.length,15);
+  assert.equal(select.options.length,16);
   assert.deepEqual(select.options.map((option)=>option.value),
-    ['string','number','integer','boolean','rect','asset','path','array','object','any','point','enum','key','color','duration']);
+    ['string','number','integer','boolean','rect','asset','path','array','object','any','point','enum','key','color','duration','workflow']);
+  assert.equal(select.options.find((option)=>option.value==='workflow').label,'工作流');
   assert.equal(select.options.find((option)=>option.value==='point').label,'坐标点');
   assert.equal(select.options.find((option)=>option.value==='enum').label,'枚举');
   assert.equal(select.options.find((option)=>option.value==='key').label,'按键');

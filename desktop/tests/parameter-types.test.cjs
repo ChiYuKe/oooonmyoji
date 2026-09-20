@@ -11,7 +11,7 @@ const { PARAMETER_TYPES, parseParameterDefinition, parameterToSchema } = require
 test('PARAMETER_TYPES 覆盖全部类型且顺序与 Python 一致', () => {
   assert.deepEqual([...PARAMETER_TYPES], [
     'string', 'number', 'integer', 'boolean', 'rect', 'asset', 'path', 'array', 'object', 'any',
-    'point', 'enum', 'key', 'color', 'duration',
+    'point', 'enum', 'key', 'color', 'duration', 'workflow',
   ]);
   // 画布用的无依赖副本必须与主进程副本同源。
   assert.deepEqual([...types.PARAMETER_TYPES], [...PARAMETER_TYPES]);
@@ -27,6 +27,7 @@ test('每种类型都有中文标签与图标可用的类型名', () => {
   assert.equal(types.parameterTypeLabel('key'), '按键');
   assert.equal(types.parameterTypeLabel('color'), '颜色');
   assert.equal(types.parameterTypeLabel('duration'), '时长');
+  assert.equal(types.parameterTypeLabel('workflow'), '工作流');
   // 未知类型原样返回，缺省回落到「任意」。
   assert.equal(types.parameterTypeLabel('mystery'), 'mystery');
   assert.equal(types.parameterTypeLabel(undefined), '任意');
@@ -62,6 +63,7 @@ test('新类型编译出的 JSON Schema 与 Python 端一致', () => {
   assert.deepEqual(parameterToSchema({ type: 'enum', enum: ['safe', 'fast'] }), {
     type: 'string', enum: ['safe', 'fast'],
   });
+  assert.deepEqual(parameterToSchema({ type: 'workflow', minLength: 1 }), { type: 'string', minLength: 1 });
 });
 
 test('parseParameterDefinition 接受新类型并校验默认值', () => {
@@ -71,6 +73,7 @@ test('parseParameterDefinition 接受新类型并校验默认值', () => {
   assert.equal(parseParameterDefinition({ type: 'color', default: '#0a0b0c' }, 'tint').default, '#0a0b0c');
   assert.equal(parseParameterDefinition({ type: 'key', default: 'BACK' }, 'confirm').default, 'BACK');
   assert.equal(parseParameterDefinition({ type: 'duration', default: 1.5 }, 'settle').default, 1.5);
+  assert.equal(parseParameterDefinition({ type: 'workflow', default: 'entrypoints/main.json' }, 'flow').default, 'entrypoints/main.json');
   assert.deepEqual(parseParameterDefinition({ type: 'enum', enum: ['a'], default: 'a' }, 'mode').enum, ['a']);
   // enum 类型的选项数组会被原样带出，供变量详情与卡片菜单共用。
   assert.deepEqual(parseParameterDefinition({ type: 'enum', enum: ['x', 'y'] }, 'mode').enum, ['x', 'y']);

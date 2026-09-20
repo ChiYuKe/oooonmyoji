@@ -187,7 +187,10 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     const idRow = field(basics, 'ID', '引用与运行事件使用的稳定标识');
     idRow.appendChild(textInput(node.id, (value) => renameNode(node.id, value.trim())));
     const nameRow = field(basics, '名称');
-    nameRow.appendChild(textInput(node.name || '', (value) => mutate(() => { if (value.trim()) node.name = value.trim(); else delete node.name; })));
+    // 固定 id：F2 重命名（editor.rename → renameSelection）靠它聚焦名称输入框。
+    const nameInput = textInput(node.name || '', (value) => mutate(() => { if (value.trim()) node.name = value.trim(); else delete node.name; })) as HTMLInputElement;
+    nameInput.id = 'inspector-node-name';
+    nameRow.appendChild(nameInput);
     if (node.type !== 'root') {
       const typeRow = field(basics, '类型');
       typeRow.appendChild(selectInput(node.type, types.filter((type) => type !== 'root').map((type) => ({ value: type, label: typeNames[type] || typeLabels[type] })), (value) => changeNodeType(node, value)));

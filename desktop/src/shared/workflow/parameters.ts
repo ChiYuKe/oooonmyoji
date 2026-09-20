@@ -47,7 +47,7 @@ export function parameterToSchema(param: ParameterInfo): Record<string, unknown>
       if (typeof param.minLength === 'number') schema.minLength = param.minLength;
       if (typeof param.maxLength === 'number') schema.maxLength = param.maxLength;
     }
-  } else if (param.type === 'asset' || param.type === 'path') {
+  } else if (param.type === 'asset' || param.type === 'path' || param.type === 'workflow') {
     schema.type = 'string';
     if (typeof param.minLength === 'number') schema.minLength = param.minLength;
     if (typeof param.maxLength === 'number') schema.maxLength = param.maxLength;

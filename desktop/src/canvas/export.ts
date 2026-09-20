@@ -24,6 +24,11 @@ export interface ExportDeps {
   wrap: HTMLElement;
   toast(message: string, error?: boolean): void;
   NS: string;
+  /**
+   * 导出前挂载全部节点、导出后恢复视口裁剪。
+   * 视口裁剪只挂载可见卡片，导出必须拿到完整画面，所以导出期间临时关闭裁剪。
+   */
+  setRenderAll?(value: boolean): void;
 }
 
 export interface ExportController {
@@ -145,8 +150,18 @@ export function createEditorExport(deps: ExportDeps): ExportController {
       const box = bounds();
       const logicalWidth = Math.max(1, Math.ceil(box.maxX - box.minX + padding * 2));
       const logicalHeight = Math.max(1, Math.ceil(box.maxY - box.minY + padding * 2));
-      const exported = graph.cloneNode(true) as SVGSVGElement;
-      inlineSvgStyles(graph, exported);
+      // 视口裁剪会把视口外的卡片从 DOM 里摘掉；导出必须包含整张画布，
+      // 所以这里临时全量挂载，克隆完成后再恢复裁剪。
+      let exported!: SVGSVGElement;
+      deps.setRenderAll?.(true);
+      try {
+        exported = graph.cloneNode(true) as SVGSVGElement;
+        // 样式必须在恢复视口裁剪之前读取。恢复裁剪会改变源 SVG 的子节点数量和顺序，
+        // 此时再按索引把计算样式复制到克隆体，会把边线样式套到卡片上（或反过来）。
+        inlineSvgStyles(graph, exported);
+      } finally {
+        deps.setRenderAll?.(false);
+      }
       exported.removeAttribute('id');
       exported.setAttribute('xmlns', NS);
       exported.setAttribute('width', String(logicalWidth));
@@ -156,6 +171,9 @@ export function createEditorExport(deps: ExportDeps): ExportController {
       const world = exported.querySelector('.graph-world');
       if (!world) throw new Error('工作流画布尚未准备好');
       world.setAttribute('transform', `translate(${padding - box.minX},${padding - box.minY})`);
+      // 拖出但还没落下的临时连线只属于交互过程，不进导出：整个预览层直接丢掉，
+      // 免得以后新增预览类型还得回来补选择器。
+      exported.querySelector('.previews')?.remove();
       exported.querySelectorAll('.connection-preview, .marquee, .edge-hit, .edge-rewire').forEach((element) => element.remove());
       // 缩略图保留进导出：把模板 <image> 的外部资源 URI 替换为内嵌 data URL，
       // 运行截图本身已是 data URL。请求失败或文件缺失时只跳过该图，不阻断导出。

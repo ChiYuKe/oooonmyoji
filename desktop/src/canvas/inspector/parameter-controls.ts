@@ -310,11 +310,12 @@ export function createParameterControls(deps: ParameterControlsDeps) {
   }
 
   function literalControl(node: any, name: string, definition: any, value: any, headingActions?: any): UiNode {
-    const workflowParameter = node.action === 'workflow.run' && name === 'workflow';
+    const workflowRunParameter = node.action === 'workflow.run' && name === 'workflow';
+    const workflowParameter = definition.type === 'workflow' || workflowRunParameter;
     const set = (next: any) => mutate(() => {
       const changed = node.params[name] !== next;
       node.params[name] = next;
-      if (workflowParameter && changed) node.params.inputs = {};
+      if (workflowRunParameter && changed) node.params.inputs = {};
     });
     if (Array.isArray(definition.enum) && definition.enum.length) {
       return selectInput(JSON.stringify(value), definition.enum.map((item: any) => ({ value: JSON.stringify(item), label: enumOption(item) })), (next: string) => set(JSON.parse(next)), 'full');

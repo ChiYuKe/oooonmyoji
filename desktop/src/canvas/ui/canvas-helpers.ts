@@ -3,6 +3,7 @@
  * 原 `workflow-editor.js` 的 updateIssueBadge 至 focusVariableCard 区间。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { createWrapMeasurement } from '../canvas/wrap-measurement';
 
 export interface CanvasHelpersDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -13,6 +14,8 @@ export interface CanvasHelpersDeps {
   contextMenuSuppressedByPan(): boolean;
   setVariableCardSelection(ids: any): void;
   wrap: HTMLElement;
+  /** 视口尺寸测量（缓存读）；缺省按 `wrap` 自行创建。 */
+  measurement?: { read(): { width: number; height: number; left: number; top: number } };
   variableCardWidth: number;
   variableCardHeight: number;
   /** 本地校验出的错误数（画布自己跑的工作流校验，比宿主的快照新）。 */
@@ -24,6 +27,7 @@ export function createCanvasHelpers(deps: CanvasHelpersDeps) {
     state, $, nodes, worldPoint, render, contextMenuSuppressedByPan, setVariableCardSelection, wrap,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   } = deps;
+  const measurement = deps.measurement ?? createWrapMeasurement(wrap as any);
   function updateIssueBadge(): void {
     const local = localIssueCount();
     const fromHost = Array.isArray(state.issues) ? state.issues.filter((item) => item.severity === 'error').length : 0;
@@ -64,7 +68,7 @@ export function createCanvasHelpers(deps: CanvasHelpersDeps) {
     state.selectedVariableScope = card.scope;
     setVariableCardSelection([card.id]);
     state.inspector = 'variables';
-    const rect = wrap.getBoundingClientRect();
+    const rect = measurement.read();
     state.panX = rect.width / 2 - (card.x + VARIABLE_CARD_W / 2) * state.zoom;
     state.panY = rect.height / 2 - (card.y + VARIABLE_CARD_H / 2) * state.zoom;
     render();

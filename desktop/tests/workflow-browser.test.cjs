@@ -106,14 +106,15 @@ function makeHarness(options = {}) {
   };
   const node = {id: 'task_1', action: 'workflow.run', params: {workflow: ''}};
   const refreshes = [];
-  const browser = createWorkflowBrowser({
-    state: {
+  const state = {
       docUri: 'file:///w/current.json',
       workflows: options.workflows ?? [
         {uri: 'file:///w/current.json', name: 'current.json', rel: 'workflows/current.json'},
         {uri: 'file:///w/other.json', name: 'other.json', rel: 'workflows/other.json', description: '另一个脚本'},
       ],
-    },
+  };
+  const browser = createWorkflowBrowser({
+    state,
     $: (id) => (id === 'workflow-browser' ? overlay : new FakeElement('div', canvasDocument)),
     el,
     nodeById: (id) => (id === node.id ? node : undefined),
@@ -121,7 +122,7 @@ function makeHarness(options = {}) {
     toast: (message, error) => events.push(['toast', message, Boolean(error)]),
     requestWorkflows: () => refreshes.push('requested'),
   });
-  return {browser, overlay, originalParent, canvasDocument, topDocument, node, events, refreshes};
+  return {browser, overlay, originalParent, canvasDocument, topDocument, node, state, events, refreshes};
 }
 
 test('弹层移植到顶层文档的 dialog + shadow root，不再挤在详情栏里', () => {
@@ -190,6 +191,17 @@ test('选择脚本后写回节点参数并关闭弹层', () => {
   assert.deepEqual(h.events.at(-1), ['toast', '已选择子工作流', false]);
   assert.equal(h.overlay.classList.contains('hidden'), true);
   assert.equal(h.topDocument.body.children.length, 0, '选择后 dialog 也要收掉');
+});
+
+test('工作流变量可通过回调复用同一个浏览器', () => {
+  const h = makeHarness();
+  const selected = [];
+  h.browser.openWorkflowBrowser('', 'flow', '', (reference) => selected.push(reference));
+  const other = h.overlay.querySelectorAll('.workflow-file').find((item) => item.dataset.reference === 'other.json');
+  other.events.dblclick[0]();
+  assert.deepEqual(selected, ['other.json']);
+  assert.equal(h.state.workflowBrowser, null);
+  assert.deepEqual(h.events.at(-1), ['toast', '已选择工作流', false]);
 });
 
 test('子文件夹里的脚本按文件夹分组，不会被漏掉', () => {

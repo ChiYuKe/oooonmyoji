@@ -6,7 +6,7 @@
   "description": "同步运行另一个工作流。子流程结束后返回完整回执 { workflow, status, output, error, error_category }；失败和取消也会把回执写入运行事件。递归调用会被拦截。",
   "parameters": {
     "workflow": {
-      "type": "string",
+      "type": "workflow",
       "required": true,
       "min_length": 1,
       "description": "子工作流 ID、JSON 文件名或 workflows/ 下的路径"

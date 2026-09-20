@@ -20,6 +20,7 @@ test('paramRowKind 按定义给出就地编辑控件类型', () => {
   assert.equal(rows.paramRowKind({ type: 'integer' }), 'integer');
   assert.equal(rows.paramRowKind({ type: 'number' }), 'number');
   assert.equal(rows.paramRowKind({ type: 'string' }), 'string');
+  assert.equal(rows.paramRowKind({ type: 'workflow' }), 'workflow');
   assert.equal(rows.paramRowKind({ type: 'asset' }), 'asset');
   assert.equal(rows.paramRowKind({ type: 'path' }), 'asset');
   assert.equal(rows.paramRowKind({ type: 'object', properties: { x: { type: 'number' } } }), 'complex');
@@ -99,7 +100,7 @@ test('固定长度数组的值文本与提交：每个元素一个输入格', ()
 });
 
 test('paramRowEditable 放行标量、资源、区域与固定长度数组，只有结构体回详情栏', () => {
-  for (const kind of ['enum', 'boolean', 'integer', 'number', 'duration', 'string', 'key', 'color', 'point', 'asset', 'rect', 'tuple']) {
+  for (const kind of ['enum', 'boolean', 'integer', 'number', 'duration', 'string', 'workflow', 'key', 'color', 'point', 'asset', 'rect', 'tuple']) {
     assert.equal(rows.paramRowEditable(kind), true, kind);
   }
   for (const kind of ['complex']) assert.equal(rows.paramRowEditable(kind), false, kind);
@@ -393,6 +394,7 @@ test('paramEditorAction 决定点击值区后的动作', () => {
   assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'integer' } }), 'input');
   assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'number' } }), 'input');
   assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'string' } }), 'input');
+  assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'workflow' } }), 'workflow-menu');
   assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'asset' } }), 'asset-menu');
   assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'rect' } }), 'roi-menu');
   assert.equal(rows.paramEditorAction({ param: 'x', definition: { type: 'array', items: { type: 'duration' }, min_items: 2, max_items: 2 } }), 'input');

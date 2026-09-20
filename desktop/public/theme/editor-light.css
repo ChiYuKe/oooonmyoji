@@ -89,6 +89,10 @@
 :root[data-theme="light"] .mini-node.type-repeat_until {
     fill: #9b501b
 }
+:root[data-theme="light"] .mini-node.type-node_group {
+    fill: #696969;
+    stroke: #515e6e
+}
 :root[data-theme="light"] .mini-node.type-instance-run {
     stroke: #41626f
 }
@@ -149,87 +153,61 @@
 :root[data-theme="light"] .instance-run-edge-line {
     stroke: #46616c
 }
-:root[data-theme="light"] .variable-edge {
-    stroke: #396478
+:root[data-theme="light"] .data-tone-0 {
+    --data-tone: #994b4e
 }
-:root[data-theme="light"] .variable-edge-hit:hover + .variable-edge {
-    stroke: color-mix(in srgb, #396478 62%, #232323)
+:root[data-theme="light"] .data-tone-1 {
+    --data-tone: #7a5828
+}
+:root[data-theme="light"] .data-tone-2 {
+    --data-tone: #576324
+}
+:root[data-theme="light"] .data-tone-3 {
+    --data-tone: #2f6b4c
+}
+:root[data-theme="light"] .data-tone-4 {
+    --data-tone: #266a6c
+}
+:root[data-theme="light"] .data-tone-5 {
+    --data-tone: #356483
+}
+:root[data-theme="light"] .data-tone-6 {
+    --data-tone: #505a92
+}
+:root[data-theme="light"] .data-tone-7 {
+    --data-tone: #6f5191
+}
+:root[data-theme="light"] .data-tone-8 {
+    --data-tone: #8b4b79
+}
+:root[data-theme="light"] .data-tone-9 {
+    --data-tone: #8c4d61
+}
+:root[data-theme="light"] .variable-edge {
+    stroke: var(--edge-tone, #356483)
+}
+:root[data-theme="light"] .group-interface-edge {
+    stroke: var(--edge-tone, #696969)
 }
 :root[data-theme="light"] .reference-edge {
-    stroke: #6c5b32
+    stroke: var(--edge-tone, #7a5828)
 }
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-0 {
-    stroke: color-mix(in srgb, #7e5163 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-1 {
-    stroke: color-mix(in srgb, #466353 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-2 {
-    stroke: color-mix(in srgb, #6c5b32 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-3 {
-    stroke: color-mix(in srgb, #465f7a 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-4 {
-    stroke: color-mix(in srgb, #6b547b 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-5 {
-    stroke: color-mix(in srgb, #3d6469 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-6 {
-    stroke: color-mix(in srgb, #7d5639 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-7 {
-    stroke: color-mix(in srgb, #545c77 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-8 {
-    stroke: color-mix(in srgb, #516242 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge.tone-9 {
-    stroke: color-mix(in srgb, #824f6e 62%, #232323)
-}
-:root[data-theme="light"] .reference-edge.tone-0 {
-    stroke: #7e5163
-}
-:root[data-theme="light"] .reference-edge.tone-1 {
-    stroke: #466353
-}
-:root[data-theme="light"] .reference-edge.tone-2 {
-    stroke: #6c5b32
-}
-:root[data-theme="light"] .reference-edge.tone-3 {
-    stroke: #465f7a
-}
-:root[data-theme="light"] .reference-edge.tone-4 {
-    stroke: #6b547b
-}
-:root[data-theme="light"] .reference-edge.tone-5 {
-    stroke: #3d6469
-}
-:root[data-theme="light"] .reference-edge.tone-6 {
-    stroke: #7d5639
-}
-:root[data-theme="light"] .reference-edge.tone-7 {
-    stroke: #545c77
-}
-:root[data-theme="light"] .reference-edge.tone-8 {
-    stroke: #516242
-}
-:root[data-theme="light"] .reference-edge.tone-9 {
-    stroke: #824f6e
+:root[data-theme="light"] .reference-edge-hit:hover + .reference-edge, :root[data-theme="light"] .variable-edge-hit:hover + .variable-edge {
+    stroke: color-mix(in srgb, var(--edge-tone, #7a5828) 68%, #232323)
 }
 :root[data-theme="light"] .reference-connection-preview {
-    stroke: #6c5b32
+    stroke: var(--data-tone, #7a5828)
 }
 :root[data-theme="light"] .reference-connection-preview.snapped {
-    stroke: #3e6744
+    stroke: color-mix(in srgb, var(--data-tone, #7a5828) 72%, #232323)
 }
 :root[data-theme="light"] .port-out-reference {
-    fill: #696969;
-    stroke: #6d5b34
+    fill: var(--card-bg, #696969);
+    stroke: var(--data-tone, #7a5828)
 }
 :root[data-theme="light"] .port-out-reference:hover, :root[data-theme="light"] .port-out-reference.active {
-    fill: #6d5b34
+    fill: var(--data-tone, #7a5828);
+    stroke: color-mix(in srgb, var(--data-tone, #7a5828) 58%, #232323)
 }
 :root[data-theme="light"] .node-box {
     fill: #ececec;
@@ -269,6 +247,9 @@
 :root[data-theme="light"] .node.type-branch .node-accent, :root[data-theme="light"] .node.type-switch .node-accent {
     fill: #854e6a
 }
+:root[data-theme="light"] .node.type-node_group .node-accent {
+    fill: #4f5e71
+}
 :root[data-theme="light"] .node.type-root .node-icon-plate {
     fill: #e5e5e5;
     stroke: #696969
@@ -294,6 +275,20 @@
 :root[data-theme="light"] .node.type-branch .node-icon-plate, :root[data-theme="light"] .node.type-switch .node-icon-plate {
     fill: #e5e5e5;
     stroke: #696969
+}
+:root[data-theme="light"] .node.type-node_group .node-icon-plate {
+    fill: #e2e2e2;
+    stroke: #495f79
+}
+:root[data-theme="light"] .node.type-node_group .node-box {
+    fill: #eaeaea;
+    stroke: #696969
+}
+:root[data-theme="light"] .node.type-node_group .node-head {
+    fill: #e4e4e4
+}
+:root[data-theme="light"] .node-group-add-bg {
+    fill: color-mix(in srgb, var(--card-head) 72%, #232323 8%)
 }
 :root[data-theme="light"] .node.selected .node-box {
     fill: #eaeaea;
@@ -395,6 +390,13 @@
     fill: rgba(47, 101, 131, 0.1);
     stroke: #31657e
 }
+:root[data-theme="light"] .node-placeholder .node-box {
+    fill: #ededed;
+    stroke: #696969
+}
+:root[data-theme="light"] .graph-world.zoom-overview .node-box {
+    fill: #eeeeee
+}
 :root[data-theme="light"] .instance-run-card-box {
     fill: #ececec;
     stroke: #696969
@@ -444,7 +446,8 @@
     fill: #686868
 }
 :root[data-theme="light"] .instance-variable-pin {
-    stroke: #232323
+    fill: var(--card-bg, #696969);
+    stroke: var(--data-tone, #61577e)
 }
 :root[data-theme="light"] .instance-variable-pin.type-string, :root[data-theme="light"] .instance-variable-pin.type-asset, :root[data-theme="light"] .instance-variable-pin.type-path {
     fill: #7e5163
@@ -476,13 +479,16 @@
 :root[data-theme="light"] .instance-variable-pin.type-duration {
     fill: #4b6442
 }
+:root[data-theme="light"] .instance-variable-pin.type-workflow {
+    fill: #40617f
+}
 :root[data-theme="light"] .port-variable, :root[data-theme="light"] .port-variable-out {
-    fill: #61577e;
-    stroke: #232323
+    fill: var(--card-bg, #696969);
+    stroke: var(--data-tone, #61577e)
 }
 :root[data-theme="light"] .variable-card-dot {
-    fill: #61577e;
-    stroke: #232323
+    fill: var(--data-tone, #61577e);
+    stroke: color-mix(in srgb, var(--data-tone, #61577e) 50%, #232323)
 }
 :root[data-theme="light"] .port-variable.type-string, :root[data-theme="light"] .port-variable-out.type-string, :root[data-theme="light"] .variable-card-dot.type-string, :root[data-theme="light"] .port-variable.type-asset, :root[data-theme="light"] .port-variable-out.type-asset, :root[data-theme="light"] .variable-card-dot.type-asset, :root[data-theme="light"] .port-variable.type-path, :root[data-theme="light"] .port-variable-out.type-path, :root[data-theme="light"] .variable-card-dot.type-path {
     fill: #7e5163
@@ -514,6 +520,18 @@
 :root[data-theme="light"] .port-variable.type-duration, :root[data-theme="light"] .port-variable-out.type-duration, :root[data-theme="light"] .variable-card-dot.type-duration {
     fill: #4b6442
 }
+:root[data-theme="light"] .port-variable.type-workflow, :root[data-theme="light"] .port-variable-out.type-workflow, :root[data-theme="light"] .variable-card-dot.type-workflow {
+    fill: #40617f
+}
+:root[data-theme="light"] .port-variable.data-tone-0, :root[data-theme="light"] .port-variable-out.data-tone-0, :root[data-theme="light"] .variable-card-dot.data-tone-0, :root[data-theme="light"] .instance-variable-pin.data-tone-0, :root[data-theme="light"] .port-variable.data-tone-1, :root[data-theme="light"] .port-variable-out.data-tone-1, :root[data-theme="light"] .variable-card-dot.data-tone-1, :root[data-theme="light"] .instance-variable-pin.data-tone-1, :root[data-theme="light"] .port-variable.data-tone-2, :root[data-theme="light"] .port-variable-out.data-tone-2, :root[data-theme="light"] .variable-card-dot.data-tone-2, :root[data-theme="light"] .instance-variable-pin.data-tone-2, :root[data-theme="light"] .port-variable.data-tone-3, :root[data-theme="light"] .port-variable-out.data-tone-3, :root[data-theme="light"] .variable-card-dot.data-tone-3, :root[data-theme="light"] .instance-variable-pin.data-tone-3, :root[data-theme="light"] .port-variable.data-tone-4, :root[data-theme="light"] .port-variable-out.data-tone-4, :root[data-theme="light"] .variable-card-dot.data-tone-4, :root[data-theme="light"] .instance-variable-pin.data-tone-4, :root[data-theme="light"] .port-variable.data-tone-5, :root[data-theme="light"] .port-variable-out.data-tone-5, :root[data-theme="light"] .variable-card-dot.data-tone-5, :root[data-theme="light"] .instance-variable-pin.data-tone-5, :root[data-theme="light"] .port-variable.data-tone-6, :root[data-theme="light"] .port-variable-out.data-tone-6, :root[data-theme="light"] .variable-card-dot.data-tone-6, :root[data-theme="light"] .instance-variable-pin.data-tone-6, :root[data-theme="light"] .port-variable.data-tone-7, :root[data-theme="light"] .port-variable-out.data-tone-7, :root[data-theme="light"] .variable-card-dot.data-tone-7, :root[data-theme="light"] .instance-variable-pin.data-tone-7, :root[data-theme="light"] .port-variable.data-tone-8, :root[data-theme="light"] .port-variable-out.data-tone-8, :root[data-theme="light"] .variable-card-dot.data-tone-8, :root[data-theme="light"] .instance-variable-pin.data-tone-8, :root[data-theme="light"] .port-variable.data-tone-9, :root[data-theme="light"] .port-variable-out.data-tone-9, :root[data-theme="light"] .variable-card-dot.data-tone-9, :root[data-theme="light"] .instance-variable-pin.data-tone-9 {
+    fill: var(--card-bg, #696969)
+}
+:root[data-theme="light"] .port-variable.configured, :root[data-theme="light"] .instance-variable-pin.configured {
+    fill: color-mix(in srgb, var(--data-tone) 28%, var(--card-bg, #696969))
+}
+:root[data-theme="light"] .port-variable.bound, :root[data-theme="light"] .instance-variable-pin.bound, :root[data-theme="light"] .port-variable-out.data-tone-0, :root[data-theme="light"] .port-variable-out.data-tone-1, :root[data-theme="light"] .port-variable-out.data-tone-2, :root[data-theme="light"] .port-variable-out.data-tone-3, :root[data-theme="light"] .port-variable-out.data-tone-4, :root[data-theme="light"] .port-variable-out.data-tone-5, :root[data-theme="light"] .port-variable-out.data-tone-6, :root[data-theme="light"] .port-variable-out.data-tone-7, :root[data-theme="light"] .port-variable-out.data-tone-8, :root[data-theme="light"] .port-variable-out.data-tone-9, :root[data-theme="light"] .variable-card-dot.data-tone-0, :root[data-theme="light"] .variable-card-dot.data-tone-1, :root[data-theme="light"] .variable-card-dot.data-tone-2, :root[data-theme="light"] .variable-card-dot.data-tone-3, :root[data-theme="light"] .variable-card-dot.data-tone-4, :root[data-theme="light"] .variable-card-dot.data-tone-5, :root[data-theme="light"] .variable-card-dot.data-tone-6, :root[data-theme="light"] .variable-card-dot.data-tone-7, :root[data-theme="light"] .variable-card-dot.data-tone-8, :root[data-theme="light"] .variable-card-dot.data-tone-9 {
+    stroke: color-mix(in srgb, var(--data-tone) 52%, #232323)
+}
 :root[data-theme="light"] .pin-variable-name {
     fill: #323232
 }
@@ -521,10 +539,10 @@
     fill: #696969
 }
 :root[data-theme="light"] .variable-connection-preview {
-    stroke: #396758
+    stroke: var(--data-tone, #2f6b4c)
 }
 :root[data-theme="light"] .variable-connection-preview.snapped {
-    stroke: #3e6744
+    stroke: color-mix(in srgb, var(--data-tone, #2f6b4c) 72%, #232323)
 }
 :root[data-theme="light"] .variable-card-box {
     fill: #ececec;
@@ -565,6 +583,9 @@
 }
 :root[data-theme="light"] .variable-card.type-duration .variable-card-accent {
     fill: #4b6442
+}
+:root[data-theme="light"] .variable-card.type-workflow .variable-card-accent {
+    fill: #40617f
 }
 :root[data-theme="light"] .variable-card-swatch {
     stroke: #696969

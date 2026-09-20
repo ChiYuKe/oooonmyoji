@@ -7,8 +7,10 @@
 import type { CanvasState } from '../state/canvas-state';
 import type { CardsNodeCards } from './cards';
 import { nodeCardSummary } from './card-values';
-import { PARAM_FIELD_GAP, PARAM_FIELD_PADDING, paramColorSwatch, paramFieldWidth, paramRowEditable, paramRowGeometry, paramRowKindOf, paramRowOpensPicker, paramRowValueView, paramTupleCells, paramTupleElementText, paramTupleItemKind, paramTupleLength } from './param-rows';
+import { PARAM_FIELD_GAP, PARAM_FIELD_PADDING, paramColorSwatch, paramFieldWidth, paramRectParts, paramRowEditable, paramRowGeometry, paramRowKindOf, paramRowOpensPicker, paramRowValueView, paramTupleCells, paramTupleElementText, paramTupleItemKind, paramTupleLength } from './param-rows';
 import type { ParamRowLike } from './param-rows';
+import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from '../canvas/data-tones';
+import { FULL_DETAIL_MIN_ZOOM } from './zoom-level';
 
 export interface NodePreviewInfo {
   uri: string;
@@ -36,6 +38,8 @@ export interface NodeParamEditorRequest {
   world: { x: number; y: number };
   /** 值文字的横向对齐：固定卡片的值行在框内左对齐，默认右对齐。 */
   valueAlign?: 'left' | 'right';
+  /** 多格参数中被点击的格子；区域参数用它直接聚焦 X / Y / W / H。 */
+  inputIndex?: number;
 }
 
 export interface NodeRenderDeps {
@@ -72,11 +76,18 @@ export interface NodeRenderDeps {
   startReferenceConnection?(event: any, nodeId: string): void;
   /** 任务卡输出口的右键菜单（列出输出字段、复制引用、断开全部引用）。 */
   nodeReferencePortMenuItems?(nodeId: string, point: { x: number; y: number }): any[];
+  /** 组内左侧变量卡的“新增接口变量”菜单。 */
+  nodeGroupVariableMenuItems?(groupId: string): any[];
   startNodeDrag(event: any, nodeId: string): void;
   registerCardPress(key: string, event: { clientX: number; clientY: number }): boolean;
   requestInspector(selection: unknown): void;
   requestOpenSubWorkflow(nodeId: string): void;
+  enterNodeGroup?(groupId: string): boolean;
+  ungroupNodeGroup?(groupId: string): boolean;
+  groupSelection?(): boolean;
   render(): void;
+  /** 双击节点：聚焦并把缩放提到完整卡片档（概览 / 紧凑模式下用）。 */
+  focusNodeDetail?(nodeId: string): void;
   contextMenuSuppressedByPan(): boolean;
   copySelection(): void;
   cutSelection(): void;
@@ -103,7 +114,8 @@ export interface NodeRenderDeps {
 }
 
 export interface CanvasNodeCardRenderer {
-  renderNode(layer: any, node: any): void;
+  /** 返回节点组元素：渲染控制器把它记进挂载表，拖拽时只改 transform，不重建卡片。 */
+  renderNode(layer: any, node: any): any;
 }
 
 /** Stable task identity, independent of the surrounding workbench theme. */
@@ -129,8 +141,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     requestOpenSubWorkflow, render, contextMenuSuppressedByPan, copySelection, cutSelection, deleteSelection,
     paramRowInfo, toggleParamRows, openParamEditor, paramRowMenuItems, compactValue,
     typeIcons, typeNames, runLabels, nodeWidth, baseHeight, portRadius, decoratorHeight, runVariableHeight,
-    variablePinX, preview, taskOutputPortY, startReferenceConnection, nodeReferencePortMenuItems, referenceDisplayNameOf,
-    nodeIssueInfo, issueTitle,
+    variablePinX, preview, taskOutputPortY, startReferenceConnection, nodeReferencePortMenuItems, nodeGroupVariableMenuItems, referenceDisplayNameOf,
+    nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection,
   } = deps;
   const rowHeightOf = nodeRowHeight ?? (() => runVariableHeight);
   const referencePortY = taskOutputPortY ?? 16;
@@ -177,7 +189,139 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     title.textContent = previewInfo.path || '运行截图';
   }
 
-  function renderNode(layer: any, node: any): void {
+  function renderNodeGroup(layer: any, node: any): any {
+    const pos = position(node);
+    const pins = nodeVariablePins(node);
+    const height = nodeHeight(node);
+    const isInterface = Boolean(node._nodeGroupInterface);
+    const isVariables = Boolean(node._nodeGroupVariables);
+    const selected = state.selected.has(node.id) ? ' selected' : '';
+    const group = svgEl('g', {
+      class: `node studio-card type-node_group category-control${selected}`,
+      transform: `translate(${pos.x},${pos.y})`,
+      'data-id': node.id,
+    }, layer);
+    group.dataset.id = node.id;
+    const body = svgEl('rect', { class: 'node-box card-body node-group-box', width: nodeWidth, height, rx: 7 }, group);
+    const head = svgEl('rect', { class: 'node-head card-head node-group-head', x: 1, y: 1, width: nodeWidth - 2, height: 32, rx: 6 }, group);
+    svgEl('rect', { class: 'node-accent card-accent node-group-accent', x: 1, y: 3, width: 4, height: 27, rx: 2 }, group);
+    svgEl('line', { class: 'node-header-rule', x1: 1, y1: 33, x2: nodeWidth - 1, y2: 33 }, group);
+    const iconPlate = svgEl('rect', { class: 'node-icon-plate', x: 10, y: 7, width: 20, height: 20, rx: 4 }, group);
+    svgEl('text', { class: 'node-icon node-group-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = isInterface ? '⇄' : isVariables ? '◆' : '▦';
+    nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: node.name || '节点组', width: nodeWidth - (isVariables ? 80 : 53), size: 12 });
+    if (isVariables) {
+      const add = svgEl('g', { class: 'node-group-add', role: 'button', tabindex: 0 }, group);
+      svgEl('rect', { class: 'node-group-add-bg', x: nodeWidth - 29, y: 6, width: 22, height: 22, rx: 3 }, add);
+      svgEl('text', { class: 'node-group-add-icon', x: nodeWidth - 18, y: 22, 'text-anchor': 'middle' }, add).textContent = '+';
+      svgEl('title', {}, add).textContent = '添加组接口变量';
+      const stop = (event: any): void => { event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.(); };
+      add.addEventListener('mousedown', stop);
+      add.addEventListener('pointerdown', stop);
+      add.addEventListener('click', (event: any) => {
+        stop(event);
+        showMenu(event.clientX, event.clientY, nodeGroupVariableMenuItems?.(String(node._nodeGroupId || '')) || []);
+      });
+      add.addEventListener('keydown', (event: any) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        stop(event);
+        const at = position(node);
+        showMenu(at.x + nodeWidth, at.y + 28, nodeGroupVariableMenuItems?.(String(node._nodeGroupId || '')) || []);
+      });
+    }
+    nodeCards.text(group, { className: 'node-type card-kicker', x: 22, y: 50, value: isInterface ? '执行入口' : isVariables ? '组变量' : '节点组', width: 100, size: 10 });
+    nodeCards.text(group, {
+      className: 'node-subtitle card-description', x: 22, y: 70,
+      value: isInterface ? '连接组内入口节点' : isVariables ? `${pins.length} 个跨组数据端点` : `${Number(node._nodeCount || 0)} 个节点`,
+      width: nodeWidth - 44, size: 11,
+    });
+    nodeCards.text(group, {
+      className: 'node-meta card-meta', x: 22, y: 87,
+      value: isInterface ? '执行流从这里进入' : isVariables ? '连接真实成员参数' : '双击进入组内编辑',
+      width: nodeWidth - 44, size: 10,
+    });
+    pins.forEach((pin: any, index: number) => {
+      const centerY = baseHeight + index * runVariableHeight + runVariableHeight / 2;
+      const targetNodeId = pin.targetNodeId || node.id;
+      const targetParam = pin.targetParam || pin.param;
+      const reference = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof pin.value.ref === 'string' ? pin.value.ref : '';
+      const linked = Boolean(pin.variable || reference);
+      const dataKey = pin.variable ? variableDataKey(pin.scope, pin.variable) : reference || parameterDataKey(targetNodeId, targetParam);
+      const toneClass = `data-tone-${dataTone(dataKey)}`;
+      const pinX = isVariables ? nodeWidth - variablePinX : variablePinX;
+      svgEl('line', { class: 'param-row-rule', x1: 1, y1: baseHeight + index * runVariableHeight, x2: nodeWidth - 1, y2: baseHeight + index * runVariableHeight }, group);
+      svgEl('circle', {
+        class: `port port-variable type-${pin.type || 'any'} ${toneClass}${linked ? ' bound configured' : ''}`,
+        style: `--data-tone:${dataToneColor(dataKey)}`,
+        cx: pinX, cy: centerY, r: portRadius - 2,
+      }, group);
+      nodeCards.text(group, { className: 'param-row-label', x: 22, y: centerY + 4, value: pin.label || targetParam, width: 142, size: 9 });
+      nodeCards.text(group, {
+        className: `param-row-value tone-${pin.variable ? 'bound' : 'default'}`,
+        x: nodeWidth - 12, y: centerY + 4,
+        value: pin.variable ? `← ${variableDisplayNameOf(pin.scope, pin.variable)}` : reference ? `← ${referenceLabel(reference)}` : '未连接',
+        width: 76, size: 9, anchor: 'end',
+      });
+      const hit = svgEl('circle', {
+        class: 'variable-port-hit', cx: pinX, cy: centerY, r: 10,
+        'data-node': targetNodeId, 'data-param': targetParam,
+      }, group);
+      hit.addEventListener('pointerdown', (event: any) => {
+        event.stopPropagation();
+        if (event.altKey) disconnectVariableFromPin(targetNodeId, targetParam);
+        else startVariableConnectionFromPin(event, targetNodeId, targetParam);
+      });
+      hit.addEventListener('contextmenu', (event: any) => {
+        const point = openPortContextMenu(event);
+        if (!point) return;
+        showMenu(event.clientX, event.clientY, nodeVariablePinMenuItems(targetNodeId, { ...pin, param: targetParam }, point));
+      });
+    });
+    if (!isVariables) svgEl('circle', { class: 'port port-in node-group-port', cx: nodeWidth / 2, cy: 0, r: portRadius }, group);
+    if (Array.isArray(node.children) && node.children.length) {
+      svgEl('circle', { class: 'port port-out node-group-port', cx: nodeWidth / 2, cy: height, r: portRadius }, group);
+    }
+    if (node._hasReferenceOutput) {
+      const output = svgEl('circle', {
+        class: 'port port-out port-out-reference node-group-port',
+        cx: nodeWidth, cy: referencePortY, r: portRadius - 2.5,
+      }, group);
+      svgEl('title', {}, output).textContent = '组内节点输出引用';
+    }
+    const press = (event: any): void => {
+      if (event.button !== 0) return;
+      if (isInterface || isVariables) {
+        startNodeDrag(event, node.id);
+        return;
+      }
+      const isDouble = registerCardPress(node.id, event);
+      if (isDouble) {
+        event.preventDefault();
+        event.stopPropagation();
+        enterNodeGroup?.(node.id);
+        return;
+      }
+      startNodeDrag(event, node.id);
+    };
+    [body, head, iconPlate, ...group.querySelectorAll('text')].forEach((surface: any) => surface.addEventListener('mousedown', press));
+    group.addEventListener('contextmenu', (event: any) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (contextMenuSuppressedByPan()) return;
+      if (isInterface || isVariables) return;
+      state.selected = new Set([node.id]);
+      state.selectedEdge = null;
+      state.selectedRun = null;
+      render();
+      showMenu(event.clientX, event.clientY, [
+        { label: '进入节点组', run: () => enterNodeGroup?.(node.id) },
+        { label: '解散节点组', run: () => ungroupNodeGroup?.(node.id) },
+      ]);
+    });
+    return group;
+  }
+
+  function renderNode(layer: any, node: any): any {
+    if (node && (node._nodeGroup || node._nodeGroupInterface || node._nodeGroupVariables)) return renderNodeGroup(layer, node);
     const pos = position(node);
     const height = nodeHeight(node);
     const run = state.run.get(node.id);
@@ -271,12 +415,19 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       const invalid = rowErrors.length > 0;
       const errorText = invalid ? issuesText(rowErrors) : '';
       const checked = Boolean(pin.configured ? pin.value : pin.definition && pin.definition.default);
+      const reference = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof (pin.value as { ref?: unknown }).ref === 'string'
+        ? (pin.value as { ref: string }).ref
+        : '';
+      const dataKey = pin.variable ? variableDataKey(pin.scope, pin.variable) : reference || parameterDataKey(node.id, pin.param);
+      const dataToneClass = `data-tone-${dataTone(dataKey)}`;
+      const linked = Boolean(pin.variable || /^nodes\.[^\.]+\.output(?:\.|$)/.test(reference));
       svgEl('line', { class: 'param-row-rule', x1: 0, y1: row.y, x2: nodeWidth, y2: row.y }, group);
       svgEl('circle', {
-        class: `port port-variable type-${pin.type}${pin.variable ? ' bound' : ''}${pin.configured ? ' configured' : ''}${invalid ? ' invalid' : ''}`,
+        class: `port port-variable type-${pin.type} ${dataToneClass}${linked ? ' bound' : ''}${pin.configured ? ' configured' : ''}${invalid ? ' invalid' : ''}`,
+        style: `--data-tone:${dataToneColor(dataKey)}`,
         cx: row.portX,
         cy: row.centerY,
-        r: 5.5,
+        r: portRadius - 2,
       }, group);
       // UE 风格：参数名与值分行（固定卡片）或同行（默认卡片）；复杂参数只显示摘要。
       const label = nodeCards.text(group, {
@@ -297,17 +448,32 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       const tupleCells = twoLine && kind === 'tuple' ? paramTupleLength(pin.definition) ?? 0 : 0;
       const tupleWidth = tupleCells > 1 ? (row.hit.width - (tupleCells - 1) * PARAM_FIELD_GAP) / tupleCells : row.hit.width;
       const cellX = (index: number): number => row.hit.x + index * (tupleWidth + PARAM_FIELD_GAP);
-      // 值行的可点区域 = 行内浮层的贴合矩形：数组的小格子都在这一格里面。
-      const fieldSpan = { x: row.hit.x, y: row.hit.y, width: row.hit.width, height: row.hit.height };
-      // 区域要开四个坐标输入，一格放不下：只有它的浮层横跨整行值区（卡片上的框仍是一格）。
-      const anchorWidth = twoLine && kind === 'rect' ? row.valueWidth : fieldSpan.width;
+      // 识别区域直接显示 X / Y / W / H 四格。它需要整行值区，避免把四个坐标压回一条摘要。
+      const rectCells = twoLine && kind === 'rect' ? 4 : 0;
+      const rectWidth = rectCells > 0 ? (row.valueWidth - (rectCells - 1) * PARAM_FIELD_GAP) / rectCells : row.hit.width;
+      const rectX = (index: number): number => row.hit.x + index * (rectWidth + PARAM_FIELD_GAP);
+      const rectParts = rectCells > 0
+        ? paramRectParts(pin.configured ? pin.value : pin.definition && pin.definition.default)
+        : null;
+      // 值行的可点区域 = 可见输入框的完整范围；区域四格中的任意一格都打开同一个编辑器。
+      const fieldSpan = {
+        x: row.hit.x,
+        y: row.hit.y,
+        width: rectCells > 0 ? row.valueWidth : row.hit.width,
+        height: row.hit.height,
+      };
+      const anchorWidth = fieldSpan.width;
       // 固定卡片：值行画成可见的输入框/控件，行内浮层点开后贴在同一个矩形上。
       // 需要离开卡片去详情栏的行（对象/数组）用虚线框，其余都是实线输入框。
       if (twoLine) {
-        const boxes = tupleCells > 1 ? Array.from({ length: tupleCells }, (_item, cell) => ({ x: cellX(cell), width: tupleWidth })) : [{ x: row.hit.x, width: row.hit.width }];
+        const boxes = rectCells > 0
+          ? Array.from({ length: rectCells }, (_item, cell) => ({ x: rectX(cell), width: rectWidth, rect: true }))
+          : tupleCells > 1
+            ? Array.from({ length: tupleCells }, (_item, cell) => ({ x: cellX(cell), width: tupleWidth, rect: false }))
+            : [{ x: row.hit.x, width: row.hit.width, rect: false }];
         for (const box of boxes) {
           svgEl('rect', {
-            class: `param-row-field${tupleCells > 1 ? ' param-row-cell' : ''}${kind === 'complex' ? ' goes-inspector' : ''}${opensPicker ? ' opens-picker' : ''}${targeted ? ' target' : ''}${invalid ? ' error' : ''}`,
+            class: `param-row-field${tupleCells > 1 || rectCells > 0 ? ' param-row-cell' : ''}${box.rect ? ' param-row-rect-cell' : ''}${kind === 'complex' ? ' goes-inspector' : ''}${opensPicker ? ' opens-picker' : ''}${targeted ? ' target' : ''}${invalid ? ' error' : ''}`,
             x: box.x,
             y: row.hit.y,
             width: box.width,
@@ -320,7 +486,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       // 右侧的 › 只占最后几个像素：值文字按实际渲染宽度让位，别把「60,120 200×80」这种
       // 刚好放得下的区域值提前截断。
       const caretGlyph = 6;
-      const caretSpace = twoLine && opensPicker ? caretGlyph : 0;
+      const showsPickerCaret = opensPicker && kind !== 'rect';
+      const caretSpace = twoLine && showsPickerCaret ? caretGlyph : 0;
       // 颜色色块在双行样式下贴值行框右侧（与行内浮层里的取色块同位置）。
       const colorSwatch = kind === 'color'
         ? paramColorSwatch(pin.configured ? pin.value : pin.definition && pin.definition.default)
@@ -358,6 +525,37 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
           });
           toggleText.style.pointerEvents = 'none';
         }
+      } else if (rectCells > 0) {
+        // 区域值始终保留四个稳定位置。轴名与数字分开排版，把绝大多数宽度留给数字，
+        // 四位坐标、高分辨率尺寸和常见负坐标都不会被省略号截断。
+        const rectLabels = ['X', 'Y', 'W', 'H'];
+        rectLabels.forEach((rectLabel, cellIndex) => {
+          const cellValue = rectParts ? rectParts[cellIndex] : null;
+          const axis = svgEl('text', {
+            class: 'param-row-rect-axis',
+            x: rectX(cellIndex) + 3,
+            y: row.valueY,
+            'font-size': 8,
+            'font-weight': 700,
+            fill: 'var(--card-muted)',
+          }, group);
+          axis.textContent = rectLabel;
+          axis.style.pointerEvents = 'none';
+          const cellText = nodeCards.text(group, {
+            className: `param-row-value param-row-rect-value tone-${view.tone}`,
+            x: rectX(cellIndex) + 11,
+            y: row.valueY,
+            value: cellValue ?? '—',
+            width: Math.max(16, rectWidth - 15),
+            size: 9,
+          });
+          cellText.style.pointerEvents = 'none';
+          // `.param-row-value` 的通用字号是 10px；区域四格使用更紧凑的 9px，并启用等宽数字。
+          cellText.style.fontSize = '9px';
+          cellText.style.fontVariantNumeric = 'tabular-nums';
+          const cellCaption: any = cellText.querySelectorAll('title')[0];
+          if (cellCaption) cellCaption.textContent = `${pin.label || pin.param} ${rectLabel} = ${cellValue ?? '未设置'}`;
+        });
       } else if (tupleCells > 1) {
         // 固定长度数组：每格一个输入格，自己的值文字（元素类型决定显示形式）。
         const itemKind = paramTupleItemKind(pin.definition);
@@ -398,7 +596,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
             fill: swatch,
           }, group).style.pointerEvents = 'none';
         }
-        if (twoLine && opensPicker) {
+        if (twoLine && showsPickerCaret) {
           svgEl('text', {
             class: 'param-row-caret',
             x: row.hit.x + row.hit.width - PARAM_FIELD_PADDING,
@@ -448,6 +646,14 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         event.preventDefault();
         event.stopPropagation();
         const point = position(node);
+        let inputIndex: number | undefined;
+        if (rectCells > 0 && typeof valueHit.getBoundingClientRect === 'function') {
+          const bounds = valueHit.getBoundingClientRect();
+          if (bounds && bounds.width > 0 && Number.isFinite(event.clientX)) {
+            const ratio = Math.max(0, Math.min(0.999999, (event.clientX - bounds.left) / bounds.width));
+            inputIndex = Math.floor(ratio * rectCells);
+          }
+        }
         openParamEditor?.({
           node,
           pin,
@@ -457,6 +663,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
           world: { x: point.x + fieldSpan.x, y: point.y + row.centerY },
           // 双行卡片的文字在框内左对齐，行内浮层要跟它保持一致，点开才像「框获得焦点」。
           valueAlign: twoLine ? 'left' : 'right',
+          inputIndex,
         });
       });
       valueHit.addEventListener('contextmenu', (event: any) => {
@@ -486,10 +693,11 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       // 任务节点是叶子，没有执行流输出；右侧这个口是「节点输出引用」口，
       // 拖到别的节点的参数行即可绑定 nodes.<id>.output.<字段>。
       const output = svgEl('circle', {
-        class: `port port-out port-out-reference${state.referenceConnect && state.referenceConnect.nodeId === node.id ? ' active' : ''}`,
+        class: `port port-out port-out-reference data-tone-${dataTone(`nodes.${node.id}.output`)}${state.referenceConnect && state.referenceConnect.nodeId === node.id ? ' active' : ''}`,
+        style: `--data-tone:${dataToneColor(`nodes.${node.id}.output`)}`,
         cx: nodeWidth,
         cy: referencePortY,
-        r: portRadius - 1,
+        r: portRadius - 2.5,
         'data-node': node.id,
       }, group);
       svgEl('title', {}, output).textContent = '节点输出：拖到别的节点的参数行绑定引用';
@@ -516,9 +724,14 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         event.preventDefault();
         event.stopPropagation();
         if (subRef) { requestOpenSubWorkflow(node.id); return; }
-        state.selected = new Set([node.id]);
+        if (!state.selected.has(node.id)) state.selected = new Set([node.id]);
         state.selectedRun = null;
         state.inspector = 'node';
+        // 概览 / 紧凑模式下双击自动聚焦并放大到完整卡片，否则只做选中。
+        if (focusNodeDetail && state.zoom < FULL_DETAIL_MIN_ZOOM) {
+          focusNodeDetail(node.id);
+          return;
+        }
         render();
         return;
       }
@@ -531,12 +744,13 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         event.preventDefault();
         event.stopPropagation();
         if (contextMenuSuppressedByPan()) return;
-        state.selected = new Set([node.id]);
+        if (!state.selected.has(node.id)) state.selected = new Set([node.id]);
         state.selectedRun = null;
         render();
         showMenu(event.clientX, event.clientY, [
           { label: '进入子工作流视图', run: () => requestOpenSubWorkflow(node.id) },
           'separator',
+          ...(state.selected.size >= 2 && groupSelection ? [{ label: '将所选节点打组', run: () => groupSelection() }, 'separator'] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           { label: '删除节点', danger: true, run: () => deleteSelection() },
@@ -548,10 +762,11 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         event.preventDefault();
         event.stopPropagation();
         if (contextMenuSuppressedByPan()) return;
-        state.selected = new Set([node.id]);
+        if (!state.selected.has(node.id)) state.selected = new Set([node.id]);
         state.selectedRun = null;
         render();
         showMenu(event.clientX, event.clientY, [
+          ...(state.selected.size >= 2 && groupSelection ? [{ label: '将所选节点打组', run: () => groupSelection() }, 'separator'] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           'separator',
@@ -559,6 +774,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         ]);
       });
     }
+    return group;
   }
 
   return { renderNode };

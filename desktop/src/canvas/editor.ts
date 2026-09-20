@@ -16,6 +16,7 @@
 import { createCanvasEdges } from './canvas/edges';
 import { createCanvasMinimap } from './canvas/minimap';
 import { createCanvasViewport } from './canvas/viewport';
+import { createWrapMeasurement } from './canvas/wrap-measurement';
 import { validateWorkflow } from '../shared/workflow/validate';
 import { createEditorExport } from './export';
 import { createAssetActions } from './interactions/asset-actions';
@@ -35,6 +36,7 @@ import { createInspectorPanel, type InspectorRenderers } from './inspector/panel
 import { createParameterControls } from './inspector/parameter-controls';
 import { createVariableInspectors } from './inspector/variable-inspectors';
 import { createCanvasWorkflowModel } from './model/canvas-workflow-model';
+import { createNodeGroups } from './model/node-groups';
 import { issuesByNode, issueTitle, nodeIssues } from './model/card-issues';
 import { createCanvasReferences } from './model/references';
 import { createEditorSchema } from './model/schema';
@@ -48,7 +50,9 @@ import { cardRowParams, hasCardLayout } from './render/card-layout';
 import { createCanvasCards } from './render/cards';
 import { createNodeCardRenderer } from './render/node-card';
 import { createNodeCards } from './render/node-cards';
-import { createRenderEntry } from './render/render-entry';
+import { createRenderEntry, type CanvasRenderEntry } from './render/render-entry';
+import { paramRowKindOf } from './render/param-rows';
+import type { RenderFlags } from './render/render-scheduler';
 import { createCanvasMessages } from './shell/messages';
 import { createCanvasCommands } from './state/commands';
 import { createEditorCommandDispatch } from './state/editor-command-dispatch';
@@ -64,6 +68,7 @@ import { createUi } from './ui/elements';
 import { ACTION_LABELS, actionLabel, enumOption, fieldLabel } from './ui/labels';
 import { createCanvasOverlays, type MenuEntry } from './ui/overlays';
 import type { CanvasBridge } from './bridge';
+import { readRuntimeEdgePreview, writeRuntimeEdgePreview } from '../shared/runtime-edge-preview';
 
 /**
  * 编辑器命令出口（调试与独立窗口转发使用）。
@@ -92,6 +97,34 @@ export interface CanvasEditorHandle {
   removeVariable(...args: any[]): any;
   deleteVariable(...args: any[]): any;
   renderInspector(): void;
+  /**
+   * 画布基准入口：给 Electron 性能基准（scripts/canvas-benchmark.cjs）用。
+   * 只暴露「测量视口/交互类操作」需要的能力，不改变编辑器语义。
+   */
+  benchmark: CanvasBenchmarkApi;
+}
+
+/** 画布基准接口：平移、缩放、拖拽与统计。 */
+export interface CanvasBenchmarkApi {
+  /** 当前渲染统计（整层重建次数、挂载卡片数等）。 */
+  stats(): any;
+  /** 画布内节点/连线/变量卡的实际 DOM 元素数量。 */
+  domCounts(): { nodes: number; edges: number; variableEdges: number; variableCards: number; total: number };
+  /** 平移视口（只改视口，不触发整层重建）。 */
+  panBy(dx: number, dy: number): void;
+  /** 以画布中心为锚点缩放。 */
+  zoomBy(factor: number): void;
+  /** 选中一个节点（用于拖拽基准）。 */
+  selectNode(id?: string): string | null;
+  /** 把选中节点移动 (dx, dy)（世界坐标），模拟拖拽。 */
+  dragSelected(dx: number, dy: number): void;
+  endDrag(): void;
+  /** 触发一次视口重绘（与外层 rAF 对齐）。 */
+  flushViewport(): void;
+  /** 当前可见（已挂载）的节点数量。 */
+  activeNodeCount(): number;
+  /** 当前缩放分级。 */
+  detailLevel(): string | null;
 }
 
 export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
@@ -132,8 +165,25 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   };
   const state = createCanvasState();
 
+  let runtimeEdgePreviewEnabled = readRuntimeEdgePreview(window.localStorage);
+  function setRuntimeEdgePreview(enabled: boolean): void {
+    runtimeEdgePreviewEnabled = enabled;
+    document.body.classList.toggle('runtime-edge-preview-disabled', !enabled);
+    writeRuntimeEdgePreview(window.localStorage, enabled);
+  }
+  setRuntimeEdgePreview(runtimeEdgePreviewEnabled);
+
   /** 重绘入口占位：RenderEntry 就绪后赋值（模块直接引用 render/focusNode 函数本身）。 */
-  let renderPieces: { render(): void; focusNode(id: string): void } | null = null;
+  let renderPieces: CanvasRenderEntry | null = null;
+  /**
+   * 连线重连旋钮的指针捕获：Connections 在 Edges 之后构造，先占位、构造后回填，
+   * 避免 Edges ⇄ Connections 的环形依赖。
+   */
+  let captureConnectionPointer: (event: any) => number | null = () => null;
+  /** 滚轮缩放合并：一帧内的多次滚轮只做一次视口更新。 */
+  let wheelZoom = 1;
+  let wheelPoint: { x: number; y: number } | null = null;
+  let wheelScheduled = false;
 
   if (window.StudioTooltip) {
     window.StudioTooltip.install({
@@ -147,6 +197,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const $ = (id: string): HTMLElement => document.getElementById(id)!;
   const graph = document.querySelector<SVGSVGElement>('#graph')!;
   const wrap = $('canvas-wrap');
+  /** 视口尺寸缓存：画布每帧都在写 DOM，读 rect 会强制同步布局（实测占缩放的 50% 帧时间）。 */
+  const wrapMeasurement = createWrapMeasurement(wrap as any);
+  window.addEventListener('resize', () => wrapMeasurement.invalidate());
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
   const Overlays = createCanvasOverlays({ el: (tag, className, text) => el(tag, className, text), $: (id) => $(id) });
   const { showMenu, hideMenus, openLightbox, toast } = Overlays;
@@ -156,7 +209,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { displayNameOfDefinition, variableDisplayNameOf, inputParameterMetadata } = Model;
 
   const EditorStatus = createEditorStatus({ state, vscode, $ });
-  const { setDirty, currentInspectorSelection, requestInspector } = EditorStatus;
+  const { setDirty, currentInspectorSelection, requestInspector, requestInspectorRename } = EditorStatus;
 
   const StudioSchema = createEditorSchema();
   const { definitionSchema, compatibleRefType, appendNestedRefs } = StudioSchema;
@@ -172,7 +225,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, vscode, nodeById, $, showMenu, compactValue,
   });
   const {
-    subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel,
+    resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel,
   } = SubworkflowHelpers;
 
   const History = createEditorHistory({
@@ -182,6 +235,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeById,
     setDirty: (value) => setDirty(value),
     render,
+    renderGraph: () => renderGraph(),
+    renderAll: () => renderPieces?.render({ full: true }),
   });
   const { snapshot, mutate, restore, replaceDocument, undo, redo } = History;
 
@@ -212,26 +267,70 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   } = CanvasWorkflowModel;
   workflowInputs = CanvasWorkflowModel.workflowInputs;
 
+  // 节点组是编辑器视图投影：运行时仍读取原始 nodes/children，打组不会改变执行语义。
+  let renderNodeGroupBreadcrumb = (): void => {};
+  let fitNodeGroupView = (): void => {};
+  const refreshNodeGroupView = (fit = false): void => {
+    renderPieces?.rebuildAll();
+    renderPieces?.render({ full: true });
+    renderNodeGroupBreadcrumb();
+    if (fit) fitNodeGroupView();
+  };
+  const NodeGroups = createNodeGroups({
+    state, nodes, nodeById, layout, mutate, toast, nodeWidth: NODE_W, nodeHeight, nodeVariablePins,
+    refreshView: refreshNodeGroupView,
+  });
+  const {
+    currentGroup, viewNodes, viewNodeById, viewReferenceSourceById, adjacentEdges, groupSelection, enterGroup, leaveGroup, ungroup, addToCurrentGroup,
+    pinExposure, pinCandidates, setPinExposed,
+  } = NodeGroups;
+  const viewPosition = (node: any) => {
+    if (!node?._nodeGroupPosition) return position(node);
+    const saved = layout()[node.id];
+    return saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : node._nodeGroupPosition;
+  };
+  const viewNodeVariablePins = (node: any) => Array.isArray(node?._groupPins) ? node._groupPins : nodeVariablePins(node);
+  const viewNodeHeight = (node: any) => {
+    if (node && Number.isFinite(node._nodeGroupHeight)) return Number(node._nodeGroupHeight);
+    if (node && (node._nodeGroup || node._nodeGroupInterface || node._nodeGroupVariables)) return BASE_H + viewNodeVariablePins(node).length * RUN_VARIABLE_H;
+    return nodeHeight(node);
+  };
+  // 缩放分级只隐藏卡内元素、不改卡片尺寸：连线锚点直接用真实布局高度。
+  const viewInstanceRunCards = () => instanceRunCards().filter((card: any) => {
+    const visible = viewNodeById(card?.node?.id);
+    return visible && !visible._nodeGroup;
+  });
+
   const StudioSidebarState = createSidebarState({ state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode });
   const { postSidebarState } = StudioSidebarState;
 
   const Viewport = createCanvasViewport({
-    state, nodes, position, layout, mutate, instanceRunCards, variableCardList, nodeHeight,
-    wrap, minimap: () => $('minimap'), render,
+    state, nodes: viewNodes, position: viewPosition, layout, mutate, instanceRunCards: viewInstanceRunCards, variableCardList, nodeHeight: viewNodeHeight,
+    // 自动排列要按变量端点把变量卡片跟着节点一起搬（真实节点的端点，不是当前投影的）。
+    nodeVariablePins,
+    // 绑定卡片纵向对齐到所属参数行：与创建卡片时同一套行几何。
+    nodeRowHeight,
+    variableCardPortY: VARIABLE_CARD_PORT_Y,
+    wrap, measurement: wrapMeasurement, minimap: () => $('minimap'), render,
     nodeWidth: NODE_W, baseHeight: BASE_H, runCardWidth: RUN_CARD_W,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
   const { autoLayout, ensureLayout, bounds, fitView, zoomAt, worldPoint, bezier } = Viewport;
+  fitNodeGroupView = fitView;
 
   const Commands = createCanvasCommands({
     state, nodes, nodeById, layout, mutate, clone, toast: (message, error) => toast(message, error), worldPoint,
     wrap, nodeWidth: NODE_W, baseHeight: BASE_H,
+    // 复制/剪切交给壳层保管：跨画布（含弹出到独立窗口的面板）粘贴靠它。
+    publishClipboard: (payload) => vscode.postMessage({ type: 'clipboardWrite', clipboard: payload }),
+    nextVariableCardId,
+    onNodesCreated: addToCurrentGroup,
   });
   const { parentOf, canConnect, connect, disconnect, buildNode, addNode, deleteSelection, copySelection, cutSelection, pasteClipboard } = Commands;
 
   const HitTest = createCanvasHitTest({
-    state, worldPoint, nodes, nodeById, position, nodeHeight, nodeRowHeight, nodeVariablePins,
-    variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards,
+    state, worldPoint, nodes: viewNodes, nodeById: viewNodeById, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, nodeVariablePins: viewNodeVariablePins,
+    variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards: viewInstanceRunCards,
     instanceRunInputPosition, variableCardList, referenceFieldsForPin,
     portRadius: PORT_R, nodeWidth: NODE_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
     variablePinX: VARIABLE_PIN_X, runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H,
@@ -263,27 +362,33 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     referenceDisplayNameOf: (ref) => referenceDisplayName(ref), variableCardList,
   });
   const {
-    startConnection, startConnectionFromInput, captureConnectionPointer,
+    startConnection, startConnectionFromInput, captureConnectionPointer: capturePointerFromConnections,
     cancelConnection, finishConnection, startVariableConnectionFromCard, startVariableConnectionFromPin,
     startVariableConnectionFromInstanceInput, cancelVariableConnection, finishVariableConnection,
     connectVariableToPin, disconnectVariableFromPin, connectVariableToInstanceInput, disconnectVariableFromInstanceInput,
     startReferenceConnection, cancelReferenceConnection, finishReferenceConnection,
     connectReferenceToPin, disconnectReferenceFromPin,
   } = Connections;
+  captureConnectionPointer = (event: any) => capturePointerFromConnections(event);
 
   const Pointer = createCanvasPointer({
-    state, graph, wrap, worldPoint, position, nodeById, nodes, nodeHeight, snapshot, render, hideMenus,
+    state, graph, wrap, measurement: wrapMeasurement, worldPoint, position: viewPosition, nodeById: viewNodeById, nodes: viewNodes, nodeHeight: viewNodeHeight, snapshot, render, hideMenus,
     clearVariableCardSelection, layout, variableCards, variableCardList, connectionTargetAt,
     variableConnectionTargetAt, referenceConnectionTargetAt,
     finishConnection, cancelConnection, finishVariableConnection, finishReferenceConnection, setDirty,
+    coalesce: (flags) => renderPieces?.coalesce(flags ?? { viewport: true, interaction: true }),
+    // 框选矩形要跟着指针走：走带标记的同步重绘，不延后到下一帧。
+    renderWith: (flags) => renderPieces?.render(flags),
+    // 重连旋钮靠 setPointerCapture 捕获后续事件；没有原生指针标识就不挂这条交互。
+    pointerCapture: (event) => (Number.isInteger((event as any).pointerId) ? (event as any).pointerId : null),
     nodeWidth: NODE_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
   const { startNodeDrag, onPointerDown, onPointerMove, onPointerUp, contextMenuSuppressedByPan } = Pointer;
 
   const CanvasHelpers = createCanvasHelpers({
-    state, $, nodes, worldPoint, render,
+    state, $, nodes: viewNodes, worldPoint, render,
     contextMenuSuppressedByPan,
-    setVariableCardSelection, wrap,
+    setVariableCardSelection, wrap, measurement: wrapMeasurement,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
     localErrorCount: () => {
       let count = 0;
@@ -317,17 +422,18 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { openRoiPicker } = StudioRoiPicker;
 
   const Minimap = createCanvasMinimap({
-    state, $, svgEl, bounds, nodes, position, nodeHeight, instanceRunCards, variableCardList,
-    wrap, nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
+    state, $, svgEl, bounds, nodes: viewNodes, position: viewPosition, nodeHeight: viewNodeHeight, instanceRunCards: viewInstanceRunCards, variableCardList,
+    wrap, measurement: wrapMeasurement,
+    nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
   const { renderMinimap } = Minimap;
 
   const Edges = createCanvasEdges({
-    state, svgEl, bezier, nodes, nodeById, position, nodeHeight, nodeRowHeight, instanceRunCards, instanceRunInputPosition,
-    variableCardList, nodeVariablePins, variablePinPosition, disconnect,
+    state, svgEl, bezier, nodes: viewNodes, nodeById: viewNodeById, referenceSourceById: viewReferenceSourceById, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, instanceRunCards: viewInstanceRunCards, instanceRunInputPosition,
+    variableCardList, nodeVariablePins: viewNodeVariablePins, variablePinPosition, disconnect,
     disconnectVariableFromPin, disconnectVariableFromInstanceInput, disconnectReferenceFromPin,
     mutate, requestInspector, render,
-    worldPoint, captureConnectionPointer,
+    worldPoint, captureConnectionPointer: (event) => captureConnectionPointer(event),
     nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
     variableCardWidth: VARIABLE_CARD_W, variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
     taskOutputPortY: TASK_OUTPUT_PORT_Y,
@@ -335,6 +441,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const {
     renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection,
     renderVariableConnection, renderReferenceConnection, renderReferenceEdges, referencePortPosition,
+    patchEdge, patchInstanceRunEdge, patchNodeDataEdges, patchRunEdgeStates, resetPatchRegistry, edgeBounds,
   } = Edges;
 
   const PortMenu = createCanvasPortMenu({
@@ -346,6 +453,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     focusVariableCard, placeVariableCard, disconnectVariableFromPin, disconnectVariableFromInstanceInput,
     removeVariableCard, fieldLabel, toast: (message, error) => toast(message, error),
     typeNames: TYPE_NAMES, nodeWidth: NODE_W,
+    nodeGroupPinExposure: pinExposure, setNodeGroupPinExposed: setPinExposed,
   });
   const {
     nodeInputPortMenuItems, nodeOutputPortMenuItems, nodeReferencePortMenuItems, nodeVariablePinMenuItems,
@@ -366,11 +474,18 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     clearInspector, section, field, textInput, selectInput, segmentedInput, checkbox, renderInspector,
   } = InspectorPanel;
 
-  const StudioToolbar = createEditorToolbar({ state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes, focusNode });
+  const StudioToolbar = createEditorToolbar({
+    state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes: viewNodes, focusNode,
+    currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
+  });
   const { renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, bindToolbar, searchNodeByName, setWorkflow, setInstance } = StudioToolbar;
-  bridge.setTopbarControls({ setWorkflow, setInstance });
+  renderNodeGroupBreadcrumb = renderWorkflowBreadcrumb;
+  bridge.setTopbarControls({ setWorkflow, setInstance, setRuntimeEdgePreview });
 
-  const StudioExport = createEditorExport({ state, graph, vscode, bounds, wrap, toast, NS });
+  const StudioExport = createEditorExport({
+    state, graph, vscode, bounds, wrap, toast, NS,
+    setRenderAll: (value: boolean) => renderPieces?.setRenderAll(value),
+  });
   const { exportFullCanvasImage, setExportBusy, collectExportTemplatePaths, applyInlineThumbnails } = StudioExport;
 
   const ParameterControls = createParameterControls({
@@ -395,7 +510,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, mutate, UI, el, $, nodeById, catalogByName, clone,
     defaultValue, referenceLabel,
     enumOption,
-    runtimeInstanceLabel, workflowInputs,
+    runtimeInstanceLabel, workflowInputs, resolveWorkflowRef,
     workflowReference, requestOpenWorkflowReference,
     definitionSchema, compatibleRefType,
     actionDropdown, renderParameter, complexValueControl,
@@ -408,7 +523,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, mutate, UI, el, $, nodeById, clone, toast,
     defaultValue, allRefs, referenceLabel,
     fieldLabel, disconnect, bindAssetPreview,
-    openAssetBrowser,
+    openAssetBrowser, openWorkflowBrowser,
     variableCards, variableLinks, clearVariableCardSelection, VariableSystem,
     vscode,
     selectInput, textInput, checkbox, field, section, clearInspector,
@@ -438,8 +553,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, svgEl, nodeCards, displayNameOfDefinition, assetPreviewForPath, bindAssetPathPreview,
     disconnectVariableFromInstanceInput, startVariableConnectionFromInstanceInput, startVariableConnectionFromCard,
     openPortContextMenu, showMenu, instanceRunPinMenuItems, variableCardPortMenuItems, requestInspector,
-    requestOpenWorkflowReference, render, contextMenuSuppressedByPan,
-    removeInstanceRun, removeVariableCard, setVariableCardSelection, worldPoint, snapshot,
+    requestOpenWorkflowReference, openWorkflowBrowser, render, contextMenuSuppressedByPan,
+    removeInstanceRun, removeVariableCard, setVariableCardSelection, variableCardList, worldPoint, snapshot,
     runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H, portRadius: PORT_R,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H, variableCardPortY: VARIABLE_CARD_PORT_Y,
   });
@@ -449,23 +564,40 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
     showMenu, nodeVariablePinMenuItems, requestInspector,
     toast: (message, error) => toast(message, error), enumOption, fieldLabel,
-    openAssetBrowser, requestRoi,
+    openAssetBrowser, openWorkflowBrowser, requestRoi,
   });
   const { openParamEditor, closeInlineEditor, setParamLiteral, refreshInlineEditor } = InlineEditor;
 
+  const nodeGroupVariableMenuItems = (groupId: string): MenuEntry[] => {
+    const candidates = pinCandidates(groupId);
+    const grouped = new Map<string, { nodeName: string; children: Exclude<MenuEntry, 'separator'>[] }>();
+    for (const candidate of candidates) {
+      let item = grouped.get(candidate.nodeId);
+      if (!item) grouped.set(candidate.nodeId, item = { nodeName: candidate.nodeName, children: [] });
+      item.children.push({
+        label: `${candidate.label} · ${candidate.type}`,
+        run: () => setPinExposed(candidate.nodeId, candidate.param, true),
+      });
+    }
+    if (!grouped.size) return [{ label: '没有可添加的参数' }];
+    return [...grouped.values()].map((item) => ({ label: item.nodeName, children: item.children }));
+  };
+
   const NodeCard = createNodeCardRenderer({
-    state, svgEl, nodeCards, position, nodeHeight, nodeRowHeight,
+    state, svgEl, nodeCards, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight,
     subWorkflowRef, templatePreview,
     compositeSubtitle, variableDisplayNameOf, referenceDisplayNameOf: (ref) => referenceDisplayName(ref),
     nodeIssueInfo, issueTitle,
-    decoratorLabel, nodeVariablePins, openLightbox,
+    decoratorLabel, nodeVariablePins: viewNodeVariablePins, openLightbox,
     disconnectVariableFromPin, startVariableConnectionFromPin,
     openPortContextMenu, showMenu,
     nodeVariablePinMenuItems, nodeInputPortMenuItems, nodeOutputPortMenuItems,
     startConnectionFromInput, startConnection, startReferenceConnection,
-    nodeReferencePortMenuItems,
+    nodeReferencePortMenuItems, nodeGroupVariableMenuItems,
     startNodeDrag,
     registerCardPress, requestInspector, requestOpenSubWorkflow, render,
+    enterNodeGroup: enterGroup, ungroupNodeGroup: ungroup, groupSelection,
+    focusNodeDetail,
     contextMenuSuppressedByPan,
     copySelection, cutSelection, deleteSelection,
     paramRowInfo, toggleParamRows, paramRowMenuItems,
@@ -478,27 +610,97 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { renderNode } = NodeCard;
 
   const RenderEntry = createRenderEntry({
-    state, $, graph, wrap, svgEl, UI, nodes, nodeById, position, nodeHeight, instanceRunCards, variableCardList,
+    state, $, graph, wrap, measurement: wrapMeasurement, svgEl, UI, nodes: viewNodes, nodeById: viewNodeById, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, nodeVariablePins: viewNodeVariablePins,
+    instanceRunCards: viewInstanceRunCards, variableCardList,
     renderNode, renderInstanceRunCard, renderVariableCard,
     renderEdge, renderInstanceRunEdge, renderConnection,
     renderVariableConnection, renderReferenceConnection, renderReferenceEdges, renderVariableEdges,
-    renderMinimap, renderInspector,
+    renderMinimap: () => refreshMinimap(),
+    renderInspector,
     postSidebarState, updateIssueBadge,
-    ensureLayout, syncLegacyInputParameters, syncLegacyVariableCards, setDirty, nodeWidth: NODE_W,
+    ensureLayout, syncLegacyInputParameters, syncLegacyVariableCards, setDirty,
+    // 变量卡片按文档里的绝对坐标绘制，裁剪与空间索引也读同一对坐标——
+    // 这里刻意不再注入位置函数：`CanvasWorkflowModel.variableCardPosition(node, index)`
+    // 是「把卡片放到某节点某一行旁边」的节点侧算法，用在卡片上会让所有卡片塌到同一个点。
+    nodeIssueInfo: (node) => nodeIssueInfo(node),
+    // 校验错误的整份指纹：一次遍历把所有节点的错误数折叠成一个字符串，
+    // 避免每张卡片各查一次（500 节点首帧的主要开销就在这里）。
+    issueFingerprint: () => {
+      const map = documentIssues();
+      if (!map.size) return '';
+      const parts: string[] = [];
+      for (const [id, info] of map) {
+        let params = 0;
+        if (info && info.params && typeof info.params.forEach === 'function') {
+          info.params.forEach((items: any[]) => { params += (items || []).length; });
+        }
+        parts.push(`${id}:${(info && info.node ? info.node.length : 0)}/${params}`);
+      }
+      return parts.sort().join(',');
+    },
+    referenceSourceIds: (node) => {
+      const ids: string[] = [];
+      for (const pin of nodeVariablePins(node)) {
+        const ref = pin && pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof pin.value.ref === 'string'
+          ? pin.value.ref
+          : '';
+        const match = /^nodes\.([^\.]+)\.output/.exec(ref);
+        if (match && match[1] !== node.id) ids.push(match[1]);
+      }
+      return ids;
+    },
+    patchers: {
+      // 拖动节点：只更新这个节点的 transform 与相邻连线路径，不重建整张画布。
+      nodeEdges: (id) => {
+        if (state.variableConnect || state.referenceConnect || state.connect) return; // 拖临时连线时数据边本来就要重画
+        // 使用当前画布投影而不是原始运行节点：拖动节点组时，组卡本身只存在于投影视图中。
+        for (const edge of adjacentEdges(id)) patchEdge(edge.parent, edge.childId, edge.order);
+        for (const card of viewInstanceRunCards()) {
+          if (card.node.id !== id) continue;
+          patchInstanceRunEdge(card);
+        }
+        patchNodeDataEdges(id);
+      },
+    },
+    beforeEdgeRebuild: () => resetPatchRegistry(),
     afterRender: () => refreshInlineEditor(),
+    nodeWidth: NODE_W,
+    variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
+    runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H,
   });
   renderPieces = RenderEntry;
 
+  /** 小地图结构签名：只有布局/结构变化时才重建缩略矩形，平移缩放只更新视口框。 */
+  let minimapStructureSeen = '';
+  function minimapStructureKey(): string {
+    const parts: string[] = [];
+    for (const node of viewNodes()) {
+      const pos = viewPosition(node);
+      parts.push(`${node.id}:${pos.x},${pos.y},${viewNodeHeight(node)}`);
+    }
+    for (const card of viewInstanceRunCards()) parts.push(`r${card.key}:${card.x},${card.y},${card.height}`);
+    for (const card of variableCardList()) parts.push(`v${card.id}:${card.x},${card.y}`);
+    return parts.join('|');
+  }
+  const refreshMinimap = (): void => {
+    const key = minimapStructureKey();
+    const structure = key !== minimapStructureSeen;
+    minimapStructureSeen = key;
+    renderMinimap({ structure });
+  };
+
   const RunEvents = createRunEvents({
-    state, nodes, nodeById, clone, render, deleteSelection, removeVariableCards, removeVariableCard,
+    state, nodes, nodeById, clone, render, patchRunEdgeStates, deleteSelection, removeVariableCards, removeVariableCard,
     removeInstanceRun, removeVariable,
   });
   const { handleRunEvent, deleteCurrentSelection } = RunEvents;
 
   const EditorCommandDispatch = createEditorCommandDispatch({
     convertInputToVariable: VariableInspectors.convertInputToVariable,
+    requestInspectorRename,
+    renameVariable: VariableInspectors.renameVariable,
     state, mutate, nodes, nodeById, undo, redo, fitView, autoLayout, copySelection, cutSelection,
-    pasteClipboard, deleteSelection, addNode, render, focusNode, searchNodeByName, exportFullCanvasImage,
+    pasteClipboard, deleteSelection, addNode, render: renderGraph, focusNode, searchNodeByName, exportFullCanvasImage,
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
     deleteVariable,
     VariableSystem,
@@ -513,7 +715,21 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   graph.addEventListener('pointerup', (event) => { if (state.connect || state.variableConnect || state.referenceConnect) onPointerUp(event); });
   graph.addEventListener('pointercancel', () => { cancelConnection(); cancelVariableConnection(); cancelReferenceConnection(); });
   graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
-  graph.addEventListener('wheel', (event) => { event.preventDefault(); zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY); }, { passive: false });
+  // 滚轮缩放：事件可以远高于帧率，累积到本帧只做一次视口更新。
+  graph.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    wheelZoom *= event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    wheelPoint = { x: event.clientX, y: event.clientY };
+    if (wheelScheduled) return;
+    wheelScheduled = true;
+    requestAnimationFrame(() => {
+      wheelScheduled = false;
+      const factor = wheelZoom;
+      const point = wheelPoint;
+      wheelZoom = 1;
+      zoomAt(factor, point?.x, point?.y);
+    });
+  }, { passive: false });
   graph.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     if (contextMenuSuppressedByPan()) return;
@@ -532,8 +748,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
         { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
       );
     }
-    if (state.clipboard && state.clipboard.length > 0) {
-      items.push({ label: `粘贴 (Ctrl+V) · ${state.clipboard.length} 个节点`, run: () => pasteClipboard(point) });
+    if (state.clipboard && state.clipboard.nodes.length > 0) {
+      items.push({ label: `粘贴 (Ctrl+V) · ${state.clipboard.nodes.length} 个节点`, run: () => pasteClipboard(point) });
     }
     items.push('separator', { label: '自动排列', run: () => { autoLayout(); fitView(); } });
     showMenu(event.clientX, event.clientY, items);
@@ -574,9 +790,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const CanvasMessages = createCanvasMessages({
     state, $, mutate, nodeById, normalizeRaw, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
     renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, renderInspector, renderAssetBrowser,
-    renderWorkflowBrowser,
+    renderWorkflowBrowser, resolveWorkflowRef,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
-    normalizedAssetPath, handleRunEvent, setExportBusy,
+    normalizedAssetPath, handleRunEvent, patchRunEdgeStates, setExportBusy,
     replaceDocument: (text: string, record?: boolean) => { closeInlineEditor(); replaceDocument(text, record); },
     executeEditorCommand, toast,
   });
@@ -588,11 +804,60 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
+  const benchmark: CanvasBenchmarkApi = {
+    stats: () => renderPieces?.stats() ?? null,
+    domCounts: () => {
+      const layer = renderPieces?.controller.getLayer();
+      const count = (parent: any): number => {
+        if (!parent) return 0;
+        if (Array.isArray(parent.children)) return parent.children.length;
+        if (typeof parent.childElementCount === 'number') return parent.childElementCount;
+        return 0;
+      };
+      const nodes = count(layer?.cards);
+      const edges = count(layer?.wires);
+      const variableEdges = count(layer?.variableEdges) + count(layer?.referenceEdges);
+      const variableCards = count(layer?.variableCards);
+      return {nodes, edges, variableEdges, variableCards, total: nodes + edges + variableEdges + variableCards};
+    },
+    panBy: (dx, dy) => { state.panX += dx; state.panY += dy; render({ viewport: true }); },
+    zoomBy: (factor) => { zoomAt(factor); },
+    selectNode: (id) => {
+      const target = id || nodes()[0]?.id || null;
+      if (!target || !nodeById(target)) return null;
+      state.selected = new Set([target]);
+      state.selectedEdge = null;
+      state.selectedRun = null;
+      state.inspector = 'node';
+      render({ selection: true, panels: true });
+      return target;
+    },
+    dragSelected: (dx, dy) => {
+      const ids = [...state.selected];
+      if (!ids.length) return;
+      const origins: Record<string, { x: number; y: number }> = {};
+      for (const id of ids) {
+        const node = nodeById(id);
+        if (!node) continue;
+        const pos = position(node);
+        origins[id] = { x: pos.x, y: pos.y };
+        layout()[id] = { x: Math.round(pos.x + dx), y: Math.round(pos.y + dy) };
+      }
+      // 与真实拖拽一致：只走视口 + 交互标记，不重建卡片。
+      state.drag = { kind: 'nodes', start: { x: 0, y: 0 }, origins, before: '', moved: true };
+      render({ viewport: true, interaction: true });
+    },
+    endDrag: () => { state.drag = null; },
+    flushViewport: () => render({ viewport: true }),
+    activeNodeCount: () => renderPieces?.controller.activeNodeIds().length ?? 0,
+    detailLevel: () => renderPieces?.detailLevel() ?? null,
+  };
   const handle: CanvasEditorHandle = {
     state, connect, disconnect, autoLayout, render, exportFullCanvasImage, copySelection, cutSelection, pasteClipboard,
     snapshot: () => JSON.stringify(state.raw), collectExportTemplatePaths, applyInlineThumbnails, placeVariableCard, variableCardList,
     nodeVariablePins, collectNodeCardVariableRefs, connectVariableToPin, referenceFieldsForPin, nodeOutputFields,
     removeVariable, deleteVariable, renderInspector,
+    benchmark,
   };
   window.__btEditor = handle;
   vscode.postMessage({ type: 'ready' });
@@ -706,6 +971,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     const node = nodeById(nodeId);
     const items: MenuEntry[] = nodeVariablePinMenuItems(nodeId, pin, point);
     items.push('separator');
+    if (node && pin && paramRowKindOf(pin, pin.definition) === 'rect') {
+      items.push({ label: '在当前画面上框选区域…', run: () => requestRoi(nodeId, String(pin.param), 'rect') });
+    }
     if (pin && pin.configured) {
       items.push({ label: '恢复默认值', run: () => { if (node) setParamLiteral(node, String(pin.param), undefined); } });
     }
@@ -714,10 +982,24 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   }
 
   /** 重绘入口占位：RenderEntry 就绪后赋值（模块直接引用 render/focusNode 函数本身）。 */
-  function render(): void {
-    renderPieces?.render();
+  function render(flags?: RenderFlags): void {
+    // 无标记的 `render()` 是「刷新画面」：卡片内容按内容签名对账，
+    // 但平移/缩放等高频路径必须显式传标记，否则会触发多余的连线重建。
+    const next: RenderFlags = flags ?? { graph: true, minimap: true, panels: true, selection: true };
+    renderPieces?.render(next);
   }
   function focusNode(id: string): void {
     renderPieces?.focusNode(id);
+  }
+  /** 双击节点：自动聚焦并放大到完整卡片档。 */
+  function focusNodeDetail(id: string): void {
+    renderPieces?.focusNodeDetail(id);
+  }
+  /**
+   * 文档结构变化后的重绘：节点/连线与面板都要对账。
+   * 历史与命令层走这里，避免它们各自猜标记。
+   */
+  function renderGraph(): void {
+    renderPieces?.render({ graph: true, minimap: true, panels: true, selection: true });
   }
 }

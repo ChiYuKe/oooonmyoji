@@ -15,7 +15,16 @@
     --green: #406646;
     --yellow: #725b28;
     --red: #984b50;
-    --status: #696969
+    --status: #696969;
+    --content-folder-icon: #353535;
+    --content-folder-tile: #696969;
+    --content-file-icon: #434343;
+    --content-file-tile: #696969;
+    --content-selection-surface: rgba(0, 0, 0, 0.065);
+    --content-selection-frame: #cdcdcd;
+    --content-selection-border: #aaaaaa;
+    --content-selection-tile: #dfdfdf;
+    --content-selection-text: #cccccc
 }
 :root[data-theme="light"] ::-webkit-scrollbar-thumb {
     background: #dadada
@@ -362,6 +371,14 @@
 :root[data-theme="light"] .variable-icon.type-duration {
     color: #4b6442
 }
+:root[data-theme="light"] .variable-icon.type-workflow {
+    color: #40617f
+}
+:root[data-theme="light"] .row-name-edit {
+    border: 1px solid var(--ui-focus, #468fb5);
+    background: var(--ui-field, #f2f2f2);
+    color: var(--ui-text, #232323)
+}
 :root[data-theme="light"] .variable-scope {
     color: #45616e
 }
@@ -466,9 +483,6 @@
 :root[data-theme="light"] .content-folder-chevron {
     color: #696969
 }
-:root[data-theme="light"] .content-folder-row > svg {
-    color: #6c5b35
-}
 :root[data-theme="light"] .content-item {
     color: #363636
 }
@@ -496,6 +510,15 @@
 }
 :root[data-theme="light"] .content-item-preview {
     background: #f4f4f4
+}
+:root[data-theme="light"] .content-item-icon {
+    border: 1px solid rgba(0, 0, 0, 0.055)
+}
+:root[data-theme="light"] .content-item.folder .content-item-icon {
+    border-color: rgba(0, 0, 0, 0.065)
+}
+:root[data-theme="light"] .content-browser-items.grid .content-item:hover .content-item-icon {
+    border-color: rgba(0, 0, 0, 0.18)
 }
 :root[data-theme="light"] .content-item-preview svg {
     color: #47606f

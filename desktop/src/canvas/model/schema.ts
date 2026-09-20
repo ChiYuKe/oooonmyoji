@@ -30,7 +30,7 @@ function definitionSchema(definition: unknown): SchemaLike {
   const object = asObject(definition);
   if (!object) return {};
   const type = object.type;
-  if (type === 'asset' || type === 'path' || type === 'key' || type === 'color' || type === 'enum') return { type: 'string' };
+  if (type === 'asset' || type === 'path' || type === 'workflow' || type === 'key' || type === 'color' || type === 'enum') return { type: 'string' };
   if (type === 'rect') return { type: 'array', items: { type: 'integer' } };
   if (type === 'point') return { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' } } };
   if (type === 'duration') return { type: 'number' };

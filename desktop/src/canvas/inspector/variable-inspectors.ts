@@ -14,6 +14,12 @@ import { paramColorSwatch, paramPointParts } from '../render/param-rows';
 
 type UiNode = any;
 
+/**
+ * 数组元素卡的折叠状态：键是「变量键 + 元素路径」，值是折叠的下标集合。
+ * 放在模块级是因为详情栏每次编辑都会重建 DOM，折叠状态不能随 DOM 一起丢。
+ */
+const collapsedArrayItems = new Map<string, Set<number>>();
+
 export interface VariableInspectorsDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
   mutate(fn: () => void): void;
@@ -30,6 +36,7 @@ export interface VariableInspectorsDeps {
   disconnect(nodeId: string, childId: string): void;
   bindAssetPreview(input: UiNode): void;
   openAssetBrowser(...args: any[]): void;
+  openWorkflowBrowser(...args: any[]): void;
   variableCards(): Record<string, any>;
   variableLinks(): Record<string, any>;
   clearVariableCardSelection(): void;
@@ -52,7 +59,7 @@ export interface VariableInspectorsDeps {
 export function createVariableInspectors(deps: VariableInspectorsDeps) {
   const {
     state, mutate, UI, el, $, nodeById, clone, toast, defaultValue, allRefs, referenceLabel, fieldLabel,
-    disconnect, bindAssetPreview, openAssetBrowser, variableCards, variableLinks, clearVariableCardSelection, VariableSystem,
+    disconnect, bindAssetPreview, openAssetBrowser, openWorkflowBrowser, variableCards, variableLinks, clearVariableCardSelection, VariableSystem,
     vscode,
     selectInput, textInput, checkbox, field, section, clearInspector,
   } = deps;
@@ -121,7 +128,7 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
 
   function definitionAcceptsValue(type: string, value: any): boolean {
     if (type === 'any') return true;
-    if (type === 'string' || type === 'asset' || type === 'path') return typeof value === 'string';
+    if (type === 'string' || type === 'asset' || type === 'path' || type === 'workflow') return typeof value === 'string';
     if (type === 'enum') return typeof value === 'string';
     if (type === 'key') return typeof value === 'string' && new RegExp(KEY_PATTERN).test(value);
     if (type === 'color') return typeof value === 'string' && new RegExp(COLOR_PATTERN).test(value);
@@ -353,7 +360,8 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
       for (const [key, child] of Object.entries<any>(properties)) {
         const row = field(shell, child.display_name || fieldLabel(key));
         const item = current[key] === undefined ? initialDefinitionValue(child) : current[key];
-        row.appendChild(definitionValueControl(child, item, next => commit({ ...current, [key]: next }), options));
+        // 带上字段路径，嵌套数组的折叠状态才互不串味。
+        row.appendChild(definitionValueControl(child, item, next => commit({ ...current, [key]: next }), { ...options, path: `${options.path ?? ''}/${key}` }));
       }
       return shell;
     }
@@ -364,29 +372,52 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
       const commit = (next: any[]): void => { items = next; assign(next); };
       const apply = (next: any[]): void => { items = next; set(next); };
       const shell = el('div', 'variable-array-value');
+      const path = typeof options.path === 'string' ? options.path : '';
+      const collapseKey = `${typeof options.key === 'string' ? options.key : ''}${path}`;
+      let collapsed = collapseKey ? collapsedArrayItems.get(collapseKey) : undefined;
+      if (!collapsed) {
+        collapsed = new Set<number>();
+        if (collapseKey) collapsedArrayItems.set(collapseKey, collapsed);
+      }
+      /** 元素卡：标题行（序号 + 可折叠 + 可选删除）在上，元素控件在下；折叠只切 class，不重渲染。 */
+      const buildItem = (index: number, control: UiNode | null, removable: boolean): UiNode => {
+        const row = el('div', 'variable-array-item');
+        if (control) row.appendChild(control);
+        const head = el('div', 'variable-array-item-head');
+        const toggle = el('button', 'variable-array-item-toggle');
+        const sync = (): void => {
+          const folded = collapsed!.has(index);
+          toggle.textContent = `${folded ? '▸' : '▾'} 元素 ${index + 1}`;
+          row.className = folded ? 'variable-array-item collapsed' : 'variable-array-item';
+        };
+        toggle.addEventListener('click', () => {
+          if (collapsed!.has(index)) collapsed!.delete(index); else collapsed!.add(index);
+          sync();
+        });
+        sync();
+        head.appendChild(toggle);
+        if (removable) head.appendChild(UI.button({ label: '删除', onClick: () => apply(items.filter((_: any, i: number) => i !== index)) }));
+        row.appendChild(head);
+        return row;
+      };
       const fixed = fixedArrayLength(definition);
       if (fixed !== null) {
         while (items.length < fixed) items.push(initialDefinitionValue(itemDefinition));
         for (let index = 0; index < fixed; index += 1) {
-          const row = el('div', 'variable-array-item');
-          row.appendChild(definitionValueControl(itemDefinition, items[index], next => {
+          shell.appendChild(buildItem(index, definitionValueControl(itemDefinition, items[index], next => {
             const updated = items.slice();
             updated[index] = next;
             commit(updated);
-          }, options));
-          shell.appendChild(row);
+          }, { ...options, path: `${path}/${index}` }), false));
         }
         return shell;
       }
       items.forEach((item: any, index: number) => {
-        const row = el('div', 'variable-array-item');
-        row.appendChild(definitionValueControl(itemDefinition, item, next => {
+        shell.appendChild(buildItem(index, definitionValueControl(itemDefinition, item, next => {
           const updated = items.slice();
           updated[index] = next;
           commit(updated);
-        }, options));
-        row.appendChild(UI.button({ label: '删除', onClick: () => apply(items.filter((_: any, i: number) => i !== index)) }));
-        shell.appendChild(row);
+        }, { ...options, path: `${path}/${index}` }), true));
       });
       shell.appendChild(UI.button({ label: '添加元素', onClick: () => apply([...items, initialDefinitionValue(itemDefinition)]) }));
       return shell;
@@ -421,6 +452,16 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
       shell.appendChild(input);
       const browse = el('button', '', '浏览'); browse.title = '从 assets 中选择模板';
       browse.addEventListener('click', () => openAssetBrowser(options.nodeId || '', options.key || '', value, assign));
+      shell.appendChild(browse);
+      return shell;
+    }
+    if (type === 'workflow') {
+      const shell = el('div', 'inline-control');
+      const input = textInput(value ?? '', set, { placeholder: 'entrypoints/example.json' });
+      shell.appendChild(input);
+      const browse = el('button', '', '浏览');
+      browse.title = '浏览 workflows 中的工作流';
+      browse.addEventListener('click', () => openWorkflowBrowser('', options.key || '', value, assign));
       shell.appendChild(browse);
       return shell;
     }
@@ -615,7 +656,10 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
     if (definition !== rawDefinition) state.raw[scope][name] = definition;
     const details = el('div', 'variable-details');
     section(details, '变量');
-    field(details, '变量命名').appendChild(textInput(variableDisplayName(scope, name), (value) => renameVariable(scope, name, value.trim())));
+    const nameInput = textInput(variableDisplayName(scope, name), (value) => renameVariable(scope, name, value.trim())) as HTMLInputElement;
+    // 固定 id：F2 重命名（editor.rename → renameSelection）靠它聚焦「变量命名」。
+    nameInput.id = 'inspector-variable-name';
+    field(details, '变量命名').appendChild(nameInput);
     field(details, '变量类型').appendChild(selectInput(definition.type || 'string', DEFINITION_TYPES.map((value) => ({ value, label: parameterTypeLabel(value) })), (value) => {
       if (variableReferenceCount(scope, name)) { toast('变量已有引用，请先解除引用再修改类型', true); return; }
       mutate(() => { changeDefinitionType(definition, value); syncExposedInput(definition, name); });
@@ -654,8 +698,10 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
     }
     section(details, '默认值');
     field(details, '默认值').appendChild(definitionValueControl(definition, definition.default, (value) => {
+      const workflowChanged = definition.type === 'workflow' && definition.default !== value;
       definition.default = value;
       syncExposedInput(definition, name);
+      if (workflowChanged) clearBoundWorkflowInputs(scope, name);
     }, { key: name }));
     if (definition.type === 'enum') {
       section(details, '枚举选项');
@@ -672,6 +718,15 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
   }
 
   function variableDisplayName(scope: string, name: string): string { return state.raw?.[scope]?.[name]?.display_name || name; }
+
+  /** 工作流变量改指其他脚本后，旧脚本的输入键不能继续挂在 workflow.run 上。 */
+  function clearBoundWorkflowInputs(scope: string, name: string): void {
+    const reference = `${scope}.${name}`;
+    for (const node of state.raw.nodes || []) {
+      if (node?.type !== 'task' || node.action !== 'workflow.run') continue;
+      if (node.params?.workflow?.ref === reference) node.params.inputs = {};
+    }
+  }
 
   /** 公开变量的自动输入是它的镜像：改名、改类型、改说明、改默认值时同步过去。 */
   function syncExposedInput(definition: any, name: string): void {

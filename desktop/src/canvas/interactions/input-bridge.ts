@@ -100,6 +100,11 @@ export function createInputBridge(deps: InputBridgeDeps) {
         event.preventDefault();
         deleteCurrentSelection();
       }
+      // F2 重命名：可见的名称输入框在详细信息镜像里，由宿主转过去聚焦。
+      if (!editing && matchesShortcut(event, 'editor.rename') && state.selected.size === 1) {
+        event.preventDefault();
+        executeEditorCommand('requestRenameSelection');
+      }
       if (!editing && matchesShortcut(event, 'editor.copy')) { event.preventDefault(); copySelection(); }
       if (!editing && matchesShortcut(event, 'editor.cut')) { event.preventDefault(); cutSelection(); }
       if (!editing && matchesShortcut(event, 'editor.paste')) { event.preventDefault(); pasteClipboard(); }

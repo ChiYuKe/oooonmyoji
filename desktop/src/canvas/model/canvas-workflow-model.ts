@@ -123,7 +123,8 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
         variable: ref,
         scope,
         type: variable.definition.type || 'any',
-        label: variable.name,
+        // 子工作流输入的键是自动生成的（`v_<uuid>`），行标签要用子工作流声明的显示名。
+        label: displayNameOfDefinition(variable.definition, variable.name),
         definition: variable.definition,
         configured: Object.prototype.hasOwnProperty.call(params.inputs || {}, variable.name),
         required: Boolean(variable.definition && variable.definition.required),

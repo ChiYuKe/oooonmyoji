@@ -56,6 +56,11 @@ export interface InspectorRequestedMessage {
   inspectorSelection?: unknown;
 }
 
+/** F2 重命名：文档画布请宿主把「聚焦详情栏名称输入框」转给详细信息镜像。 */
+export interface InspectorRenameRequestedMessage {
+  type: 'inspectorRenameRequested';
+}
+
 export interface SidebarStateChangedMessage {
   type: 'sidebarStateChanged';
   nodes?: unknown;
@@ -205,11 +210,58 @@ export interface RefreshWorkflowsMessage {
   type: 'refreshWorkflows';
 }
 
+/** 剪贴板里被节点引用到的输入/变量定义（粘贴到别的文档时按需补过去）。 */
+export interface CanvasClipboardVariable {
+  scope: 'inputs' | 'variables';
+  name: string;
+  definition: Record<string, unknown>;
+}
+
+/** 这些变量在源画布上的卡片位置（目标文档没有该变量的卡片时才补）。 */
+export interface CanvasClipboardCard {
+  scope: 'inputs' | 'variables';
+  name: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * 画布剪贴板：节点卡片连同它们引用到的输入/变量与变量卡片一起搬运。
+ * 存在壳层里，所以同一窗口的任意画布（含弹出到独立窗口的面板）共用同一份剪贴板。
+ */
+export interface CanvasClipboardPayload {
+  /** 结构版本；换结构时同步改 parseCanvasClipboard。 */
+  version: 1;
+  /** 复制来源文档 URI：同文档粘贴不补变量/卡片（源文档里本来就有）。 */
+  sourceUri: string;
+  /** 被复制的节点（含子树）。节点结构由画布侧宽松处理，这里只保证是对象数组。 */
+  nodes: any[];
+  /** 节点 id → 世界坐标。 */
+  layout: Record<string, { x: number; y: number }>;
+  /** 被复制节点引用到的输入/变量定义。 */
+  variables: CanvasClipboardVariable[];
+  /** 这些变量在源画布上的卡片。 */
+  cards: CanvasClipboardCard[];
+}
+
+/** 画布 → 壳层：把刚复制的卡片交给壳层保管（并广播给其他画布）。 */
+export interface ClipboardWriteMessage {
+  type: 'clipboardWrite';
+  clipboard?: unknown;
+}
+
+/** 壳层 → 画布：当前剪贴板内容（复制后广播，以及新画布握手时补发）。 */
+export interface ClipboardMessage {
+  type: 'clipboard';
+  clipboard?: unknown;
+}
+
 export type EditorMessage =
   | ReadyMessage
   | CreateVariableNodeMessage
   | DocumentStateChangedMessage
   | InspectorRequestedMessage
+  | InspectorRenameRequestedMessage
   | SidebarStateChangedMessage
   | SaveMessage
   | SwitchWorkflowMessage
@@ -233,13 +285,15 @@ export type EditorMessage =
   | OpenReferencesMessage
   | VariableReferencesRequestedMessage
   | EditorErrorMessage
-  | RefreshWorkflowsMessage;
+  | RefreshWorkflowsMessage
+  | ClipboardWriteMessage;
 
 export const EDITOR_MESSAGE_TYPES = [
   'ready',
   'createVariableNode',
   'documentStateChanged',
   'inspectorRequested',
+  'inspectorRenameRequested',
   'sidebarStateChanged',
   'save',
   'switchWorkflow',
@@ -264,6 +318,7 @@ export const EDITOR_MESSAGE_TYPES = [
   'openReferences',
   'variableReferencesRequested',
   'error',
+  'clipboardWrite',
 ] as const;
 
 export type EditorMessageType = (typeof EDITOR_MESSAGE_TYPES)[number];
@@ -274,4 +329,42 @@ export function parseEditorMessage(value: unknown): EditorMessage | undefined {
   const type = (value as { type?: unknown }).type;
   if (typeof type !== 'string' || !(EDITOR_MESSAGE_TYPES as readonly string[]).includes(type)) return undefined;
   return value as EditorMessage;
+}
+
+function isClipboardVariable(value: unknown): value is CanvasClipboardVariable {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (record.scope === 'inputs' || record.scope === 'variables')
+    && typeof record.name === 'string' && record.name.length > 0
+    && Boolean(record.definition) && typeof record.definition === 'object' && !Array.isArray(record.definition);
+}
+
+function isClipboardCard(value: unknown): value is CanvasClipboardCard {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (record.scope === 'inputs' || record.scope === 'variables')
+    && typeof record.name === 'string' && record.name.length > 0
+    && Number.isFinite(record.x) && Number.isFinite(record.y);
+}
+
+/**
+ * 通信边界校验：壳层转发过来的剪贴板必须是本版本的结构。
+ * 缺字段就补齐、非法条目直接丢掉，画布只管用它粘贴，不再自己判结构。
+ */
+export function parseCanvasClipboard(value: unknown): CanvasClipboardPayload | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return undefined;
+  if (!Array.isArray(record.nodes) || record.nodes.length === 0) return undefined;
+  const layout = record.layout && typeof record.layout === 'object' && !Array.isArray(record.layout)
+    ? record.layout as Record<string, { x: number; y: number }>
+    : {};
+  return {
+    version: 1,
+    sourceUri: typeof record.sourceUri === 'string' ? record.sourceUri : '',
+    nodes: record.nodes as any[],
+    layout,
+    variables: Array.isArray(record.variables) ? record.variables.filter(isClipboardVariable) : [],
+    cards: Array.isArray(record.cards) ? record.cards.filter(isClipboardCard) : [],
+  };
 }

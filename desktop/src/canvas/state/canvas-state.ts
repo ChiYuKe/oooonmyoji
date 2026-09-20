@@ -4,6 +4,7 @@
  *
  * 边界类型暂时保持宽松，待 commands/history/canvas 拆出后按职责收紧。
  */
+import type { CanvasClipboardPayload } from '../../shared/editor-messages';
 
 export interface CanvasRefs {
   inputs: string[];
@@ -61,12 +62,14 @@ export interface CanvasState {
   templateCheck: any;
   exportBusy: boolean;
   nodeSearch: CanvasNodeSearch;
-  clipboard: any;
-  clipboardLayout: Record<string, any> | null;
+  /** 画布剪贴板：节点连同引用到的输入/变量与变量卡片；由壳层在所有画布之间同步。 */
+  clipboard: CanvasClipboardPayload | null;
   paramLiteralCache: Record<string, any>;
   /** 展开全部参数行的节点（默认只显示必填 + 已配置，UE 的收起高级引脚）。 */
   paramRowsExpanded: Set<string>;
   mouse: any;
+  /** 当前进入的编辑器节点组；空字符串表示工作流顶层。 */
+  nodeGroupId: string;
   [key: string]: any;
 }
 
@@ -113,9 +116,9 @@ export function createCanvasState(): CanvasState {
     exportBusy: false,
     nodeSearch: { query: '', ids: [], index: -1 },
     clipboard: null,
-    clipboardLayout: null,
     paramLiteralCache: {},
     paramRowsExpanded: new Set(),
     mouse: null,
+    nodeGroupId: '',
   };
 }

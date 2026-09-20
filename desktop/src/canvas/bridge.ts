@@ -38,6 +38,7 @@ export interface CanvasBridge {
 export interface TopbarControls {
   setWorkflow(value: string): void;
   setInstance(value: string): void;
+  setRuntimeEdgePreview(enabled: boolean): void;
 }
 
 export interface CanvasBridgeDeps {
@@ -85,6 +86,8 @@ export function createCanvasBridge(deps: CanvasBridgeDeps = {}): CanvasBridge {
         topbarControls?.setWorkflow(String(payload.value ?? ''));
       } else if (command === 'selectInstance') {
         topbarControls?.setInstance(String(payload.value ?? ''));
+      } else if (command === 'setRuntimeEdgePreview') {
+        topbarControls?.setRuntimeEdgePreview(payload.value !== false);
       }
       return;
     }

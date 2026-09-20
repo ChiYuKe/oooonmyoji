@@ -30,6 +30,10 @@ export interface EditorCommandDispatchDeps {
   clearVariableCardSelection(): void;
   deleteCurrentSelection(): void;
   renderInspector(): void;
+  /** F2 在文档画布里按下时：请宿主把聚焦请求转给详细信息镜像。 */
+  requestInspectorRename(): void;
+  /** 左侧变量列表的行内改名：与详情栏改「变量命名」同一条路径（含公开镜像同步）。 */
+  renameVariable(scope: string, oldName: string, name: string): void;
   addVariableCardCommand(value: any): void;
   VariableSystem: any;
   convertInputToVariable(name: string): void;
@@ -40,7 +44,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     state, mutate, nodes, nodeById, undo, redo, fitView, autoLayout, copySelection, cutSelection,
     pasteClipboard, deleteSelection, addNode, render, focusNode, searchNodeByName, exportFullCanvasImage,
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
-    deleteVariable,
+    deleteVariable, requestInspectorRename, renameVariable,
     VariableSystem,
   } = deps;
   function executeEditorCommand(command: string, value?: any): any {
@@ -50,6 +54,46 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     else if (command === 'copy') copySelection();
     else if (command === 'paste') pasteClipboard();
     else if (command === 'deleteSelection') deleteCurrentSelection();
+    else if (command === 'requestRenameSelection') {
+      // 文档画布里的 F2：可见的详情栏是独立的镜像画布，把聚焦请求转给宿主。
+      requestInspectorRename();
+    }
+    else if (command === 'renameNodeName') {
+      // 左侧结构树的行内改名：改的是显示名（节点 id 保持稳定，连线与参数引用都按 id 走）。
+      const nodeId = String(value?.nodeId ?? '');
+      const name = String(value?.name ?? '').trim();
+      const node = nodeId ? nodeById(nodeId) : undefined;
+      if (!node) return;
+      mutate(() => { if (name) node.name = name; else delete node.name; });
+    }
+    else if (command === 'renameVariable') {
+      // 左侧变量列表的行内改名：走详情栏同一个实现，公开镜像输入一起同步。
+      const scope = value?.scope === 'inputs' ? 'inputs' : 'variables';
+      const oldName = String(value?.oldName ?? '');
+      const name = String(value?.name ?? '').trim();
+      if (oldName && name) renameVariable(scope, oldName, name);
+    }
+    else if (command === 'renameSelection') {
+      // 详情栏镜像里的 F2：聚焦它自己那份可见的名称输入框。
+      if (state.inspector === 'variables' && state.selectedVariable) {
+        renderInspector();
+        const variableInput = document.getElementById('inspector-variable-name') as HTMLInputElement | null;
+        variableInput?.focus();
+        variableInput?.select();
+        return;
+      }
+      const selected = [...state.selected];
+      if (selected.length !== 1) return;
+      const node = nodeById(selected[0]);
+      if (!node) return;
+      state.selectedEdge = null;
+      state.selectedRun = null;
+      state.inspector = 'node';
+      renderInspector();
+      const nameInput = document.getElementById('inspector-node-name') as HTMLInputElement | null;
+      nameInput?.focus();
+      nameInput?.select();
+    }
     else if (command === 'selectAll') {
       state.selected = new Set(nodes().map((node) => node.id));
       state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); state.inspector = 'node'; render();

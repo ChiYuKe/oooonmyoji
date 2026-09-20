@@ -23,6 +23,7 @@ function harness(mode) {
   bridge.setTopbarControls({
     setWorkflow: (value) => posted.push({ topbar: ['workflow', value] }),
     setInstance: (value) => posted.push({ topbar: ['instance', value] }),
+    setRuntimeEdgePreview: (value) => posted.push({ topbar: ['runtime-edge-preview', value] }),
   });
   return {
     bridge,
@@ -68,9 +69,11 @@ test('desktopControl 复用工具条按钮与顶栏选择器', () => {
   assert.deepEqual(h.clicks, ['btn-run', 'btn-save']);
   h.shell({ type: 'desktopControl', command: 'switchWorkflow', value: 'workflows/a.json' });
   h.shell({ type: 'desktopControl', command: 'selectInstance', value: 'mumu-0' });
+  h.shell({ type: 'desktopControl', command: 'setRuntimeEdgePreview', value: false });
   assert.deepEqual(h.posted, [
     { topbar: ['workflow', 'workflows/a.json'] },
     { topbar: ['instance', 'mumu-0'] },
+    { topbar: ['runtime-edge-preview', false] },
   ]);
 });
 

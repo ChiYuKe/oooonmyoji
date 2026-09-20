@@ -6,6 +6,7 @@
  * 所有文档修改都通过注入的 mutate（History）完成，命令本身不渲染。
  */
 import type { CanvasState } from './canvas-state';
+import type { CanvasClipboardCard, CanvasClipboardPayload, CanvasClipboardVariable } from '../../shared/editor-messages';
 import { reconcileVariableLinks } from '../model/variable-links';
 
 export interface PointerPoint {
@@ -25,6 +26,12 @@ export interface CommandsDeps {
   wrap: HTMLElement;
   nodeWidth: number;
   baseHeight: number;
+  /** 复制/剪切后把剪贴板交给壳层保管，其他画布（包括弹出到独立窗口的面板）才能粘贴。 */
+  publishClipboard?(payload: CanvasClipboardPayload): void;
+  /** 变量卡片 id 生成器；缺省按 `card_<n>` 递增。 */
+  nextVariableCardId?(): string;
+  /** 在节点组内部创建/粘贴时，把新节点留在当前组内。 */
+  onNodesCreated?(ids: string[]): void;
 }
 
 export interface CanvasCommands {
@@ -158,6 +165,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     mutate(() => {
       const node = buildNode(type);
       nodes().push(node);
+      deps.onNodesCreated?.([node.id]);
       const point = at || worldPoint({ clientX: wrap.clientWidth / 2, clientY: wrap.clientHeight / 2 });
       layout()[node.id] = { x: Math.round(point.x - nodeWidth / 2), y: Math.round(point.y - baseHeight / 2) };
       state.selected = new Set([node.id]);
@@ -195,16 +203,104 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return ids;
   }
 
-  /** 把选中节点及其子树复制到内部剪贴板。 */
+  /**
+   * 收集被复制节点引用到的输入/变量，连同它们在画布上的卡片一起打包。
+   * 没有这一步，粘到别的工作流时绑定会指向不存在的变量（画布上显示「失效」、校验也报错）。
+   */
+  function clipboardCarry(ids: Set<string>): { variables: CanvasClipboardVariable[]; cards: CanvasClipboardCard[] } {
+    const raw = state.raw || {};
+    const wanted = new Map<string, { scope: 'inputs' | 'variables'; name: string }>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      if (!value || typeof value !== 'object') return;
+      const record = value as Record<string, unknown>;
+      if (typeof record.ref === 'string' && Object.keys(record).length === 1) {
+        const match = /^(inputs|variables)\.([^\.]+)/.exec(record.ref);
+        if (match) {
+          const scope = match[1] as 'inputs' | 'variables';
+          wanted.set(`${scope}.${match[2]}`, { scope, name: match[2] });
+        }
+      }
+      Object.values(record).forEach(visit);
+    };
+    for (const node of nodes()) if (ids.has(node.id)) visit(node);
+
+    const variables: CanvasClipboardVariable[] = [];
+    const cards: CanvasClipboardCard[] = [];
+    const cardEntries = raw._variableCards && typeof raw._variableCards === 'object' ? Object.entries<any>(raw._variableCards) : [];
+    for (const { scope, name } of wanted.values()) {
+      const definition = raw[scope] && typeof raw[scope] === 'object' ? raw[scope][name] : undefined;
+      if (definition && typeof definition === 'object') variables.push({ scope, name, definition: clone(definition) });
+      const card = cardEntries.find(([, value]) => value && value.scope === scope && value.name === name);
+      if (!card) continue;
+      cards.push({ scope, name, x: Number(card[1].x ?? 0), y: Number(card[1].y ?? 0) });
+    }
+    return { variables, cards };
+  }
+
+  /** 把选中子树打包成剪贴板内容（节点 + 布局 + 引用到的变量与卡片），并存进画布状态。 */
+  function captureSelection(ids: Set<string>): CanvasClipboardPayload {
+    const copied = clone(nodes().filter((node) => ids.has(node.id)));
+    const copiedLayout: Record<string, { x: number; y: number }> = {};
+    for (const id of ids) {
+      const position = layout()[id];
+      if (position) copiedLayout[id] = { x: position.x, y: position.y };
+    }
+    const { variables, cards } = clipboardCarry(ids);
+    const payload: CanvasClipboardPayload = {
+      version: 1,
+      sourceUri: String(state.docUri || ''),
+      nodes: copied,
+      layout: copiedLayout,
+      variables,
+      cards,
+    };
+    state.clipboard = payload;
+    // 交给壳层：同一窗口的其他画布（含弹出面板）会同步到同一份剪贴板。
+    deps.publishClipboard?.(payload);
+    return payload;
+  }
+
+  /** 粘贴到别的文档时把变量定义与变量卡片补上（同文档粘贴无需重复补）。 */
+  function carryIntoDocument(payload: CanvasClipboardPayload, dx: number, dy: number): void {
+    if (!payload.sourceUri || payload.sourceUri === String(state.docUri || '')) return;
+    const raw = state.raw;
+    if (!raw) return;
+    for (const variable of payload.variables) {
+      raw[variable.scope] ||= {};
+      // 目标文档已有同名变量就以它为准（可能是刻意的不同定义），不覆盖。
+      if (Object.prototype.hasOwnProperty.call(raw[variable.scope], variable.name)) continue;
+      raw[variable.scope][variable.name] = clone(variable.definition);
+    }
+    for (const card of payload.cards) {
+      const scopeValues = raw[card.scope];
+      if (!scopeValues || !Object.prototype.hasOwnProperty.call(scopeValues, card.name)) continue;
+      const cards = (raw._variableCards ||= {});
+      const exists = Object.values<any>(cards).some((value) => value && value.scope === card.scope && value.name === card.name);
+      if (exists) continue;
+      cards[nextCardId()] = { name: card.name, scope: card.scope, x: Math.round(card.x + dx), y: Math.round(card.y + dy) };
+    }
+  }
+
+  function nextCardId(): string {
+    if (deps.nextVariableCardId) return deps.nextVariableCardId();
+    const cards = state.raw && state.raw._variableCards && typeof state.raw._variableCards === 'object' ? state.raw._variableCards : {};
+    let index = 1;
+    while (Object.prototype.hasOwnProperty.call(cards, `card_${index}`)) index += 1;
+    return `card_${index}`;
+  }
+
+  /** 把选中节点及其子树复制到画布剪贴板。 */
   function copySelection(): boolean {
     const ids = selectionTreeIds();
     if (ids.size === 0) {
       toast('请先选择要复制的节点', true);
       return false;
     }
-    state.clipboard = clone(nodes().filter((node) => ids.has(node.id)));
-    state.clipboardLayout = {};
-    for (const id of ids) if (layout()[id]) state.clipboardLayout[id] = { ...layout()[id] };
+    captureSelection(ids);
     toast(`已复制 ${ids.size} 个节点`);
     return true;
   }
@@ -216,9 +312,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       toast('请先选择要剪切的节点', true);
       return false;
     }
-    state.clipboard = clone(nodes().filter((node) => ids.has(node.id)));
-    state.clipboardLayout = {};
-    for (const id of ids) if (layout()[id]) state.clipboardLayout[id] = { ...layout()[id] };
+    captureSelection(ids);
     mutate(() => {
       state.raw!.nodes = nodes().filter((node) => !ids.has(node.id));
       for (const node of nodes()) if (Array.isArray(node.children)) node.children = node.children.filter((id: string) => !ids.has(id));
@@ -229,15 +323,19 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return true;
   }
 
-  /** 粘贴剪贴板内容：生成新 ID、重映射 children/refs、放置到目标位置（默认鼠标处）。 */
+  /**
+   * 粘贴剪贴板内容：生成新 ID、重映射 children/refs、放置到目标位置（默认鼠标处）。
+   * 剪贴板来自壳层，所以这里粘的可能是**另一个画布**复制的卡片：一起把变量定义与变量卡片补过去。
+   */
   function pasteClipboard(at?: PointerPoint): boolean {
-    if (!state.clipboard || state.clipboard.length === 0) {
+    const payload = state.clipboard;
+    if (!payload || !Array.isArray(payload.nodes) || payload.nodes.length === 0) {
       toast('剪贴板为空', true);
       return false;
     }
     const used = new Set(nodes().map((node) => node.id));
     const idMap = new Map<string, string>();
-    for (const src of state.clipboard) {
+    for (const src of payload.nodes) {
       const prefix = (src.id || 'node').replace(/_\d+$/, '') || 'node';
       let index = 1;
       let candidate = `${prefix}_${index}`;
@@ -246,7 +344,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       idMap.set(src.id, candidate);
     }
     // 以剪贴板内容的包围盒左上角为锚点，把整组移动到目标位置。
-    const positions = Object.values(state.clipboardLayout || {});
+    const positions = Object.values(payload.layout || {});
     let minX = 0;
     let minY = 0;
     if (positions.length) {
@@ -270,17 +368,19 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
         }
         Object.values(item).forEach(remap);
       };
-      for (const src of state.clipboard!) {
+      carryIntoDocument(payload, dx, dy);
+      for (const src of payload.nodes) {
         const copy = clone(src);
         copy.id = idMap.get(src.id);
         if (Array.isArray(copy.children)) copy.children = copy.children.filter((id: string) => idMap.has(id)).map((id: string) => idMap.get(id));
         remap(copy);
-        const base = state.clipboardLayout![src.id] || { x: 0, y: 0 };
+        const base = payload.layout[src.id] || { x: 0, y: 0 };
         layout()[copy.id] = { x: base.x + dx, y: base.y + dy };
         nodes().push(copy);
         created.push(copy.id);
       }
       state.selected = new Set(created);
+      deps.onNodesCreated?.(created);
       state.selectedRun = null;
       state.inspector = 'node';
       // 粘贴出来的节点带着参数的变量引用，但连线项是按节点 id 记的：

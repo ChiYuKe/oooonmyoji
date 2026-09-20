@@ -13,6 +13,7 @@ const { createCanvasMessages } = require('../dist-test-renderer/canvas/shell/mes
 function harness(options = {}) {
   const applied = [];
   const toasts = [];
+  const dirties = [];
   const state = {
     raw: options.raw || {
       schema_version: 4, id: 'w', root: 'r', inputs: {}, variables: {},
@@ -21,6 +22,7 @@ function harness(options = {}) {
     roi: options.roi || null,
     assetPaths: new Set(),
     assetBrowser: options.assetBrowser || null,
+    workflows: options.workflows || [],
   };
   const overlay = { classList: { add() {}, remove() {}, toggle() {} } };
   const deps = {
@@ -29,7 +31,7 @@ function harness(options = {}) {
     mutate: (fn) => fn(),
     nodeById: (id) => (state.raw.nodes || []).find((node) => node.id === id) || null,
     normalizeRaw: (raw) => raw,
-    clearVariableCardSelection() {}, setDirty() {}, render() {}, fitView() {}, ensureLayout() {},
+    clearVariableCardSelection() {}, setDirty(value) { dirties.push(value); }, render() {}, fitView() {}, ensureLayout() {},
     renderInstancePicker() {}, renderWorkflowPicker() {}, renderWorkflowBreadcrumb() {}, renderInspector() {},
     renderAssetBrowser() {}, closeAssetBrowser() {}, renderTemplateCheck() {},
     restoreAssetBrowserAfterRoi: () => applied.push('restoreAssetBrowser'),
@@ -39,7 +41,7 @@ function harness(options = {}) {
     toast: (message, error) => toasts.push([message, Boolean(error)]),
   };
   const messages = createCanvasMessages(deps);
-  return { state, messages, applied, toasts };
+  return { state, messages, applied, toasts, dirties };
 }
 
 test('templateSaved 没有本地 ROI 请求时按 nodeId/key 落值（详情栏镜像里点的截取）', () => {
@@ -76,4 +78,25 @@ test('roiPickerResult 拒绝非法矩形，不写坏值', () => {
   messages.handleMessage({ type: 'roiPickerResult', requestId: 'r1', nodeId: 't', key: 'roi', roi: [1, 2, 3] });
   messages.handleMessage({ type: 'roiPickerResult', requestId: 'r1', nodeId: 't', key: 'roi', roi: [1, 2, 3, 'x'] });
   assert.deepEqual(state.raw.nodes.find((item) => item.id === 't').params, {});
+});
+
+test('子工作流取消公开输入后清理父节点对应的传参与连线', () => {
+  const uri = 'file:///project/workflows/child.json';
+  const raw = {
+    schema_version: 4, id: 'parent', inputs: {}, variables: {},
+    nodes: [{id: 'run', type: 'task', action: 'workflow.run', params: {
+      workflow: 'child.json',
+      inputs: {运行轮数: {ref: 'inputs.rounds'}, 保留未知项: 7},
+    }}],
+    _variableLinks: {'run:inputs.运行轮数': 'card_1', 'run:inputs.保留未知项': 'card_2'},
+  };
+  const before = [{uri, rel: 'workflows/child.json', inputs: [{name: '运行轮数', definition: {type: 'integer'}}]}];
+  const h = harness({raw, workflows: before});
+
+  h.messages.handleMessage({type: 'workflows', workflows: [{uri, rel: 'workflows/child.json'}]});
+
+  assert.deepEqual(raw.nodes[0].params.inputs, {保留未知项: 7});
+  assert.equal(raw._variableLinks['run:inputs.运行轮数'], undefined);
+  assert.equal(raw._variableLinks['run:inputs.保留未知项'], 'card_2', '不是刚取消公开的未知项不能误删');
+  assert.equal(h.dirties.at(-1), true);
 });

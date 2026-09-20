@@ -40,5 +40,13 @@ export function createEditorStatus(deps: EditorStatusDeps) {
     vscode.postMessage({ type: 'inspectorRequested', inspectorSelection: selection });
   }
 
-  return { setDirty, currentInspectorSelection, requestInspector };
+  /**
+   * F2 重命名：详情栏是独立的镜像画布，可见的输入框在它那边；
+   * 文档画布只负责把「聚焦名称输入框」的请求转给宿主。
+   */
+  function requestInspectorRename(): void {
+    vscode.postMessage({ type: 'inspectorRenameRequested' });
+  }
+
+  return { setDirty, currentInspectorSelection, requestInspector, requestInspectorRename };
 }

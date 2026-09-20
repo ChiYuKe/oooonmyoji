@@ -16,8 +16,9 @@ export interface WorkflowBrowserState {
   workflows?: WorkflowBrowserFile[];
   docUri?: string;
   workflowBrowser?: {
-    nodeId: string;
-    key: string;
+    nodeId?: string;
+    key?: string;
+    applyValue?: (reference: string) => void;
     folder: string;
     query: string;
     selectedReference: string;
@@ -44,7 +45,7 @@ export interface WorkflowBrowserDeps {
 
 export interface WorkflowBrowser {
   workflowReference(file: WorkflowBrowserFile): string;
-  openWorkflowBrowser(nodeId: string, key: string, currentReference: string): void;
+  openWorkflowBrowser(nodeId: string, key: string, currentReference: string, applyValue?: (reference: string) => void): void;
   closeWorkflowBrowser(): void;
   renderWorkflowBrowser(): void;
 }
@@ -143,12 +144,13 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
       .filter((file) => file.reference);
   }
 
-  function openWorkflowBrowser(nodeId: string, key: string, currentReference: string): void {
+  function openWorkflowBrowser(nodeId: string, key: string, currentReference: string, applyValue?: (reference: string) => void): void {
     const normalized = typeof currentReference === 'string' ? currentReference.replace(/\\/g, '/').replace(/^workflows\//i, '') : '';
     const slash = normalized.lastIndexOf('/');
     state.workflowBrowser = {
       nodeId,
       key,
+      applyValue,
       folder: slash > 0 ? `workflows/${normalized.slice(0, slash)}` : 'workflows',
       query: '',
       selectedReference: normalized,
@@ -186,16 +188,23 @@ export function createWorkflowBrowser(deps: WorkflowBrowserDeps): WorkflowBrowse
       toast('当前工作流不能作为自己的子工作流', true);
       return;
     }
-    const node = nodeById(browser.nodeId);
+    if (browser.applyValue) {
+      mutate(() => browser.applyValue!(reference));
+      closeWorkflowBrowser();
+      toast('已选择工作流');
+      return;
+    }
+    const node = nodeById(browser.nodeId || '');
     if (!node) {
       closeWorkflowBrowser();
       toast('目标节点已不存在', true);
       return;
     }
     mutate(() => {
-      const changed = node.params[browser.key] !== reference;
-      node.params[browser.key] = reference;
-      if (node.action === 'workflow.run' && browser.key === 'workflow' && changed) node.params.inputs = {};
+      const key = browser.key || '';
+      const changed = node.params[key] !== reference;
+      node.params[key] = reference;
+      if (node.action === 'workflow.run' && key === 'workflow' && changed) node.params.inputs = {};
     });
     closeWorkflowBrowser();
     toast('已选择子工作流');

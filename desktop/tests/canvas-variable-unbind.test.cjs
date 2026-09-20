@@ -84,6 +84,18 @@ test('删除变量卡片：参数回到默认值，不再引用已删掉的变�
   assert.equal(h.state.raw._variableCards.card_1, undefined);
 });
 
+test('给运行子工作流节点改接工作流变量时清除旧输入', () => {
+  const raw = baseRaw();
+  raw.variables.flow = {type: 'workflow', default: 'entrypoints/new.json'};
+  raw.nodes[0] = {id: 'n', type: 'task', action: 'workflow.run', params: {workflow: 'old.json', inputs: {旧参数: 1}}};
+  const h = harness(raw);
+
+  h.connections.connectVariableToPin('variables', 'flow', 'n', 'workflow');
+
+  assert.deepEqual(h.state.raw.nodes[0].params.workflow, {ref: 'variables.flow'});
+  assert.deepEqual(h.state.raw.nodes[0].params.inputs, {});
+});
+
 test('连线映射丢失但参数还引用着变量：删卡片同样要清掉这个孤儿引用', () => {
   const raw = baseRaw();
   // 真实场景：连线映射与引用是两个记录，`_variableLinks` 里已经没有这一项了。

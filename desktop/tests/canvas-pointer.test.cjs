@@ -114,6 +114,30 @@ test('未移动的拖拽不进入历史', () => {
   assert.equal(h.calls.dirty, 0);
 });
 
+test('变量卡片拖拽按 origins 移动整组选中的卡片', () => {
+  const h = harness({
+    inputs: {超时: {type: 'number'}, 阈值: {type: 'number'}},
+    _variableCards: {
+      card_1: {name: '超时', scope: 'inputs', x: 10, y: 10},
+      card_2: {name: '阈值', scope: 'inputs', x: 10, y: 90},
+    },
+  });
+  const snap = (value) => Math.round(value / 8) * 8;
+  h.state.drag = {
+    kind: 'variable-card', id: 'card_1', start: {x: 0, y: 0},
+    origins: {card_1: {x: 10, y: 10}, card_2: {x: 10, y: 90}},
+    before: JSON.stringify(h.state.raw), moved: false,
+  };
+  // 世界坐标 = 客户端坐标 - pan（80/48），所以这里位移正好是 (40, 40)。
+  h.pointer.onPointerMove(event({clientX: 120, clientY: 88}));
+  assert.equal(h.state.drag.moved, true);
+  assert.deepEqual(h.state.raw._variableCards.card_1, {name: '超时', scope: 'inputs', x: snap(50), y: snap(50)});
+  assert.deepEqual(h.state.raw._variableCards.card_2, {name: '阈值', scope: 'inputs', x: snap(50), y: snap(130)});
+  h.pointer.onPointerUp(event({clientX: 120, clientY: 88}));
+  assert.equal(h.state.undo.length, 1, '整组拖拽仍然只形成一次历史');
+  assert.equal(h.calls.dirty, 1);
+});
+
 test('框选按节点与变量卡矩形命中，只选中卡片时进入变量详情', () => {
   const h = harness({
     nodes: [{id: 'a'}, {id: 'b'}],

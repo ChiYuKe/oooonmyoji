@@ -21,7 +21,7 @@ export interface HitTestDeps {
   nodeHeight(node: any): number;
   /** 每个节点自己的参数行高（固定卡片用双行行样式）。 */
   nodeRowHeight?(node: any): number;
-  nodeVariablePins(node: any): Array<{ param: string }>;
+  nodeVariablePins(node: any): Array<{ param: string; [key: string]: any }>;
   variableCompatibleWithPin(scope: string, variableName: string, node: any, param: string): boolean;
   variableCompatibleWithInstanceInput(scope: string, variableName: string, card: any, input: any): boolean;
   /** 目标参数能接受源节点输出的哪些字段（为空表示不兼容）。 */
@@ -104,12 +104,14 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       if (!pins.length) continue;
       const pos = position(node);
       pins.forEach((pin, index) => {
-        if (!variableCompatibleWithPin(scope, variableName, node, pin.param)) return;
+        const targetNode = pin._targetNode || (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
+        const targetParam = pin.targetParam || pin.param;
+        if (!targetNode || !variableCompatibleWithPin(scope, variableName, targetNode, targetParam)) return;
         const x = pos.x + variablePinX;
         const y = rowCenterY(node, index);
         const distance = Math.hypot(point.x - x, point.y - y);
         if (distance <= bestDistance) {
-          best = { nodeId: node.id, param: pin.param, x, y };
+          best = { nodeId: targetNode.id, param: targetParam, x, y };
           bestDistance = distance;
         }
       });
@@ -120,9 +122,18 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       const pos = position(node);
       if (point.x < pos.x || point.x > pos.x + nodeWidth || point.y < pos.y || point.y > pos.y + nodeHeight(node)) continue;
       const pins = nodeVariablePins(node);
-      const index = pins.findIndex((pin) => variableCompatibleWithPin(scope, variableName, node, pin.param));
+      const index = pins.findIndex((pin) => {
+        const targetNode = pin._targetNode || (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
+        return Boolean(targetNode) && variableCompatibleWithPin(scope, variableName, targetNode, pin.targetParam || pin.param);
+      });
       if (index < 0) continue;
-      return { nodeId: node.id, param: pins[index].param, x: pos.x + variablePinX, y: rowCenterY(node, index) };
+      const pin = pins[index];
+      return {
+        nodeId: pin.targetNodeId || node.id,
+        param: pin.targetParam || pin.param,
+        x: pos.x + variablePinX,
+        y: rowCenterY(node, index),
+      };
     }
     return null;
   }

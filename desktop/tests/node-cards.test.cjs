@@ -42,7 +42,7 @@ function harness() {
   ctx.instanceRunInputPosition=CanvasWorkflowModel.instanceRunInputPosition;
   // vm 顶层的 const 不会挂到上下文对象上；用表达式赋值保留同一公式（常量取自源码切片）。
   ctx.nodeHeight=vm.runInContext('(node) => BASE_H + nodeVariablePins(node).length * RUN_VARIABLE_H + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0)',ctx);
-  Object.assign(ctx,{state:{run:new Map(),selected:new Set(),raw:{inputs:{count:{type:'integer',default:0}}}},position:()=>({x:0,y:0}),subWorkflowRef:()=>null,templatePreview:()=>null,assetPreviewForPath:()=>null,bindAssetPathPreview:()=>{},definitionSchema:value=>value,compatibleRefType:()=>true,
+  Object.assign(ctx,{state:{run:new Map(),selected:new Set(),raw:{inputs:{count:{type:'integer',default:0}}}},position:()=>({x:0,y:0}),subWorkflowRef:()=>null,templatePreview:()=>null,assetPreviewForPath:()=>null,bindAssetPathPreview:()=>{},workflowBrowsers:[],definitionSchema:value=>value,compatibleRefType:()=>true,
     TYPE_NAMES:{task:'任务',sequence:'顺序',root:'根节点'},TYPE_ICON:{task:'□',sequence:'→'},RUN_LABEL:{succeeded:'已完成'},compositeSubtitle:()=> '执行子节点',decoratorLabel:()=> 'Retry · 3 次'});
   const model=createWorkflowModel(ctx.state);
   ctx.displayNameOfDefinition=model.displayNameOfDefinition;
@@ -77,16 +77,18 @@ function harness() {
     startVariableConnectionFromInstanceInput:(...args)=>ctx.startVariableConnectionFromInstanceInput(...args),
     startVariableConnectionFromCard:(...args)=>ctx.startVariableConnectionFromCard?.(...args),
     openPortContextMenu:()=>null,
-    showMenu:()=>{},
+    showMenu:(...args)=>ctx.showMenu?.(...args),
     instanceRunPinMenuItems:()=>[],
     variableCardPortMenuItems:()=>[],
     requestInspector:()=>{},
     requestOpenWorkflowReference:()=>{},
+    openWorkflowBrowser:(...args)=>ctx.workflowBrowsers.push(args),
     render:()=>{},
     contextMenuSuppressedByPan:()=>false,
     removeInstanceRun:()=>{},
     removeVariableCard:(...args)=>ctx.removeVariableCard?.(...args),
     setVariableCardSelection:(ids)=>ctx.setVariableCardSelection?.(ids),
+    variableCardList:()=>model.variableCardList(),
     worldPoint:(event)=>({x:event.clientX,y:event.clientY}),
     snapshot:()=>JSON.stringify(ctx.state.raw),
     runCardWidth:250,runCardBaseHeight:78,runVariableHeight:24,portRadius:7,
@@ -111,13 +113,14 @@ function harness() {
     disconnectVariableFromPin:(...args)=>ctx.disconnectVariableFromPin(...args),
     startVariableConnectionFromPin:(...args)=>ctx.startVariableConnectionFromPin?.(...args),
     openPortContextMenu:()=>null,
-    showMenu:()=>{},
+    showMenu:(...args)=>ctx.showMenu?.(...args),
+    nodeGroupVariableMenuItems:(...args)=>ctx.nodeGroupVariableMenuItems?.(...args) || [],
     nodeVariablePinMenuItems:()=>[],
     nodeInputPortMenuItems:()=>[],
     nodeOutputPortMenuItems:()=>[],
     startConnectionFromInput:()=>{},
     startConnection:()=>{},
-    startNodeDrag:()=>{},
+    startNodeDrag:(...args)=>ctx.startNodeDrag?.(...args),
     registerCardPress:cards.registerCardPress,
     requestInspector:()=>{},
     requestOpenSubWorkflow:()=>{},
@@ -167,6 +170,44 @@ function harness() {
   return {ctx,Element,svgEl,NodeCards};
 }
 const byClass=(element,name)=>element.children.filter(c=>(c.attrs.class || '').split(' ').includes(name));
+test('折叠组存在跨组输出引用时显示右侧代理输出口',()=>{
+  const {ctx,Element}=harness();
+  const layer=new Element('g');
+  ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:2,_groupPins:[],_hasReferenceOutput:true});
+  const card=layer.children[0];
+  const outputs=byClass(card,'port-out-reference');
+  assert.equal(outputs.length,1);
+  assert.equal(outputs[0].attrs.cx,'260');
+  assert.equal(outputs[0].attrs.cy,'16');
+});
+test('组内变量卡把数据端点放在右侧且不显示执行端口',()=>{
+  const {ctx,Element}=harness();
+  const regularHeight=ctx.nodeHeight;
+  ctx.nodeHeight=(node)=>node._nodeGroupHeight || regularHeight(node);
+  const regularPins=ctx.nodeVariablePins;
+  ctx.nodeVariablePins=(node)=>node._groupPins || regularPins(node);
+  const layer=new Element('g');
+  ctx.renderNode(layer,{
+    id:'group-vars',type:'node_group_variables',name:'节点组 变量',children:[],_nodeGroupVariables:true,_nodeGroupHeight:320,
+    _groupPins:[{param:'group-pin:0',targetNodeId:'inside',targetParam:'match',label:'点击节点 · 匹配结果',type:'object',value:{ref:'nodes.source.output.match'}}],
+  });
+  const card=layer.children[0];
+  assert.equal(byClass(card,'node-box')[0].attrs.height,'320','变量卡使用组成员纵向跨度');
+  assert.equal(byClass(card,'port-variable')[0].attrs.cx,'250','数据端点位于卡片右侧');
+  assert.equal(byClass(card,'port-in').length,0,'变量卡不混入执行流入口');
+  assert.equal(byClass(card,'port-out').length,0,'变量卡不混入执行流出口');
+  const dragged=[];
+  const menus=[];
+  ctx.startNodeDrag=(event,id)=>dragged.push(id);
+  ctx.showMenu=(...args)=>menus.push(args);
+  byClass(card,'node-box')[0].events.mousedown[0]({button:0});
+  ctx.renderNode(layer,{id:'group-entry',type:'node_group_interface',name:'节点组 接口',children:['inside'],_nodeGroupInterface:true,_groupPins:[]});
+  byClass(layer.children[1],'node-box')[0].events.mousedown[0]({button:0});
+  assert.deepEqual(dragged,['group-vars','group-entry'],'变量卡和执行入口都交给普通节点拖动器');
+  const add=byClass(card,'node-group-add')[0];
+  add.events.click[0]({clientX:120,clientY:80,preventDefault(){},stopPropagation(){}});
+  assert.equal(menus.length,1,'变量卡标题提供新增入口');
+});
 test('card text width budgets preserve CJK, emoji, zero and complete hover text',()=>{
   const {Element}=harness();const UI=NodeCards;
   for(const text of ['等待挑战按钮与战斗结束页面', 'long_workflow_reference.json', '变量😀输入',0,false]) {
@@ -208,13 +249,13 @@ test('新类型变量卡片：类型名用中文标签，颜色卡片带色块',
   const {ctx,Element}=harness();
   ctx.state.raw.variables={
     tint:{type:'color',default:'#ff8c3a'},target:{type:'point',default:{x:960,y:540}},
-    settle:{type:'duration',default:1.5},mode:{type:'enum',enum:['安全','快速'],default:'安全'},confirm_key:{type:'key',default:'BACK'},
+    settle:{type:'duration',default:1.5},mode:{type:'enum',enum:['安全','快速'],default:'安全'},confirm_key:{type:'key',default:'BACK'},flow:{type:'workflow',default:'a.json'},
   };
   const layer=new Element('g');
   const render=(name)=>{const target=new Element('g');ctx.renderVariableCard(target,{name,scope:'variables',id:name,x:0,y:0});return target.children[0];};
   const tint=render('tint');
   assert.equal(byClass(tint,'variable-card-access')[0].textContent,'颜色 · 状态');
-  assert.equal(byClass(tint,'variable-card-dot')[0].attrs.class,'variable-card-dot type-color');
+  assert.match(byClass(tint,'variable-card-dot')[0].attrs.class,/^variable-card-dot type-color data-tone-\d+$/);
   assert.equal(byClass(tint,'variable-card-swatch')[0].attrs.fill,'#ff8c3a');
   assert.equal(byClass(tint,'variable-card-swatch')[0].attrs.x,'102');
   assert.equal(byClass(tint,'variable-card-value')[0].textContent,'#ff8c3a');
@@ -223,7 +264,8 @@ test('新类型变量卡片：类型名用中文标签，颜色卡片带色块',
   assert.equal(byClass(render('settle'),'variable-card-value')[0].textContent,'1.5s');
   assert.equal(byClass(render('mode'),'variable-card-value')[0].textContent,'安全');
   assert.equal(byClass(render('confirm_key'),'variable-card-value')[0].textContent,'BACK');
-  for(const [name,label,type] of [['target','坐标点','point'],['settle','时长','duration'],['mode','枚举','enum'],['confirm_key','按键','key']]){
+  assert.equal(byClass(render('flow'),'variable-card-value')[0].textContent,'a.json');
+  for(const [name,label,type] of [['target','坐标点','point'],['settle','时长','duration'],['mode','枚举','enum'],['confirm_key','按键','key'],['flow','工作流','workflow']]){
     const card=render(name);
     assert.equal(byClass(card,'variable-card-access')[0].textContent,`${label} · 状态`);
     assert.ok(byClass(card,'port-variable-out')[0].attrs.class.includes(`type-${type}`),type);
@@ -232,6 +274,67 @@ test('新类型变量卡片：类型名用中文标签，颜色卡片带色块',
   // 颜色默认值非法时不画色块（例如手工编辑过的旧文档）。
   ctx.state.raw.variables.tint.default='红色';
   assert.equal(byClass(render('tint'),'variable-card-swatch').length,0);
+});
+test('工作流变量卡片双击快速打开工作流浏览器',()=>{
+  const {ctx,Element}=harness();
+  ctx.state.raw.variables={flow:{type:'workflow',default:'old.json'}};
+  ctx.state.raw.nodes=[{id:'run',type:'task',action:'workflow.run',params:{workflow:{ref:'variables.flow'},inputs:{旧参数:1}}}];
+  const layer=new Element('g');
+  ctx.renderVariableCard(layer,{name:'flow',scope:'variables',id:'flow-card',x:0,y:0});
+  const card=layer.children[0];
+  const event={button:0,clientX:30,clientY:20,preventDefault:()=>{},stopPropagation:()=>{},target:{closest:()=>true}};
+  card.events.mousedown[0](event);
+  card.events.mousedown[0](event);
+  assert.equal(ctx.workflowBrowsers.length,1);
+  assert.deepEqual(ctx.workflowBrowsers[0].slice(0,3),['','flow','old.json']);
+  ctx.workflowBrowsers[0][3]('entrypoints/new.json');
+  assert.equal(ctx.state.raw.variables.flow.default,'entrypoints/new.json');
+  assert.deepEqual(ctx.state.raw.nodes[0].params.inputs,{});
+});
+test('卡片渲染返回组元素，拖拽补丁才能就地改 transform',()=>{
+  const {ctx,Element}=harness();
+  const cardLayer=new Element('g');
+  const card=ctx.renderVariableCard(cardLayer,{name:'count',scope:'inputs',id:'card_1',x:0,y:0});
+  assert.equal(card,cardLayer.children[0],'变量卡片渲染要返回卡片组元素');
+  assert.match(card.attrs.class,/variable-card/);
+  ctx.state.raw.nodes=[{id:'n1',type:'task',children:[],pins:[]}];
+  const nodeLayer=new Element('g');
+  const node=ctx.renderNode(nodeLayer,ctx.state.raw.nodes[0]);
+  assert.equal(node,nodeLayer.children[0],'节点卡片渲染要返回卡片组元素');
+  assert.match(node.attrs.class,/node/);
+});
+test('单击已选中的变量卡片保留整组选择，并把整组起点交给拖拽',()=>{
+  const {ctx,Element}=harness();
+  ctx.state.raw.inputs={count:{type:'integer',default:0},other:{type:'integer',default:0},third:{type:'integer',default:0}};
+  ctx.state.raw._variableCards={
+    card_1:{name:'count',scope:'inputs',x:0,y:0},
+    card_2:{name:'other',scope:'inputs',x:0,y:80},
+    card_3:{name:'third',scope:'inputs',x:0,y:160},
+  };
+  const applied=[];
+  ctx.setVariableCardSelection=(ids)=>{
+    applied.push([...ids]);
+    ctx.state.selectedVariableCardIds=new Set(ids);
+    ctx.state.selectedVariableCardId=ids.length===1?ids[0]:'';
+  };
+  const render=(id,name,y)=>{const layer=new Element('g');ctx.renderVariableCard(layer,{name,scope:'inputs',id,x:0,y});return layer.children[0];};
+  const press=(card,extra={})=>card.events.mousedown[0]({button:0,clientX:30,clientY:20,preventDefault:()=>{},stopPropagation:()=>{},target:{closest:()=>true},...extra});
+  ctx.state.selectedVariableCardIds=new Set(['card_1','card_2']);
+  ctx.state.selectedVariableCardId='';
+  // 框选后按住组里的一张：选择不能被收窄成一张，拖拽要带上整组起点。
+  press(render('card_1','count',0));
+  assert.deepEqual(applied,[],'已选中的卡片被按下时不应收窄选择');
+  assert.equal(ctx.state.drag.kind,'variable-card');
+  assert.deepEqual(Object.keys(ctx.state.drag.origins).sort(),['card_1','card_2']);
+  assert.deepEqual(ctx.state.drag.origins.card_2,{x:0,y:80});
+  // 单击没被选中的卡片仍然只选这一张。
+  press(render('card_3','third',160));
+  assert.deepEqual(applied.at(-1),['card_3']);
+  assert.deepEqual(Object.keys(ctx.state.drag.origins),['card_3']);
+  // Shift 点击把没选中的卡片加进多选。
+  press(render('card_1','count',0),{shiftKey:true});
+  assert.deepEqual(applied.at(-1).sort(),['card_1','card_3']);
+  assert.deepEqual(Object.keys(ctx.state.drag.origins).sort(),['card_1','card_3']);
 });
 test('删除变量卡片后不会因为保留变量详情而选中同名卡片',()=>{
   const {ctx,Element}=harness();
@@ -548,7 +651,8 @@ test('校验错误的行标红：参数级标在那一行，节点级标在卡�
   // 只有出错的那一行标红：标签 error、值框 error、热区 invalid、引脚 invalid。
   const labels=byClass(card,'param-row-label');
   assert.deepEqual(labels.map(node=>node.attrs.class.includes('error')),[false,true,false,false,false,false]);
-  assert.deepEqual(byClass(card,'param-row-field').map(node=>node.attrs.class.includes('error')),[false,true,false,false,false,false]);
+  assert.deepEqual(byClass(card,'param-row-field').map(node=>node.attrs.class.includes('error')),
+    [false,true,false,false,false,false,false,false,false]);
   assert.deepEqual(byClass(card,'variable-port-hit').length,6);
   assert.deepEqual(byClass(card,'port-variable').map(node=>node.attrs.class.includes('invalid')),[false,true,false,false,false,false]);
   const hits=byClass(card,'param-row-hit');
@@ -580,15 +684,17 @@ test('固定卡片渲染成双行行样式：值行是可见输入框、无折�
   const labels=byClass(card,'param-row-label');
   const values=byClass(card,'param-row-value');
   assert.deepEqual(labels.map(node=>node.attrs.y),['109','149','189','229','269','309']);
-  assert.deepEqual(values.map(node=>node.attrs.y),['127','167','207','247','287','327']);
-  assert.deepEqual(values.map(node=>node.attrs['text-anchor']),['start','start','start','start','start','start']);
-  // 模板只显示文件名，识别区域显示四坐标，未配置的走定义默认值。
+  assert.deepEqual(values.map(node=>node.attrs.y),['127','167','207','247','247','247','247','287','327']);
+  assert.deepEqual(values.map(node=>node.attrs['text-anchor']),Array(9).fill('start'));
+  // 模板只显示文件名，识别区域拆成 X / Y / W / H 四格，未配置的走定义默认值。
   assert.deepEqual(values.map(node=>node.textContent),
-    ['battle.png','未设置','等待出现','60,120 200×80','0.85','关闭']);
+    ['battle.png','未设置','等待出现','60','120','200','80','0.85','关闭']);
+  assert.deepEqual(byClass(card,'param-row-rect-axis').map(node=>node.textContent),['X','Y','W','H']);
   // 非布尔行把悬停提示换成完整取值；布尔行的提示就是它的状态文案。
   assert.deepEqual(values.map(node=>node.children[0].textContent),
     ['template = assets/templates/battle.png（点击选择模板图）','timeout_seconds：未设置（点击编辑）',
-      '等待出现','roi = 60, 120 200×80','threshold：默认值 0.85（点击编辑）','关闭'])
+      '等待出现','识别区域 X = 60','识别区域 Y = 120','识别区域 W = 200','识别区域 H = 80',
+      'threshold：默认值 0.85（点击编辑）','关闭'])
   assert.equal(byClass(card,'param-row-swatch').length,0);
   // 两个布尔行：勾选框在值行框内左侧，勾选的那个画对勾；框按文字光学中心对齐而不是压在基线上。
   assert.deepEqual(byClass(card,'param-row-check').map(node=>node.attrs.x),['31','31']);
@@ -598,26 +704,30 @@ test('固定卡片渲染成双行行样式：值行是可见输入框、无折�
   assert.equal(byClass(card,'param-row-check-mark').length,1);
   // 每行的值都是一个可见的输入框/控件：与热区同矩形，文字在内边距处左对齐。
   const fields=byClass(card,'param-row-field');
-  assert.equal(fields.length,6);
-  assert.deepEqual(fields.map(node=>node.attrs.y),['115','155','195','235','275','315']);
-  assert.deepEqual(fields.map(node=>node.attrs.height),['18','18','18','18','18','18']);
-  // 值区是一套固定网格：单个值框占一格（111），所有行同宽。
-  assert.deepEqual(fields.map(node=>node.attrs.width),['111','111','111','111','111','111']);
+  assert.equal(fields.length,9);
+  assert.deepEqual(fields.map(node=>node.attrs.y),['115','155','195','235','235','235','235','275','315']);
+  assert.deepEqual(fields.map(node=>node.attrs.height),Array(9).fill('18'));
+  // 普通值框占一格（111）；识别区域横跨整行，并均分成四个 53.5px 输入框。
+  assert.deepEqual(fields.map(node=>node.attrs.width),['111','111','111','53.5','53.5','53.5','53.5','111','111']);
   assert.equal(fields[0].attrs.rx,'4');
   assert.deepEqual(fields.map(node=>node.attrs.class.replace('param-row-field','').trim()),
-    ['opens-picker','','','opens-picker','','']);
-  // 需要展开选择器/详情栏的行给一个 › 提示（模板、识别区域、超时不算）。
-  assert.equal(byClass(card,'param-row-caret').length,2);
-  assert.deepEqual(byClass(card,'param-row-caret').map(node=>node.textContent),['›','›']);
-  assert.deepEqual(byClass(card,'param-row-caret').map(node=>node.attrs.x),['124','124'],'› 贴在一格值框的右边缘');
+    ['opens-picker','','','param-row-cell param-row-rect-cell opens-picker','param-row-cell param-row-rect-cell opens-picker',
+      'param-row-cell param-row-rect-cell opens-picker','param-row-cell param-row-rect-cell opens-picker','','']);
+  assert.deepEqual(byClass(card,'param-row-rect-cell').map(node=>node.attrs.x),['22','79.5','137','194.5']);
+  // 区域已经有四个明确输入格，不再额外占空间画 ›；模板选择器仍保留提示。
+  assert.equal(byClass(card,'param-row-caret').length,1);
+  assert.deepEqual(byClass(card,'param-row-caret').map(node=>node.textContent),['›']);
+  assert.deepEqual(byClass(card,'param-row-caret').map(node=>node.attrs.x),['124'],'› 贴在一格值框的右边缘');
   // 值文字贴在框内边距（9px）处，左对齐。
-  assert.deepEqual(values.map(node=>node.attrs.x),['31','31','48','31','31','48']);
+  assert.deepEqual(values.map(node=>node.attrs.x),['31','31','48','33','90.5','148','205.5','31','48']);
+  assert.deepEqual(byClass(card,'param-row-rect-value').map(node=>node.attrs['font-size']),['9','9','9','9']);
+  assert.deepEqual(byClass(card,'param-row-rect-value').map(node=>node.style.fontSize),['9px','9px','9px','9px']);
   // 热区就是值行框本身（标签行不再是编辑热区），每行一个。
   const hits=byClass(card,'param-row-hit');
   assert.equal(hits.length,6);
   assert.deepEqual(hits.map(node=>node.attrs.y),['115','155','195','235','275','315']);
   assert.deepEqual(hits.map(node=>node.attrs.height),['18','18','18','18','18','18']);
-  assert.deepEqual(hits.map(node=>node.attrs.width),['111','111','111','111','111','111'],'热区与值框同宽');
+  assert.deepEqual(hits.map(node=>node.attrs.width),['111','111','111','226','111','111'],'区域热区覆盖四个输入格');
   assert.deepEqual(hits.map(node=>node.attrs['data-param']),
     ['template','timeout_seconds','present','roi','threshold','scale_search']);
   // 需要弹选择器的行光标是手型。
@@ -625,8 +735,10 @@ test('固定卡片渲染成双行行样式：值行是可见输入框、无折�
   assert.equal(fields[0].events.pointerdown,undefined,'值行框本身不吃事件，命中由热区负责');
   // 资源与区域的行点开也走卡片内编辑（菜单/浮层由编辑器决定），不再直接跳详情栏。
   hits[0].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:40,clientY:110});
-  hits[3].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:40,clientY:230});
+  hits[3].getBoundingClientRect=()=>({left:100,width:226});
+  hits[3].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:245,clientY:230});
   assert.deepEqual(calls.editors.map(request=>request.pin.param),['template','roi']);
+  assert.deepEqual(calls.editors.map(request=>request.inputIndex),[undefined,2],'点第三格直接聚焦 W 输入框');
   // 双行卡片的值文字在框内左对齐，浮层要按同一种对齐打开。
   assert.deepEqual(calls.editors.map(request=>request.valueAlign),['left','left']);
   assert.deepEqual(calls.editors.map(request=>request.rect),[
@@ -642,8 +754,8 @@ test('固定卡片渲染成双行行样式：值行是可见输入框、无折�
     ['card-kicker','card-description','node-meta'].map(name=>byClass(card,name)[0].attrs.x),
     ['22','22','22'],'表头说明行与参数列对齐');
   assert.deepEqual(byClass(card,'param-row-label').map(node=>node.attrs.x),['22','22','22','22','22','22']);
-  assert.deepEqual(fields.map(node=>node.attrs.x),['22','22','22','22','22','22']);
-  assert.deepEqual(values.map(node=>node.attrs.x),['31','31','48','31','31','48']);
+  assert.deepEqual(fields.map(node=>node.attrs.x),['22','22','22','22','79.5','137','194.5','22','22']);
+  assert.deepEqual(values.map(node=>node.attrs.x),['31','31','48','33','90.5','148','205.5','31','48']);
   assert.equal(byClass(card,'card-title')[0].attrs.x,'39');
   // 引脚仍是连线端点，类型 class 跟着参数类型走。
   assert.deepEqual(byClass(card,'port-variable').map(node=>node.attrs.class.split(' ').filter(name=>name.startsWith('type-'))[0]),
@@ -651,6 +763,20 @@ test('固定卡片渲染成双行行样式：值行是可见输入框、无折�
   assert.equal(byClass(card,'variable-port-hit').length,6);
   assert.equal(byClass(card,'port-out').length,1,'任务卡右侧有节点输出引用口');
   assert.equal(byClass(card,'port-out-reference')[0].attrs.cx,'260');
+});
+
+test('识别区域四格完整显示常见四位坐标，不产生省略号',()=>{
+  const {ctx,Element,renderer}=rowHarness({nodeRowHeight:()=>40,paramRowInfo:()=>({expanded:true,total:6,hidden:0,fixed:true,twoLine:true})});
+  ctx.nodeHeight=(node)=>96+(node.pins||[]).length*40;
+  const node={
+    ...fixedCardNode,
+    pins:fixedCardNode.pins.map(pin=>pin.param==='roi'?{...pin,value:[1621,791,299,289]}:{...pin}),
+  };
+  const layer=new Element('g');
+  renderer.renderNode(layer,node);
+  const values=byClass(layer.children[0],'param-row-rect-value');
+  assert.deepEqual(values.map(value=>value.textContent),['1621','791','299','289']);
+  assert.equal(values.some(value=>value.textContent.includes('…')),false);
 });
 
 
@@ -669,6 +795,16 @@ test('task categories have distinct, stable identities and reach the rendered SV
   const local=new Map();
   css.walkRules(rule=>{if(rule.selector==='.studio-card')rule.walkDecls(d=>local.set(d.prop,d.value));});
   for(const token of ['--card-bg','--card-head','--card-text','--card-muted','--success','--danger','--warning']) assert(local.has(token),token+' must be owned by cards, not inherited from the theme');
+  // 端点按数据身份着色：已有字面量用同色浅填充，已绑定用实心；invalid 仍覆盖成危险色。
+  let configuredUsesIdentityColor=false, invalidOverrides=false;
+  css.walkRules(rule=>{
+    if(!rule.selector.includes('.port-variable'))return;
+    const decls=new Map();rule.walkDecls(d=>decls.set(d.prop,d.value));
+    if(/\.configured/.test(rule.selector)){configuredUsesIdentityColor=Boolean(decls.get('fill')?.includes('--data-tone')&&decls.get('stroke')?.includes('--data-tone'));}
+    if(/\.invalid/.test(rule.selector))invalidOverrides=decls.get('fill')?.includes('--danger')??false;
+  });
+  assert(configuredUsesIdentityColor,'.configured 要用数据身份色做浅填充与描边');
+  assert(invalidOverrides,'.invalid 仍要把端点标红');
   // 卡面跟随当前界面主题；分类色落在标题带上（否则分类看不出来）。两者都要在 .studio-card 里声明。
   assert.match(local.get('--card-bg'),/var\(--ui-panel/,'卡面底色应跟随界面主题');
   assert.match(local.get('--card-head'),/var\(--ui-surface/,'标题带底色应跟随界面主题');

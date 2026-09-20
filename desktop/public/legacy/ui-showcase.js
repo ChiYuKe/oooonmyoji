@@ -10,7 +10,7 @@
   ['浏览', '截取', '替换'].forEach(label => $('demo-buttons').appendChild(UI.button({ label, onClick: () => report(`点击了「${label}」`) })));
   $('demo-buttons').appendChild(UI.button({ label: '删除', variant: 'danger', onClick: () => report('删除按钮示例，不删除数据') }));
   $('demo-buttons').appendChild(UI.button({ label: '不可用', disabled: true }));
-  $('demo-buttons').appendChild(UI.button({label:'悬浮提示',tip:'repeat轮数repeatcount\n(repeat_rounds_repeat_count)\n类型：integer\n调用方传入，只读\n拖到画布可创建引用卡片'}));
+  $('demo-buttons').appendChild(UI.button({label:'悬浮提示',tip:'拖到画布创建引用卡片\nDelete 删除'}));
   $('demo-inputs').appendChild(UI.input({ value: '等待挑战按钮消失', label: '显示名称', onChange: value => report(`名称：${value}`) }));
   $('demo-inputs').appendChild(UI.input({ placeholder: '输入模板路径', label: '模板路径' }));
   $('demo-inputs').appendChild(UI.input({ value: '只读字段', readOnly: true, label: '只读示例' }));

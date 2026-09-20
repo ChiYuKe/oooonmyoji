@@ -212,7 +212,11 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
       if (param.startsWith('inputs.')) {
         if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
         node.params.inputs[param.slice('inputs.'.length)] = { ref: `${scope}.${variable}` };
-      } else node.params[param] = { ref: `${scope}.${variable}` };
+      } else {
+        node.params[param] = { ref: `${scope}.${variable}` };
+        // 子工作流来源改变后，旧工作流的输入键不再可靠；详情面板会按新变量默认值重新列出输入。
+        if (node.type === 'task' && node.action === 'workflow.run' && param === 'workflow') node.params.inputs = {};
+      }
       // 连线项一律记录（不管从哪个入口绑过来的），否则同一处绑定会出现两种描述。
       if (link) variableLinks()[`${nodeId}:${param}`] = link;
       else delete variableLinks()[`${nodeId}:${param}`];

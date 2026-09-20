@@ -17,6 +17,13 @@ export interface HistoryDeps {
   normalizeRaw?(raw: unknown): Record<string, any>;
   setDirty(value?: boolean): void;
   render(): void;
+  /**
+   * 文档结构变化后的重绘：节点/参数/连线都要对账。
+   * 缺省退化为 `render()`，但画布入口会传更精确的标记，避免高频路径跟着重建连线。
+   */
+  renderGraph?(): void;
+  /** 文档整体替换（载入、外部同步）：整层重建，放弃所有元素缓存。 */
+  renderAll?(): void;
 }
 
 export interface EditorHistory {
@@ -33,6 +40,7 @@ const MAX_HISTORY = 80;
 export function createEditorHistory(deps: HistoryDeps): EditorHistory {
   const { state, cleanupReleased, clearVariableCardSelection, nodeById, setDirty, render } = deps;
   const normalizeRaw = deps.normalizeRaw ?? defaultNormalizeRaw;
+  const renderAfterDocumentChange = deps.renderGraph ?? render;
 
   function snapshot(): string {
     return JSON.stringify(state.raw);
@@ -52,7 +60,7 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     pushUndo(before);
     state.docVersion = (state.docVersion || 0) + 1;
     setDirty();
-    if (options.render !== false) render();
+    if (options.render !== false) renderAfterDocumentChange();
   }
 
   function restore(text: string): void {
@@ -62,7 +70,7 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     state.selectedEdge = null;
     state.selectedRun = null;
     clearVariableCardSelection();
-    render();
+    renderAfterDocumentChange();
   }
 
   function replaceDocument(text: string, recordHistory = false): void {
@@ -86,7 +94,9 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     if (state.inspector === 'variables' && !Object.prototype.hasOwnProperty.call(state.raw?.[state.selectedVariableScope] || {}, state.selectedVariable)) {
       state.selectedVariable = '';
     }
-    render();
+    // 整份替换：节点集合可能整体变化，按整层重绘处理。
+    deps.renderAll?.();
+    renderAfterDocumentChange();
   }
 
   function undo(): void {

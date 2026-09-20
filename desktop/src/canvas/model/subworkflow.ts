@@ -16,10 +16,24 @@ export interface SubworkflowDeps {
 
 export function createSubworkflowHelpers(deps: SubworkflowDeps) {
   const { state, vscode, nodeById, $, showMenu, compactValue } = deps;
+  /**
+   * 工作流引用可以是卡片上的字面量，也可以是 workflow 类型变量。
+   * 编辑期用变量默认值解析子工作流，这样输入面板和双击进入都能继续工作。
+   */
+  function resolveWorkflowRef(value: any): string {
+    if (typeof value === 'string') return value.trim();
+    if (!isBindingValue(value)) return '';
+    const match = /^(inputs|variables)\.([^.]+)$/.exec(value.ref);
+    if (!match) return '';
+    const definition = state.raw?.[match[1]]?.[match[2]];
+    return definition && definition.type === 'workflow' && typeof definition.default === 'string'
+      ? definition.default.trim()
+      : '';
+  }
+
   function subWorkflowRef(node: any): any {
     if (!node || node.type !== 'task' || node.action !== 'workflow.run') return '';
-    const value = node.params && typeof node.params.workflow === 'string' ? node.params.workflow : '';
-    return value.trim();
+    return resolveWorkflowRef(node.params?.workflow);
   }
 
   /** 请求打开子工作流视图；当前有未保存修改时先询问保存/放弃。 */
@@ -73,5 +87,5 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
     return key ? key.toUpperCase() : '未配置';
   }
 
-  return { subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel, conditionSummary };
+  return { resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel, conditionSummary };
 }

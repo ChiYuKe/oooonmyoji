@@ -180,8 +180,33 @@
 #inspector-body .variable-references > button { display: block; width: 100%; text-align: left; margin-top: 3px; }
 #inspector-body .variable-watch { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; padding: 8px; background: var(--ui-field); color: var(--ui-text); }
 #inspector-body .variable-struct-value { width: 100%; min-width: 0; }
-#inspector-body .variable-array-value { display: grid; gap: 4px; }
-#inspector-body .variable-array-item { display: flex; gap: 4px; min-width: 0; }
+/* 数组默认值：每个元素一张卡片，标题行可单独折叠（元素一多也不会拉得太长）。
+ * 标题行在 DOM 里排在元素控件之后，用 grid 区域放到上面，这样控件始终是第一个子节点。 */
+#inspector-body .variable-array-value { display: grid; gap: 10px; }
+#inspector-body .variable-array-item {
+  display: grid;
+  grid-template-areas: 'title' 'body';
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-line);
+  border-radius: 6px;
+  background: var(--ui-surface);
+}
+#inspector-body .variable-array-item > :first-child { grid-area: body; min-width: 0; }
+#inspector-body .variable-array-item.collapsed > :first-child { display: none; }
+#inspector-body .variable-array-item-head { grid-area: title; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+#inspector-body .variable-array-item-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+#inspector-body .variable-array-item-toggle:hover { color: var(--ui-text); }
 /* 无字段声明的对象：一行一个「字段名 + 值 + 删除」，按钮不参与拉伸。 */
 #inspector-body .variable-map-value { display: grid; gap: 4px; width: 100%; min-width: 0; }
 #inspector-body .variable-map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; align-items: center; }

@@ -248,6 +248,7 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .mini-node.type-instance_parallel { fill: #6943ad; }
 .mini-node.type-repeat_until { fill: #b95f20; }
 .mini-node.type-branch, .mini-node.type-switch { fill: #9c3d70; }
+.mini-node.type-node_group { fill: #52637a; stroke: #9db6d6; }
 .mini-node.type-instance-run { fill: #355f72; stroke: #79b8cf; }
 .mini-viewport { fill: rgba(75, 163, 211, 0.06); stroke: #71818a; stroke-width: 3; }
 
@@ -256,6 +257,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .edge-flow { stroke: transparent; stroke-width: 3; }
 .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
 .edge:hover .edge-line, .edge.selected .edge-line { stroke: #6bc2ea; stroke-width: 3.5; }
+.edge.edge-collapsed-group .edge-hit, .edge.edge-collapsed-group .edge-rewire { display: none; }
+.edge.edge-collapsed-group { pointer-events: none; }
 .edge.run-running .edge-line { stroke: #c9952e; stroke-width: 3; }
 .edge.run-running .edge-flow {
   stroke: #ffe08a;
@@ -280,44 +283,33 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .connection-preview { fill: none; stroke: #58b7e4; stroke-width: 3; stroke-dasharray: 7 5; pointer-events: none; }
 .connection-preview.snapped { stroke: #7ed28a; stroke-dasharray: none; }
 .instance-run-edge-line { fill: none; stroke: #7aaabd; stroke-width: 2.25; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.variable-edge { fill: none; stroke: #5b9fc0; stroke-width: 1.75; stroke-dasharray: 5 4; opacity: 0.85; pointer-events: none; vector-effect: non-scaling-stroke; }
-/* 细线不好点：可见线不接收事件，命中交给下面这条透明加粗线（屏幕空间恒定宽度，
- * 缩放后命中范围不变），Alt + 左键点在它上面即断开。 */
+/* 数据身份色：每个变量/引用按稳定身份散列到一个色号，同一数据在卡片、端点和线上始终同色。 */
+.data-tone-0 { --data-tone: #ef767a; --edge-tone: var(--data-tone); }
+.data-tone-1 { --data-tone: #e7a84b; --edge-tone: var(--data-tone); }
+.data-tone-2 { --data-tone: #a6bd45; --edge-tone: var(--data-tone); }
+.data-tone-3 { --data-tone: #55c38a; --edge-tone: var(--data-tone); }
+.data-tone-4 { --data-tone: #45bfc2; --edge-tone: var(--data-tone); }
+.data-tone-5 { --data-tone: #5aa9df; --edge-tone: var(--data-tone); }
+.data-tone-6 { --data-tone: #7f8fe8; --edge-tone: var(--data-tone); }
+.data-tone-7 { --data-tone: #aa7cde; --edge-tone: var(--data-tone); }
+.data-tone-8 { --data-tone: #d875bd; --edge-tone: var(--data-tone); }
+.data-tone-9 { --data-tone: #e47e9e; --edge-tone: var(--data-tone); }
+/* 变量线：实线（不再点线）、比执行连线（.edge-line 2px）细；命中交给下面那条透明加粗线。 */
+.variable-edge { fill: none; stroke: var(--edge-tone, #5aa9df); stroke-width: 1.8; opacity: 0.92; pointer-events: none; vector-effect: non-scaling-stroke; }
+.group-interface-edge { fill: none; stroke: var(--edge-tone, #7e91a0); stroke-width: 1.4; stroke-dasharray: 5 4; opacity: 0.72; pointer-events: none; vector-effect: non-scaling-stroke; }
 .variable-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
-.variable-edge-hit:hover + .variable-edge { stroke-width: 2.75; opacity: 1; stroke: color-mix(in srgb, #5b9fc0 62%, #ffffff); }
-/* 节点输出引用：从任务卡右侧输出口连到参数行。实线、比执行连线（.edge-line 2px）细，
- * 按「源输出字段」上色——不同变量拉出来的线颜色不同，同一个变量始终同色。 */
-.reference-edge { fill: none; stroke: #c8a95c; stroke-width: 1.5; opacity: 0.95; pointer-events: none; vector-effect: non-scaling-stroke; }
-/* 同上：引用线的命中由这条透明加粗线负责（14px，屏幕空间恒定）。 */
+/* 节点输出引用线：从任务卡右侧输出口连到参数行，同样是实线、比执行连线细。 */
+.reference-edge { fill: none; stroke: var(--edge-tone, #e7a84b); stroke-width: 1.8; opacity: 0.92; pointer-events: none; vector-effect: non-scaling-stroke; }
 .reference-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
 /* 悬停（指针在命中范围内）时把细线提亮 + 略加粗，明确「这条线可以 Alt 点击断开」。
  * 用显式颜色而不是 filter：浅色主题由 build-light-palette 生成加深版本。 */
-.reference-edge-hit:hover + .reference-edge { stroke-width: 2.5; opacity: 1; }
-.reference-edge-hit:hover + .reference-edge.tone-0 { stroke: color-mix(in srgb, #c9829f 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-1 { stroke: color-mix(in srgb, #86bfa0 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-2 { stroke: color-mix(in srgb, #c8a95c 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-3 { stroke: color-mix(in srgb, #7ba7d6 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-4 { stroke: color-mix(in srgb, #b58fd0 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-5 { stroke: color-mix(in srgb, #6fb6c0 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-6 { stroke: color-mix(in srgb, #d08f5f 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-7 { stroke: color-mix(in srgb, #98a7d8 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-8 { stroke: color-mix(in srgb, #9dbd7f 62%, #ffffff); }
-.reference-edge-hit:hover + .reference-edge.tone-9 { stroke: color-mix(in srgb, #d07fb0 62%, #ffffff); }
-.reference-edge.tone-0 { stroke: #c9829f; }
-.reference-edge.tone-1 { stroke: #86bfa0; }
-.reference-edge.tone-2 { stroke: #c8a95c; }
-.reference-edge.tone-3 { stroke: #7ba7d6; }
-.reference-edge.tone-4 { stroke: #b58fd0; }
-.reference-edge.tone-5 { stroke: #6fb6c0; }
-.reference-edge.tone-6 { stroke: #d08f5f; }
-.reference-edge.tone-7 { stroke: #98a7d8; }
-.reference-edge.tone-8 { stroke: #9dbd7f; }
-.reference-edge.tone-9 { stroke: #d07fb0; }
-.reference-connection-preview { fill: none; stroke: #c8a95c; stroke-width: 1.75; stroke-dasharray: none; pointer-events: none; vector-effect: non-scaling-stroke; }
-.reference-connection-preview.snapped { stroke: #7ed28a; }
+.reference-edge-hit:hover + .reference-edge,
+.variable-edge-hit:hover + .variable-edge { stroke-width: 2.7; opacity: 1; stroke: color-mix(in srgb, var(--edge-tone, #e7a84b) 68%, #ffffff); }
+.reference-connection-preview { fill: none; stroke: var(--data-tone, #e7a84b); stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; vector-effect: non-scaling-stroke; }
+.reference-connection-preview.snapped { stroke: color-mix(in srgb, var(--data-tone, #e7a84b) 72%, #ffffff); stroke-dasharray: none; }
 /* 任务卡的输出口（右侧）：数据口画成空心小圆，拖出去就是绑定引用。 */
-.port-out-reference { fill: #222629; stroke: #c2a15c; stroke-width: 2; cursor: crosshair; }
-.port-out-reference:hover, .port-out-reference.active { fill: #c2a15c; }
+.port-out-reference { fill: var(--card-bg, #222629); stroke: var(--data-tone, #e7a84b); stroke-width: 2; cursor: crosshair; }
+.port-out-reference:hover, .port-out-reference.active { fill: var(--data-tone, #e7a84b); stroke: color-mix(in srgb, var(--data-tone, #e7a84b) 58%, #ffffff); }
 
 .node { cursor: default; }
 .node-box { fill: #222629; stroke: #4b5259; stroke-width: 1; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .3)); cursor: move; }
@@ -332,6 +324,7 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.type-instance_parallel .node-accent { fill: #aa8fda; }
 .node.type-repeat_until .node-accent { fill: #d39460; }
 .node.type-branch .node-accent, .node.type-switch .node-accent { fill: #c977a1; }
+.node.type-node_group .node-accent { fill: #8ea9cc; }
 .node.type-root .node-icon-plate { fill: #413137; stroke: #704953; }
 .node.type-selector .node-icon-plate { fill: #2d4038; stroke: #456c59; }
 .node.type-sequence .node-icon-plate { fill: #413a2a; stroke: #6b5a35; }
@@ -339,6 +332,14 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.type-instance_parallel .node-icon-plate { fill: #393346; stroke: #5c4d75; }
 .node.type-repeat_until .node-icon-plate { fill: #40352c; stroke: #70513a; }
 .node.type-branch .node-icon-plate, .node.type-switch .node-icon-plate { fill: #40303a; stroke: #70475c; }
+.node.type-node_group .node-icon-plate { fill: #303c4b; stroke: #526b89; }
+.node.type-node_group .node-box { fill: #232a33; stroke: #596b82; stroke-dasharray: 5 3; }
+.node.type-node_group .node-head { fill: #2d3846; }
+.node.type-node_group .node-group-port { pointer-events: none; }
+.node-group-add { cursor: pointer; }
+.node-group-add-bg { fill: color-mix(in srgb, var(--card-head) 72%, #ffffff 8%); stroke: var(--card-line); stroke-width: 1; }
+.node-group-add-icon { fill: var(--card-text); font-size: 16px; font-weight: 600; pointer-events: none; }
+.node-group-add:hover .node-group-add-bg { fill: color-mix(in srgb, var(--card-head) 68%, var(--accent) 18%); stroke: var(--accent); }
 .node-head:hover, .node-icon-plate:hover { filter: brightness(1.12); }
 .node.selected .node-box { fill: #252b30; stroke: #72b4d8; stroke-width: 2; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .38)); }
 .node.connect-hover .node-box { stroke: #76bd91; stroke-width: 2; }
@@ -375,6 +376,80 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .port-out { fill: #c8a654; }
 .port:hover { stroke: #fff; stroke-width: 3; filter: brightness(1.25); }
 .marquee { fill: rgba(75, 163, 211, .1); stroke: #58b7e4; stroke-width: 1; stroke-dasharray: 5 3; }
+/* 浮层（框选矩形、交互预览）盖在卡片之上；本身不吃指针事件，避免挡住卡片点击。 */
+.overlays { pointer-events: none; }
+.overlays .marquee { pointer-events: none; }
+/* 占位卡片：视口突然变大时先挂壳、分帧补内容。
+ * 不吃指针事件，避免用户在内容补齐前点到一张还没有端口的卡片。 */
+.node-placeholder { pointer-events: none; }
+.node-placeholder .node-box { fill: #212427; stroke: #3f464c; filter: none; }
+
+/* ---------------------------------------------------------------------------
+ * 缩放分级：由画布在 `.graph-world` 上切换 `zoom-full` / `zoom-compact` /
+ * `zoom-overview` 一个 class，元素本身不重建。
+ *
+ * 设计约束：**分级只决定「还显示什么」，不改变卡片尺寸**。
+ * 卡片框、标题带与端口都按真实布局几何绘制，缩小画布时整块卡片跟着 zoom 一起缩，
+ * 跨档时不会突然变矮或换一个尺寸。因此概览档必须把卡内会露馅的元素整组收掉：
+ * 只 `display: none` 参数行会留下空框，端口点还留在原位变成「遗留」小点。
+ * ------------------------------------------------------------------------- */
+
+/* 紧凑：保留标题、类型、参数行与端口，只收掉占地方的预览图与装饰器。 */
+.graph-world.zoom-compact .node-preview-frame,
+.graph-world.zoom-compact .node-preview-image,
+.graph-world.zoom-compact .decorator-rule,
+.graph-world.zoom-compact .decorator-icon,
+.graph-world.zoom-compact .decorator-label,
+.graph-world.zoom-compact .variable-card-swatch {
+  display: none;
+}
+
+/* 概览：只留标题、运行状态与结构关系；参数行、类型、装饰器、端口全部收起。 */
+.graph-world.zoom-overview .node-icon,
+.graph-world.zoom-overview .node-icon-plate,
+.graph-world.zoom-overview .node-accent,
+.graph-world.zoom-overview .node-header-rule,
+.graph-world.zoom-overview .node-type,
+.graph-world.zoom-overview .node-subtitle,
+.graph-world.zoom-overview .node-meta,
+.graph-world.zoom-overview .node-duration,
+.graph-world.zoom-overview .node-preview-frame,
+.graph-world.zoom-overview .node-preview-image,
+.graph-world.zoom-overview .decorator-rule,
+.graph-world.zoom-overview .decorator-icon,
+.graph-world.zoom-overview .decorator-label,
+.graph-world.zoom-overview .param-row-rule,
+.graph-world.zoom-overview .param-row-label,
+.graph-world.zoom-overview .param-row-value,
+.graph-world.zoom-overview .param-row-field,
+.graph-world.zoom-overview .param-row-swatch,
+.graph-world.zoom-overview .param-row-check,
+.graph-world.zoom-overview .param-row-check-mark,
+.graph-world.zoom-overview .param-row-caret,
+.graph-world.zoom-overview .param-row-hit,
+.graph-world.zoom-overview .param-rows-toggle,
+/* 「识别区域」四格：轴名（X/Y/W/H）与数字用的是区域专用类，必须单独列出。
+ * 只收 `param-row-value` / `param-row-field` 会漏掉它们——缩略图上就剩这一行四个小框。 */
+.graph-world.zoom-overview .param-row-rect-cell,
+.graph-world.zoom-overview .param-row-rect-axis,
+.graph-world.zoom-overview .param-row-rect-value,
+.graph-world.zoom-overview .port,
+.graph-world.zoom-overview .variable-port-hit,
+.graph-world.zoom-overview .variable-card-head,
+.graph-world.zoom-overview .variable-card-header-rule,
+.graph-world.zoom-overview .variable-card-dot,
+.graph-world.zoom-overview .variable-card-access,
+.graph-world.zoom-overview .variable-card-value,
+.graph-world.zoom-overview .variable-card-swatch {
+  display: none;
+}
+.graph-world.zoom-overview .node-box,
+.graph-world.zoom-overview .variable-card-box,
+.graph-world.zoom-overview .instance-run-card-box {
+  filter: none;
+}
+.graph-world.zoom-overview .node-box { fill: #1f2225; }
+.graph-world.zoom-overview .edge-flow { display: none; }
 
 .instance-run-card-box { fill: #222629; stroke: #4b555d; stroke-width: 1; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .28)); cursor: pointer; }
 .instance-run-card-head { fill: #2a2f33; pointer-events: none; }
@@ -391,7 +466,7 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .instance-variable-rule { stroke: #3a4147; stroke-width: 1; pointer-events: none; }
 .instance-variable-name { fill: #d5dce1; font-size: 10px; pointer-events: none; }
 .instance-variable-value { fill: #909ca5; font-size: 9px; pointer-events: none; }
-.instance-variable-pin { stroke: #e1e6e9; stroke-width: 1; pointer-events: none; }
+.instance-variable-pin { fill: var(--card-bg, #222629); stroke: var(--data-tone, #998ac8); stroke-width: 2; pointer-events: none; }
 .instance-variable-pin.type-string, .instance-variable-pin.type-asset, .instance-variable-pin.type-path { fill: #c9829f; }
 .instance-variable-pin.type-number, .instance-variable-pin.type-integer { fill: #79b888; }
 .instance-variable-pin.type-boolean { fill: #cf777d; }
@@ -402,8 +477,9 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .instance-variable-pin.type-key { fill: #8f9fd8; }
 .instance-variable-pin.type-color { fill: #d07fb0; }
 .instance-variable-pin.type-duration { fill: #8fbf7f; }
-.port-variable, .port-variable-out { fill: #998ac8; stroke: #edf2ef; stroke-width: 1.5; cursor: crosshair; }
-.variable-card-dot { fill: #998ac8; stroke: #edf2ef; stroke-width: 1; }
+.instance-variable-pin.type-workflow { fill: #6fa8dc; }
+.port-variable, .port-variable-out { fill: var(--card-bg, #222629); stroke: var(--data-tone, #998ac8); stroke-width: 2; cursor: crosshair; }
+.variable-card-dot { fill: var(--data-tone, #998ac8); stroke: color-mix(in srgb, var(--data-tone, #998ac8) 50%, #ffffff); stroke-width: 1; }
 .port-variable.type-string, .port-variable-out.type-string, .variable-card-dot.type-string,
 .port-variable.type-asset, .port-variable-out.type-asset, .variable-card-dot.type-asset,
 .port-variable.type-path, .port-variable-out.type-path, .variable-card-dot.type-path { fill: #c9829f; }
@@ -419,10 +495,27 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .port-variable.type-key, .port-variable-out.type-key, .variable-card-dot.type-key { fill: #8f9fd8; }
 .port-variable.type-color, .port-variable-out.type-color, .variable-card-dot.type-color { fill: #d07fb0; }
 .port-variable.type-duration, .port-variable-out.type-duration, .variable-card-dot.type-duration { fill: #8fbf7f; }
+.port-variable.type-workflow, .port-variable-out.type-workflow, .variable-card-dot.type-workflow { fill: #6fa8dc; }
+.port-variable.data-tone-0, .port-variable-out.data-tone-0, .variable-card-dot.data-tone-0, .instance-variable-pin.data-tone-0,
+.port-variable.data-tone-1, .port-variable-out.data-tone-1, .variable-card-dot.data-tone-1, .instance-variable-pin.data-tone-1,
+.port-variable.data-tone-2, .port-variable-out.data-tone-2, .variable-card-dot.data-tone-2, .instance-variable-pin.data-tone-2,
+.port-variable.data-tone-3, .port-variable-out.data-tone-3, .variable-card-dot.data-tone-3, .instance-variable-pin.data-tone-3,
+.port-variable.data-tone-4, .port-variable-out.data-tone-4, .variable-card-dot.data-tone-4, .instance-variable-pin.data-tone-4,
+.port-variable.data-tone-5, .port-variable-out.data-tone-5, .variable-card-dot.data-tone-5, .instance-variable-pin.data-tone-5,
+.port-variable.data-tone-6, .port-variable-out.data-tone-6, .variable-card-dot.data-tone-6, .instance-variable-pin.data-tone-6,
+.port-variable.data-tone-7, .port-variable-out.data-tone-7, .variable-card-dot.data-tone-7, .instance-variable-pin.data-tone-7,
+.port-variable.data-tone-8, .port-variable-out.data-tone-8, .variable-card-dot.data-tone-8, .instance-variable-pin.data-tone-8,
+.port-variable.data-tone-9, .port-variable-out.data-tone-9, .variable-card-dot.data-tone-9, .instance-variable-pin.data-tone-9 { fill: var(--card-bg, #222629); stroke: var(--data-tone); }
+.port-variable.configured, .instance-variable-pin.configured { fill: color-mix(in srgb, var(--data-tone) 28%, var(--card-bg, #222629)); }
+.port-variable.bound, .instance-variable-pin.bound,
+.port-variable-out.data-tone-0, .port-variable-out.data-tone-1, .port-variable-out.data-tone-2, .port-variable-out.data-tone-3, .port-variable-out.data-tone-4,
+.port-variable-out.data-tone-5, .port-variable-out.data-tone-6, .port-variable-out.data-tone-7, .port-variable-out.data-tone-8, .port-variable-out.data-tone-9,
+.variable-card-dot.data-tone-0, .variable-card-dot.data-tone-1, .variable-card-dot.data-tone-2, .variable-card-dot.data-tone-3, .variable-card-dot.data-tone-4,
+.variable-card-dot.data-tone-5, .variable-card-dot.data-tone-6, .variable-card-dot.data-tone-7, .variable-card-dot.data-tone-8, .variable-card-dot.data-tone-9 { fill: var(--data-tone); stroke: color-mix(in srgb, var(--data-tone) 52%, #ffffff); }
 .pin-variable-name { fill: #ccd2d8; font-size: 10px; font-weight: 650; pointer-events: none; }
 .pin-variable-param { fill: #828b94; font-size: 9px; pointer-events: none; }
-.variable-connection-preview { fill: none; stroke: #65b69c; stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; vector-effect: non-scaling-stroke; }
-.variable-connection-preview.snapped { stroke: #7ed28a; stroke-dasharray: none; }
+.variable-connection-preview { fill: none; stroke: var(--data-tone, #55c38a); stroke-width: 2.2; stroke-dasharray: 6 4; pointer-events: none; vector-effect: non-scaling-stroke; }
+.variable-connection-preview.snapped { stroke: color-mix(in srgb, var(--data-tone, #55c38a) 72%, #ffffff); stroke-dasharray: none; }
 .variable-card-box { fill: #222729; stroke: #495552; stroke-width: 1; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .25)); cursor: move; }
 .variable-card-head { fill: #292f31; pointer-events: none; }
 .variable-card-accent { fill: #998ac8; pointer-events: none; }
@@ -436,6 +529,7 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .variable-card.type-key .variable-card-accent { fill: #8f9fd8; }
 .variable-card.type-color .variable-card-accent { fill: #d07fb0; }
 .variable-card.type-duration .variable-card-accent { fill: #8fbf7f; }
+.variable-card.type-workflow .variable-card-accent { fill: #6fa8dc; }
 .variable-card-swatch { stroke: #1c2022; stroke-width: 1; pointer-events: none; }
 .variable-card-header-rule { stroke: #39413f; stroke-width: 1; pointer-events: none; }
 .variable-card.selected .variable-card-box { fill: #27302f; stroke: #7dc7ae; stroke-width: 1.8; }

@@ -135,3 +135,50 @@ test('参数行引脚携带定义、配置状态与当前值供卡片渲染', ()
   context.state.paramRowsExpanded.clear();
   assert.deepEqual(Array.from(context.nodeVariablePins(node), (pin) => pin.param), ['message']);
 });
+
+/** 只搭子工作流场景：节点没有清单，参数行全由子工作流声明的 inputs 生成。 */
+function childWorkflowHarness(declared) {
+  const context = vm.createContext({ state: { raw: { _inputParams: {} }, catalog: [] } });
+  const model = require('../dist-test-renderer/canvas/model/canvas-workflow-model.js').createCanvasWorkflowModel({
+    state: context.state,
+    Model: {
+      displayNameOfDefinition: (definition, fallback = '') => (
+        definition && typeof definition.display_name === 'string' && definition.display_name ? definition.display_name : fallback
+      ),
+    },
+    VariableSystem: {}, nodes: () => [], position: () => ({ x: 0, y: 0 }),
+    variableCards: () => ({}), compatibleRefType: () => true, definitionSchema: (definition) => definition, nodeHeight: () => 0,
+    baseHeight: 96, nodeWidth: 260, decoHeight: 22, variableCardWidth: 168, variableCardHeight: 58,
+    variableCardPortY: 29, variablePinX: 10, runCardWidth: 250, runCardBaseHeight: 78, runVariableHeight: 24,
+    runCardGapX: 48, runCardGapY: 92,
+    catalogByName: () => undefined,
+    fieldLabel: (name) => name,
+    workflowNodeInputs: () => declared,
+    nextVariableCardId: () => '', workflowReference: () => '',
+  });
+  return model;
+}
+
+test('子工作流输入行用子工作流声明的显示名，不是自动生成的键', () => {
+  // 子工作流的输入键是编辑器生成的 `v_<uuid>`：画布上直接显示这个键会看不懂（详情栏显示的是「运行轮数」）。
+  const key = 'v_e9e2ee318a1e4a84abbe42e1d9a77690';
+  const model = childWorkflowHarness([{ name: key, definition: { type: 'integer', display_name: '运行轮数' } }]);
+  const node = {
+    id: 'capture', type: 'task', action: 'workflow.run',
+    params: { workflow: '活动副本.json', inputs: { [key]: { ref: `inputs.inputs_${key}` } } },
+  };
+  const pins = Array.from(model.nodeVariablePins(node));
+  assert.equal(pins.length, 1);
+  assert.equal(pins[0].param, `inputs.${key}`);
+  assert.equal(pins[0].label, '运行轮数', '行标签要用 display_name');
+  assert.equal(pins[0].variable, `inputs_${key}`);
+  assert.equal(pins[0].scope, 'inputs');
+  assert.equal(pins[0].configured, true);
+  assert.equal(pins[0].type, 'integer');
+
+  // 子工作流没声明显示名时回落到键，至少不会留空。
+  const fallback = childWorkflowHarness([{ name: 'v_plain', definition: { type: 'string' } }]);
+  const plain = Array.from(fallback.nodeVariablePins({ id: 'capture', type: 'task', action: 'workflow.run', params: { inputs: {} } }));
+  assert.equal(plain[0].label, 'v_plain');
+  assert.equal(plain[0].configured, false);
+});

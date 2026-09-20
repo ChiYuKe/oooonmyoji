@@ -5,6 +5,7 @@
  * 只更新状态并调用已迁移的渲染/命令模块；注册监听由入口负责。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { parseCanvasClipboard } from '../../shared/editor-messages';
 
 export interface CanvasMessagesDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -21,6 +22,7 @@ export interface CanvasMessagesDeps {
   renderWorkflowPicker(...args: any[]): any;
   renderWorkflowBreadcrumb(...args: any[]): any;
   renderWorkflowBrowser?(...args: any[]): any;
+  resolveWorkflowRef?(value: any): string;
   renderInspector(): void;
   renderAssetBrowser(...args: any[]): any;
   closeAssetBrowser(...args: any[]): any;
@@ -30,6 +32,7 @@ export interface CanvasMessagesDeps {
   requestAssetInventory(): void;
   normalizedAssetPath(value: any): string;
   handleRunEvent(event: any): void;
+  patchRunEdgeStates?(nodeId?: string): number;
   setExportBusy(busy: boolean): void;
   replaceDocument(text: string, recordHistory: boolean): void;
   executeEditorCommand(command: string, value?: any): any;
@@ -42,8 +45,57 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, renderInspector, renderAssetBrowser,
     renderWorkflowBrowser,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
-    normalizedAssetPath, handleRunEvent, setExportBusy, replaceDocument, executeEditorCommand, toast,
+    normalizedAssetPath, handleRunEvent, patchRunEdgeStates, setExportBusy, replaceDocument, executeEditorCommand, toast,
   } = deps;
+  const resolveWorkflowRef = deps.resolveWorkflowRef || ((value: any) => typeof value === 'string' ? value.trim() : '');
+
+  function workflowDescriptor(reference: string, workflows: any[]): any {
+    const normalized = String(reference || '').trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
+    if (!normalized) return null;
+    const withExtension = normalized.toLowerCase().endsWith('.json') ? normalized : `${normalized}.json`;
+    return workflows.find((item: any) => {
+      const relative = String(item?.rel || '').replace(/\\/g, '/').replace(/^workflows\//i, '');
+      return item?.id === normalized || relative === normalized || relative === withExtension
+        || relative.endsWith(`/${normalized}`) || relative.endsWith(`/${withExtension}`);
+    }) || null;
+  }
+
+  function workflowInputNames(descriptor: any): Set<string> {
+    return new Set((Array.isArray(descriptor?.inputs) ? descriptor.inputs : [])
+      .map((item: any) => typeof item?.name === 'string' ? item.name : '')
+      .filter(Boolean));
+  }
+
+  /** 清掉子工作流已经取消公开、但父节点里仍残留的传参与连线。 */
+  function pruneRemovedWorkflowInputs(previous: any[], next: any[], onlyLinked = false): boolean {
+    const removals: Array<{ node: any; names: string[] }> = [];
+    for (const node of state.raw?.nodes || []) {
+      if (node?.type !== 'task' || node.action !== 'workflow.run' || !node.params?.inputs || typeof node.params.inputs !== 'object') continue;
+      const reference = resolveWorkflowRef(node.params.workflow);
+      const before = workflowDescriptor(reference, previous);
+      const after = before
+        ? next.find((item: any) => item?.uri === before.uri)
+        : workflowDescriptor(reference, next);
+      if (!after) continue;
+      const afterNames = workflowInputNames(after);
+      const beforeNames = before ? workflowInputNames(before) : null;
+      const names = Object.keys(node.params.inputs).filter((name) => {
+        if (afterNames.has(name)) return false;
+        const link = state.raw?._variableLinks?.[`${node.id}:inputs.${name}`];
+        if (onlyLinked) return Boolean(link);
+        return Boolean(beforeNames?.has(name));
+      });
+      if (names.length) removals.push({ node, names });
+    }
+    if (!removals.length) return false;
+    for (const { node, names } of removals) {
+      for (const name of names) {
+        delete node.params.inputs[name];
+        if (state.raw._variableLinks) delete state.raw._variableLinks[`${node.id}:inputs.${name}`];
+      }
+    }
+    return true;
+  }
   function handleMessage(message: any): void {
 
   if (message.type === 'init') {
@@ -52,12 +104,14 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     // 同一文档的重复初始化（如保存后的外部变更同步）保留当前视口；
     // 只有切换/重新打开其他工作流时才重新适配。
     const sameDocument = Boolean(message.document && message.document.uri && message.document.uri === state.docUri);
-    if (!sameDocument) { state.variableSnapshots = {}; state.variableValues = null; }
+    if (!sameDocument) { state.variableSnapshots = {}; state.variableValues = null; state.nodeGroupId = ''; }
     state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
     state.assetsBaseUri = typeof message.assetsBaseUri === 'string' ? message.assetsBaseUri.replace(/\/?$/, '/') : '';
     state.refs = message.refs || { inputs: [], variables: [], nodes: [] }; state.issues = message.issues || [];
     state.docVersion = (state.docVersion || 0) + 1;
     state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item: any) => item && typeof item.uri === 'string') : [];
+    // 兼容已经保存过的旧残留：有画布连线记录、但子工作流已不再声明的输入可以安全收敛。
+    const prunedWorkflowInputs = pruneRemovedWorkflowInputs([], state.workflows, true);
     state.docUri = message.document.uri || '';
     state.documentName = message.document.name || '';
     state.workflowTrail = Array.isArray(message.workflowTrail) ? message.workflowTrail : [];
@@ -65,14 +119,27 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
     state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); state.undo = []; state.redo = []; state.run.clear(); state.paramLiteralCache = {}; state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
     $('btn-back').classList.toggle('hidden', !message.canGoBack);
-    renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(false); render();
+    renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(prunedWorkflowInputs); render();
     requestAssetInventory();
     setTimeout(() => { if (!sameDocument) fitView(); }, 0);
   } else if (message.type === 'workflows') {
     // 脚本目录在别处变了（新建工作流、外部改动）：就地换掉列表并刷新选择器，不重载文档。
-    state.workflows = Array.isArray(message.workflows) ? message.workflows.filter((item: any) => item && typeof item.uri === 'string') : state.workflows;
+    const previousWorkflows = state.workflows;
+    const nextWorkflows = Array.isArray(message.workflows) ? message.workflows.filter((item: any) => item && typeof item.uri === 'string') : state.workflows;
+    state.workflows = nextWorkflows;
+    const prunedWorkflowInputs = pruneRemovedWorkflowInputs(previousWorkflows, nextWorkflows);
     renderWorkflowPicker();
     if (state.workflowBrowser) renderWorkflowBrowser?.();
+    // 子工作流的公开输入可能刚在另一个画布中增删；节点卡片与详情栏必须立即重算。
+    if (prunedWorkflowInputs) setDirty(true);
+    render();
+  } else if (message.type === 'workflowTrail') {
+    state.workflowTrail = Array.isArray(message.workflowTrail) ? message.workflowTrail : [];
+    $('btn-back').classList.toggle('hidden', !message.canGoBack);
+    renderWorkflowBreadcrumb();
+  } else if (message.type === 'clipboard') {
+    // 画布剪贴板由壳层保管：复制后广播，新画布握手时补发；跨画布粘贴靠它。
+    state.clipboard = parseCanvasClipboard(message.clipboard) ?? null;
   } else if (message.type === 'runEvent') handleRunEvent(message.event);
   else if (message.type === 'runtimeInstances') {
     state.instances = Array.isArray(message.instances) ? message.instances.filter((item: any) => item && typeof item.id === 'string' && item.id) : [];
@@ -80,7 +147,11 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     state.variableValues = state.variableSnapshots?.[state.instanceId || 'default'] || null;
     renderInstancePicker();
   }
-  else if (message.type === 'runReplay') { state.run.clear(); (message.events || []).forEach(handleRunEvent); }
+  else if (message.type === 'runReplay') {
+    state.run.clear();
+    patchRunEdgeStates?.();
+    (message.events || []).forEach(handleRunEvent);
+  }
   else if (message.type === 'roiPickerImage') openRoiPicker(message);
   else if (message.type === 'roiPickerCancelled' || message.type === 'roiPickerError') {
     const request = state.roi;

@@ -7,7 +7,7 @@ const { createWorkflowModel } = require('../dist-test-renderer/canvas/model/work
 const { createEditorHistory } = require('../dist-test-renderer/canvas/state/history.js');
 const { createCanvasCommands } = require('../dist-test-renderer/canvas/state/commands.js');
 
-function harness(raw) {
+function harness(raw, options = {}) {
   const state = createCanvasState();
   state.raw = raw;
   state.catalog = [{name: 'core.capture'}];
@@ -35,6 +35,7 @@ function harness(raw) {
     wrap: {clientWidth: 400, clientHeight: 300},
     nodeWidth: 260,
     baseHeight: 96,
+    publishClipboard: options.publishClipboard,
   });
   return {state, model, history, commands, toasts};
 }
@@ -152,4 +153,100 @@ test('剪切移除选中子树，空剪贴板粘贴给出提示', () => {
   h.state.clipboard = null;
   assert.equal(h.commands.pasteClipboard(), false);
   assert.deepEqual(h.toasts.at(-1), ['剪贴板为空', true]);
+});
+
+/** 带变量绑定的子树：卡片绑 `inputs.运行轮次`，并在画布上有一张变量卡片。 */
+function boundTree() {
+  return {
+    root: 'root',
+    inputs: {运行轮次: {type: 'integer', default: 3}},
+    nodes: [
+      {id: 'root', type: 'root', children: ['a']},
+      {id: 'a', type: 'task', action: 'core.capture', params: {value: {ref: 'inputs.运行轮次'}}},
+    ],
+    _layout: {a: {x: 10, y: 20}},
+    _variableCards: {card_1: {name: '运行轮次', scope: 'inputs', x: 100, y: 200}},
+  };
+}
+
+test('复制把节点、布局与引用到的变量/卡片一起交给壳层（跨画布粘贴的前提）', () => {
+  const published = [];
+  const h = harness(boundTree(), {publishClipboard: (payload) => published.push(payload)});
+  h.state.docUri = 'file:///w/a.json';
+  h.state.selected = new Set(['a']);
+
+  assert.equal(h.commands.copySelection(), true);
+
+  assert.equal(published.length, 1, '复制要交给壳层，别的画布才拿得到');
+  const payload = published[0];
+  assert.equal(payload, h.state.clipboard, '画布状态与壳层拿到的是同一份内容');
+  assert.equal(payload.version, 1);
+  assert.equal(payload.sourceUri, 'file:///w/a.json');
+  assert.deepEqual(payload.nodes.map((node) => node.id), ['a']);
+  assert.deepEqual(payload.layout, {a: {x: 10, y: 20}});
+  assert.deepEqual(payload.variables, [{scope: 'inputs', name: '运行轮次', definition: {type: 'integer', default: 3}}]);
+  assert.deepEqual(payload.cards, [{scope: 'inputs', name: '运行轮次', x: 100, y: 200}]);
+});
+
+test('跨画布粘贴：目标文档补上被引用的输入与变量卡片，并按新节点 id 接线', () => {
+  const source = harness(boundTree());
+  source.state.docUri = 'file:///w/a.json';
+  source.state.selected = new Set(['a']);
+  source.commands.copySelection();
+  // 壳层广播的是结构化克隆（跨窗口/跨 iframe 走 postMessage），测试里同样过一遍 JSON。
+  const payload = JSON.parse(JSON.stringify(source.state.clipboard));
+
+  const target = harness({root: 'root', nodes: [{id: 'root', type: 'root', children: []}], _layout: {}});
+  target.state.docUri = 'file:///w/b.json';
+  target.state.clipboard = payload;
+
+  assert.equal(target.commands.pasteClipboard({x: 400, y: 300}), true);
+  const pasted = target.state.raw.nodes.find((node) => node.id === 'a_1');
+  assert.ok(pasted, '新文档里生成重命名后的节点');
+  assert.deepEqual(pasted.params, {value: {ref: 'inputs.运行轮次'}});
+  assert.deepEqual(target.state.raw.inputs['运行轮次'], {type: 'integer', default: 3}, '输入定义被补进目标文档');
+  assert.deepEqual(target.state.raw._layout.a_1, {x: 400, y: 300}, '锚点是剪贴板包围盒左上角，所以落在鼠标处');
+  const cardIds = Object.keys(target.state.raw._variableCards);
+  assert.equal(cardIds.length, 1);
+  assert.deepEqual(target.state.raw._variableCards[cardIds[0]], {
+    name: '运行轮次', scope: 'inputs', x: 490, y: 480,
+  }, '变量卡片跟着整组一起偏移');
+  assert.equal(target.state.raw._variableLinks['a_1:value'], cardIds[0], '连线项按新节点 id 补上');
+});
+
+test('同文档粘贴不重复补变量与卡片', () => {
+  const h = harness(boundTree());
+  h.state.docUri = 'file:///w/a.json';
+  h.state.selected = new Set(['a']);
+  h.commands.copySelection();
+
+  h.commands.pasteClipboard({x: 400, y: 300});
+
+  assert.deepEqual(Object.keys(h.state.raw.inputs), ['运行轮次']);
+  assert.equal(Object.keys(h.state.raw._variableCards).length, 1, '源文档本来就有卡片，不再补一张');
+  assert.deepEqual(h.state.raw.inputs['运行轮次'], {type: 'integer', default: 3});
+});
+
+test('目标文档已有同名变量时以目标为准；已有卡片时也只接线', () => {
+  const source = harness(boundTree());
+  source.state.docUri = 'file:///w/a.json';
+  source.state.selected = new Set(['a']);
+  source.commands.copySelection();
+  const payload = JSON.parse(JSON.stringify(source.state.clipboard));
+
+  const target = harness({
+    root: 'root',
+    inputs: {运行轮次: {type: 'string', default: '目标自己的定义'}},
+    nodes: [{id: 'root', type: 'root', children: []}],
+    _layout: {},
+    _variableCards: {card_9: {name: '运行轮次', scope: 'inputs', x: -50, y: -60}},
+  });
+  target.state.docUri = 'file:///w/b.json';
+  target.state.clipboard = payload;
+
+  target.commands.pasteClipboard({x: 0, y: 0});
+
+  assert.deepEqual(target.state.raw.inputs['运行轮次'], {type: 'string', default: '目标自己的定义'}, '不覆盖目标文档的定义');
+  assert.deepEqual(Object.keys(target.state.raw._variableCards), ['card_9'], '不新建重复卡片');
+  assert.equal(target.state.raw._variableLinks['a_1:value'], 'card_9', '直接把新节点接到已有卡片上');
 });

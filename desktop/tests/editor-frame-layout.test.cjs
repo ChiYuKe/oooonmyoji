@@ -44,3 +44,10 @@ test('both frame modes load the explicit desktop layout after all shared styles'
   const bridge=fs.readFileSync(path.join(__dirname,'../src/canvas/bridge.ts'),'utf8');
   assert(bridge.includes('desktop-${mode}-mode'));
 });
+
+test('runtime edge preview can be disabled without hiding ordinary structure edges', () => {
+  const disabledLine = properties('.runtime-edge-preview-disabled .edge[class*="run-"] .edge-line');
+  assert.equal(disabledLine.stroke, 'var(--wire)');
+  assert.equal(disabledLine['stroke-dasharray'], 'none');
+  assert.equal(properties('.runtime-edge-preview-disabled .edge .edge-flow').display, 'none');
+});

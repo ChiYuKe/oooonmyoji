@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createDocumentStore } = require('../dist-electron/shared/workspace/documents.js');
 const { createAutoSaveQueue } = require('../dist-electron/shared/workspace/autosave.js');
+const { createWorkspace } = require('../dist-test-renderer/renderer/workspace.js');
 
 function deferred() {
   let resolve;
@@ -167,4 +168,31 @@ test('写盘失败按版本回调，等待覆盖所有文档的在途保存', as
   assert.deepEqual(failed, [['workflows/a.json', 'Error: disk full']]);
   assert.deepEqual(restored, ['workflows/b.json']);
   assert.equal(queue.hasPending('workflows/a.json'), false);
+});
+
+test('编辑子工作流公开输入后立即同步所有画布的工作流摘要', () => {
+  const messages = [];
+  global.window = {
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    onmyoji: {readLayout: () => undefined, writeLayout: () => {}},
+  };
+  const uri = 'file:///project/workflows/child.json';
+  const bootstrap = {
+    projectRoot: '/project', instances: [], catalog: [],
+    workflows: [{uri, name: 'child.json', rel: 'workflows/child.json', id: 'child', inputs: [{name: '运行轮数', definition: {type: 'integer'}}]}],
+  };
+  const detailsFrame = {contentWindow: {postMessage: envelope => messages.push(envelope.payload)}};
+  const workspace = createWorkspace({
+    detailsFrame,
+    api: {saveWorkflow: async () => {}},
+    getBootstrap: () => bootstrap,
+    showToast: () => {}, errorMessage: String, setStatus: () => {}, syncDocumentTabs: () => {},
+  });
+
+  workspace.syncWorkflowDescriptor(uri, JSON.stringify({id: 'child', description: '', inputs: {}, variables: {运行轮数: {type: 'integer'}}}));
+
+  assert.equal(bootstrap.workflows[0].inputs, undefined);
+  assert.equal(messages.at(-1).type, 'workflows');
+  assert.equal(messages.at(-1).workflows[0].inputs, undefined);
 });

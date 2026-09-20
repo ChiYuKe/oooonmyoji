@@ -11,9 +11,13 @@
     "build:renderer-tests": "tsc -p tsconfig.renderer-tests.json",
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "build": "node scripts/build-light-palette.cjs && npm run typecheck && npm run build:electron && vite build",
+    "benchmark:canvas": "node scripts/canvas-benchmark.cjs",
+    "benchmark:canvas:enforce": "node scripts/canvas-benchmark.cjs --enforce",
+    "fixture:canvas": "node scripts/canvas-fixture.cjs",
     "start": "npm run build && electron ."
   },
   "dependencies": {
+    "@phosphor-icons/web": "^2.1.2",
     "ajv": "^8.20.0",
     "dockview": "^8.2.0",
     "lucide": "^1.38.0"

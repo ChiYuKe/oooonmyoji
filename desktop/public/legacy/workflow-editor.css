@@ -250,6 +250,13 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .mini-node.type-branch, .mini-node.type-switch { fill: #9c3d70; }
 .mini-node.type-node_group { fill: #52637a; stroke: #9db6d6; }
 .mini-node.type-instance-run { fill: #355f72; stroke: #79b8cf; }
+/* 运行状态标记：运行中与失败在小地图上也要一眼看到（比类型色优先）。 */
+.mini-node.run-running { fill: #d2a02a; stroke: #ffe6a3; }
+.mini-node.run-failed { fill: #c23b3b; stroke: #ffb4b4; }
+.mini-node.run-succeeded { fill: #2f7d52; stroke: #a7e0c2; }
+.mini-node.run-cancelled { fill: #6a6a72; stroke: #b9b9c2; }
+/* 搜索/定位目标：独立描边，不跟状态色抢。 */
+.mini-node.mini-search-target { stroke: var(--accent, #3694d4); stroke-width: 6; }
 .mini-viewport { fill: rgba(75, 163, 211, 0.06); stroke: #71818a; stroke-width: 3; }
 
 .edge-line, .edge-flow { fill: none; stroke-linecap: round; pointer-events: none; vector-effect: non-scaling-stroke; }
@@ -359,6 +366,40 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.node-flash .node-icon-plate { filter: brightness(1.3); }
 .param-row-flash { filter: drop-shadow(0 0 4px var(--accent, #3694d4)); stroke: var(--accent, #3694d4); stroke-width: 2; }
 .param-row-flash.param-row-hit { fill: color-mix(in srgb, var(--accent, #3694d4) 16%, transparent); }
+
+/* 锁定位置：卡片右上角一枚小锁，拖动与自动排列都跳过它。 */
+.node.node-locked .node-box { stroke-dasharray: 6 3; }
+.node-locked-badge { fill: #d6ad55; pointer-events: none; }
+.node-locked-badge-glyph { fill: #23282c; font-size: 8px; font-weight: 700; pointer-events: none; }
+
+/* 按状态/类型临时隐藏：只切 class，不删卡片、不改文档。 */
+.node.node-filtered { display: none; }
+.wires > g.edge-filtered { display: none; }
+
+/* 自动排列预览：虚线虚影 + 底部确认条（确认前不写文档）。 */
+.arrange-preview-box { fill: color-mix(in srgb, var(--accent, #3694d4) 10%, transparent); stroke: var(--accent, #3694d4); stroke-width: 2; stroke-dasharray: 8 5; pointer-events: none; }
+#arrange-preview-bar {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  font-size: 11px;
+  color: var(--muted);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+  z-index: 5;
+}
+#arrange-preview-bar.hidden { display: none; }
+#arrange-preview-text { white-space: nowrap; }
+#arrange-preview-bar button { height: 22px; padding: 0 10px; font-size: 11px; }
+.viewport-tools-separator { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+.icon-button.is-disabled, .icon-button:disabled { opacity: .45; cursor: default; }
 .node-icon { fill: #edf1f3; font-size: 12px; font-weight: 700; pointer-events: none; }
 .node-name { fill: #f0f2f3; font-size: 12px; font-weight: 650; pointer-events: none; }
 .node-type { fill: #929ca5; font-size: 8px; font-weight: 650; letter-spacing: 0; pointer-events: none; }

@@ -32,6 +32,9 @@ function harness(options = {}) {
     nodeHeight: () => options.nodeHeight ?? 96,
     instanceRunCards: () => options.runCards || [],
     variableCardList: () => options.cards || [],
+    // 阶段 5 标记：运行状态着色与「按状态/类型隐藏」的过滤。
+    nodeRunStatus: options.nodeRunStatus,
+    isNodeFiltered: options.isNodeFiltered,
     wrap: {getBoundingClientRect: () => ({width: 400, height: 300})},
     nodeWidth: 260,
     runCardWidth: 250,
@@ -118,6 +121,49 @@ test('空内容时包围盒保持最小尺寸', () => {
   const h = harness({bounds: {minX: 0, minY: 0, maxX: 0, maxY: 0}});
   h.minimap.renderMinimap();
   assert.equal(h.mini.attrs.viewBox, '-40 -40 80 80');
+});
+
+// —— 阶段 5：小地图标记运行中 / 失败 / 搜索目标，并跳过被隐藏的卡片 ——
+
+test('小地图按运行状态着色：运行中与失败各自带状态 class', () => {
+  const h = harness({
+    nodes: [{id: 'run', type: 'task'}, {id: 'bad', type: 'task'}, {id: 'idle', type: 'task'}],
+    nodeRunStatus: (node) => ({run: 'running', bad: 'failed'}[node.id] || ''),
+  });
+  h.minimap.renderMinimap();
+  const classes = h.mini.children
+    .filter((child) => child.tag === 'rect' && String(child.attrs.class).startsWith('mini-node'))
+    .map((child) => child.attrs.class);
+  assert.deepEqual(classes, [
+    'mini-node type-task run-running',
+    'mini-node type-task run-failed',
+    'mini-node type-task',
+  ]);
+});
+
+test('小地图标出搜索/定位目标：独立 class，不跟状态色抢', () => {
+  const h = harness({
+    nodes: [{id: 'a', type: 'task'}, {id: 'b', type: 'task'}],
+    nodeRunStatus: (node) => (node.id === 'a' ? 'failed' : ''),
+  });
+  h.state.searchTargetId = 'a';
+  h.minimap.renderMinimap();
+  const target = h.mini.children.find((child) => String(child.attrs.class).includes('mini-search-target'));
+  assert.equal(target.attrs.class, 'mini-node type-task run-failed mini-search-target');
+  // 目标变化要触发结构重建（否则小地图上的标记停在旧卡片上）。
+  h.state.searchTargetId = 'b';
+  h.minimap.renderMinimap();
+  assert.equal(h.minimap.structureBuilds(), 2);
+});
+
+test('被「按状态/类型隐藏」筛掉的卡片不在小地图上出现', () => {
+  const h = harness({
+    nodes: [{id: 'keep', type: 'task'}, {id: 'gone', type: 'task'}],
+    isNodeFiltered: (node) => node.id === 'gone',
+  });
+  h.minimap.renderMinimap();
+  const ids = h.mini.children.filter((child) => child.tag === 'rect' && String(child.attrs.class).startsWith('mini-node')).map((child) => child.attrs.x);
+  assert.equal(ids.length, 1, '被隐藏的卡片不画缩略矩形');
 });
 
 test('小地图不再每帧清空：整体重建只发生在 invalidate 之后', () => {

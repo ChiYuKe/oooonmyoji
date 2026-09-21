@@ -6,6 +6,8 @@
 // 所以单独用真实 createRenderEntry 接线来守住它。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { createCanvasState } = require('../dist-test-renderer/canvas/state/canvas-state.js');
 const { createWorkflowModel } = require('../dist-test-renderer/canvas/model/workflow-model.js');
 const { createRenderEntry } = require('../dist-test-renderer/canvas/render/render-entry.js');
@@ -26,6 +28,21 @@ function fakeElement(tag, attrs = {}) {
     removeChild(child) { this.children = this.children.filter((item) => item !== child); child.parent = null; },
     replaceChildren(...nodes) { for (const child of [...this.children]) this.removeChild(child); for (const node of nodes) this.appendChild(node); },
     remove() { if (this.parent) this.parent.removeChild(this); },
+    // classList：筛选/锁定这类「只切 class 不重建」的路径靠它，替身必须像真 DOM 一样工作。
+    classList: {
+      _names() { return String(element.attrs.class || '').split(/\s+/).filter(Boolean); },
+      _write(names) { element.attrs.class = names.join(' '); },
+      add(...names) { const set = new Set(this._names()); for (const name of names) set.add(name); this._write([...set]); },
+      remove(...names) { const drop = new Set(names); this._write(this._names().filter((name) => !drop.has(name))); },
+      contains(name) { return this._names().includes(name); },
+      toggle(name, force) {
+        const has = this.contains(name);
+        const want = force === undefined ? !has : Boolean(force);
+        if (want && !has) this.add(name);
+        else if (!want && has) this.remove(name);
+        return want;
+      },
+    },
   };
   Object.defineProperty(element, 'isConnected', { get() { return Boolean(this.parent); } });
   return element;
@@ -362,3 +379,105 @@ test('从变量面板拖进画布的卡片立刻出现（不需要滚动/缩放�
   assert.equal(mounted.length, 1, '卡片元素必须立刻出现在变量卡图层里');
   assert.equal(mounted[0].dataset.variable, 'count');
 });
+
+// —— 阶段 5：按状态/类型临时隐藏（只切 class）与自动排列预览（只画虚影） ——
+
+test('按状态/类型隐藏只切 class：命中的卡片就地加 hidden，不重建图层', () => {
+  // 给足视口尺寸，卡片才会真的挂载。
+  let hidden = new Set();
+  const filtered = harness({
+    measurement: {read: () => ({width: 1200, height: 800, left: 0, top: 0})},
+    entryDeps: {isNodeFiltered: (node) => hidden.has(node.id)},
+  });
+  filtered.entry.render({full: true});
+  const mountedBefore = [...filtered.entry.controller.mountedNodes().values()];
+  assert.notEqual(mountedBefore.length, 0, '先要真的挂载了卡片');
+  for (const element of mountedBefore) assert.equal(element.classList.contains('node-filtered'), false);
+
+  hidden = new Set(['a']);
+  filtered.entry.render({graph: true, selection: true, interaction: true});
+  const nodeA = filtered.entry.controller.mountedNodes().get('a');
+  assert.equal(nodeA.classList.contains('node-filtered'), true, '命中的卡片带 node-filtered');
+  for (const [id, element] of filtered.entry.controller.mountedNodes()) {
+    if (id !== 'a') assert.equal(element.classList.contains('node-filtered'), false, '未命中的不受影响');
+  }
+
+  hidden = new Set();
+  filtered.entry.render({graph: true, selection: true, interaction: true});
+  assert.equal(filtered.entry.controller.mountedNodes().get('a').classList.contains('node-filtered'), false, '筛选清掉后 class 也撤掉');
+});
+
+test('自动排列预览只画虚影：确认前不写文档、取消后虚影消失', () => {
+  const h = harness({measurement: {read: () => ({width: 1200, height: 800, left: 0, top: 0})}});
+  h.entry.render({full: true});
+  const overlays = () => h.entry.controller.getLayer().overlays;
+  const previewBoxes = () => overlays().children
+    .filter((child) => child.attrs.class === 'arrange-preview')
+    .flatMap((group) => group.children.filter((child) => child.attrs.class === 'arrange-preview-box'));
+
+  const before = JSON.stringify(h.state.raw._layout);
+  h.state.arrangePreview = {scope: 'all', nodes: {root: {x: 0, y: 0}, a: {x: 0, y: 400}}};
+  h.entry.render({interaction: true});
+  assert.equal(previewBoxes().length, 2, '每个待排列卡片一个虚影框');
+  assert.deepEqual(previewBoxes()[0].attrs, {class: 'arrange-preview-box', x: 0, y: 0, width: 260, height: 96, rx: 5});
+  assert.equal(JSON.stringify(h.state.raw._layout), before, '预览不写文档');
+
+  h.state.arrangePreview = null;
+  h.entry.render({interaction: true});
+  assert.equal(previewBoxes().length, 0, '取消后虚影消失');
+});
+
+test('视口真的变了才请求「稍后记录画布位置」，选中/交互重绘不请求', () => {
+  let records = 0;
+  const tracked = harness({
+    measurement: {read: () => ({width: 1200, height: 800, left: 0, top: 0})},
+    entryDeps: {recordViewportSoon: () => { records += 1; }},
+  });
+  tracked.entry.render({full: true});            // 首帧 = 1
+  tracked.entry.render({viewport: true});        // 视口没变：不再耗一个定时器
+  assert.equal(records, 1);
+  tracked.state.panX = 300;
+  tracked.entry.render({viewport: true});        // 平移 = 2
+  tracked.entry.render({viewport: true});        // 同一个位置：不重复请求
+  assert.equal(records, 2);
+  tracked.entry.render({selection: true});       // 只改选中：与视口无关，不再请求
+  assert.equal(records, 2);
+});
+
+test('定位后节点短暂闪烁：立刻高亮、1.4 秒后自动消退', (t) => {
+  // flashNode 走 window.setTimeout（画布里就是浏览器）；这里补一个最小 window 与假计时器。
+  const originalWindow = global.window;
+  t.mock.timers.enable({apis: ['setTimeout']});
+  global.window = {setTimeout: (...args) => setTimeout(...args), clearTimeout: (id) => clearTimeout(id)};
+  try {
+    const h = harness({measurement: {read: () => ({width: 1200, height: 800, left: 0, top: 0})}});
+    h.entry.render({full: true});
+    h.entry.focusNode('a');
+    const element = h.entry.controller.mountedNodes().get('a');
+    assert.equal(element.classList.contains('node-flash'), true, '定位后节点立刻闪烁');
+    assert.equal(h.state.searchTargetId, 'a', '定位目标记进状态（小地图据此标记）');
+    t.mock.timers.tick(1400);
+    assert.equal(element.classList.contains('node-flash'), false, '1.4 秒后自动消退');
+
+    // 参数端点闪烁：按 data-param 找到那一行再加 class（DOM 里没有该行时安全跳过）。
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/render/render-entry.ts'), 'utf8');
+    assert.match(source, /\[data-param="\$\{CSS\.escape\(param\)\}"\]/, '参数端点按 data-param 精确定位');
+    assert.match(source, /row\.classList\.add\('param-row-flash'\)/);
+    assert.match(source, /element\.classList\.remove\('node-flash'\)/);
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public/legacy/workflow-editor.css'), 'utf8');
+    assert.match(css, /\.node\.node-flash \.node-box \{/);
+    assert.match(css, /\.param-row-flash \{/);
+  } finally {
+    if (originalWindow === undefined) delete global.window; else global.window = originalWindow;
+  }
+});
+
+test('搜索定位与结构树定位共用同一条闪烁路径', () => {
+  const toolbar = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/toolbar.ts'), 'utf8');
+  // 搜索命中后 focusNode → render-entry 的 focusNode 会闪烁。
+  assert.match(toolbar, /focusNode\(target\.id\)/);
+  const renderEntry = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/render/render-entry.ts'), 'utf8');
+  const focusFn = renderEntry.slice(renderEntry.indexOf('function focusNode('), renderEntry.indexOf('function focusNodeDetail('));
+  assert.match(focusFn, /flashNode\(id, param\)/, '搜索/结构树定位都会闪烁');
+});
+

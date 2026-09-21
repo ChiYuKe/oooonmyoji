@@ -106,6 +106,8 @@ export interface NodeRenderDeps {
   runLabels: Record<string, string>;
   /** 折叠组卡的状态来自真实成员节点，不使用合成组 id 查询运行表。 */
   nodeGroupRunSummary?(groupId: string): NodeGroupRunSummary | null;
+  /** 该节点位置是否已锁定：卡片显示一把小锁，拖动与自动排列都跳过它。 */
+  isNodeLocked?(nodeId: string): boolean;
   nodeWidth: number;
   baseHeight: number;
   portRadius: number;
@@ -150,6 +152,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     variablePinX, preview, taskOutputPortY, startReferenceConnection, nodeReferencePortMenuItems, nodeGroupVariableMenuItems, referenceDisplayNameOf,
     nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection, nodeGroupRunSummary,
   } = deps;
+  const isNodeLocked = deps.isNodeLocked ?? (() => false);
   const rowHeightOf = nodeRowHeight ?? (() => runVariableHeight);
   const referencePortY = taskOutputPortY ?? 16;
   const referenceLabel = referenceDisplayNameOf ?? ((ref: unknown) => String(ref || ''));
@@ -405,6 +408,9 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     // 校验错误：节点级错误把卡片标红，参数级错误落到具体那一行。
     const issueInfo = issuesOf(node);
     if (issueInfo && issueInfo.node.length) classes.push('node-invalid');
+    // 锁定位置：卡片样式与角标都要标出来（拖动与自动排列都会跳过它）。
+    const locked = Boolean(isNodeLocked?.(node.id));
+    if (locked) classes.push('node-locked');
     const group = svgEl('g', { class: classes.join(' '), transform: `translate(${pos.x},${pos.y})`, 'data-id': node.id }, layer);
     group.dataset.id = node.id;
     const body = svgEl('rect', { class: 'node-box card-body', width: nodeWidth, height, rx: 5 }, group);
@@ -427,10 +433,16 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: node.name || node.id, width: nodeWidth - (showRowToggle ? 71 : 51), size: 12 });
     nodeCards.text(group, { className: 'node-type card-kicker', x: contentX, y: 47, value: subRef ? '子工作流' : typeNames[node.type] || node.type, width: 130, size: 10 });
     const nodeErrorText = issueInfo && issueInfo.node.length ? issuesText(issueInfo.node) : '';
-    svgEl('title', {}, group).textContent = `${node.name || node.id}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[run.status] || run.status}${run.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}`;
+    svgEl('title', {}, group).textContent = `${node.name || node.id}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[run.status] || run.status}${run.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
     if (issueInfo && issueInfo.node.length) {
       const dot = svgEl('circle', { class: 'node-error-dot', cx: nodeWidth - 8, cy: 8, r: 4 }, group);
       dot.style.pointerEvents = 'none';
+    }
+    // 锁定角标：画在标题带右上角，避开错误点（错误时小锁左移一点）。
+    if (locked) {
+      const badgeX = issueInfo && issueInfo.node.length ? nodeWidth - 38 : nodeWidth - 22;
+      svgEl('rect', { class: 'node-locked-badge', x: badgeX, y: 6, width: 14, height: 12, rx: 3 }, group);
+      svgEl('text', { class: 'node-locked-badge-glyph', x: badgeX + 7, y: 15, 'text-anchor': 'middle' }, group).textContent = '锁';
     }
     if (showRowToggle && rows) {
       const caret = svgEl('text', {

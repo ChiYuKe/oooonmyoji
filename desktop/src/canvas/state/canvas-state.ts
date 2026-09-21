@@ -18,6 +18,19 @@ export interface CanvasNodeSearch {
   index: number;
 }
 
+/** 视口快照：画布位置前进/后退的最小单位（平移 + 缩放）。 */
+export interface CanvasViewportSnapshot {
+  panX: number;
+  panY: number;
+  zoom: number;
+}
+
+/** 自动排列预览：确认前只画虚影，不写文档、不进历史。 */
+export interface CanvasArrangePreview {
+  scope: string;
+  nodes: Record<string, { x: number; y: number }>;
+}
+
 export interface CanvasState {
   raw: Record<string, any> | null;
   catalog: any[];
@@ -39,6 +52,16 @@ export interface CanvasState {
   zoom: number;
   panX: number;
   panY: number;
+  /** 画布位置历史：平移/缩放/定位后记录，前进/后退在快照之间移动。 */
+  viewportHistory: CanvasViewportSnapshot[];
+  viewportHistoryIndex: number;
+  /** 临时隐藏筛选：命中的运行状态 / 节点类型（null 表示该维度不过滤）。 */
+  filterStatus: string[] | null;
+  filterTypes: string[] | null;
+  /** 最近一次定位/搜索的目标节点：小地图上单独标出来。 */
+  searchTargetId: string;
+  /** 排列预览（确认前不写文档）。 */
+  arrangePreview: CanvasArrangePreview | null;
   drag: any;
   connect: any;
   variableConnect: any;
@@ -95,6 +118,12 @@ export function createCanvasState(): CanvasState {
     zoom: 1,
     panX: 80,
     panY: 48,
+    viewportHistory: [],
+    viewportHistoryIndex: -1,
+    filterStatus: null,
+    filterTypes: null,
+    searchTargetId: '',
+    arrangePreview: null,
     drag: null,
     connect: null,
     variableConnect: null,

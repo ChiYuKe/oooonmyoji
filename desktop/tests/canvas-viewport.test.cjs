@@ -26,6 +26,9 @@ function harness(raw, options = {}) {
     nodeVariablePins: options.nodeVariablePins,
     // 组内被边界行代表的变量（组内不画的卡片）：组内排列不得碰它们。
     groupRepresentedRefs: options.groupRepresentedRefs,
+    // 锁定的卡片自动排列时保持原位；「当前组」由调用方给出（进组或选中组卡）。
+    isLocked: options.isLocked,
+    currentNodeGroupId: options.currentNodeGroupId,
     wrap,
     minimap: () => options.minimap || null,
     render: () => { calls.rendered += 1; },
@@ -352,4 +355,111 @@ test('fitView 为小地图预留底部空间并居中内容', () => {
 test('bezier 输出带最小弯曲量的三次曲线', () => {
   const h = harness(tree());
   assert.equal(h.viewport.bezier(0, 0, 100, 20), 'M 0 0 C 0 48, 100 -28, 100 20');
+});
+
+// —— 阶段 5：自动排列范围、锁定位置、排列预览、画布位置前进/后退 ——
+
+test('自动排列范围=选中：只动选中的卡片，并按选区左上角为基准', () => {
+  const raw = tree();
+  raw._layout = {root: {x: 1000, y: 500}, seq: {x: 1000, y: 800}, a: {x: 900, y: 1100}, b: {x: 1300, y: 1100}};
+  const h = harness(raw);
+  h.state.selected = new Set(['a', 'b']);
+  h.viewport.autoLayout(true, 'selected');
+  // 基准 = 选区包围盒左上角 (900, 1100)；两张叶子横向排开。
+  assert.deepEqual(h.state.raw._layout.a, {x: 900, y: 1100});
+  assert.deepEqual(h.state.raw._layout.b, {x: 1232, y: 1100});
+  // 范围外的卡片一个都不动。
+  assert.deepEqual(h.state.raw._layout.root, {x: 1000, y: 500});
+  assert.deepEqual(h.state.raw._layout.seq, {x: 1000, y: 800});
+});
+
+test('自动排列范围=当前组：只排组成员，组外保持原位', () => {
+  const raw = {
+    root: 'root',
+    nodes: [
+      {id: 'root', type: 'root', children: ['g1', 'g2']},
+      {id: 'g1', type: 'task', params: {}},
+      {id: 'g2', type: 'task', params: {}},
+    ],
+    _layout: {root: {x: 0, y: 0}, g1: {x: 900, y: 700}, g2: {x: 1500, y: 700}},
+    _nodeGroups: [{id: 'grp', name: '组', nodeIds: ['g1'], pins: [], pinPolicy: 'explicit-v1'}],
+  };
+  const h = harness(raw, {currentNodeGroupId: () => 'grp'});
+  h.viewport.autoLayout(true, 'group');
+  // 组里只有 g1：排到组包围盒左上角（原位）。
+  assert.deepEqual(h.state.raw._layout.g1, {x: 900, y: 700});
+  assert.deepEqual(h.state.raw._layout.g2, {x: 1500, y: 700}, '组外卡片不动');
+  assert.deepEqual(h.state.raw._layout.root, {x: 0, y: 0});
+});
+
+test('自动排列：锁定的卡片保持原位，只作为父级居中的锚点', () => {
+  const raw = tree();
+  raw._layout = {root: {x: 500, y: 300}, seq: {x: 500, y: 100}, a: {x: 900, y: 900}, b: {x: 1300, y: 900}};
+  raw._layoutLocks = ['a'];
+  const h = harness(raw, {isLocked: (id) => id === 'a'});
+  h.viewport.autoLayout(false);
+  assert.deepEqual(h.state.raw._layout.a, {x: 900, y: 900}, '锁定的卡片位置不动');
+  // 未锁的 b 排到第一个叶子位（a 锁定时不占叶子槽，父级用 a 的当前横坐标居中）。
+  assert.equal(h.state.raw._layout.b.y, 416);
+  assert.equal(typeof h.state.raw._layout.b.x, 'number');
+});
+
+test('autoLayoutPreview 只算不写：不产生历史也不改文档', () => {
+  const raw = tree();
+  raw._layout = {root: {x: 0, y: 0}};
+  const h = harness(raw);
+  const positions = h.viewport.autoLayoutPreview('all');
+  assert.equal(h.calls.mutated, 0, '预览不进历史');
+  assert.deepEqual(raw._layout, {root: {x: 0, y: 0}}, '预览不碰文档');
+  assert.deepEqual(Object.keys(positions).sort(), ['a', 'b', 'root', 'seq']);
+  assert.deepEqual(positions.root, {x: 166, y: 0});
+});
+
+test('applyLayoutPositions 写入预览位置：一次写入、卡片跟随', () => {
+  const raw = tree();
+  const h = harness(raw);
+  const positions = h.viewport.autoLayoutPreview('all');
+  h.viewport.applyLayoutPositions(positions);
+  assert.deepEqual(h.state.raw._layout.a, {x: 0, y: 416});
+  assert.deepEqual(h.state.raw._layout.root, {x: 166, y: 0});
+});
+
+test('画布位置后退/前进：在快照之间移动，边缘处返回 false', () => {
+  const h = harness(tree());
+  h.state.panX = 80; h.state.panY = 48; h.state.zoom = 1;
+  h.viewport.recordViewport();                       // 快照 0
+  h.state.panX = 200; h.state.panY = 120; h.state.zoom = 1.5;
+  h.viewport.recordViewport();                       // 快照 1
+  assert.deepEqual(h.viewport.viewportHistoryState(), {canBack: true, canForward: false, length: 2});
+
+  assert.equal(h.viewport.viewportBack(), true);
+  assert.equal(h.state.panX, 80);
+  assert.equal(h.state.panY, 48);
+  assert.equal(h.state.zoom, 1);
+  assert.deepEqual(h.viewport.viewportHistoryState(), {canBack: false, canForward: true, length: 2});
+
+  assert.equal(h.viewport.viewportForward(), true);
+  assert.equal(h.state.panX, 200);
+  assert.equal(h.state.zoom, 1.5);
+  assert.equal(h.viewport.viewportForward(), false, '已经在最新位置');
+
+  h.viewport.viewportBack();
+  assert.equal(h.viewport.viewportBack(), false, '已经在最早位置');
+});
+
+test('画布位置历史：重复快照不重复入栈，中间操作会丢弃「未来」分支', () => {
+  const h = harness(tree());
+  h.viewport.recordViewport();
+  h.viewport.recordViewport();
+  assert.equal(h.viewport.viewportHistoryState().length, 1, '相同快照只留一条');
+
+  h.state.panX = 300;
+  h.viewport.recordViewport();
+  h.viewport.viewportBack();
+  assert.equal(h.viewport.viewportHistoryState().canForward, true);
+  // 后退之后再产生新位置：前进分支被丢弃。
+  h.state.panX = 500;
+  h.viewport.recordViewport();
+  assert.equal(h.viewport.viewportHistoryState().canForward, false);
+  assert.equal(h.viewport.viewportHistoryState().length, 2);
 });

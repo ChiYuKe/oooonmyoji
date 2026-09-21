@@ -64,6 +64,10 @@ export interface RenderEntryDeps {
   afterRender?(): void;
   /** 该节点引用了哪些节点输出。 */
   referenceSourceIds?(node: any): string[];
+  /** 视口变化后延迟记录一次画布位置历史（前进/后退用）。 */
+  recordViewportSoon?(): void;
+  /** 该节点是否被「按状态/类型临时隐藏」筛掉。 */
+  isNodeFiltered?(node: any): boolean;
   /** 节点内容签名（缺省用节点 JSON + 交互状态）。 */
   nodeSignature?(id: string): string;
   /** 该节点的校验错误（错误标记变化也要重建卡片）。 */
@@ -446,9 +450,70 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     }
   }
 
+  /**
+   * 按状态/类型临时隐藏：只增删 class，不重建卡片与连线。
+   *
+   * 卡片、结构连线组都带 `data-id` / `data-parent` / `data-child`，命中集合一变就地切换
+   * `.node-filtered` / `.edge-filtered`；筛选是视图层的事，绝不写文档、也不进历史。
+   */
+  function filteredIds(): Set<string> {
+    const ids = new Set<string>();
+    if (!deps.isNodeFiltered) return ids;
+    for (const node of nodes()) {
+      if (deps.isNodeFiltered(node)) ids.add(String(node.id));
+    }
+    return ids;
+  }
+
+  /** 上一帧是否有命中项：没有筛选、上一帧也没有时，整段遍历直接跳过。 */
+  let filterWasActive = false;
+  function applyNodeFilter(): void {
+    const filtered = filteredIds();
+    const touched = filtered.size > 0 || filterWasActive;
+    filterWasActive = filtered.size > 0;
+    if (!touched) return;
+    for (const [id, element] of controller.mountedNodes()) {
+      if (!element || typeof element.classList !== 'object' || typeof element.classList.toggle !== 'function') continue;
+      element.classList.toggle('node-filtered', filtered.has(String(id)));
+    }
+    const wires = controller.getLayer().wires;
+    const children = wires && Array.isArray(wires.children) ? wires.children : [];
+    for (const group of children) {
+      const dataset = group && group.dataset;
+      if (!dataset) continue;
+      const hit = filtered.has(String(dataset.parent || '')) || filtered.has(String(dataset.child || ''));
+      if (typeof group.classList === 'object' && typeof group.classList.toggle === 'function') {
+        group.classList.toggle('edge-filtered', hit);
+      }
+    }
+  }
+
+  /** 排列预览的虚影：只画一层虚线框，确认后才真正写文档。 */
+  let arrangePreviewLayer: any = null;
+  /** 上一次已经请求记录过的视口（pan/zoom）：不变就不再排定时器。 */
+  let lastViewportKey = '';
+  function renderArrangePreview(): void {
+    const overlays = controller.getLayer().overlays;
+    const preview = state.arrangePreview;
+    if (!preview || !preview.nodes || !Object.keys(preview.nodes).length) {
+      if (arrangePreviewLayer && typeof arrangePreviewLayer.remove === 'function') arrangePreviewLayer.remove();
+      arrangePreviewLayer = null;
+      return;
+    }
+    if (arrangePreviewLayer && typeof arrangePreviewLayer.remove === 'function') arrangePreviewLayer.remove();
+    arrangePreviewLayer = svgEl('g', { class: 'arrange-preview' }, overlays);
+    for (const [id, pos] of Object.entries(preview.nodes) as Array<[string, { x: number; y: number }]>) {
+      const node = nodeById(id);
+      if (!node) continue;
+      svgEl('rect', {
+        class: 'arrange-preview-box',
+        x: pos.x, y: pos.y, width: NODE_W, height: nodeHeight(node), rx: 5,
+      }, arrangePreviewLayer);
+    }
+  }
+
   /** 一次重绘：控制器负责节点/卡片/连线；这里补它不管的世界变换、浮层与面板。 */
-  function render(flags: RenderFlags = {}): void {
-    if (!state.raw) return;
+  function render(flags: RenderFlags = {}): void {    if (!state.raw) return;
     const full = Boolean(flags.full);
     const firstFrame = !panelsSeen;
     const scope: RenderFlags = full
@@ -483,6 +548,17 @@ export function createRenderEntry(deps: RenderEntryDeps) {
       for (const id of nodeElements.keys()) patchNodeState(id);
     }
     renderMarquee();
+    renderArrangePreview();
+    // 临时隐藏的筛选：卡片与结构连线只切 class（不重建、不写文档）。
+    if (scope.graph || scope.full || scope.selection || scope.interaction || firstFrame) applyNodeFilter();
+    // 画布位置历史：只有平移/缩放真的变了才请求记录（避免每次图形重绘都排一个定时器）。
+    if (scope.viewport || scope.graph || full || firstFrame) {
+      const viewportKey = `${state.panX},${state.panY},${state.zoom}`;
+      if (viewportKey !== lastViewportKey) {
+        lastViewportKey = viewportKey;
+        deps.recordViewportSoon?.();
+      }
+    }
 
     $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
     if (scope.panels || full || firstFrame) {
@@ -537,7 +613,9 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     const rect = measurement.read();
     state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom;
     state.panY = rect.height / 2 - (pos.y + nodeHeight(node) / 2) * state.zoom;
-    render({ viewport: true, selection: true, panels: true });
+    // 小地图据此标出「刚刚定位到的卡片」。
+    state.searchTargetId = String(id);
+    render({ viewport: true, selection: true, panels: true, minimap: true });
     flashNode(id, param);
   }
 
@@ -551,7 +629,8 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom;
     state.panY = rect.height / 2 - (pos.y + nodeHeight(node) / 2) * state.zoom;
     detailLevel = resolveDetailLevel(state.zoom, null);
-    render({ viewport: true, selection: true, panels: true });
+    state.searchTargetId = String(id);
+    render({ viewport: true, selection: true, panels: true, minimap: true });
   }
 
   const entry: CanvasRenderEntry = {

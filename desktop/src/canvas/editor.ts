@@ -37,6 +37,7 @@ import { createInspectorPanel, type InspectorRenderers } from './inspector/panel
 import { createParameterControls } from './inspector/parameter-controls';
 import { createVariableInspectors } from './inspector/variable-inspectors';
 import { createCanvasWorkflowModel } from './model/canvas-workflow-model';
+import { isNodeLocked, toggleNodeLock } from './model/layout-locks';
 import { createNodeGroups, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from './model/node-groups';
 import { issuesByNode, issueTitle, nodeIssues } from './model/card-issues';
 import { createCanvasReferences } from './model/references';
@@ -301,6 +302,113 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (!refs.size) return documentVariableCardList();
     return documentVariableCardList().filter((card: any) => !refs.has(`${card.scope}.${card.name}`));
   };
+  /**
+   * 「当前组」：已经进入的组优先；没进组时退化为选中的那张组卡所代表的组
+   * （组卡的 id 就是组 id）。两处都不成立时返回空串，调用方给出提示。
+   */
+  const currentNodeGroupId = (): string => {
+    const entered = currentGroup();
+    if (entered && entered.id) return String(entered.id);
+    if (state.selected.size === 1) {
+      const node: any = viewNodeById([...state.selected][0]);
+      if (node && node._nodeGroup === true) return String(node.id);
+    }
+    return '';
+  };
+
+  /**
+   * 按状态/类型临时隐藏（视图层，不写文档、不进历史）。
+   *
+   * 两个维度各自独立，命中的都算隐藏：`filterStatus` 收运行状态（running / failed …），
+   * `filterTypes` 收节点类型（task / selector …）。空数组与 null 都表示该维度不过滤。
+   */
+  const nodeFilterActive = (): boolean => Boolean(
+    (state.filterStatus && state.filterStatus.length) || (state.filterTypes && state.filterTypes.length),
+  );
+  const nodeRunStatusOf = (node: any): string => {
+    if (!node) return '';
+    if (node._nodeGroup) return String(nodeGroupRunSummary(String(node._nodeGroupId || node.id))?.status || '').toLowerCase();
+    const entry = state.run && typeof state.run.get === 'function' ? state.run.get(String(node.id)) : undefined;
+    return String(entry?.status || '').toLowerCase();
+  };
+  const isNodeFiltered = (node: any): boolean => {
+    if (!node || !nodeFilterActive()) return false;
+    const statuses = state.filterStatus || [];
+    const types = state.filterTypes || [];
+    if (statuses.length && statuses.includes(nodeRunStatusOf(node))) return true;
+    return Boolean(types.length && types.includes(String(node.type || '')));
+  };
+  /** 切换筛选时清掉不再存在的状态/类型，避免「筛了个空的」。 */
+  const pruneNodeFilter = (): void => {
+    if (state.filterStatus && state.filterStatus.length) {
+      const live = new Set(viewNodes().map((node: any) => nodeRunStatusOf(node)).filter(Boolean));
+      const kept = state.filterStatus.filter((status: string) => live.has(status));
+      state.filterStatus = kept.length ? kept : null;
+    }
+    if (state.filterTypes && state.filterTypes.length) {
+      const live = new Set(viewNodes().map((node: any) => String(node.type || '')));
+      const kept = state.filterTypes.filter((type: string) => live.has(type));
+      state.filterTypes = kept.length ? kept : null;
+    }
+  };
+  const toggleNodeFilterValue = (kind: 'status' | 'type', value: string): void => {
+    const key = kind === 'status' ? 'filterStatus' : 'filterTypes';
+    const current: string[] | null = state[key] || null;
+    const list = current ? current.slice() : [];
+    const index = list.indexOf(value);
+    if (index >= 0) list.splice(index, 1); else list.push(value);
+    state[key] = list.length ? list : null;
+    render({ graph: true, minimap: true, panels: true });
+  };
+  const clearNodeFilter = (): void => {
+    state.filterStatus = null;
+    state.filterTypes = null;
+    render({ graph: true, minimap: true, panels: true });
+  };
+
+  /** 锁定/解锁节点位置：文档元数据，走历史可撤销。 */
+  const toggleNodeLockCommand = (id?: string): void => {
+    const target = String(id || (state.selected.size === 1 ? [...state.selected][0] : ''));
+    if (!target) { toast('请先选中要锁定位置的卡片', true); return; }
+    const node: any = viewNodeById(target);
+    if (!node) return;
+    let locked = false;
+    mutate(() => { locked = toggleNodeLock(state.raw, target); });
+    // 锁定状态进了卡片内容签名，走图形重绘让角标立刻出现/消失。
+    render({ graph: true, selection: true, panels: true });
+    toast(locked ? `已锁定「${String(node.name || node.id)}」的位置` : `已解锁「${String(node.name || node.id)}」的位置`);
+  };
+
+  /**
+   * 自动排列预览：先算虚影，确认后才写文档（一次 mutate = 一条历史）。
+   * 范围没东西可排时（没选卡片 / 不在组里）给出提示而不是静默重排整张图。
+   */
+  const ARRANGE_SCOPE_LABELS: Record<string, string> = { all: '全部', selected: '选中', group: '当前组' };
+  const previewAutoLayout = (scope: 'all' | 'selected' | 'group'): boolean => {
+    if (scope === 'selected' && state.selected.size === 0) { toast('请先选中要排列的卡片', true); return false; }
+    if (scope === 'group' && !currentNodeGroupId()) { toast('请先进入或选中一个节点组', true); return false; }
+    const positions = autoLayoutPreview(scope);
+    const keys = Object.keys(positions);
+    if (!keys.length) { toast('这个范围里没有可以排列的卡片', true); return false; }
+    state.arrangePreview = { scope, nodes: positions };
+    render({ interaction: true });
+    return true;
+  };
+  const confirmArrangePreview = (): void => {
+    const preview = state.arrangePreview;
+    state.arrangePreview = null;
+    if (!preview) return;
+    const positions = preview.nodes;
+    mutate(() => applyLayoutPositions(positions));
+    render({ full: true });
+    fitView();
+    toast(`已按「${ARRANGE_SCOPE_LABELS[preview.scope] || preview.scope}」排列 ${Object.keys(positions).length} 张卡片`);
+  };
+  const cancelArrangePreview = (): void => {
+    if (!state.arrangePreview) return;
+    state.arrangePreview = null;
+    render({ interaction: true });
+  };
   const viewPosition = (node: any) => {
     // 只有组内两张合成卡（接口卡/变量卡）有投影位置；组卡位置直接存布局。
     if (!isGroupInterfaceNode(node) && !isGroupVariablesNode(node)) return position(node);
@@ -336,11 +444,18 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     // 组内排列跳过被组边界行代表的卡片：与 variableCardList() 的过滤同一个来源，
     // 否则组内根本不画的那张卡会被搬走，用户出组才发现外层布局被改了。
     groupRepresentedRefs: boundaryVariableRefs,
+    // 锁定的卡片自动排列时保持原位（作为父级居中的锚点）。
+    isLocked: (id) => isNodeLocked(state.raw, id),
+    // 「当前组」= 已经进入的组；没进组时退化为选中的那张组卡。
+    currentNodeGroupId: () => currentNodeGroupId(),
     wrap, measurement: wrapMeasurement, minimap: () => $('minimap'), render,
     nodeWidth: NODE_W, baseHeight: BASE_H, runCardWidth: RUN_CARD_W,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
-  const { autoLayout, ensureLayout, bounds, fitView, zoomAt, worldPoint, bezier } = Viewport;
+  const {
+    autoLayout, autoLayoutPreview, applyLayoutPositions, ensureLayout, bounds, fitView, zoomAt, worldPoint, bezier,
+    recordViewportSoon, viewportBack, viewportForward, viewportHistoryState,
+  } = Viewport;
   fitNodeGroupView = fitView;
 
   const Commands = createCanvasCommands({
@@ -409,6 +524,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     renderWith: (flags) => renderPieces?.render(flags),
     // 重连旋钮靠 setPointerCapture 捕获后续事件；没有原生指针标识就不挂这条交互。
     pointerCapture: (event) => (Number.isInteger((event as any).pointerId) ? (event as any).pointerId : null),
+    // 位置锁定的卡片不参与拖拽。
+    isNodeLocked: (id) => isNodeLocked(state.raw, id),
+    toast: (message, error) => toast(message, error),
     nodeWidth: NODE_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
   const { startNodeDrag, onPointerDown, onPointerMove, onPointerUp, contextMenuSuppressedByPan } = Pointer;
@@ -451,6 +569,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   const Minimap = createCanvasMinimap({
     state, $, svgEl, bounds, nodes: viewNodes, position: viewPosition, nodeHeight: viewNodeHeight, instanceRunCards: viewInstanceRunCards, variableCardList,
+    // 小地图标记：运行中/失败的卡片按状态着色，被筛选隐藏的不画。
+    nodeRunStatus: (node) => nodeRunStatusOf(node),
+    isNodeFiltered: (node) => isNodeFiltered(node),
     wrap, measurement: wrapMeasurement,
     nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
@@ -642,6 +763,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     compactValue,
     typeIcons: TYPE_ICON, typeNames: TYPE_NAMES, runLabels: RUN_LABEL,
     nodeGroupRunSummary,
+    // 锁定的卡片显示小锁角标（拖动与自动排列都会跳过它）。
+    isNodeLocked: (id) => isNodeLocked(state.raw, id),
     nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
     runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X, taskOutputPortY: TASK_OUTPUT_PORT_Y, preview: PREVIEW,
   });
@@ -661,10 +784,21 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     // 这里刻意不再注入位置函数：`CanvasWorkflowModel.variableCardPosition(node, index)`
     // 是「把卡片放到某节点某一行旁边」的节点侧算法，用在卡片上会让所有卡片塌到同一个点。
     nodeIssueInfo: (node) => nodeIssueInfo(node),
-    nodeRunStatus: (node) => node?._nodeGroup
-      ? String(nodeGroupRunSummary(String(node._nodeGroupId || node.id))?.status || '')
-      : String(state.run.get(node.id)?.status || ''),
+    nodeRunStatus: (node) => nodeRunStatusOf(node),
     patchNodeRuntime,
+    // 卡片内容签名：默认是节点 JSON；锁定状态存在文档元数据 `_layoutLocks` 里、
+    // 不在节点对象上，不改签名的话切换锁定时卡片不会重建，小锁角标就画不出来。
+    nodeSignature: (id) => {
+      const node: any = viewNodeById(id);
+      if (!node) return '';
+      let json = '';
+      try { json = JSON.stringify(node); } catch { json = String(node); }
+      return isNodeLocked(state.raw, id) ? `${json}:locked` : json;
+    },
+    // 画布位置历史：视口变化后延迟记录一次（平移/缩放/定位共用）。
+    recordViewportSoon: () => recordViewportSoon(),
+    // 按状态/类型临时隐藏：卡片与结构连线只切 class，不重建。
+    isNodeFiltered: (node) => isNodeFiltered(node),
     // 校验错误的整份指纹：一次遍历把所有节点的错误数折叠成一个字符串，
     // 避免每张卡片各查一次（500 节点首帧的主要开销就在这里）。
     issueFingerprint: () => {
@@ -743,6 +877,15 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     renameVariable: VariableInspectors.renameVariable,
     state, mutate, nodes, nodeById, selectionNodeById: (id) => viewNodeById(id) || nodeById(id), undo, redo, fitView, autoLayout, copySelection, cutSelection,
     pasteClipboard, deleteSelection, addNode, render: renderGraph, focusNode, searchNodeByName, exportFullCanvasImage,
+    // 阶段 5：排列预览、锁定位置、画布位置前进/后退、按状态/类型临时隐藏。
+    previewArrange: (scope) => previewAutoLayout(scope),
+    confirmArrangePreview: () => confirmArrangePreview(),
+    cancelArrangePreview: () => cancelArrangePreview(),
+    toggleNodeLock: (id) => toggleNodeLockCommand(id),
+    viewportBack: () => viewportBack(),
+    viewportForward: () => viewportForward(),
+    toggleNodeFilter: (kind, value) => toggleNodeFilterValue(kind, value),
+    clearNodeFilter: () => clearNodeFilter(),
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
     deleteVariable,
     showVariableReferences: VariableInspectors.showVariableReferences,
@@ -798,7 +941,29 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (state.clipboard && state.clipboard.nodes.length > 0) {
       items.push({ label: `粘贴 (Ctrl+V) · ${state.clipboard.nodes.length} 个节点`, run: () => pasteClipboard(point) });
     }
-    items.push('separator', { label: '自动排列', run: () => { autoLayout(); fitView(); } });
+    items.push('separator', { label: '自动排列（预览）· 全部', run: () => previewAutoLayout('all') });
+    items.push({ label: '自动排列（预览）· 选中', run: () => previewAutoLayout('selected') });
+    items.push({ label: '自动排列（预览）· 当前组', run: () => previewAutoLayout('group') });
+    items.push('separator');
+    // 锁定位置：单选节点时直接开关；多选时逐个锁定（保持选择不串味）。
+    const lockedCount = [...state.selected].filter((id) => isNodeLocked(state.raw, id)).length;
+    items.push({
+      label: state.selected.size > 1
+        ? (lockedCount === state.selected.size ? '解锁所选卡片位置' : '锁定所选卡片位置')
+        : (state.selected.size === 1 && isNodeLocked(state.raw, [...state.selected][0]) ? '解锁位置' : '锁定位置'),
+      run: () => {
+        const targets = [...state.selected];
+        if (!targets.length) { toast('请先选中要锁定位置的卡片', true); return; }
+        const unlocking = targets.every((id) => isNodeLocked(state.raw, id));
+        mutate(() => { for (const id of targets) if (isNodeLocked(state.raw, id) === unlocking) toggleNodeLock(state.raw, id); });
+        render({ graph: true, selection: true, panels: true });
+        toast(unlocking ? `已解锁 ${targets.length} 张卡片的位置` : `已锁定 ${targets.length} 张卡片的位置`);
+      },
+    });
+    items.push('separator');
+    items.push({ label: '画布后退', run: () => { if (!viewportBack()) toast('已经是最早的位置'); } });
+    items.push({ label: '画布前进', run: () => { if (!viewportForward()) toast('已经是最新的位置'); } });
+    if (nodeFilterActive()) items.push({ label: '清除按状态/类型隐藏', run: () => clearNodeFilter() });
     showMenu(event.clientX, event.clientY, items);
   });
   window.addEventListener('mousemove', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
@@ -855,6 +1020,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (id === 'template-check') overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) closeTemplateCheck(); });
   }
   bindToolbar();
+  bindViewportTools();
   const benchmark: CanvasBenchmarkApi = {
     stats: () => renderPieces?.stats() ?? null,
     domCounts: () => {
@@ -1038,7 +1204,96 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     // 但平移/缩放等高频路径必须显式传标记，否则会触发多余的连线重建。
     const next: RenderFlags = flags ?? { graph: true, minimap: true, panels: true, selection: true };
     renderPieces?.render(next);
+    updateArrangePreviewBar();
+    updateViewportHistoryButtons();
   }
+
+  /** 排列预览条：只在有预览时出现，文案给出范围与卡片数。 */
+  function updateArrangePreviewBar(): void {
+    const bar = $('arrange-preview-bar');
+    const text = $('arrange-preview-text');
+    const preview = state.arrangePreview;
+    if (!bar) return;
+    bar.classList.toggle('hidden', !preview);
+    if (preview && text) {
+      const label = (preview.scope === 'selected' ? '选中' : preview.scope === 'group' ? '当前组' : '全部');
+      text.textContent = `排列预览 · ${label} · ${Object.keys(preview.nodes).length} 张卡片（尚未应用）`;
+    }
+  }
+
+  /** 画布前进/后退按钮：到头时置灰，位置历史一眼可见。 */
+  function updateViewportHistoryButtons(): void {
+    const back = $('btn-viewport-back') as HTMLButtonElement | null;
+    const forward = $('btn-viewport-forward') as HTMLButtonElement | null;
+    if (!back && !forward) return;
+    const history = viewportHistoryState();
+    if (back) {
+      back.disabled = !history.canBack;
+      back.classList.toggle('is-disabled', !history.canBack);
+    }
+    if (forward) {
+      forward.disabled = !history.canForward;
+      forward.classList.toggle('is-disabled', !history.canForward);
+    }
+  }
+
+  /** 视口工具条：自动排列（范围菜单）、临时隐藏（状态/类型菜单）、画布前进/后退。 */
+  function bindViewportTools(): void {
+    const back = $('btn-viewport-back');
+    if (back) back.addEventListener('click', () => { if (!viewportBack()) toast('已经是最早的位置'); });
+    const forward = $('btn-viewport-forward');
+    if (forward) forward.addEventListener('click', () => { if (!viewportForward()) toast('已经是最新的位置'); });
+    const arrange = $('btn-arrange');
+    if (arrange) arrange.addEventListener('click', () => {
+      const rect = arrange.getBoundingClientRect();
+      showMenu(rect.left, rect.bottom + 4, [
+        { label: '排列全部（预览）', run: () => previewAutoLayout('all') },
+        { label: '排列选中（预览）', run: () => previewAutoLayout('selected') },
+        { label: '排列当前组（预览）', run: () => previewAutoLayout('group') },
+      ]);
+    });
+    const filter = $('btn-filter');
+    if (filter) filter.addEventListener('click', () => {
+      const rect = filter.getBoundingClientRect();
+      // 打开筛选菜单时先清掉已经不在画布上的状态/类型，避免「筛了个空的」。
+      pruneNodeFilter();
+      const statuses: string[] = [];
+      const types: string[] = [];
+      for (const node of viewNodes()) {
+        const status = nodeRunStatusOf(node);
+        if (status && !statuses.includes(status)) statuses.push(status);
+        const type = String(node.type || '');
+        if (type && !types.includes(type)) types.push(type);
+      }
+      const activeStatus = state.filterStatus || [];
+      const activeTypes = state.filterTypes || [];
+      const mark = (list: string[], value: string): string => (list.includes(value) ? '✓ ' : '　');
+      const items: MenuEntry[] = [];
+      if (statuses.length) {
+        items.push({ label: '按状态隐藏', run: () => {} });
+        for (const status of statuses) {
+          items.push({ label: `${mark(activeStatus, status)}${(RUN_LABEL as Record<string, string>)[status] || status}`, run: () => toggleNodeFilterValue('status', status) });
+        }
+      }
+      if (types.length) {
+        if (items.length) items.push('separator');
+        items.push({ label: '按类型隐藏', run: () => {} });
+        for (const type of types) {
+          items.push({ label: `${mark(activeTypes, type)}${(TYPE_NAMES as Record<string, string>)[type] || type}`, run: () => toggleNodeFilterValue('type', type) });
+        }
+      }
+      if (nodeFilterActive()) {
+        items.push('separator', { label: '清除全部隐藏', run: () => clearNodeFilter() });
+      }
+      if (!items.length) items.push({ label: '当前画布没有可筛选的卡片', run: () => {} });
+      showMenu(rect.left, rect.bottom + 4, items);
+    });
+    const applyButton = $('btn-arrange-apply');
+    if (applyButton) applyButton.addEventListener('click', () => confirmArrangePreview());
+    const cancelButton = $('btn-arrange-cancel');
+    if (cancelButton) cancelButton.addEventListener('click', () => cancelArrangePreview());
+  }
+
   function focusNode(id: string, param?: string): void {
     renderPieces?.focusNode(id, param);
   }

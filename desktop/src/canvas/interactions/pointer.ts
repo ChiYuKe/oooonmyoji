@@ -60,6 +60,10 @@ export interface PointerDeps {
   setDirty(value?: boolean): void;
   /** 连线重连旋钮的指针捕获；缺省表示该画布不支持从连线旋钮重连。 */
   pointerCapture?(event: PointerEventLike): number | null;
+  /** 该节点位置是否已锁定：锁定的卡片不参与拖拽（只选中）。 */
+  isNodeLocked?(id: string): boolean;
+  /** 提示（锁定卡片被拖动时给出原因）。 */
+  toast?(message: string, error?: boolean): void;
   nodeWidth: number;
   variableCardWidth: number;
   variableCardHeight: number;
@@ -85,6 +89,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     referenceConnectionTargetAt, finishReferenceConnection,
     nodeWidth, variableCardWidth, variableCardHeight,
   } = deps;
+  const isNodeLocked = deps.isNodeLocked ?? (() => false);
 
   // 高频路径（指针移动、滚轮）合并到本帧；没有注入调度器时保持同步重绘。
   const coalesce = deps.coalesce ?? ((flags) => { void flags; render(); });
@@ -108,7 +113,18 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     state.inspector = 'node';
     const point = worldPoint(event);
     const origins: Record<string, PointerPoint> = {};
-    for (const selected of state.selected) origins[selected] = { ...position(nodeById(selected)) };
+    let lockedSkipped = false;
+    for (const selected of state.selected) {
+      // 位置锁定的卡片不参与拖拽：多选时只拖没锁的那几张。
+      if (isNodeLocked(selected)) { lockedSkipped = true; continue; }
+      origins[selected] = { ...position(nodeById(selected)) };
+    }
+    if (!Object.keys(origins).length) {
+      render();
+      if (lockedSkipped) deps.toast?.('这些卡片的位置已锁定（右键可解锁）', true);
+      return;
+    }
+    if (lockedSkipped) deps.toast?.('已跳过位置锁定的卡片', false);
     state.drag = { kind: 'nodes', start: point, origins, before: snapshot(), moved: false };
     render();
   }

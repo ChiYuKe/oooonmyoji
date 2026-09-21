@@ -96,6 +96,24 @@
 :root[data-theme="light"] .mini-node.type-instance-run {
     stroke: #41626f
 }
+:root[data-theme="light"] .mini-node.run-running {
+    fill: #775b18;
+    stroke: #665c41
+}
+:root[data-theme="light"] .mini-node.run-failed {
+    stroke: #785555
+}
+:root[data-theme="light"] .mini-node.run-succeeded {
+    fill: #296d48;
+    stroke: #496255
+}
+:root[data-theme="light"] .mini-node.run-cancelled {
+    fill: #696969;
+    stroke: #494949
+}
+:root[data-theme="light"] .mini-node.mini-search-target {
+    stroke: var(--accent, #256793)
+}
 :root[data-theme="light"] .mini-viewport {
     fill: rgba(47, 101, 131, 0.06);
     stroke: #696969
@@ -320,6 +338,16 @@
 }
 :root[data-theme="light"] .param-row-flash.param-row-hit {
     fill: color-mix(in srgb, var(--accent, #256793) 16%, transparent)
+}
+:root[data-theme="light"] .node-locked-badge {
+    fill: #f9f4e7
+}
+:root[data-theme="light"] .node-locked-badge-glyph {
+    fill: #696969
+}
+:root[data-theme="light"] .arrange-preview-box {
+    fill: color-mix(in srgb, var(--accent, #e3f0f9) 10%, transparent);
+    stroke: var(--accent, #256793)
 }
 :root[data-theme="light"] .node-icon {
     fill: #232323

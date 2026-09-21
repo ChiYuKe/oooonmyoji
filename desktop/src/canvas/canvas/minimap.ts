@@ -38,6 +38,10 @@ export interface MinimapDeps {
   nodeHeight(node: MinimapNode): number;
   instanceRunCards(): MinimapRunCard[];
   variableCardList(): MinimapVariableCard[];
+  /** 该节点当前是否被「按状态/类型临时隐藏」筛掉：隐藏的卡片小地图上也不画。 */
+  isNodeFiltered?(node: MinimapNode): boolean;
+  /** 节点运行状态（running / failed / succeeded …）：小地图上按状态着色。 */
+  nodeRunStatus?(node: MinimapNode): string;
   wrap: HTMLElement;
   /** 视口尺寸测量（缓存读）；缺省按 `wrap` 自行创建。 */
   measurement?: { read(): { width: number; height: number; left: number; top: number } };
@@ -86,13 +90,28 @@ export function createCanvasMinimap(deps: MinimapDeps): CanvasMinimap {
     const parts: string[] = [];
     for (const node of nodes()) {
       const pos = position(node);
-      parts.push(`n${node.id}:${pos.x},${pos.y},${nodeHeight(node)}`);
+      // 状态与筛选也进签名：小地图上的状态着色/隐藏不重建就会一直停在旧画面上。
+      parts.push(`n${node.id}:${pos.x},${pos.y},${nodeHeight(node)},${runStatus(node)},${hidden(node) ? 'h' : ''}`);
     }
     for (const card of instanceRunCards()) parts.push(`r${card.key ?? `${card.x},${card.y}`}:${card.x},${card.y},${card.height}`);
     for (const card of variableCardList()) parts.push(`v${card.id ?? `${card.x},${card.y}`}:${card.x},${card.y}`);
     const box = bounds();
     parts.push(`b${box.minX},${box.minY},${box.maxX},${box.maxY}`);
+    parts.push(`s${state.searchTargetId || ''}`);
     return parts.join('|');
+  }
+
+  /** 运行状态：合成组卡由画布侧给出，这里只负责取值与归一。 */
+  function runStatus(node: MinimapNode): string {
+    const injected = deps.nodeRunStatus?.(node);
+    if (injected) return String(injected).toLowerCase();
+    const run: any = state.run;
+    const entry = run && typeof run.get === 'function' && node.id ? run.get(String(node.id)) : undefined;
+    return String(entry?.status || '').toLowerCase();
+  }
+
+  function hidden(node: MinimapNode): boolean {
+    return Boolean(deps.isNodeFiltered?.(node));
   }
 
   function renderStructure(mini: any): void {
@@ -101,9 +120,15 @@ export function createCanvasMinimap(deps: MinimapDeps): CanvasMinimap {
     mini.setAttribute('viewBox', `${box.minX - pad} ${box.minY - pad} ${Math.max(1, box.maxX - box.minX + pad * 2)} ${Math.max(1, box.maxY - box.minY + pad * 2)}`);
     if (typeof mini.replaceChildren === 'function') mini.replaceChildren();
     else mini.innerHTML = '';
+    const targetId = String(state.searchTargetId || '');
     for (const node of nodes()) {
+      if (hidden(node)) continue;
       const pos = position(node);
-      svgEl('rect', { class: `mini-node type-${node.type}`, x: pos.x, y: pos.y, width: nodeWidth, height: nodeHeight(node) }, mini);
+      const status = runStatus(node);
+      const classes = ['mini-node', `type-${node.type}`];
+      if (status) classes.push(`run-${status}`);
+      if (targetId && String(node.id) === targetId) classes.push('mini-search-target');
+      svgEl('rect', { class: classes.join(' '), x: pos.x, y: pos.y, width: nodeWidth, height: nodeHeight(node) }, mini);
     }
     for (const card of instanceRunCards()) {
       svgEl('rect', { class: 'mini-node type-instance-run', x: card.x, y: card.y, width: runCardWidth, height: card.height }, mini);

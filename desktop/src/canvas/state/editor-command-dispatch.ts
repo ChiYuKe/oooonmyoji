@@ -17,6 +17,19 @@ export interface EditorCommandDispatchDeps {
   redo(): void;
   fitView(): void;
   autoLayout(): void;
+  /** 自动排列预览：范围 = 全部 / 选中 / 当前组；返回是否真的生成了预览。 */
+  previewArrange(scope: 'all' | 'selected' | 'group'): boolean;
+  /** 确认排列预览：一次历史记录写入。 */
+  confirmArrangePreview(): void;
+  /** 取消排列预览：丢弃虚影，不写文档。 */
+  cancelArrangePreview(): void;
+  /** 锁定/解锁节点位置（缺省用当前单选节点）。 */
+  toggleNodeLock(id?: string): void;
+  viewportBack(): boolean;
+  viewportForward(): boolean;
+  /** 按状态/类型临时隐藏的单项开关。 */
+  toggleNodeFilter(kind: 'status' | 'type', value: string): void;
+  clearNodeFilter(): void;
   copySelection(): void;
   cutSelection(): void;
   pasteClipboard(): void;
@@ -58,6 +71,8 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
     deleteVariable, showVariableReferences, requestInspectorRename, renameVariable,
     disconnectVariableReference, disconnectAllVariableReferences, confirmPendingRename, cancelPendingRename,
+    previewArrange, confirmArrangePreview, cancelArrangePreview, toggleNodeLock, viewportBack, viewportForward,
+    toggleNodeFilter, clearNodeFilter,
     VariableSystem,
   } = deps;
   const selectionNodeById = deps.selectionNodeById ?? nodeById;
@@ -127,6 +142,22 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     else if (command === 'addSwitch') addNode('switch');
     else if (command === 'addInstanceParallel') addNode('instance_parallel');
     else if (command === 'autoLayout') { autoLayout(); fitView(); }
+    else if (command === 'previewArrange') {
+      // 自动排列先出预览：范围由载荷给出（全部 / 选中 / 当前组）。
+      const scope = value === 'selected' || value === 'group' ? value : 'all';
+      previewArrange(scope);
+    }
+    else if (command === 'confirmArrangePreview') confirmArrangePreview();
+    else if (command === 'cancelArrangePreview') cancelArrangePreview();
+    else if (command === 'toggleNodeLock') toggleNodeLock(value?.nodeId ?? value);
+    else if (command === 'viewportBack') viewportBack();
+    else if (command === 'viewportForward') viewportForward();
+    else if (command === 'toggleNodeFilter') {
+      const kind = value?.kind === 'type' ? 'type' : 'status';
+      const item = String(value?.value ?? '');
+      if (item) toggleNodeFilter(kind, item);
+    }
+    else if (command === 'clearNodeFilter') clearNodeFilter();
     else if (command === 'fitView') fitView();
     else if (command === 'exportImage') exportFullCanvasImage();
     else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }

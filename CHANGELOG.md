@@ -208,6 +208,43 @@
     侧栏引用徽标、断开的参数与连线映射清理、改名影响范围（确认 / 取消 / 无引用直改）、
     新命令分派（`tests/variable-references-panel.test.cjs`、`variable-references-delete.test.cjs`、
     `variables-panel.test.cjs`、`sidebar-variable-list.test.cjs`、`rename-shortcuts.test.cjs`）。
+- **画布布局与导航补全**（阶段 5）：
+  - **自动排列可选范围**：右键菜单与视口工具条的「⤢」都提供**全部 / 选中 / 当前组**三种范围，
+    局部排列以选区（或当前组）现有包围盒左上角为基准，范围外的卡片一个都不动；
+    「当前组」优先取已经进入的组，没进组时取选中的那张组卡
+    （`canvas/canvas/viewport.ts` 的 `computeLayout(scope)`、`canvas/editor.ts` 的 `previewAutoLayout`）。
+  - **排列前先生成预览**：选范围后画布上出现**虚线虚影**（只画不写文档、不进历史），
+    顶部出现「排列预览 · 范围 · N 张卡片（尚未应用）」确认条，「应用」才把位置写进文档
+    （**一次排列 = 一条历史记录**）、「取消」直接丢弃
+    （`render-entry.ts` 的 `renderArrangePreview`、`canvas.html` 的 `#arrange-preview-bar`、
+    `public/legacy/workflow-editor.css` 的 `.arrange-preview-box`）。
+  - **支持锁定节点位置**：右键「锁定位置 / 解锁位置」（多选可整批）把节点 id 记进文档元数据
+    `_layoutLocks`——锁定的卡片显示一枚小锁角标、**拖不动**（多选拖动自动跳过并提示）、
+    **自动排列保持原位**（只作为父级居中的锚点）；锁跟着文档保存、重开仍在，解锁即整体撤销
+    （`canvas/model/layout-locks.ts`、`canvas/render/node-card.ts`、`canvas/interactions/pointer.ts`、
+    `canvas/canvas/viewport.ts` 的 `isLocked`）。
+  - **搜索结果定位后闪烁**：面板定位、搜索命中与结构树定位共用同一条
+    `focusNode(id, param)`——节点卡片与参数端点高亮 1.4 秒后自动消退（阶段 4 的闪烁机制）。
+  - **小地图标记运行中 / 失败 / 搜索目标**：缩略矩形按运行状态着色（运行中金色、失败红色、
+    已完成绿色、已取消灰色），当前定位/搜索目标额外描一圈强调色；被「临时隐藏」筛掉的卡片
+    在小地图上也不画；状态与目标都进小地图结构签名，变了才重建
+    （`canvas/canvas/minimap.ts`、`workflow-editor.css` 的 `.mini-node.run-*` / `.mini-search-target`）。
+  - **画布位置前进 / 后退**：视口工具条新增 ↩ / ↪（到头自动置灰），右键菜单同样可点；
+    平移、缩放、定位停手 350 ms 后记一个位置快照，最多 60 个，后退之后再操作会丢弃「前进」分支；
+    只有视口真的变了才请求记录，不会给每一帧重绘都排一个定时器
+    （`canvas/canvas/viewport.ts` 的 `recordViewportSoon / viewportBack / viewportForward`）。
+  - **大画布可按状态或类型临时隐藏**：视口工具条「☰」列出当前画布上真实存在的运行状态与节点
+    类型（打勾即隐藏、可多选，另有「清除全部隐藏」）；命中的卡片与经过它的结构连线**只切
+    class**（`node-filtered` / `edge-filtered`）就地隐藏，不重建图层、不写文档、不进历史——
+    是**临时**视图状态，重开后自然恢复；打开菜单时自动清掉已经不在画布上的状态/类型
+    （`canvas/editor.ts` 的 `isNodeFiltered / toggleNodeFilterValue / clearNodeFilter`、
+    `render-entry.ts` 的 `applyNodeFilter`）。
+  - 回归测试：自动排列三种范围（局部基准、组外不动、孤立节点不参与）、锁定位置保持原位、
+    预览只算不写、`applyLayoutPositions` 一次写入、位置历史前进/后退与分支丢弃、锁定读写的
+    脏数据退化与「保存→重开仍在」、小地图状态色 / 搜索目标 / 隐藏跳过、隐藏只切 class、
+    预览虚影的出现与消失、定位闪烁（高亮后 1.4 秒消退）、新命令分派与工具条接线
+    （`tests/canvas-viewport.test.cjs`、`canvas-layout-locks.test.cjs`、`canvas-minimap.test.cjs`、
+    `canvas-render-entry.test.cjs`、`canvas-navigation.test.cjs`）。
 - 卡片值行的编辑态：行内浮层静止时与卡片值框同色（`card-head` / `card-line`），
   聚焦只在值框内侧描一圈同色系高亮，不再换成亮青色的 `card-port` 边框；数组行只
   提亮正在编辑的那一格，不再整行都跟着亮。

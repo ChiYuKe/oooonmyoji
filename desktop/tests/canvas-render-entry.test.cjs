@@ -127,6 +127,21 @@ test('空的节点错误信息不会给全部卡片加粉色错误描边', () =>
   assert(invalid.cards().every((card) => card.attrs.class.includes('node-invalid')));
 });
 
+test('运行事件局部刷新即使 class 未变化，也会继续更新卡片内部进度', () => {
+  let patches = 0;
+  const h = harness({entryDeps: {
+    nodeRunStatus: () => 'running',
+    patchNodeRuntime: () => { patches += 1; return true; },
+  }});
+  h.entry.render({full: true});
+  const card = h.cards()[0];
+  h.entry.render({selection: true});
+  const afterFirst = patches;
+  assert.match(card.attrs.class, /run-running/);
+  h.entry.render({selection: true});
+  assert.ok(patches > afterFirst, '同为 running 时仍要补丁进度文字，不能等滚动或缩放触发重建');
+});
+
 test('框选：拖拽时出现并随之更新，抬起后消失', () => {
   const h = harness();
   h.entry.render({full: true});
@@ -347,4 +362,3 @@ test('从变量面板拖进画布的卡片立刻出现（不需要滚动/缩放�
   assert.equal(mounted.length, 1, '卡片元素必须立刻出现在变量卡图层里');
   assert.equal(mounted[0].dataset.variable, 'count');
 });
-

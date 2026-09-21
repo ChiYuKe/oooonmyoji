@@ -296,7 +296,10 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .data-tone-9 { --data-tone: #e47e9e; --edge-tone: var(--data-tone); }
 /* 变量线：实线（不再点线）、比执行连线（.edge-line 2px）细；命中交给下面那条透明加粗线。 */
 .variable-edge { fill: none; stroke: var(--edge-tone, #5aa9df); stroke-width: 1.8; opacity: 0.92; pointer-events: none; vector-effect: non-scaling-stroke; }
-.group-interface-edge { fill: none; stroke: var(--edge-tone, #7e91a0); stroke-width: 1.4; stroke-dasharray: 5 4; opacity: 0.72; pointer-events: none; vector-effect: non-scaling-stroke; }
+/* 组接口 / 组变量卡到真实成员参数的映射线**也是变量线**：沿用上面 `.variable-edge` 的
+ * 数据线样式（实线、按身份取色、1.8px、悬停提亮、带 14px 命中线）。
+ * `group-interface-edge` 只作为语义标记保留，不再单独声明虚线样式——
+ * 组边界的线以前是 1.4px 虚线 + 不可点，和用户熟悉的变量线标准对不上。 */
 .variable-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
 /* 节点输出引用线：从任务卡右侧输出口连到参数行，同样是实线、比执行连线细。 */
 .reference-edge { fill: none; stroke: var(--edge-tone, #e7a84b); stroke-width: 1.8; opacity: 0.92; pointer-events: none; vector-effect: non-scaling-stroke; }
@@ -349,6 +352,13 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.run-not_matched .node-box { stroke: #d6ad55; stroke-width: 2; }
 .node.run-branch_miss .node-box { stroke: #9ba4ad; stroke-dasharray: 4 3; }
 .node.run-cancelled .node-box { stroke: #9ba4ad; stroke-dasharray: 5 3; }
+
+/* 定位闪烁：变量引用面板「定位」与搜索定位把视野移过去后，节点与参数端点短暂高亮。 */
+.node.node-flash .node-box { stroke: var(--accent, #3694d4); stroke-width: 2; filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent, #3694d4) 55%, transparent)); }
+.node.node-flash .node-head { filter: brightness(1.18); }
+.node.node-flash .node-icon-plate { filter: brightness(1.3); }
+.param-row-flash { filter: drop-shadow(0 0 4px var(--accent, #3694d4)); stroke: var(--accent, #3694d4); stroke-width: 2; }
+.param-row-flash.param-row-hit { fill: color-mix(in srgb, var(--accent, #3694d4) 16%, transparent); }
 .node-icon { fill: #edf1f3; font-size: 12px; font-weight: 700; pointer-events: none; }
 .node-name { fill: #f0f2f3; font-size: 12px; font-weight: 650; pointer-events: none; }
 .node-type { fill: #929ca5; font-size: 8px; font-weight: 650; letter-spacing: 0; pointer-events: none; }

@@ -28,6 +28,14 @@ export interface EditorHostDeps {
   openReferences: (uri: string) => void;
   /** 打开「变量引用」面板，列出谁在引用某个变量。 */
   showVariableReferences?: (data: VariableReferencesData, source: VariableReferencesSource) => void;
+  /** 影响范围确认弹窗：改名等操作先亮出影响清单，返回 true 表示确认继续。 */
+  showImpactConfirm?: (request: {
+    title: string;
+    summary: string;
+    items?: Array<{ label: string; detail?: string }>;
+    confirmLabel?: string;
+    danger?: boolean;
+  }) => Promise<boolean>;
   /** 重新读取脚本目录（工作流列表），并推送给所有画布。 */
   refreshWorkflows?: () => Promise<void>;
   /** 文档画布的 iframe：详情栏是镜像，写文档的指令要发给它。 */
@@ -52,7 +60,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
   const {
     api, workspace, detailsFrame, sidebar, roiPicker, showToast, errorMessage, setStatus,
     showDetailsPanel, showRuntimePanel, openContentBrowserSearch, openReferences,
-    showVariableReferences, getDocumentFrame,
+    showVariableReferences, showImpactConfirm, getDocumentFrame,
     getSelectedInstance, createNewWorkflow, switchWorkflow, ensureDocument, openWorkflowTab,
     loadWorkflow, loadDocumentOnce, sendDocumentInit, resolveWorkflow, selectInstance, refreshWorkflows,
   } = deps;
@@ -129,9 +137,13 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           return;
         }
         case 'inspectorRenameRequested': {
-          // 文档画布按了 F2：可见的名称输入框在详细信息镜像里，转给它聚焦。
+          // 文档画布按了 F2：先同步当前选中项，再聚焦详细信息镜像里的名称输入框。
+          // 节点组不是运行时节点，不能依赖镜像此前保存的普通节点选区。
           if (!isActiveSource && sourceUri) return;
           showDetailsPanel();
+          if (message.inspectorSelection) {
+            workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'setInspectorSelection', value: message.inspectorSelection });
+          }
           workspace.postToFrame(detailsFrame, { type: 'editorCommand', command: 'renameSelection' });
           return;
         }
@@ -146,6 +158,8 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
             scope: message.scope === 'inputs' ? 'inputs' : 'variables',
             name: String(message.name ?? ''),
             displayName: String(message.displayName ?? message.name ?? ''),
+            type: typeof message.variableType === 'string' ? message.variableType : '',
+            defaultText: typeof message.defaultText === 'string' ? message.defaultText : '',
             entries: Array.isArray(message.entries) ? (message.entries as VariableReferencesData['entries']) : [],
           }, {
             frame: documentFrame,
@@ -159,6 +173,39 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
               }
             },
           });
+          return;
+        }
+        case 'variableRenameImpactRequested': {
+          // 变量改名会改写多处引用：先亮出影响范围，确认后再回画布真正改名。
+          if (!isActiveSource && sourceUri) return;
+          const renameMessage = message as unknown as {
+            scope?: string; oldName?: string; name?: string; count?: number; entries?: unknown[];
+          };
+          const oldName = String(renameMessage.oldName ?? '');
+          const name = String(renameMessage.name ?? '');
+          const entries = Array.isArray(renameMessage.entries) ? renameMessage.entries : [];
+          const summary = oldName && name
+            ? `「${oldName}」将改名为「${name}」，${Number(renameMessage.count) || entries.length} 处引用会随之显示新名字。`
+            : `${Number(renameMessage.count) || 0} 处引用会随之显示新名字。`;
+          const ok = await (showImpactConfirm?.({
+            title: oldName && name ? `改名为「${name}」` : '确认改名',
+            summary,
+            items: entries.slice(0, 200).map((entry) => {
+              const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+              const where = typeof record.nodeName === 'string' && record.nodeName
+                ? `节点「${record.nodeName}」`
+                : (typeof record.nodeId === 'string' && record.nodeId ? `节点「${record.nodeId}」` : '初始化输入');
+              const target = typeof record.label === 'string' && record.label ? record.label : '参数引用';
+              return {
+                label: `${where} · ${target}`,
+                detail: typeof record.ref === 'string' ? record.ref : '',
+              };
+            }),
+            confirmLabel: '确认改名',
+          }) ?? false);
+          // 改名请求（暂存）在发起它的那份画布里：确认/取消必须回发给它——
+          // 侧栏 F2 的请求来自文档画布，详情栏输入框的请求来自镜像画布，各自持有暂存状态。
+          workspace.postToFrame(sourceFrame, { type: 'editorCommand', command: ok ? 'confirmRenameVariable' : 'cancelRenameVariable' });
           return;
         }
         case 'sidebarStateChanged': {

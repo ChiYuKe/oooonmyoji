@@ -424,7 +424,7 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
   kind.textContent = item.kind === 'folder' ? '文件夹' : item.kind === 'workflow' ? '工作流' : '模板图片';
   preview.appendChild(kind);
   const label = editing ? document.createElement('input') : document.createElement('span');
-  label.className = editing ? 'content-item-name-edit' : 'content-item-name';
+  label.className = editing ? 'inline-rename-input content-item-name-edit' : 'content-item-name';
   if (editing) {
     const input = label as HTMLInputElement;
     input.type = 'text';

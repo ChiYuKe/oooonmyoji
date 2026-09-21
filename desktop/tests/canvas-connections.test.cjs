@@ -12,7 +12,7 @@ function harness(raw, options = {}) {
   const state = createCanvasState();
   state.raw = raw;
   const model = createWorkflowModel(state);
-  const calls = {rendered: 0, toasts: [], mutated: 0, captured: [], released: []};
+  const calls = {rendered: 0, toasts: [], mutated: 0, captured: [], released: [], emptyDrops: []};
   const history = createEditorHistory({
     state,
     cleanupReleased: () => [],
@@ -56,6 +56,9 @@ function harness(raw, options = {}) {
     displayNameOfDefinition: model.displayNameOfDefinition,
     variableDisplayNameOf: model.variableDisplayNameOf,
     toast: (message, error) => calls.toasts.push([message, Boolean(error)]),
+    onEmptyVariableDrop: options.onEmptyVariableDrop
+      ? (connection, point) => { calls.emptyDrops.push([connection, point]); return options.onEmptyVariableDrop(connection, point); }
+      : undefined,
   });
   return {state, model, commands, connections, calls};
 }
@@ -159,4 +162,19 @@ test('finishVariableConnection 按方向路由到目标并处理无目标', () =
   noTarget.connections.finishVariableConnection(event());
   assert.equal(noTarget.state.variableConnect, null);
   assert.equal(noTarget.calls.rendered > 0, true);
+});
+
+test('变量线拖到空白处把原连接与落点交给自动创建入口', () => {
+  const h = harness({nodes: [{id: 'n', type: 'task', params: {}}]}, {
+    onEmptyVariableDrop: () => true,
+  });
+  h.connections.startVariableConnectionFromPin(event(), 'n', 'template');
+  h.connections.finishVariableConnection(event({clientX: 320, clientY: 180}));
+  assert.equal(h.state.variableConnect, null);
+  assert.equal(h.calls.emptyDrops.length, 1);
+  assert.equal(h.calls.emptyDrops[0][0].direction, 'from-pin');
+  assert.equal(h.calls.emptyDrops[0][0].nodeId, 'n');
+  assert.equal(h.calls.emptyDrops[0][0].param, 'template');
+  assert.deepEqual(h.calls.emptyDrops[0][1], {x: 320, y: 180});
+  assert.deepEqual(h.calls.released, [3]);
 });

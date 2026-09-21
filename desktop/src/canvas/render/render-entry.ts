@@ -68,6 +68,10 @@ export interface RenderEntryDeps {
   nodeSignature?(id: string): string;
   /** 该节点的校验错误（错误标记变化也要重建卡片）。 */
   nodeIssueInfo?(node: any): { node: any[]; params: Map<string, any[]> } | null;
+  /** 合成组卡需要从真实成员节点推导运行状态。 */
+  nodeRunStatus?(node: any): string;
+  /** 卡片内部运行态文字的轻量补丁。 */
+  patchNodeRuntime?(element: any, node: any): boolean;
   /** 整份文档的校验错误指纹（由渲染入口折叠成一个字符串，避免按节点重复查询）。 */
   issueFingerprint?(): string;
   /** 变量卡内容签名（缺省用卡片 JSON + 定义 + 实时值 + 选中态）。 */
@@ -90,7 +94,7 @@ export interface CanvasRenderEntry {
   render(flags?: RenderFlags): void;
   /** 合并到本帧的重绘：高频路径用。 */
   coalesce(flags?: RenderFlags): void;
-  focusNode(id: string): void;
+  focusNode(id: string, param?: string): void;
   focusNodeDetail(id: string): void;
   /** 导出前后切换：导出期间挂载全部节点。 */
   setRenderAll(value: boolean): void;
@@ -169,8 +173,8 @@ export function createRenderEntry(deps: RenderEntryDeps) {
   function dynamicNodeClasses(node: any): string[] {
     const classes: string[] = [];
     if (state.selected && state.selected.has(node.id)) classes.push('selected');
-    const run = state.run?.get ? state.run.get(node.id) : null;
-    if (run && run.status) classes.push(`run-${run.status}`);
+    const status = deps.nodeRunStatus ? deps.nodeRunStatus(node) : (state.run?.get ? state.run.get(node.id)?.status : '');
+    if (status) classes.push(`run-${status}`);
     if (state.connect && state.connect.hover === node.id) classes.push('connect-hover');
     if (state.variableConnect && state.variableConnect.hover && state.variableConnect.hover.nodeId === node.id) classes.push('connect-hover');
     if (state.referenceConnect && state.referenceConnect.hover && state.referenceConnect.hover.nodeId === node.id) classes.push('connect-hover');
@@ -189,9 +193,13 @@ export function createRenderEntry(deps: RenderEntryDeps) {
       && !DYNAMIC_NODE_CLASSES.includes(name)
       && !DYNAMIC_CLASS_PREFIXES.some((prefix) => name.startsWith(prefix)));
     const next = [...kept, ...dynamicNodeClasses(node)].join(' ');
-    if (next === current) return false;
-    element.setAttribute('class', next);
-    return true;
+    let changed = false;
+    if (next !== current) {
+      element.setAttribute('class', next);
+      changed = true;
+    }
+    // 即使组的主状态没变（例如连续完成第 2、3 个节点），进度文字仍须逐事件更新。
+    return Boolean(deps.patchNodeRuntime?.(element, node)) || changed;
   }
 
   function nodeContentSignature(id: string): string {
@@ -489,8 +497,40 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     if (controller.pendingPlaceholders().length) schedulePlaceholderFills();
   }
 
-  /** 把画布视野中心移到指定节点（搜索定位与结构树窗口共用）。 */
-  function focusNode(id: string): void {
+  /** 定位后的短暂高亮：节点卡与（可选）参数端点闪烁一次，1.4 秒后自动消退。 */
+  let flashTimer: number | undefined;
+  function flashNode(id: string, param?: string): void {
+    const element = controller.mountedNodes().get(id);
+    if (!element || typeof element.classList !== 'object' || typeof element.classList.add !== 'function') return;
+    if (flashTimer !== undefined) {
+      if (typeof window !== 'undefined' && typeof window.clearTimeout === 'function') window.clearTimeout(flashTimer);
+      flashTimer = undefined;
+    }
+    let rowElements: any[] = [];
+    if (param && typeof element.querySelectorAll === 'function') {
+      try {
+        rowElements = Array.from(element.querySelectorAll(`[data-param="${CSS.escape(param)}"]`));
+      } catch {
+        rowElements = [];
+      }
+    }
+    element.classList.add('node-flash');
+    for (const row of rowElements) {
+      if (row && typeof row.classList === 'object' && typeof row.classList.add === 'function') row.classList.add('param-row-flash');
+    }
+    if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+      flashTimer = window.setTimeout(() => {
+        element.classList.remove('node-flash');
+        for (const row of rowElements) {
+          if (row && typeof row.classList === 'object' && typeof row.classList.remove === 'function') row.classList.remove('param-row-flash');
+        }
+        flashTimer = undefined;
+      }, 1400);
+    }
+  }
+
+  /** 把画布视野中心移到指定节点（搜索定位与结构树窗口共用），并让节点短暂闪烁。 */
+  function focusNode(id: string, param?: string): void {
     const node = nodeById(id);
     if (!node) return;
     const pos = position(node);
@@ -498,6 +538,7 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     state.panX = rect.width / 2 - (pos.x + NODE_W / 2) * state.zoom;
     state.panY = rect.height / 2 - (pos.y + nodeHeight(node) / 2) * state.zoom;
     render({ viewport: true, selection: true, panels: true });
+    flashNode(id, param);
   }
 
   /** 双击节点：自动聚焦并放大到完整卡片档（概览模式下也能看清内容）。 */

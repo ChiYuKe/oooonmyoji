@@ -7,6 +7,8 @@
  */
 import type { CanvasState } from '../state/canvas-state';
 import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from './data-tones';
+import { isGroupBoundaryPin, isGroupCardNode, isGroupInterfaceNode, isGroupMemberNode, isGroupVariablesNode } from '../model/node-groups';
+import { aggregateNodeRunStatus } from '../model/node-group-runtime';
 
 export interface EdgePoint {
   x: number;
@@ -47,6 +49,8 @@ export interface EdgesDeps {
   nodeById(id: string): EdgeNode | null;
   /** 折叠节点组时，把隐藏的真实引用源解析成可见的组卡。 */
   referenceSourceById?(id: string): EdgeNode | null;
+  /** 折叠组的代理执行边实际指向哪些真实节点（运行事件仍使用真实节点 id）。 */
+  edgeRunTargetIds?(parentId: string, childId: string): string[];
   position(node: EdgeNode): EdgePoint;
   nodeHeight(node: EdgeNode): number;
   /** 每个节点自己的参数行高（固定卡片用双行行样式）。 */
@@ -104,8 +108,6 @@ export interface CanvasEdges {
   edgeBounds(parentId: string, childId: string): { x: number; y: number; width: number; height: number } | null;
 }
 
-const RUN_STATUSES = ['running', 'succeeded', 'matched', 'failed', 'not_matched', 'branch_miss', 'cancelled'];
-
 /** 数据线的色调下标：按身份字符串取色（配色见 workflow-editor.css 的 `.data-tone-N`）。
  * 变量线按「作用域.变量名」、引用线按引用文本，于是同一个变量/引用在所有卡片、端点和
  * 连线上颜色一致，不同来源颜色不同。 */
@@ -128,7 +130,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
    * 已挂载连线的元素索引：`patchEdge` 用它做局部更新，不必查询 DOM。
    * key 为 `parentId\0childId`，图层整体重建时清空。
    */
-  const edgeRegistry = new Map<string, { group: any; parentId: string; childId: string; paths: any[]; order: any; orderBg: any; rewire: any }>();
+  const edgeRegistry = new Map<string, { group: any; parentId: string; childId: string; runTargetIds: string[]; paths: any[]; order: any; orderBg: any; rewire: any }>();
   const runEdgeRegistry = new Map<string, { paths: any[]; order: any; orderBg: any }>();
   const edgeBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
   type DataEdgeEntry = { paths: any[]; path(): string };
@@ -159,19 +161,19 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     return patched;
   }
 
-  function structuralEdgeClass(parentId: string, childId: string): string {
+  function structuralEdgeClass(parentId: string, childId: string, runTargetIds = [childId]): string {
     const selected = state.selectedEdge && state.selectedEdge.parent === parentId && state.selectedEdge.child === childId;
-    const run = state.run.get(childId);
-    const runStatus = run && RUN_STATUSES.includes(run.status) ? run.status : '';
-    const collapsed = Boolean((nodeById(parentId) as any)?._nodeGroup || (nodeById(childId) as any)?._nodeGroup);
+    // 多条真实边折叠成一条代理边时，与组卡使用完全相同的状态优先级。
+    const runStatus = aggregateNodeRunStatus(runTargetIds, state.run);
+    const collapsed = Boolean(isGroupCardNode(nodeById(parentId)) || isGroupCardNode(nodeById(childId)));
     return `edge${selected ? ' selected' : ''}${runStatus ? ` run-${runStatus}` : ''}${collapsed ? ' edge-collapsed-group' : ''}`;
   }
 
   function patchRunEdgeStates(nodeId?: string): number {
     let patched = 0;
     for (const entry of edgeRegistry.values()) {
-      if (nodeId && entry.childId !== nodeId) continue;
-      const next = structuralEdgeClass(entry.parentId, entry.childId);
+      if (nodeId && !entry.runTargetIds.includes(nodeId)) continue;
+      const next = structuralEdgeClass(entry.parentId, entry.childId, entry.runTargetIds);
       if (entry.group?.getAttribute?.('class') === next) continue;
       entry.group?.setAttribute?.('class', next);
       patched += 1;
@@ -227,35 +229,50 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     for (const node of nodes()) {
       // 进入组内后，变量卡先连到「组接口」，再由接口映射到真实参数。
       // 成员卡不再同时画一条重复的变量卡直连。
-      if ((node as any)._nodeGroupMember) continue;
+      if (isGroupMemberNode(node)) continue;
       nodeVariablePins(node).forEach((pin, index) => {
-        const targetNodeId = (pin as any).targetNodeId || node.id;
-        const targetParam = (pin as any).targetParam || pin.param;
-        const targetNode = (pin as any)._targetNode || nodeById(targetNodeId);
+        const targetNodeId = isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id;
+        const targetParam = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
+        const targetNode = isGroupBoundaryPin(pin) ? pin._targetNode : nodeById(targetNodeId);
         const toneKey = pin.variable
           ? variableDataKey(pin.scope, pin.variable)
           : parameterDataKey(targetNodeId, targetParam);
         const tone = dataTone(toneKey);
 
         // 手动添加到组接口后立即画到真实成员参数的映射；不必等外部变量先连上。
-        if (((node as any)._nodeGroupInterface || (node as any)._nodeGroupVariables) && targetNode) {
+        if ((isGroupInterfaceNode(node) || isGroupVariablesNode(node)) && targetNode) {
           const targetPins = nodeVariablePins(targetNode);
-          const targetIndex = Number.isInteger((pin as any).targetIndex)
-            ? (pin as any).targetIndex
+          const targetIndex = isGroupBoundaryPin(pin) && Number.isInteger(pin.targetIndex)
+            ? pin.targetIndex
             : targetPins.findIndex((item) => item.param === targetParam);
           if (targetIndex >= 0) {
             const mappingPath = (): string => {
               const origin = position(node);
               const target = position(targetNode);
-              const x1 = origin.x + ((node as any)._nodeGroupVariables ? nodeWidth - variablePinX : variablePinX);
+              // 出线口在哪一侧决定了头段控制点往哪推：变量卡的端口在右边缘（线向右走），
+              // 接口卡的端口在左边缘。两个控制点都往左推时，长距离的映射线几乎退化成直斜线。
+              const fromRight = isGroupVariablesNode(node);
+              const x1 = origin.x + (fromRight ? nodeWidth - variablePinX : variablePinX);
               const y1 = origin.y + baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2;
               const x2 = target.x + variablePinX;
               const y2 = target.y + baseHeight + targetIndex * rowHeightOf(targetNode) + rowHeightOf(targetNode) / 2;
               const bend = Math.max(32, Math.abs(x2 - x1) * 0.42);
-              return `M ${x1} ${y1} C ${x1 - bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+              const headX = fromRight ? x1 + bend : x1 - bend;
+              // 末端落在成员卡左侧的参数引脚上，所以从左边切入。
+              return `M ${x1} ${y1} C ${headX} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
             };
-            const mapping = svgEl('path', { class: `group-interface-edge data-tone-${tone}`, d: mappingPath() }, layer);
-            registerDataEdge(variableEdgeRegistry, [node.id, targetNodeId], [mapping], mappingPath);
+            // 组接口 / 组变量卡到真实成员参数也是**变量线**：与普通变量线同一套「数据线」样式
+            // （实线、按身份取色、1.8px，带透明命中线），不是另一种虚线。
+            // `group-interface-edge` 只作为语义标记保留，不再自带样式。
+            const mappingPaths = renderDisconnectableEdge(
+              layer,
+              `variable-edge group-interface-edge data-tone-${tone}`,
+              'variable-edge-hit',
+              mappingPath(),
+              () => disconnectVariableFromPin(targetNodeId, targetParam),
+              toneKey,
+            );
+            registerDataEdge(variableEdgeRegistry, [node.id, targetNodeId], mappingPaths, mappingPath);
           }
         }
 
@@ -266,7 +283,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
         const y1 = card.y + variableCardPortY;
         const path = (): string => {
           const current = position(node);
-          const targetX = current.x + ((node as any)._nodeGroupVariables ? nodeWidth - variablePinX : variablePinX);
+          const targetX = current.x + (isGroupVariablesNode(node) ? nodeWidth - variablePinX : variablePinX);
           const targetY = current.y + baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2;
           const curve = Math.max(32, Math.abs(targetX - x1) * 0.42);
           return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
@@ -311,7 +328,8 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     const y1 = from.y + nodeHeight(parent);
     const x2 = to.x + nodeWidth / 2;
     const y2 = to.y;
-    const group = svgEl('g', { class: structuralEdgeClass(parent.id, childId), 'data-parent': parent.id, 'data-child': childId }, layer);
+    const runTargetIds = deps.edgeRunTargetIds?.(parent.id, childId) ?? [childId];
+    const group = svgEl('g', { class: structuralEdgeClass(parent.id, childId, runTargetIds), 'data-parent': parent.id, 'data-child': childId }, layer);
     group.dataset.parent = parent.id;
     group.dataset.child = childId;
     const path = svgEl('path', { class: 'edge-hit', d: bezier(x1, y1, x2, y2) }, group);
@@ -325,7 +343,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     const rewire = svgEl('circle', { class: 'edge-rewire', cx: x2, cy: y2 - 18, r: 6, title: '拖动以重新连接' }, group);
     // 局部更新用的元素索引：拖拽时只改这些属性的 `d` / 位置。
     edgeRegistry.set(`${parent.id}\u0000${childId}`, {
-      group, parentId: parent.id, childId, paths: [path, line, flow], order: orderText, orderBg, rewire,
+      group, parentId: parent.id, childId, runTargetIds, paths: [path, line, flow], order: orderText, orderBg, rewire,
     });
     edgeBounds.set(`${parent.id}\u0000${childId}`, {
       x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1),
@@ -534,7 +552,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   function renderReferenceEdges(layer: any): void {
     referenceEdgeRegistry.clear();
     for (const node of nodes()) {
-      if (!node || (node.type !== 'task' && !(node as any)._nodeGroup)) continue;
+      if (!node || (node.type !== 'task' && !isGroupCardNode(node))) continue;
       nodeVariablePins(node).forEach((pin, index) => {
         const ref = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof (pin.value as { ref?: unknown }).ref === 'string'
           ? (pin.value as { ref: string }).ref
@@ -543,8 +561,8 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
         if (!match) return;
         const source = referenceSourceById ? referenceSourceById(match[1]) : nodeById(match[1]);
         if (!source || source.id === node.id) return;
-        const targetNodeId = (pin as any).targetNodeId || node.id;
-        const targetParam = (pin as any).targetParam || pin.param;
+        const targetNodeId = isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id;
+        const targetParam = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
         const path = (): string => {
           const currentOrigin = referencePortPosition(source);
           const currentTargetPos = position(node);

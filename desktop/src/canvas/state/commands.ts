@@ -32,6 +32,8 @@ export interface CommandsDeps {
   nextVariableCardId?(): string;
   /** 在节点组内部创建/粘贴时，把新节点留在当前组内。 */
   onNodesCreated?(ids: string[]): void;
+  /** 删除/剪切节点后同步节点组元数据（移除成员与端点、清理空组）；须在同一 mutate 内调用。 */
+  onNodesRemoved?(ids: string[]): void;
 }
 
 export interface CanvasCommands {
@@ -187,6 +189,8 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       state.raw!.nodes = nodes().filter((node) => !ids.includes(node.id));
       for (const node of nodes()) if (Array.isArray(node.children)) node.children = node.children.filter((id: string) => !ids.includes(id));
       for (const id of ids) delete layout()[id];
+      // 组元数据与节点删除同一次历史提交：失效成员/端点就地清理，空组整组删除。
+      deps.onNodesRemoved?.(ids);
       state.selected.clear();
       state.selectedRun = null;
     });
@@ -317,6 +321,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       state.raw!.nodes = nodes().filter((node) => !ids.has(node.id));
       for (const node of nodes()) if (Array.isArray(node.children)) node.children = node.children.filter((id: string) => !ids.has(id));
       for (const id of ids) delete layout()[id];
+      deps.onNodesRemoved?.([...ids]);
       state.selected.clear();
     });
     toast(`已剪切 ${ids.size} 个节点`);

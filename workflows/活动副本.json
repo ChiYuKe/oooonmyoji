@@ -11,17 +11,23 @@
   "inputs": {
     "v_3a3d58354dbf4aeb8a85bf05bc703c2c": {
       "type": "integer",
-      "default": 1100,
+      "default": 760,
       "min": 1,
       "description": "循环执行次数。",
       "display_name": "运行轮数",
       "_autoPublished": true
+    },
+    "重新校验": {
+      "type": "boolean",
+      "description": "点击前重新截图验证匹配是否仍在，默认 true",
+      "display_name": "重新校验",
+      "default": true
     }
   },
   "variables": {
     "v_10a5b9e6f0724cae9fddae2b177a86af": {
       "type": "integer",
-      "default": 1100,
+      "default": 760,
       "min": 1,
       "description": "循环执行次数。",
       "display_name": "运行轮数",
@@ -174,7 +180,7 @@
       "params": {
         "template": "assets/templates/task_3-template.png",
         "present": true,
-        "timeout_seconds": 300,
+        "timeout_seconds": 60,
         "roi": [
           700,
           950,
@@ -209,7 +215,9 @@
         "match": {
           "ref": "nodes.wait_battle_end.output.0"
         },
-        "revalidate": true,
+        "revalidate": {
+          "ref": "inputs.重新校验"
+        },
         "verify_gone": true,
         "verify_timeout_seconds": 8,
         "random_offset": 25,
@@ -333,15 +341,15 @@
   ],
   "_layout": {
     "root": {
-      "x": 602,
+      "x": 498,
       "y": 0
     },
     "repeat_rounds": {
-      "x": 602,
+      "x": 496,
       "y": 208
     },
     "round": {
-      "x": 602,
+      "x": 498,
       "y": 416
     },
     "wait_round_state": {
@@ -349,16 +357,16 @@
       "y": 624
     },
     "round_state_selector": {
-      "x": 1204,
+      "x": 996,
       "y": 624
     },
     "start_round": {
-      "x": 747,
+      "x": 664,
       "y": 832
     },
     "continue_round": {
-      "x": 1168,
-      "y": -216
+      "x": 1328,
+      "y": 544
     },
     "tap_challenge": {
       "x": 332,
@@ -369,41 +377,58 @@
       "y": 1040
     },
     "finish_started_round": {
-      "x": 1162,
-      "y": 1040
+      "x": 166,
+      "y": 208
     },
     "tap_exit_after_battle": {
-      "x": 996,
-      "y": 1248
+      "x": 0,
+      "y": 416
     },
     "wait_challenge_after_battle": {
-      "x": 1328,
-      "y": 1248
+      "x": 332,
+      "y": 416
     },
     "tap_exit_from_settlement": {
-      "x": 996,
-      "y": 0
+      "x": 1168,
+      "y": 752
     },
     "wait_challenge_after_settlement": {
-      "x": 1328,
-      "y": 0
+      "x": 1496,
+      "y": 752
     },
     "node_group_1": {
-      "x": 1660,
+      "x": 1328,
       "y": 832
     },
-    "__node_group_interface__:node_group_1": {
-      "x": 1168,
-      "y": -400
-    },
     "__node_group_variables__:node_group_1": {
-      "x": 520,
+      "x": 736,
+      "y": 760
+    },
+    "node_group_2": {
+      "x": 1000,
+      "y": 1040
+    },
+    "__node_group_variables__:node_group_2": {
+      "x": 664,
+      "y": 0
+    },
+    "__node_group_interface__:node_group_2": {
+      "x": 166,
       "y": 0
     }
   },
   "_inputParams": {},
-  "_variableLinks": {},
-  "_variableCards": {},
+  "_variableLinks": {
+    "tap_exit_after_battle:revalidate": "card_1"
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "重新校验",
+      "scope": "inputs",
+      "x": 960,
+      "y": 1376
+    }
+  },
   "_nodeGroups": {
     "node_group_1": {
       "name": "节点组 1",
@@ -412,7 +437,32 @@
         "tap_exit_from_settlement",
         "wait_challenge_after_settlement"
       ],
-      "pins": []
+      "pins": [
+        {
+          "nodeId": "tap_exit_from_settlement",
+          "param": "match"
+        }
+      ],
+      "pinPolicy": "explicit-v1"
+    },
+    "node_group_2": {
+      "name": "节点组 2",
+      "nodeIds": [
+        "finish_started_round",
+        "tap_exit_after_battle",
+        "wait_challenge_after_battle"
+      ],
+      "pins": [
+        {
+          "nodeId": "tap_exit_after_battle",
+          "param": "match"
+        },
+        {
+          "nodeId": "tap_exit_after_battle",
+          "param": "revalidate"
+        }
+      ],
+      "pinPolicy": "explicit-v1"
     }
   }
 }

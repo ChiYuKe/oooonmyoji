@@ -36,6 +36,7 @@ function harness(raw, options = {}) {
     nodeWidth: 260,
     baseHeight: 96,
     publishClipboard: options.publishClipboard,
+    onNodesRemoved: options.onNodesRemoved,
   });
   return {state, model, history, commands, toasts};
 }
@@ -129,6 +130,19 @@ test('deleteSelection 删除选中节点并清理布局，选中连线时只断�
   h2.commands.deleteSelection();
   assert.deepEqual(h2.state.raw.nodes.find((node) => node.id === 'seq').children, ['b']);
   assert.equal(h2.state.selectedEdge, null);
+});
+
+test('删除与剪切在同一次 mutate 内回调 onNodesRemoved（节点组元数据同步入口）', () => {
+  const removed = [];
+  const h = harness(tree(), {onNodesRemoved: (ids) => removed.push([...ids])});
+  h.state.selected = new Set(['seq']);
+  h.commands.deleteSelection();
+  assert.deepEqual(removed, [['seq']]);
+
+  removed.length = 0;
+  h.state.selected = new Set(['a']);
+  h.commands.cutSelection();
+  assert.deepEqual(removed, [['a']]);
 });
 
 test('复制粘贴重映射 ID、children 与节点输出引用', () => {

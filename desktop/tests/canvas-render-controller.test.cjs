@@ -339,6 +339,7 @@ test('节点坐标在文档里改了：已挂载卡片就地改 transform，不�
   const h = harness(nodes, {width: 1200, height: 600});
   h.controller.request({full: true});
   const built = h.calls.nodes;
+  const edgesBuilt = h.calls.edges;
   const cardLayer = h.host.children[0].children.find((child) => child.attrs.class === 'cards');
   const group = cardLayer.children.find((child) => child.dataset.id === 'n1');
   assert.equal(group.attrs.transform, 'translate(300,0)');
@@ -348,6 +349,7 @@ test('节点坐标在文档里改了：已挂载卡片就地改 transform，不�
   h.controller.request({graph: true});
   assert.equal(h.calls.nodes, built, '只是换位置：不得重建卡片');
   assert.equal(group.attrs.transform, 'translate(40,800)', '已挂载卡片必须就地换到新坐标');
+  assert.ok(h.calls.edges > edgesBuilt, '自动排列只改坐标时也必须按新端点重建连线');
 
   // 坐标没变的帧不能再写一次 DOM（每帧对每张卡都写会拖慢平移/缩放）。
   let writes = 0;

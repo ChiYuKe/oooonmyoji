@@ -11,6 +11,8 @@ export interface EditorCommandDispatchDeps {
   mutate(fn: () => void): void;
   nodes(): any[];
   nodeById(id: string): any;
+  /** 当前投影里的节点解析；节点组等合成卡不在运行时 nodeById 中。 */
+  selectionNodeById?(id: string): any;
   undo(): void;
   redo(): void;
   fitView(): void;
@@ -21,19 +23,29 @@ export interface EditorCommandDispatchDeps {
   deleteSelection(): void;
   addNode(...args: any[]): void;
   render(): void;
-  focusNode(id: string): void;
+  focusNode(id: string, param?: string): void;
   searchNodeByName(...args: any[]): void;
   exportFullCanvasImage(...args: any[]): void;
   addVariable(scope?: string): void;
   /** 「变量引用」面板确认后的强制删除：引用一并清掉。 */
   deleteVariable(scope: string, name: string): void;
+  /** 计算并把变量引用清单交给宿主面板。 */
+  showVariableReferences(scope: string, name: string): void;
+  /** 断开面板里的单条引用（参数回落，初始化解除）；走一次历史记录。 */
+  disconnectVariableReference(entry: unknown): void;
+  /** 批量断开全部引用；合并为一次历史记录。 */
+  disconnectAllVariableReferences(scope: string, name: string): void;
   clearVariableCardSelection(): void;
   deleteCurrentSelection(): void;
   renderInspector(): void;
   /** F2 在文档画布里按下时：请宿主把聚焦请求转给详细信息镜像。 */
-  requestInspectorRename(): void;
+  requestInspectorRename(selection?: unknown): void;
   /** 左侧变量列表的行内改名：与详情栏改「变量命名」同一条路径（含公开镜像同步）。 */
   renameVariable(scope: string, oldName: string, name: string): void;
+  /** 改名影响范围确认后：按暂存的名字真正执行改名。 */
+  confirmPendingRename(): void;
+  /** 改名影响范围被取消：丢弃暂存请求。 */
+  cancelPendingRename(): void;
   addVariableCardCommand(value: any): void;
   VariableSystem: any;
   convertInputToVariable(name: string): void;
@@ -44,9 +56,11 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     state, mutate, nodes, nodeById, undo, redo, fitView, autoLayout, copySelection, cutSelection,
     pasteClipboard, deleteSelection, addNode, render, focusNode, searchNodeByName, exportFullCanvasImage,
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
-    deleteVariable, requestInspectorRename, renameVariable,
+    deleteVariable, showVariableReferences, requestInspectorRename, renameVariable,
+    disconnectVariableReference, disconnectAllVariableReferences, confirmPendingRename, cancelPendingRename,
     VariableSystem,
   } = deps;
+  const selectionNodeById = deps.selectionNodeById ?? nodeById;
   function executeEditorCommand(command: string, value?: any): any {
     if (command === 'undo') undo();
     else if (command === 'redo') redo();
@@ -56,7 +70,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     else if (command === 'deleteSelection') deleteCurrentSelection();
     else if (command === 'requestRenameSelection') {
       // 文档画布里的 F2：可见的详情栏是独立的镜像画布，把聚焦请求转给宿主。
-      requestInspectorRename();
+      requestInspectorRename(value);
     }
     else if (command === 'renameNodeName') {
       // 左侧结构树的行内改名：改的是显示名（节点 id 保持稳定，连线与参数引用都按 id 走）。
@@ -73,6 +87,8 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       const name = String(value?.name ?? '').trim();
       if (oldName && name) renameVariable(scope, oldName, name);
     }
+    else if (command === 'confirmRenameVariable') confirmPendingRename();
+    else if (command === 'cancelRenameVariable') cancelPendingRename();
     else if (command === 'renameSelection') {
       // 详情栏镜像里的 F2：聚焦它自己那份可见的名称输入框。
       if (state.inspector === 'variables' && state.selectedVariable) {
@@ -84,7 +100,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       }
       const selected = [...state.selected];
       if (selected.length !== 1) return;
-      const node = nodeById(selected[0]);
+      const node = selectionNodeById(selected[0]);
       if (!node) return;
       state.selectedEdge = null;
       state.selectedRun = null;
@@ -166,17 +182,33 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       const name = String(value && value.name !== undefined ? value.name : '');
       if (name) deleteVariable(scope, name);
     }
+    else if (command === 'showVariableReferences') {
+      const scope = value?.scope === 'inputs' ? 'inputs' : 'variables';
+      const name = String(value?.name ?? '');
+      if (name) showVariableReferences(scope, name);
+    }
+    else if (command === 'disconnectVariableReference') {
+      // 「变量引用」面板里的单条断开：参数回落到字面量 / 初始化解除，一次历史记录。
+      disconnectVariableReference(value?.entry);
+    }
+    else if (command === 'disconnectAllVariableReferences') {
+      const scope = value?.scope === 'inputs' ? 'inputs' : 'variables';
+      const name = String(value?.name ?? '');
+      if (name) disconnectAllVariableReferences(scope, name);
+    }
     else if (command === 'addVariableCard') addVariableCardCommand(value);
     else if (command === 'searchNodeByName') searchNodeByName(value);
     else if (command === 'focusNode') {
-      const id = String(value ?? '');
+      // 兼容两种载荷：面板定位带 `{nodeId, param}`，搜索/结构树定位传裸 id。
+      const id = String(value && typeof value === 'object' ? value.nodeId ?? '' : value ?? '');
+      const param = String(value && typeof value === 'object' ? value.param ?? '' : '');
       const node = nodeById(id);
       if (!node) return;
       state.selected = new Set([id]);
       state.selectedEdge = null;
       state.selectedRun = null;
       state.inspector = 'node';
-      focusNode(id);
+      focusNode(id, param);
     }
     else if (command === 'setInspectorSelection') {
       const selection = value && typeof value === 'object' ? value : { kind: 'none' };
@@ -199,7 +231,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       } else if (selection.kind === 'node') {
         state.inspector = 'node';
         const id = String(selection.nodeId || '');
-        if (nodeById(id)) state.selected.add(id);
+        if (selectionNodeById(id)) state.selected.add(id);
       } else state.inspector = 'node';
       render();
     }

@@ -9,6 +9,7 @@ const { createSidebar } = require('../dist-test-renderer/renderer/panels/sidebar
 class Element {
   constructor(tag) {
     this.tagName = tag; this.children = []; this.attrs = {}; this.dataset = {}; this.events = {}; this.className = ''; this.scrollTop = 0;
+    this.style = {}; this.ownerDocument = globalThis.document;
     this.classList = {
       add: (name) => { if (!this.className.split(' ').includes(name)) this.className += ' ' + name; },
       remove: (name) => { this.className = this.className.split(' ').filter((item) => item !== name).join(' '); },
@@ -34,6 +35,12 @@ class Element {
     node.parent = parent;
   }
   focus() {} select() {}
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((item) => item !== this);
+  }
+  contains(target) { return target === this || this.children.some((child) => child.contains?.(target)); }
+  getBoundingClientRect() { return {width: 156, height: 34, top: 0, bottom: 34}; }
   set innerHTML(html) {
     this.children = [...html.matchAll(/<span class="([^"]+)"><\/span>/g)].map(([, cls]) => {
       const node = new Element('span'); node.className = cls; node.parent = this; return node;
@@ -48,9 +55,14 @@ class Element {
   addEventListener(name, fn) { this.events[name] = fn; }
 }
 
+const documentEvents = {};
 globalThis.document = {
+  body: new Element('body'),
+  documentElement: {clientWidth: 1280, clientHeight: 720},
   createElement: (tag) => new Element(tag),
   createElementNS: (_ns, tag) => new Element(tag),
+  addEventListener: (name, fn) => { documentEvents[name] = fn; },
+  removeEventListener: (name, fn) => { if (documentEvents[name] === fn) delete documentEvents[name]; },
 };
 globalThis.CSS = { escape: (value) => value };
 
@@ -115,6 +127,26 @@ test('variable selection and drag preserve existing scope-aware commands', () =>
   assert.equal(h.rows()[1].className.includes('selected'), true);
 });
 
+test('右键变量可查看引用，并把稳定名称与作用域交给当前画布', () => {
+  const h = harness([{name: 'v_10a5', displayName: '运行轮数', scope: 'variables', type: 'integer'}]);
+  let prevented = 0; let stopped = 0;
+  h.rows()[0].events.contextmenu({
+    clientX: 120, clientY: 80,
+    preventDefault: () => { prevented += 1; },
+    stopPropagation: () => { stopped += 1; },
+  });
+  assert.equal(prevented, 1); assert.equal(stopped, 1);
+  assert.deepEqual(h.commands[0], ['selectVariable', {name: 'v_10a5', scope: 'variables'}]);
+  const menu = globalThis.document.body.children.find((item) => item.className === 'sidebar-context-menu');
+  assert.ok(menu, '右键后显示变量菜单');
+  assert.equal(menu.attrs['aria-label'], '变量操作');
+  const entry = menu.children[0];
+  assert.equal(entry.children.at(-1).textContent, '查看变量引用');
+  entry.events.click();
+  assert.deepEqual(h.commands[1], ['showVariableReferences', {name: 'v_10a5', scope: 'variables'}]);
+  assert.equal(globalThis.document.body.children.includes(menu), false, '执行后关闭菜单');
+});
+
 test('empty variable list skips the redundant heading and explains the single add control', () => {
   const h = harness([]); h.render();
   assert.equal(h.list.children.filter((item) => item.tagName === 'h3').length, 0);
@@ -150,6 +182,19 @@ test('已连接画布的变量在列表里标记出来，未连接的没有标�
   assert.equal(h.rows()[0].title, '拖到画布创建引用卡片\nF2 重命名\nDelete 删除');
   assert.equal(nameNode(h.rows()[1]).children.filter((item) => item.className === 'variable-on-card').length, 0);
   assert.equal(h.rows()[1].title, h.rows()[0].title, '悬浮提示不再重复行内已有的状态');
+});
+
+test('变量行显示引用数量徽标：有引用才显示，未引用留空', () => {
+  const h = harness([
+    {name: '被引用', scope: 'inputs', type: 'number', refCount: 3},
+    {name: '零引用', scope: 'variables', type: 'string', refCount: 0},
+  ]);
+  const badge = (row) => row.querySelector('.variable-ref-count');
+  assert.equal(badge(h.rows()[0]).textContent, '3 引用');
+  assert.equal(badge(h.rows()[0]).title, '变量被 3 处引用，点击行右键可查看详情');
+  assert.equal(h.rows()[0].title, '拖到画布创建引用卡片\nF2 重命名\nDelete 删除\n当前被引用 3 处');
+  assert.equal(badge(h.rows()[1]).textContent, undefined, '零引用不显示徽标（测试桩里未赋值即 undefined）');
+  assert.equal(h.rows()[1].title, '拖到画布创建引用卡片\nF2 重命名\nDelete 删除');
 });
 
 test('F2 在变量行原地改名：行内输入框 + 画布改名命令', () => {

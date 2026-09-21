@@ -24,6 +24,7 @@ import {
   ListTree,
   ListOrdered,
   MonitorUp,
+  Network,
   Palette,
   Scan,
   Sigma,
@@ -127,6 +128,61 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
   /** 行内改名草稿（F2）：命中的那一行渲染成输入框，Enter/失焦提交、Esc 取消。 */
   let nodeRenameDraft = '';
   let variableRenameDraft: { name: string; scope: 'inputs' | 'variables' } | undefined;
+  let variableContextMenu: {
+    owner: Document;
+    menu: HTMLElement;
+    dismiss: (event: Event) => void;
+    keyHandler: (event: KeyboardEvent) => void;
+  } | undefined;
+
+  function closeVariableContextMenu(): void {
+    if (!variableContextMenu) return;
+    variableContextMenu.owner.removeEventListener('pointerdown', variableContextMenu.dismiss, true);
+    variableContextMenu.owner.removeEventListener('keydown', variableContextMenu.keyHandler, true);
+    variableContextMenu.menu.remove();
+    variableContextMenu = undefined;
+  }
+
+  /** 变量行右键菜单：引用数据由文档画布在点击时实时计算，侧栏不缓存引用清单。 */
+  function showVariableContextMenu(event: MouseEvent, variable: SidebarVariable, row: HTMLElement): void {
+    closeVariableContextMenu();
+    const doc = row.ownerDocument || document;
+    const menu = doc.createElement('div');
+    menu.className = 'sidebar-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', '变量操作');
+
+    const entry = doc.createElement('button');
+    entry.type = 'button';
+    entry.setAttribute('role', 'menuitem');
+    entry.appendChild(createTreeIcon(Network, 'sidebar-context-menu-icon'));
+    const label = doc.createElement('span');
+    label.textContent = '查看变量引用';
+    entry.appendChild(label);
+    entry.addEventListener('click', () => {
+      closeVariableContextMenu();
+      editorCommand('showVariableReferences', { name: variable.name, scope: variable.scope });
+    });
+    menu.appendChild(entry);
+    doc.body.appendChild(menu);
+
+    const rect = menu.getBoundingClientRect();
+    const viewportWidth = doc.documentElement.clientWidth;
+    const viewportHeight = doc.documentElement.clientHeight;
+    menu.style.left = `${Math.max(4, Math.min(event.clientX, viewportWidth - rect.width - 6))}px`;
+    menu.style.top = `${Math.max(4, Math.min(event.clientY, viewportHeight - rect.height - 6))}px`;
+
+    const dismiss = (pointerEvent: Event): void => {
+      if (menu.contains(pointerEvent.target as Node)) return;
+      closeVariableContextMenu();
+    };
+    const keyHandler = (keyEvent: KeyboardEvent): void => {
+      if (keyEvent.key === 'Escape') closeVariableContextMenu();
+    };
+    doc.addEventListener('pointerdown', dismiss, true);
+    doc.addEventListener('keydown', keyHandler, true);
+    variableContextMenu = { owner: doc, menu, dismiss, keyHandler };
+  }
 
   /** 行内改名输入框：把「输入 → 提交/取消」的按键与失焦语义收在一处。 */
   function createRowNameInput(
@@ -136,7 +192,7 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
   ): HTMLInputElement {
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'row-name-edit';
+    input.className = 'inline-rename-input row-name-edit';
     input.value = value;
     input.autocomplete = 'off';
     input.spellcheck = false;
@@ -347,6 +403,7 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
   }
 
   function renderVariables(): void {
+    closeVariableContextMenu();
     const keepScroll = variablesView.scrollTop;
     const groupView = variablesView as HTMLElement & { collapsedGroups?: Set<string> };
     const collapsedGroups = groupView.collapsedGroups ||= new Set<string>();
@@ -382,11 +439,11 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         row.hidden = collapsedGroups.has(group);
         row.className = `variable-row scope-${scope}${variable.name === selectedVariable && scope === selectedVariableScope ? ' selected' : ''}`;
         row.setAttribute('aria-pressed', String(variable.name === selectedVariable && scope === selectedVariableScope));
-        // 名称、类型、公开状态与「已连接」都已在行内可见，悬浮提示只保留隐藏操作。
-        row.title = '拖到画布创建引用卡片\nF2 重命名\nDelete 删除';
+        // 名称、类型、公开状态、「已连接」与引用处数都已行内可见，悬浮提示只保留隐藏操作。
+        row.title = `拖到画布创建引用卡片\nF2 重命名\nDelete 删除${variable.refCount ? `\n当前被引用 ${variable.refCount} 处` : ''}`;
         row.dataset.variableName = variable.name;
         row.dataset.variableScope = scope;
-        row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span>';
+        row.innerHTML = '<span class="variable-icon"></span><span class="variable-name"></span><span class="variable-flags"></span><span class="variable-ref-count"></span>';
         const variableGlyph = variableTypeGlyphs[variable.type.toLowerCase()] ?? variableTypeFallbackGlyph;
         const icon = row.querySelector<HTMLElement>('.variable-icon')!;
         icon.classList.add(variableGlyph.className);
@@ -422,6 +479,13 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
         const flags = row.querySelector<HTMLElement>('.variable-flags')!;
         flags.textContent = variableTypeLabels[variable.type.toLowerCase()] ?? variable.type;
         flags.title = variable.type;
+        // 引用处数徽标：有引用才显示，0 处时留空让行布局稳定。
+        const refCount = row.querySelector<HTMLElement>('.variable-ref-count')!;
+        const count = Number(variable.refCount) || 0;
+        if (count > 0) {
+          refCount.textContent = `${count} 引用`;
+          refCount.title = `变量被 ${count} 处引用，点击行右键可查看详情`;
+        }
         const eye = document.createElement('span');
         eye.className = `variable-eye${variable.public ? '' : ' off'}`;
         eye.setAttribute('role', 'button');
@@ -451,6 +515,14 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
           editorCommand('selectVariable', { name: variable.name, scope });
           // 变量行选中即等价于画布选中该变量：Delete 交由画布执行删除；F2 在这一行原地改名。
           registerEditorDeleteTarget({ variable: { name: variable.name, scope } });
+        });
+        row.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          // 右键目标同步为当前变量，但不强制切换详情面板。
+          editorCommand('selectVariable', { name: variable.name, scope });
+          registerEditorDeleteTarget({ variable: { name: variable.name, scope } });
+          showVariableContextMenu(event, variable, row);
         });
         variablesView.appendChild(row);
       }

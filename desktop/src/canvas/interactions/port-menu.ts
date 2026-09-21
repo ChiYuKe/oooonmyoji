@@ -77,14 +77,15 @@ export interface PortMenuDeps {
   toast(message: string, error?: boolean): void;
   typeNames: Record<string, string>;
   nodeWidth: number;
-  /** 组内端点按需暴露：null 表示当前不在可编辑的节点组内。 */
-  nodeGroupPinExposure?(nodeId: string, param: string): boolean | null;
-  setNodeGroupPinExposed?(nodeId: string, param: string, exposed: boolean): boolean;
+  variableCardWidth: number;
+  variableCardPortY: number;
+  /** 组内端点「添加到组接口 / 从组接口移除」菜单项；不在可编辑的节点组内返回 null。 */
+  nodeGroupPinMenu?(nodeId: string, param: string): MenuEntry | null;
   /** 可选覆盖：测试或宿主希望替换默认实现（菜单项调用覆盖实现，公开 API 仍是默认实现）。 */
   copyVariableReference?(scope: string, name: string): void;
   insertNodeAbove?(childId: string, type: string): void;
   addChildNode?(parentId: string, type: string, point: PortPoint): void;
-  promotePinToVariable?(nodeId: string, param: string, pin: PortPin): void;
+  promotePinToVariable?(nodeId: string, param: string, pin: PortPin, point?: PortPoint): void;
   /** 剪贴板所在 navigator，便于在 vm/测试环境注入；默认取全局。 */
   getNavigator?(): Navigator | undefined;
 }
@@ -98,7 +99,7 @@ export interface CanvasPortMenu {
   variableCardPortMenuItems(card: PortVariableCard, point: PortPoint): MenuEntry[];
   insertNodeAbove(childId: string, type: string): void;
   addChildNode(parentId: string, type: string, point: PortPoint): void;
-  promotePinToVariable(nodeId: string, param: string, pin: PortPin): void;
+  promotePinToVariable(nodeId: string, param: string, pin: PortPin, point?: PortPoint): void;
   copyVariableReference(scope: string, name: string): void;
 }
 
@@ -109,7 +110,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
     canConnect, connect, disconnect, mutate, nodeById, position, layout, nodes, nodeVariablePins,
     variableCards, variableLinks, nextVariableCardId, variableCardList, variableCardPosition,
     focusVariableCard, placeVariableCard, disconnectVariableFromPin, disconnectVariableFromInstanceInput,
-    removeVariableCard, fieldLabel, toast, typeNames, nodeWidth,
+    removeVariableCard, fieldLabel, toast, typeNames, nodeWidth, variableCardWidth, variableCardPortY,
     startReferenceConnection, nodeOutputFields, disconnectReferenceFromPin,
   } = deps;
 
@@ -162,12 +163,8 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
       items.push({ label: '从这里开始连线（绑定变量）', run: () => startVariableConnectionFromPin(null, nodeId, pin.param, point) });
       items.push('separator', { label: '提升为变量', run: () => promotePin(nodeId, pin.param, pin) });
     }
-    const exposed = deps.nodeGroupPinExposure?.(nodeId, pin.param);
-    if (exposed !== null && exposed !== undefined && deps.setNodeGroupPinExposed) {
-      items.push('separator', exposed
-        ? { label: '从组接口移除', danger: true, run: () => deps.setNodeGroupPinExposed!(nodeId, pin.param, false) }
-        : { label: '添加到组接口', run: () => deps.setNodeGroupPinExposed!(nodeId, pin.param, true) });
-    }
+    const groupItem = deps.nodeGroupPinMenu?.(nodeId, pin.param);
+    if (groupItem) items.push('separator', groupItem);
     return items;
   }
 
@@ -396,7 +393,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
   }
 
   /** UE 的 Promote to Variable：把参数字面量提升为工作流输入变量，绑定端口，并在画布创建变量卡片自动连上。 */
-  function promotePinToVariable(nodeId: string, param: string, pin: PortPin): void {
+  function promotePinToVariable(nodeId: string, param: string, pin: PortPin, point?: PortPoint): void {
     const node = nodeById(nodeId);
     if (!node) return;
     const current = param.startsWith('inputs.')
@@ -421,7 +418,10 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
       // 创建变量卡片并登记连线：端口右键后即可看到“变量卡片 + 自动连线”
       const pins = nodeVariablePins(node);
       const pinIndex = Math.max(0, pins.findIndex((item) => item.param === param));
-      const at = variableCardPosition(node, pinIndex);
+      // 从端口拖到空白处时，让新卡片的输出端点正好落在松手位置；右键“提升为变量”仍沿用自动位置。
+      const at = point
+        ? { x: Math.round(point.x - variableCardWidth), y: Math.round(point.y - variableCardPortY) }
+        : variableCardPosition(node, pinIndex);
       const cardId = nextVariableCardId();
       variableCards()[cardId] = { name, scope: 'inputs', x: at.x, y: at.y };
       variableLinks()[`${nodeId}:${param}`] = cardId;

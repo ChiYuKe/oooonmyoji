@@ -49,6 +49,8 @@ export interface ConnectionsDeps {
   showMenu?(x: number, y: number, items: any[]): void;
   /** 引用显示名（`nodes.<id>.output.0` → `节点名[0]`），用于落点提示。 */
   referenceDisplayNameOf?(ref: string): string;
+  /** 变量线落在空白画布时交给宿主创建合适的端点/变量卡；返回 true 表示已处理。 */
+  onEmptyVariableDrop?(connection: any, point: ConnectionPoint): boolean;
 }
 
 export interface CanvasConnections {
@@ -81,6 +83,7 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     nodeById, instanceRunCards, variableCompatibleWithPin, variableCompatibleWithInstanceInput,
     variableLinks, displayNameOfDefinition, variableDisplayNameOf, toast, variableCardList,
     referenceConnectionTargetAt, referenceMissAt, fieldLabel, showMenu, referenceDisplayNameOf,
+    onEmptyVariableDrop,
   } = deps;
 
   function captureConnectionPointer(event: PointerLike): number | null {
@@ -182,7 +185,11 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     const target = variableConnectionTargetAt(event) || connection.hover;
     state.variableConnect = null;
     releaseConnectionPointer(connection.pointerId);
-    if (!target) { render(); return; }
+    if (!target) {
+      const point = worldPoint(event as PointerLike & { clientX: number; clientY: number });
+      if (!onEmptyVariableDrop?.(connection, point)) render();
+      return;
+    }
     if (connection.direction === 'from-card') {
       if (target.kind === 'instance-input') connectVariableToInstanceInput(connection.scope, connection.variable, target.nodeId, target.runIndex, target.param, connection.cardId);
       else connectVariableToPin(connection.scope, connection.variable, target.nodeId, target.param, connection.cardId);

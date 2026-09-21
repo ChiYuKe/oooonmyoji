@@ -18,6 +18,10 @@
  * - 折叠的组：成员按组卡的位移整组平移，组内相对关系不变。
  * - **组内视图（进了某个组再排列）完全隔离**：只动本组成员的位移与挂在本组成员上的卡片；
  *   组卡在外层的坐标、组外节点与组外卡片一律不碰——外层布局是用户自己排的。
+ * - **组内不画的卡片也不碰**：被组边界行代表的变量（`groupRepresentedRefs`）在组内视图里
+ *   根本没有画布卡片（左侧边界卡的那一行代替了它），组内排列就不该改它的坐标——否则用户
+ *   在组内看不见任何变化，出组才发现外层那张卡片被搬走了（「组内操作改了组外布局」）。
+ *   这条规则必须与 `editor.variableCardList()` 的过滤规则同源。
  */
 
 export interface FollowCardLayoutDeps {
@@ -46,6 +50,12 @@ export interface FollowCardLayoutDeps {
    * 组外布局是用户在外层自己排的，进组排一次不该把外面也改掉。
    */
   groupScopeId?: string;
+  /**
+   * 组内视图里被「组边界行」代表的变量（`作用域.变量名`，即 `boundaryVariableRefs()`）：
+   * 这些卡片在组内根本不画（组左侧边界卡的那一行代替了它），组内排列一律不碰它们的坐标。
+   * 缺省（或不在组内）时为空——外层排列照旧处理所有卡片。
+   */
+  groupRepresentedRefs?: Set<string>;
 }
 
 export interface FollowCardLayoutResult {
@@ -76,6 +86,17 @@ const CARD_SLOT_OFFSETS = [0, -72, 72, -144, 144];
 
 const snap = (value: number): number => Math.round(value / SNAP) * SNAP;
 const isFinitePoint = (value: any): boolean => Boolean(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
+
+/**
+ * 卡片代表的变量引用（`作用域.变量名`）：与 `workflow-model.variableCardList()` /
+ * `editor.variableCardList()` 的键完全同一套规则（缺省作用域 inputs、缺省名字用卡片 id），
+ * 「组内画不画这张卡」与「组内排不排这张卡」才不会各说各话。
+ */
+function cardReferenceOf(id: string, card: any): string {
+  const scope = card?.scope === 'variables' ? 'variables' : 'inputs';
+  const name = typeof card?.name === 'string' && card.name ? card.name : id;
+  return `${scope}.${name}`;
+}
 
 /**
  * 节点组卡片的位置：成员包围盒中心（与打组时同一个公式，打组与自动排列共用）。
@@ -327,6 +348,8 @@ export function followCardsAfterLayout(deps: FollowCardLayoutDeps): FollowCardLa
   const scoped = Boolean(scopeMembers && scopeMembers.size);
   /** 这次该不该动「归属于 ownerId 的东西」：组内视图只认本组成员。 */
   const inScope = (ownerId: string): boolean => !scoped || (Boolean(ownerId) && scopeMembers!.has(ownerId));
+  /** 组内被边界行代表的变量：这些卡片组内不画，组内排列也不碰（与 variableCardList 同源）。 */
+  const represented = scoped ? (deps.groupRepresentedRefs ?? new Set<string>()) : new Set<string>();
 
   // 节点组：折叠时成员跟着组卡搬（组外排列）；进组排列时不动组卡（组卡位置属于组外布局）。
   const groups = groupTable(raw);
@@ -370,6 +393,8 @@ export function followCardsAfterLayout(deps: FollowCardLayoutDeps): FollowCardLa
     .filter(Boolean) as CardRect[];
   for (const [id, card] of Object.entries(cards)) {
     if (!card || typeof card !== 'object' || !isFinitePoint(card)) continue;
+    // 组内视图：这张卡由组边界行代表、组内根本不画——排列也不许动它（否则出组才发现卡片跳了）。
+    if (scoped && represented.has(cardReferenceOf(id, card))) continue;
     const owner = owners.get(id) || null;
     const ownerId = owner ? owner.nodeId : '';
     // 组内视图：只有挂在**本组成员**上的卡片跟着走；组外卡片（含未绑定卡片）原地不动。

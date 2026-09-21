@@ -32,6 +32,7 @@ function harness(nodes, options = {}) {
     nodes: () => state.raw.nodes,
     nodeById: (id) => state.raw.nodes.find((node) => node.id === id) || null,
     referenceSourceById: options.referenceSourceById,
+    edgeRunTargetIds: options.edgeRunTargetIds,
     position: (node) => (options.positions && options.positions[node.id]) || {x: 0, y: 0},
     nodeHeight: () => options.nodeHeight ?? 96,
     instanceRunCards: () => options.runCards || [],
@@ -129,6 +130,41 @@ test('运行事件就地更新连线状态，无需等待视口重绘', () => {
   h.state.run.clear();
   assert.equal(h.edges.patchRunEdgeStates(), 1);
   assert.equal(group.attrs.class, 'edge');
+});
+
+test('折叠组代理线继承组内真实入口节点的运行效果并实时刷新', () => {
+  const h = harness([
+    {id: 'selector', type: 'selector', children: ['group']},
+    {id: 'group', type: 'node_group', _nodeGroup: true, children: []},
+  ], {edgeRunTargetIds: (parentId, childId) => parentId === 'selector' && childId === 'group' ? ['inside'] : [childId]});
+  h.edges.renderEdge(h.layer, h.state.raw.nodes[0], 'group', 2);
+  const edge = h.layer.children[0];
+  assert.equal(edge.attrs.class, 'edge edge-collapsed-group');
+
+  h.state.run.set('inside', {status: 'running'});
+  assert.equal(h.edges.patchRunEdgeStates('inside'), 1, '真实节点事件必须命中代理边');
+  assert.equal(edge.attrs.class, 'edge run-running edge-collapsed-group');
+
+  h.state.run.set('inside', {status: 'succeeded'});
+  assert.equal(h.edges.patchRunEdgeStates('inside'), 1);
+  assert.equal(edge.attrs.class, 'edge run-succeeded edge-collapsed-group');
+  assert.equal(h.edges.patchRunEdgeStates('unrelated'), 0, '无关节点不触碰这条代理边');
+});
+
+test('多入口组代理线与组卡使用同一优先级，当前运行态不会显示成旧绿色', () => {
+  const h = harness([
+    {id: 'selector', type: 'selector', children: ['group']},
+    {id: 'group', type: 'node_group', _nodeGroup: true, children: []},
+  ], {edgeRunTargetIds: () => ['old-entry', 'current-entry']});
+  h.state.run.set('old-entry', {status: 'succeeded'});
+  h.state.run.set('current-entry', {status: 'running'});
+  h.edges.renderEdge(h.layer, h.state.raw.nodes[0], 'group', 0);
+  const edge = h.layer.children[0];
+  assert.equal(edge.attrs.class, 'edge run-running edge-collapsed-group');
+
+  h.state.run.set('current-entry', {status: 'failed'});
+  assert.equal(h.edges.patchRunEdgeStates('current-entry'), 1);
+  assert.equal(edge.attrs.class, 'edge run-failed edge-collapsed-group');
 });
 
 test('Alt + 左键在连线上直接断开，并保持选区与重连语义', () => {
@@ -241,7 +277,7 @@ test('节点组接口端点代理真实成员参数，不重复直连成员卡',
   };
   const proxyPin = {
     param: 'group-pin:0', variable: 'count', scope: 'inputs',
-    targetNodeId: 'inside', targetParam: 'count', targetIndex: 0, _targetNode: member,
+    targetNodeId: 'inside', targetParam: 'count', targetIndex: 0, _targetNode: member, _nodeGroupPin: true,
   };
   const boundary = {
     id: '__node_group_interface__:g1', type: 'node_group_interface', _nodeGroupInterface: true,
@@ -257,27 +293,83 @@ test('节点组接口端点代理真实成员参数，不重复直连成员卡',
   h.edges.renderVariableEdges(h.layer);
   const visible = h.layer.children.filter((child) => child.attrs.class.includes('variable-edge '));
   const mappings = h.layer.children.filter((child) => child.attrs.class.includes('group-interface-edge'));
-  assert.equal(visible.length, 1, '变量卡只连到组接口一次');
-  assert.equal(mappings.length, 1, '组接口用虚线映射到真实成员端点');
+  // 两条都用标准变量线样式：变量卡 → 组接口这一条，加上组接口 → 真实成员端点那一条。
+  assert.equal(visible.length, 2, '变量卡到组接口、组接口到真实成员都要画成变量线');
+  assert.equal(mappings.length, 1, '组接口到真实成员端点的映射线带 group-interface-edge 语义标记');
+  assert.match(mappings[0].attrs.class, /^variable-edge group-interface-edge data-tone-\d+$/, '映射线必须与普通变量线同一套数据线样式');
+  assert.match(String(mappings[0].attrs.style), /--edge-tone:var\(--data-tone\)/, '映射线按身份取色，不再是固定的灰色虚线');
   const hit = h.layer.children.find((child) => child.attrs.class === 'variable-edge-hit');
   hit.fire('pointerdown', {altKey: true, clientX: 10, clientY: 10});
   hit.fire('pointerup', {altKey: true, clientX: 10, clientY: 10});
   assert.deepEqual(h.calls.disconnectedPins, [['inside', 'count']], '在组接口断线必须作用于真实成员参数');
 });
 
+test('组边界映射线不再使用虚线样式（与变量线标准一致）', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public/legacy/workflow-editor.css'), 'utf8');
+  assert.doesNotMatch(css, /\.group-interface-edge\s*\{[^}]*stroke-dasharray/, '组边界映射线不得声明虚线');
+  assert.doesNotMatch(css, /\.group-interface-edge\s*\{[^}]*stroke-width/, '线宽交给 .variable-edge 的数据线标准');
+  const light = fs.readFileSync(path.join(__dirname, '..', 'public/theme/editor-light.css'), 'utf8');
+  assert.doesNotMatch(light, /data-theme="light"\]\s*\.group-interface-edge\s*\{[^}]*#696969/, '浅色主题里也不再有灰色映射线');
+});
+
 test('手动创建的组接口端点尚未绑定变量时也显示组内映射线', () => {
   const member = {id: 'inside', type: 'task', _nodeGroupMember: true, pins: [{param: 'count', variable: '', scope: 'inputs'}]};
   const boundary = {
     id: '__node_group_interface__:g1', type: 'node_group_interface', _nodeGroupInterface: true,
-    pins: [{param: 'group-pin:0', variable: '', scope: 'inputs', targetNodeId: 'inside', targetParam: 'count', targetIndex: 0, _targetNode: member}],
+    pins: [{param: 'group-pin:0', variable: '', scope: 'inputs', targetNodeId: 'inside', targetParam: 'count', targetIndex: 0, _targetNode: member, _nodeGroupPin: true}],
     children: ['inside'],
   };
   const h = harness([boundary, member], {
     positions: {'__node_group_interface__:g1': {x: 0, y: 0}, inside: {x: 200, y: 260}},
   });
   h.edges.renderVariableEdges(h.layer);
-  assert.equal(h.layer.children.filter((child) => child.attrs.class.includes('group-interface-edge')).length, 1);
-  assert.equal(h.layer.children.filter((child) => child.attrs.class.includes('variable-edge ')).length, 0);
+  const mappings = h.layer.children.filter((child) => child.attrs.class.includes('group-interface-edge'));
+  assert.equal(mappings.length, 1);
+  // 还没有外部变量时只画这一条映射线，但样式同样是标准变量线（实线、按参数身份取色）。
+  assert.match(mappings[0].attrs.class, /^variable-edge group-interface-edge data-tone-\d+$/);
+  assert.equal(h.layer.children.filter((child) => child.attrs.class.includes('variable-edge ')).length, 1);
+});
+
+test('组内视图隐藏了变量卡时，只留映射线、不画悬空的变量线', () => {
+  // 组边界行已经代表了这个变量，画布入口于是把它从变量卡列表里剔掉：
+  // 此时映射线（边界行 → 真实成员参数）照画，指向卡片的连线不能留半截。
+  const member = {id: 'inside', type: 'task', _nodeGroupMember: true, pins: [{param: 'count', variable: 'count', scope: 'inputs'}]};
+  const boundary = {
+    id: '__node_group_variables__:g1', type: 'node_group_variables', _nodeGroupVariables: true,
+    pins: [{param: 'group-pin:0', variable: 'count', scope: 'inputs', targetNodeId: 'inside', targetParam: 'count', targetIndex: 0, _targetNode: member, _nodeGroupPin: true}],
+    children: [],
+  };
+  const h = harness([boundary, member], {
+    positions: {'__node_group_variables__:g1': {x: -240, y: 0}, inside: {x: 200, y: 260}},
+    // 没有任何变量卡片（组内视图过滤掉了）
+  });
+  h.state.raw.inputs = {count: {type: 'integer', default: 1}};
+  h.edges.renderVariableEdges(h.layer);
+  const mappings = h.layer.children.filter((child) => child.attrs.class.includes('group-interface-edge'));
+  const cardLines = h.layer.children.filter((child) => child.attrs.class.includes('variable-edge ')
+    && !child.attrs.class.includes('group-interface-edge'));
+  assert.equal(mappings.length, 1, '边界行到真实成员参数的映射线要保留');
+  assert.equal(cardLines.length, 0, '卡片被隐藏时不得留下指向它的悬空连线');
+  // 变量卡的端口在右边缘：头段控制点必须往右推（x1 + bend），否则长距离时线几乎退化成直斜线。
+  // 起点 (10,108)、终点 (210,368)、bend = max(32, 200*0.42) = 84。
+  assert.equal(mappings[0].attrs.d, 'M 10 108 C 94 108, 126 368, 210 368');
+});
+
+test('接口卡的映射线仍然从左侧出线（头段控制点往左推）', () => {
+  const member = {id: 'inside', type: 'task', _nodeGroupMember: true, pins: [{param: 'count', variable: 'count', scope: 'inputs'}]};
+  const boundary = {
+    id: '__node_group_interface__:g1', type: 'node_group_interface', _nodeGroupInterface: true,
+    pins: [{param: 'group-pin:0', variable: 'count', scope: 'inputs', targetNodeId: 'inside', targetParam: 'count', targetIndex: 0, _targetNode: member, _nodeGroupPin: true}],
+    children: ['inside'],
+  };
+  const h = harness([boundary, member], {
+    positions: {'__node_group_interface__:g1': {x: 0, y: 0}, inside: {x: 200, y: 260}},
+  });
+  h.state.raw.inputs = {count: {type: 'integer', default: 1}};
+  h.edges.renderVariableEdges(h.layer);
+  const mapping = h.layer.children.find((child) => child.attrs.class.includes('group-interface-edge'));
+  // 接口卡端口在左边缘：起点 (10,108) → 头段控制点 x1 - bend = -74。
+  assert.equal(mapping.attrs.d, 'M 10 108 C -74 108, 126 368, 210 368');
 });
 
 test('节点拖动时变量线局部更新到新的参数端点', () => {
@@ -386,7 +478,7 @@ test('折叠组上的引用边连接可见组卡，但断开仍作用于真实�
     id: 'group', type: 'node_group', _nodeGroup: true,
     pins: [{
       param: 'group-pin:0', value: {ref: 'nodes.source.output.match'},
-      targetNodeId: 'inside', targetParam: 'match',
+      targetNodeId: 'inside', targetParam: 'match', _nodeGroupPin: true,
     }],
   };
   const h = harness([source, group], {positions: {source: {x: 0, y: 0}, group: {x: 400, y: 200}}});

@@ -6,6 +6,7 @@
  * 纯几何 + 类型兼容计算，不修改状态；变量连线与节点输出引用拖拽的悬停目标由这里给出。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { isGroupBoundaryPin } from '../model/node-groups';
 
 export interface HitPoint {
   x: number;
@@ -104,8 +105,8 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       if (!pins.length) continue;
       const pos = position(node);
       pins.forEach((pin, index) => {
-        const targetNode = pin._targetNode || (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
-        const targetParam = pin.targetParam || pin.param;
+        const targetNode = isGroupBoundaryPin(pin) ? pin._targetNode : (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
+        const targetParam = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
         if (!targetNode || !variableCompatibleWithPin(scope, variableName, targetNode, targetParam)) return;
         const x = pos.x + variablePinX;
         const y = rowCenterY(node, index);
@@ -123,14 +124,14 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       if (point.x < pos.x || point.x > pos.x + nodeWidth || point.y < pos.y || point.y > pos.y + nodeHeight(node)) continue;
       const pins = nodeVariablePins(node);
       const index = pins.findIndex((pin) => {
-        const targetNode = pin._targetNode || (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
-        return Boolean(targetNode) && variableCompatibleWithPin(scope, variableName, targetNode, pin.targetParam || pin.param);
+        const targetNode = isGroupBoundaryPin(pin) ? pin._targetNode : (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
+        return Boolean(targetNode) && variableCompatibleWithPin(scope, variableName, targetNode, isGroupBoundaryPin(pin) ? pin.targetParam : pin.param);
       });
       if (index < 0) continue;
       const pin = pins[index];
       return {
-        nodeId: pin.targetNodeId || node.id,
-        param: pin.targetParam || pin.param,
+        nodeId: isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id,
+        param: isGroupBoundaryPin(pin) ? pin.targetParam : pin.param,
         x: pos.x + variablePinX,
         y: rowCenterY(node, index),
       };

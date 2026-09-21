@@ -374,10 +374,23 @@
 :root[data-theme="light"] .variable-icon.type-workflow {
     color: #40617f
 }
-:root[data-theme="light"] .row-name-edit {
-    border: 1px solid var(--ui-focus, #468fb5);
-    background: var(--ui-field, #f2f2f2);
-    color: var(--ui-text, #232323)
+:root[data-theme="light"] .inline-rename-input {
+    border: 1px solid color-mix(in srgb, var(--border, #dbdbdb) 70%, var(--muted, #bdbdbd));
+    background: color-mix(in srgb, var(--surface-raised, #eaeaea) 90%, var(--bg, #f5f5f5));
+    color: var(--text, #313131);
+    caret-color: color-mix(in srgb, var(--text, #313131) 76%, var(--muted, #696969))
+}
+:root[data-theme="light"] .inline-rename-input:focus {
+    border-color: color-mix(in srgb, var(--muted, #bdbdbd) 76%, var(--border, #dbdbdb));
+    background: color-mix(in srgb, var(--surface-raised, #eaeaea) 94%, var(--bg, #f5f5f5))
+}
+:root[data-theme="light"] .inline-rename-input::selection {
+    background: color-mix(in srgb, var(--muted, #cccccc) 30%, transparent);
+    color: var(--text, #313131)
+}
+:root[data-theme="light"] .variable-ref-count {
+    color: var(--accent, #426176);
+    background: color-mix(in srgb, var(--accent, #ecf4fa) 14%, transparent)
 }
 :root[data-theme="light"] .variable-scope {
     color: #45616e
@@ -495,12 +508,6 @@
 :root[data-theme="light"] .content-item.selected {
     background: #e1e7ec
 }
-:root[data-theme="light"] .content-item.editing {
-    background: #e1e7ec
-}
-:root[data-theme="light"] .content-item.editing:hover {
-    background: #e1e7ec
-}
 :root[data-theme="light"] .content-item.folder.drop-target, :root[data-theme="light"] .content-folder-row.drop-target, :root[data-theme="light"] .content-crumb.drop-target, :root[data-theme="light"] .content-browser-items.drop-target {
     border-color: #4e8dac;
     background: #e0e6e9
@@ -530,11 +537,6 @@
 :root[data-theme="light"] .content-browser-items.grid .content-item-kind {
     background: rgba(249, 249, 249, 0.82);
     color: #2e2e2e
-}
-:root[data-theme="light"] .content-item-name-edit {
-    border: 1px solid #468fb5;
-    background: #f2f2f2;
-    color: #232323
 }
 :root[data-theme="light"] .content-item-path {
     color: #696969
@@ -931,6 +933,50 @@
 :root[data-theme="light"] .content-rewrite-footer > span {
     color: #696969
 }
+:root[data-theme="light"] .impact-confirm-modal {
+    background: rgba(251, 251, 251, 0.72)
+}
+:root[data-theme="light"] .impact-confirm-dialog {
+    border: 1px solid #d7d7d7;
+    background: #eeeeee
+}
+:root[data-theme="light"] .impact-confirm-header {
+    border-bottom: 1px solid #dddddd;
+    background: #ebebeb
+}
+:root[data-theme="light"] .impact-confirm-header strong {
+    color: #232323
+}
+:root[data-theme="light"] .impact-confirm-header span {
+    color: #696969
+}
+:root[data-theme="light"] .impact-confirm-header button {
+    color: #696969
+}
+:root[data-theme="light"] .impact-confirm-header button:hover {
+    background: #e1e1e1;
+    color: #232323
+}
+:root[data-theme="light"] .impact-confirm-item {
+    border: 1px solid #dddddd;
+    background: #f0f0f0
+}
+:root[data-theme="light"] .impact-confirm-item strong {
+    color: #2a2a2a
+}
+:root[data-theme="light"] .impact-confirm-item code {
+    color: #456171
+}
+:root[data-theme="light"] .impact-confirm-footer {
+    border-top: 1px solid #dddddd;
+    background: #ebebeb
+}
+:root[data-theme="light"] .impact-confirm-footer .overview-config-button.primary.danger {
+    background: #f3e5e6
+}
+:root[data-theme="light"] .impact-confirm-footer .overview-config-button.primary.danger:hover {
+    background: #f6e6e8
+}
 :root[data-theme="light"] .roi-picker-modal {
     background: rgba(251, 251, 251, 0.78)
 }
@@ -983,6 +1029,16 @@
     color: #232323
 }
 :root[data-theme="light"] .content-context-menu button:hover svg {
+    color: #232323
+}
+:root[data-theme="light"] .sidebar-context-menu {
+    background: #ededed
+}
+:root[data-theme="light"] .sidebar-context-menu button:hover {
+    background: #dde5eb;
+    color: #232323
+}
+:root[data-theme="light"] .sidebar-context-menu button:hover .sidebar-context-menu-icon {
     color: #232323
 }
 :root[data-theme="light"] .reference-viewer {
@@ -1261,12 +1317,113 @@
 :root[data-theme="light"] .variable-references-header {
     background: #f0f0f0
 }
+:root[data-theme="light"] .variable-references-icon {
+    background: #ececec;
+    color: #606060
+}
+:root[data-theme="light"] .variable-references-chip {
+    border: 1px solid #dcdcdc;
+    background: #ececec;
+    color: #636363
+}
+:root[data-theme="light"] .variable-references-chip.type {
+    color: #555555
+}
+:root[data-theme="light"] .variable-references-toolbar {
+    background: #f0f0f0
+}
+:root[data-theme="light"] .variable-references-search {
+    border: 1px solid #dcdcdc;
+    background: #f5f5f5;
+    color: #696969
+}
+:root[data-theme="light"] .variable-references-search:focus-within {
+    border-color: #d1d1d1;
+    color: #484848
+}
+:root[data-theme="light"] .variable-references-search input {
+    color: #2f2f2f
+}
+:root[data-theme="light"] .variable-references-filter {
+    border: 1px solid #dcdcdc;
+    background: #eeeeee;
+    color: #5a5a5a
+}
+:root[data-theme="light"] .variable-references-filter:hover:not(:disabled) {
+    background: #e9e9e9;
+    color: #2e2e2e
+}
+:root[data-theme="light"] .variable-references-filter.active {
+    background: #e3e3e3;
+    border-color: #d5d5d5;
+    color: #232323
+}
+:root[data-theme="light"] .variable-references-filter-count {
+    color: #696969
+}
+:root[data-theme="light"] .variable-references-filter.active .variable-references-filter-count {
+    color: #4f4f4f
+}
+:root[data-theme="light"] .variable-reference-group-head {
+    background: #f2f2f2
+}
+:root[data-theme="light"] .variable-reference-group-order {
+    color: #696969
+}
+:root[data-theme="light"] .variable-reference-group-name {
+    color: #282828
+}
+:root[data-theme="light"] .variable-reference-group-action {
+    color: #696969
+}
+:root[data-theme="light"] .variable-reference-group-parent {
+    color: #696969
+}
+:root[data-theme="light"] .variable-reference-group-count {
+    color: #696969
+}
+:root[data-theme="light"] .variable-reference-row.param {
+    border-left-color: #dbdbdb
+}
+:root[data-theme="light"] .variable-reference-row.linked .variable-reference-icon {
+    color: #4c5f6a
+}
+:root[data-theme="light"] .variable-reference-row.initializer .variable-reference-icon {
+    color: #695c3b
+}
+:root[data-theme="light"] .variable-reference-ref {
+    color: #696969
+}
 :root[data-theme="light"] .variable-reference-badge {
     background: #ebebeb
 }
 :root[data-theme="light"] .variable-reference-badge.linked {
     background: #e9e9e9;
     color: #4d5f67
+}
+:root[data-theme="light"] .variable-reference-badge.initializer {
+    background: #eaeaea;
+    color: #665c3f
+}
+:root[data-theme="light"] .variable-reference-jump {
+    color: #696969
+}
+:root[data-theme="light"] .variable-references-empty-icon {
+    color: #696969
+}
+:root[data-theme="light"] .variable-references-empty strong {
+    color: #454545
+}
+:root[data-theme="light"] .variable-references-empty-note {
+    color: #696969
+}
+:root[data-theme="light"] .variable-references-reset {
+    border: 1px solid #dcdcdc;
+    background: #ececec;
+    color: #3c3c3c
+}
+:root[data-theme="light"] .variable-references-reset:hover {
+    background: #e7e7e7
 }
 :root[data-theme="light"] .variable-references-footer {
     background: #f0f0f0
@@ -1359,6 +1516,21 @@
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-input:focus:not(:focus-visible) {
     outline-color: var(--inline-focus-line, #bbbbbb)
+}
+:root[data-theme="light"] .inline-node-name-editor {
+    border: 1px solid color-mix(in srgb, var(--card-line, #d7d7d7) 72%, var(--inline-focus-line, #bbbbbb));
+    background: color-mix(in srgb, var(--card-head, #e6e6e6) 92%, #f7f7f7 8%)
+}
+:root[data-theme="light"] .inline-node-name-editor:focus-within {
+    border-color: color-mix(in srgb, var(--inline-focus-line, #bbbbbb) 72%, var(--card-line, #d7d7d7))
+}
+:root[data-theme="light"] .inline-node-name-input {
+    color: var(--card-text, #232323);
+    caret-color: var(--inline-focus-line, #696969)
+}
+:root[data-theme="light"] .inline-node-name-input::selection {
+    background: color-mix(in srgb, var(--inline-focus-line, #cccccc) 30%, transparent);
+    color: var(--card-text, #232323)
 }
 :root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple {
     --inline-cell-line: var(--card-line, #696969)

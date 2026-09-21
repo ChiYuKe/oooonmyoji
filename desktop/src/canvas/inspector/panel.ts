@@ -32,6 +32,7 @@ export interface InspectorPanelDeps {
   typeNames: Record<string, string>;
   typeLabels: Record<string, string>;
   renameNode(nodeId: string, value: string): void;
+  renameNodeGroup(groupId: string, value: string): void;
   changeNodeType(node: any, value: string): void;
   mutate(fn: () => void): void;
   deleteSelection(): void;
@@ -53,7 +54,7 @@ export interface InspectorPanel {
 export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
   const {
     state, UI, $, el, nodeById, hideAssetPathPreview, types, typeNames, typeLabels,
-    renameNode, changeNodeType, mutate, deleteSelection, renderers,
+    renameNode, renameNodeGroup, changeNodeType, mutate, deleteSelection, renderers,
   } = deps;
 
   function clearInspector(title: string): HTMLElement {
@@ -181,6 +182,15 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     const node = selectedNode;
     if (!node) return;
     const body = clearInspector(node.name || node.id);
+    if (node._nodeGroup) {
+      section(body, '节点组');
+      const nameRow = field(body, '名称');
+      const nameInput = textInput(node.name || '', (value) => renameNodeGroup(node.id, value)) as HTMLInputElement;
+      // 与普通节点共用 F2 聚焦约定，宿主无需区分目标类型。
+      nameInput.id = 'inspector-node-name';
+      nameRow.appendChild(nameInput);
+      return;
+    }
     section(body, '节点');
     const basics = el('div', 'node-basics');
     body.appendChild(basics);

@@ -15,9 +15,16 @@ function harness() {
   class Element {
     constructor(tag){this.tag=tag;this.attrs={};this.children=[];this.dataset={};this.events={};this.style={};}
     setAttribute(k,v){this.attrs[k]=String(v);}
+    getAttribute(k){return Object.prototype.hasOwnProperty.call(this.attrs,k)?this.attrs[k]:null;}
     appendChild(node){this.children.push(node);return node;}
     addEventListener(k,fn){(this.events[k] ||= []).push(fn);}
-    querySelectorAll(tag){return this.children.flatMap(c=>[...(c.tag===tag?[c]:[]),...c.querySelectorAll(tag)]);}
+    querySelectorAll(selector){
+      const matches=(node)=>selector.startsWith('.')
+        ? String(node.attrs.class || '').split(/\s+/).includes(selector.slice(1))
+        : node.tag===selector;
+      return this.children.flatMap(c=>[...(matches(c)?[c]:[]),...c.querySelectorAll(selector)]);
+    }
+    querySelector(selector){return this.querySelectorAll(selector)[0] || null;}
   }
   const svgEl=(tag,attrs,parent)=>{const node=new Element(tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent?.appendChild(node);return node;};
   globalThis.document={createElementNS:(_,tag)=>new Element(tag)};
@@ -124,6 +131,8 @@ function harness() {
     registerCardPress:cards.registerCardPress,
     requestInspector:()=>{},
     requestOpenSubWorkflow:()=>{},
+    enterNodeGroup:(...args)=>ctx.enterNodeGroup?.(...args),
+    ungroupNodeGroup:(...args)=>ctx.ungroupNodeGroup?.(...args),
     render:()=>{},
     contextMenuSuppressedByPan:()=>false,
     copySelection:()=>{},
@@ -132,6 +141,7 @@ function harness() {
     typeIcons:ctx.TYPE_ICON,
     typeNames:ctx.TYPE_NAMES,
     runLabels:ctx.RUN_LABEL,
+    nodeGroupRunSummary:(groupId)=>ctx.nodeGroupRunSummary?.(groupId) || null,
     nodeWidth:260,
     baseHeight:96,
     portRadius:7,
@@ -141,6 +151,7 @@ function harness() {
     preview:{x:174,y:56,width:72,height:30},
   });
   ctx.renderNode=nodeCard.renderNode;
+  ctx.patchNodeRuntime=nodeCard.patchNodeRuntime;
   const connections=createCanvasConnections({
     state:ctx.state,
     graph:{setPointerCapture(){},releasePointerCapture(){}},
@@ -170,6 +181,43 @@ function harness() {
   return {ctx,Element,svgEl,NodeCards};
 }
 const byClass=(element,name)=>element.children.filter(c=>(c.attrs.class || '').split(' ').includes(name));
+test('折叠组卡显示成员运行进度，并能在主状态不变时就地刷新',()=>{
+  const {ctx,Element}=harness();
+  let completed=1;
+  ctx.RUN_LABEL.running='运行中';
+  ctx.nodeGroupRunSummary=()=>({
+    status:'running',total:3,completed,runningNodeId:'b',runningNodeName:'点击按钮',failedNodeIds:[],failedNodeNames:[],
+  });
+  const layer=new Element('g');
+  const node={id:'group',type:'node_group',name:'战斗循环',children:[],_nodeGroup:true,_nodeCount:3,_groupPins:[],_hasReferenceOutput:false};
+  ctx.renderNode(layer,node);
+  const card=layer.children[0];
+  assert.match(card.attrs.class,/run-running/);
+  assert.equal(byClass(card,'node-group-run-label')[0].textContent,'运行中');
+  assert.equal(byClass(card,'node-group-progress')[0].textContent,'3 个节点 · 已完成 1/3');
+  assert.equal(byClass(card,'node-group-runtime-detail')[0].textContent,'正在执行：点击按钮');
+
+  completed=2;
+  assert.equal(ctx.patchNodeRuntime(card,node),true);
+  assert.equal(byClass(card,'node-group-progress')[0].textContent,'3 个节点 · 已完成 2/3');
+});
+test('运行态组卡右键提供直接定位真实成员的入口',()=>{
+  const {ctx,Element}=harness();
+  const opened=[];
+  let menu=[];
+  ctx.nodeGroupRunSummary=()=>({
+    status:'failed',total:2,completed:2,runningNodeId:'',runningNodeName:'',failedNodeIds:['failed-task'],failedNodeNames:['失败任务'],
+  });
+  ctx.enterNodeGroup=(...args)=>opened.push(args);
+  ctx.showMenu=(x,y,items)=>{menu=items;};
+  const layer=new Element('g');
+  ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:2,_groupPins:[],_hasReferenceOutput:false});
+  const card=layer.children[0];
+  card.events.contextmenu[0]({preventDefault(){},stopPropagation(){},clientX:10,clientY:20});
+  assert.deepEqual(menu.map(item=>item.label),['定位异常节点','进入节点组','解散节点组']);
+  menu[0].run();
+  assert.deepEqual(opened,[['group','failed-task']]);
+});
 test('折叠组存在跨组输出引用时显示右侧代理输出口',()=>{
   const {ctx,Element}=harness();
   const layer=new Element('g');
@@ -189,7 +237,7 @@ test('组内变量卡把数据端点放在右侧且不显示执行端口',()=>{
   const layer=new Element('g');
   ctx.renderNode(layer,{
     id:'group-vars',type:'node_group_variables',name:'节点组 变量',children:[],_nodeGroupVariables:true,_nodeGroupHeight:320,
-    _groupPins:[{param:'group-pin:0',targetNodeId:'inside',targetParam:'match',label:'点击节点 · 匹配结果',type:'object',value:{ref:'nodes.source.output.match'}}],
+    _groupPins:[{param:'group-pin:0',targetNodeId:'inside',targetParam:'match',label:'点击节点 · 匹配结果',type:'object',value:{ref:'nodes.source.output.match'},_nodeGroupPin:true}],
   });
   const card=layer.children[0];
   assert.equal(byClass(card,'node-box')[0].attrs.height,'320','变量卡使用组成员纵向跨度');

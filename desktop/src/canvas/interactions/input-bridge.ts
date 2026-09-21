@@ -5,6 +5,7 @@
  * 监听器只在 `install()` 时注册，便于测试在不具备 DOM 的环境下直接验证分派函数。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { isProjectedGroupNode } from '../model/node-groups';
 
 export interface InputBridgeDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -28,6 +29,8 @@ export interface InputBridgeDeps {
   cutSelection(): void;
   pasteClipboard(): void;
   executeEditorCommand(command: string, value?: any): any;
+  /** 节点 F2：直接在画布卡片标题上编辑。返回 true 表示已接管。 */
+  openNodeNameEditor?(node: any): boolean;
   undo(): void;
   redo(): void;
   fitView(): void;
@@ -103,7 +106,12 @@ export function createInputBridge(deps: InputBridgeDeps) {
       // F2 重命名：可见的名称输入框在详细信息镜像里，由宿主转过去聚焦。
       if (!editing && matchesShortcut(event, 'editor.rename') && state.selected.size === 1) {
         event.preventDefault();
-        executeEditorCommand('requestRenameSelection');
+        const selectedId = String([...state.selected][0] || '');
+        const selectedNode = selectedId ? nodeById(selectedId) : null;
+        if (selectedNode && deps.openNodeNameEditor?.(selectedNode)) return;
+        // 组内接口卡/变量卡都是编辑器投影，F2 应编辑所属组，而不是合成卡自己的标题。
+        const nodeId = String(isProjectedGroupNode(selectedNode) ? (selectedNode._nodeGroupId || selectedId) : selectedId);
+        executeEditorCommand('requestRenameSelection', { kind: 'node', nodeId });
       }
       if (!editing && matchesShortcut(event, 'editor.copy')) { event.preventDefault(); copySelection(); }
       if (!editing && matchesShortcut(event, 'editor.cut')) { event.preventDefault(); cutSelection(); }

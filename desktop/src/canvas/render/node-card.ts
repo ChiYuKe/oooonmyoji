@@ -5,12 +5,14 @@
  * 渲染函数不修改文档；选择、拖拽与连线都经注入的指针/命令回调。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { presentNodeGroupRun, type NodeGroupRunSummary } from '../model/node-group-runtime';
 import type { CardsNodeCards } from './cards';
 import { nodeCardSummary } from './card-values';
 import { PARAM_FIELD_GAP, PARAM_FIELD_PADDING, paramColorSwatch, paramFieldWidth, paramRectParts, paramRowEditable, paramRowGeometry, paramRowKindOf, paramRowOpensPicker, paramRowValueView, paramTupleCells, paramTupleElementText, paramTupleItemKind, paramTupleLength } from './param-rows';
 import type { ParamRowLike } from './param-rows';
 import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from '../canvas/data-tones';
 import { FULL_DETAIL_MIN_ZOOM } from './zoom-level';
+import { isGroupBoundaryPin, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from '../model/node-groups';
 
 export interface NodePreviewInfo {
   uri: string;
@@ -82,7 +84,7 @@ export interface NodeRenderDeps {
   registerCardPress(key: string, event: { clientX: number; clientY: number }): boolean;
   requestInspector(selection: unknown): void;
   requestOpenSubWorkflow(nodeId: string): void;
-  enterNodeGroup?(groupId: string): boolean;
+  enterNodeGroup?(groupId: string, focusNodeId?: string): boolean;
   ungroupNodeGroup?(groupId: string): boolean;
   groupSelection?(): boolean;
   render(): void;
@@ -102,6 +104,8 @@ export interface NodeRenderDeps {
   typeIcons: Record<string, string>;
   typeNames: Record<string, string>;
   runLabels: Record<string, string>;
+  /** 折叠组卡的状态来自真实成员节点，不使用合成组 id 查询运行表。 */
+  nodeGroupRunSummary?(groupId: string): NodeGroupRunSummary | null;
   nodeWidth: number;
   baseHeight: number;
   portRadius: number;
@@ -116,6 +120,8 @@ export interface NodeRenderDeps {
 export interface CanvasNodeCardRenderer {
   /** 返回节点组元素：渲染控制器把它记进挂载表，拖拽时只改 transform，不重建卡片。 */
   renderNode(layer: any, node: any): any;
+  /** 运行事件的轻量补丁：只改组卡状态文字，不重建卡片。 */
+  patchNodeRuntime(element: any, node: any): boolean;
 }
 
 /** Stable task identity, independent of the surrounding workbench theme. */
@@ -142,13 +148,59 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     paramRowInfo, toggleParamRows, openParamEditor, paramRowMenuItems, compactValue,
     typeIcons, typeNames, runLabels, nodeWidth, baseHeight, portRadius, decoratorHeight, runVariableHeight,
     variablePinX, preview, taskOutputPortY, startReferenceConnection, nodeReferencePortMenuItems, nodeGroupVariableMenuItems, referenceDisplayNameOf,
-    nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection,
+    nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection, nodeGroupRunSummary,
   } = deps;
   const rowHeightOf = nodeRowHeight ?? (() => runVariableHeight);
   const referencePortY = taskOutputPortY ?? 16;
   const referenceLabel = referenceDisplayNameOf ?? ((ref: unknown) => String(ref || ''));
   const issuesOf = nodeIssueInfo ?? (() => null);
   const issuesText = issueTitle ?? ((items: any[]) => items.map((item) => String(item && item.message || '')).filter(Boolean).join('\n'));
+
+  function classElement(element: any, name: string): any {
+    if (typeof element?.querySelector === 'function') return element.querySelector(`.${name}`);
+    if (typeof element?.querySelectorAll === 'function') return element.querySelectorAll(`.${name}`)?.[0] || null;
+    return null;
+  }
+
+  function setText(element: any, value: string): boolean {
+    if (!element || element.textContent === value) return false;
+    element.textContent = value;
+    return true;
+  }
+
+  function setVisibility(element: any, visible: boolean): boolean {
+    if (!element?.getAttribute || !element?.setAttribute) return false;
+    const next = visible ? 'visible' : 'hidden';
+    if (element.getAttribute('visibility') === next) return false;
+    element.setAttribute('visibility', next);
+    return true;
+  }
+
+  function groupPresentation(node: any) {
+    const groupId = String(node?._nodeGroupId || node?.id || '');
+    return presentNodeGroupRun(nodeGroupRunSummary?.(groupId), runLabels);
+  }
+
+  function groupRuntimeFocus(node: any): { id: string; label: string } | null {
+    if (!node?._nodeGroup) return null;
+    const summary = nodeGroupRunSummary?.(String(node._nodeGroupId || node.id));
+    if (summary?.runningNodeId) return { id: summary.runningNodeId, label: '定位当前运行节点' };
+    if (summary?.failedNodeIds?.length) return { id: summary.failedNodeIds[0], label: '定位异常节点' };
+    return null;
+  }
+
+  function patchNodeRuntime(element: any, node: any): boolean {
+    if (!node?._nodeGroup || node._nodeGroupInterface || node._nodeGroupVariables) return false;
+    const view = groupPresentation(node);
+    let changed = false;
+    changed = setVisibility(classElement(element, 'node-group-run-dot'), Boolean(view.status)) || changed;
+    changed = setVisibility(classElement(element, 'node-group-run-label'), Boolean(view.status)) || changed;
+    changed = setText(classElement(element, 'node-group-run-label'), view.statusLabel) || changed;
+    changed = setText(classElement(element, 'node-group-progress'), view.progressLabel) || changed;
+    changed = setText(classElement(element, 'node-group-runtime-detail'), view.detailLabel) || changed;
+    changed = setText(classElement(element, 'node-group-runtime-title'), `${node.name || '节点组'}\n${view.title}`) || changed;
+    return changed;
+  }
 
   /** 当前拖拽（变量或节点输出引用）是否正好落在这个节点的这一行上。 */
   function hoverTargetOf(nodeId: string, param: string): boolean {
@@ -193,11 +245,14 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     const pos = position(node);
     const pins = nodeVariablePins(node);
     const height = nodeHeight(node);
-    const isInterface = Boolean(node._nodeGroupInterface);
-    const isVariables = Boolean(node._nodeGroupVariables);
+    const isInterface = isGroupInterfaceNode(node);
+    const isVariables = isGroupVariablesNode(node);
+    const isCollapsedGroup = !isInterface && !isVariables;
+    const runtime = isCollapsedGroup ? groupPresentation(node) : null;
     const selected = state.selected.has(node.id) ? ' selected' : '';
+    const runClass = runtime?.status ? ` run-${runtime.status}` : '';
     const group = svgEl('g', {
-      class: `node studio-card type-node_group category-control${selected}`,
+      class: `node studio-card type-node_group category-control${selected}${runClass}`,
       transform: `translate(${pos.x},${pos.y})`,
       'data-id': node.id,
     }, layer);
@@ -229,20 +284,28 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       });
     }
     nodeCards.text(group, { className: 'node-type card-kicker', x: 22, y: 50, value: isInterface ? '执行入口' : isVariables ? '组变量' : '节点组', width: 100, size: 10 });
+    if (isCollapsedGroup) {
+      svgEl('circle', { class: 'run-dot node-group-run-dot', cx: nodeWidth - 74, cy: 46, r: 3, visibility: runtime?.status ? 'visible' : 'hidden' }, group);
+      nodeCards.text(group, {
+        className: 'run-label node-group-run-label', x: nodeWidth - 14, y: 50,
+        value: runtime?.statusLabel || '', width: 52, size: 10, anchor: 'end',
+      }).setAttribute('visibility', runtime?.status ? 'visible' : 'hidden');
+    }
     nodeCards.text(group, {
-      className: 'node-subtitle card-description', x: 22, y: 70,
-      value: isInterface ? '连接组内入口节点' : isVariables ? `${pins.length} 个跨组数据端点` : `${Number(node._nodeCount || 0)} 个节点`,
+      className: `node-subtitle card-description${isCollapsedGroup ? ' node-group-progress' : ''}`, x: 22, y: 70,
+      value: isInterface ? '连接组内入口节点' : isVariables ? `${pins.length} 个跨组数据端点` : (runtime?.progressLabel || `${Number(node._nodeCount || 0)} 个节点`),
       width: nodeWidth - 44, size: 11,
     });
     nodeCards.text(group, {
-      className: 'node-meta card-meta', x: 22, y: 87,
-      value: isInterface ? '执行流从这里进入' : isVariables ? '连接真实成员参数' : '双击进入组内编辑',
+      className: `node-meta card-meta${isCollapsedGroup ? ' node-group-runtime-detail' : ''}`, x: 22, y: 87,
+      value: isInterface ? '执行流从这里进入' : isVariables ? '连接真实成员参数' : (runtime?.detailLabel || '双击进入组内编辑'),
       width: nodeWidth - 44, size: 10,
     });
+    if (isCollapsedGroup) svgEl('title', { class: 'node-group-runtime-title' }, group).textContent = `${node.name || '节点组'}\n${runtime?.title || ''}`;
     pins.forEach((pin: any, index: number) => {
       const centerY = baseHeight + index * runVariableHeight + runVariableHeight / 2;
-      const targetNodeId = pin.targetNodeId || node.id;
-      const targetParam = pin.targetParam || pin.param;
+      const targetNodeId = isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id;
+      const targetParam = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
       const reference = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof pin.value.ref === 'string' ? pin.value.ref : '';
       const linked = Boolean(pin.variable || reference);
       const dataKey = pin.variable ? variableDataKey(pin.scope, pin.variable) : reference || parameterDataKey(targetNodeId, targetParam);
@@ -289,6 +352,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     }
     const press = (event: any): void => {
       if (event.button !== 0) return;
+      // 组内两张合成卡也编辑同一个组名；详情镜像只需要认识真实 group id。
+      requestInspector({ kind: 'node', nodeId: String(node._nodeGroupId || node.id) });
       if (isInterface || isVariables) {
         startNodeDrag(event, node.id);
         return;
@@ -297,7 +362,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       if (isDouble) {
         event.preventDefault();
         event.stopPropagation();
-        enterNodeGroup?.(node.id);
+        enterNodeGroup?.(node.id, groupRuntimeFocus(node)?.id);
         return;
       }
       startNodeDrag(event, node.id);
@@ -312,7 +377,9 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       state.selectedEdge = null;
       state.selectedRun = null;
       render();
+      const runtimeFocus = groupRuntimeFocus(node);
       showMenu(event.clientX, event.clientY, [
+        ...(runtimeFocus ? [{ label: runtimeFocus.label, run: () => enterNodeGroup?.(node.id, runtimeFocus.id) }] : []),
         { label: '进入节点组', run: () => enterNodeGroup?.(node.id) },
         { label: '解散节点组', run: () => ungroupNodeGroup?.(node.id) },
       ]);
@@ -321,7 +388,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
   }
 
   function renderNode(layer: any, node: any): any {
-    if (node && (node._nodeGroup || node._nodeGroupInterface || node._nodeGroupVariables)) return renderNodeGroup(layer, node);
+    if (isProjectedGroupNode(node)) return renderNodeGroup(layer, node);
     const pos = position(node);
     const height = nodeHeight(node);
     const run = state.run.get(node.id);
@@ -777,5 +844,5 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     return group;
   }
 
-  return { renderNode };
+  return { renderNode, patchNodeRuntime };
 }

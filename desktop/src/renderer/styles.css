@@ -697,12 +697,37 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .variable-icon.type-duration { color: #8fbf7f; }
 .variable-icon.type-workflow { color: #6fa8dc; }
 .variable-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 侧栏行内改名（F2）：命中的那一行原地变成输入框，与内容浏览器同一套手感。
- * 颜色走语义变量，深浅主题都不用再单独适配。 */
-.row-name-edit { width: 100%; min-width: 0; height: 18px; padding: 1px 4px; border: 1px solid var(--ui-focus, #4c9bc5); border-radius: 3px; outline: 0; background: var(--ui-field, #171b1f); color: var(--ui-text, #f1f4f6); font: inherit; font-size: 12px; }
+/* F2 原位改名共用同一套视觉语义；具体场景只负责尺寸和对齐。 */
+.inline-rename-input {
+  min-width: 0;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--border, #3b3b3b) 70%, var(--muted, #929292));
+  border-radius: 4px;
+  outline: 0;
+  background: color-mix(in srgb, var(--surface-raised, #2b2b2b) 90%, var(--bg, #141414));
+  color: var(--text, #d2d2d2);
+  caret-color: color-mix(in srgb, var(--text, #d2d2d2) 76%, var(--muted, #929292));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .2), inset 0 0 0 1px rgba(255, 255, 255, .025);
+  transition: border-color .1s ease, background-color .1s ease, box-shadow .1s ease;
+}
+.inline-rename-input:focus {
+  border-color: color-mix(in srgb, var(--muted, #929292) 76%, var(--border, #3b3b3b));
+  background: color-mix(in srgb, var(--surface-raised, #2b2b2b) 94%, var(--bg, #141414));
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .24), inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+.inline-rename-input::selection {
+  background: color-mix(in srgb, var(--muted, #929292) 30%, transparent);
+  color: var(--text, #d2d2d2);
+}
+.inline-rename-input:disabled { opacity: .65; }
+/* 侧栏行内改名（F2）：命中的那一行原地变成输入框。 */
+.row-name-edit { width: 100%; height: 18px; padding: 1px 5px; font: inherit; font-size: 12px; }
 .variable-row .row-name-edit { height: 21px; font-size: 11px; }
 :is(.tree-row, .variable-row).renaming { cursor: text; }
 .variable-flags { display: flex; align-items: center; gap: 5px; color: var(--muted); font: 9px/1 Consolas, monospace; }
+.variable-ref-count { margin-left: auto; flex: none; color: var(--accent, #7ab3d9); font: 9px/1.2 "HarmonyOS Sans SC", system-ui, sans-serif; background: color-mix(in srgb, var(--accent, #7ab3d9) 14%, transparent); border-radius: 7px; padding: 1px 6px; }
+.variable-ref-count:empty { display: none; }
+.variable-row.selected .variable-ref-count { color: var(--text); }
 .variable-scope { color: #78a9bf; }
 .variable-row.scope-variables .variable-scope { color: #d1b56e; }
 .variable-eye { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; color: var(--muted); }
@@ -794,8 +819,8 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-browser-items.grid .content-item:hover { background: transparent; }
 .content-browser-items.grid .content-item.selected { border-radius: calc(8px * var(--cb-zoom)); background: var(--content-selection-surface); box-shadow: inset 0 0 0 1px var(--content-selection-frame), 0 3px 10px rgba(0,0,0,.12); }
 .content-browser-items.grid .content-item.selected::after { content: ""; position: absolute; top: calc(7px * var(--cb-zoom)); right: calc(7px * var(--cb-zoom)); width: calc(5px * var(--cb-zoom)); height: calc(5px * var(--cb-zoom)); border-radius: 50%; background: var(--content-selection-border); box-shadow: 0 0 0 2px rgba(0,0,0,.22); }
-.content-item.editing { background: #2b5674; box-shadow: inset 0 0 0 1px #397da4; cursor: default; }
-.content-item.editing:hover { background: #2b5674; }
+.content-item.editing { border-radius: calc(6px * var(--cb-zoom)); background: var(--content-selection-surface); box-shadow: inset 0 0 0 1px var(--content-selection-frame); cursor: default; }
+.content-item.editing:hover { background: var(--content-selection-surface); }
 .content-item.dragging { opacity: .45; }
 .content-item.folder.drop-target,
 .content-folder-row.drop-target,
@@ -822,8 +847,7 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-browser-items.grid .content-item-kind { display: block; position: absolute; left: 3px; bottom: 3px; max-width: calc(100% - 6px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 4px; border-radius: 2px; background: rgba(12, 12, 12, .82); color: #cfd6dc; font-size: 9px; }
 .content-item-name, .content-item-path { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .content-item-name { font-size: calc(11px * clamp(.85, var(--cb-zoom), 1.5)); }
-.content-item-name-edit { width: 100%; max-width: 100%; height: 23px; min-width: 0; padding: 2px 4px; border: 1px solid #4c9bc5; border-radius: 3px; outline: 0; background: #171b1f; color: #f1f4f6; font-size: 11px; text-align: center; }
-.content-item-name-edit:disabled { opacity: .65; }
+.content-item-name-edit { width: 100%; max-width: 100%; height: 23px; padding: 2px 5px; font-size: 11px; text-align: center; }
 .content-item-path { color: #707985; font-size: 9px; }
 .content-browser-items.grid .content-item-name { text-align: center; }
 .content-browser-items.grid .content-item-path { display: none; }
@@ -1168,6 +1192,43 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-rewrite-footer { height: 54px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid #34373b; background: #27292c; }
 .content-rewrite-footer > span { flex: 1; min-width: 0; overflow: hidden; color: #747d85; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------- 影响范围确认（改名/删除/外部变化等共用同一套确认界面） ---------- */
+.impact-confirm-modal {
+  position: fixed;
+  z-index: 2350;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 9, 10, .72);
+  backdrop-filter: blur(2px);
+}
+.impact-confirm-dialog {
+  width: min(480px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #44484d;
+  border-radius: 7px;
+  background: #202225;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .62);
+}
+.impact-confirm-header { min-height: 48px; display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #34373b; background: #27292c; }
+.impact-confirm-header > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.impact-confirm-header strong { overflow: hidden; color: #e7eaed; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.impact-confirm-header span { color: #8f979e; font-size: 10px; }
+.impact-confirm-header button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #9299a0; cursor: pointer; }
+.impact-confirm-header button:hover { background: #3a3d41; color: #fff; }
+.impact-confirm-header svg { width: 15px; height: 15px; }
+.impact-confirm-body { max-height: min(340px, 48vh); overflow: auto; padding: 10px 14px; }
+.impact-confirm-list { display: grid; gap: 4px; }
+.impact-confirm-item { display: flex; flex-direction: column; gap: 2px; padding: 6px 9px; border: 1px solid #34373b; border-radius: 4px; background: #1c1e21; }
+.impact-confirm-item strong { overflow: hidden; color: #d7dade; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.impact-confirm-item code { overflow: hidden; color: #7fb2d0; font: 9px/1.4 Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.impact-confirm-footer { min-height: 54px; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid #34373b; background: #27292c; }
+.impact-confirm-footer .overview-config-button.primary.danger { background: #a8434c; border-color: #c05560; }
+.impact-confirm-footer .overview-config-button.primary.danger:hover { background: #bc4f5a; }
+
 /* ---------- 截取模板：挂在桌面主窗口上，避免被右侧详情 iframe 裁剪 ---------- */
 .roi-picker-modal {
   position: fixed;
@@ -1281,6 +1342,19 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .content-context-menu button svg { width: 13px; height: 13px; color: var(--blue); flex: 0 0 13px; }
 .content-context-menu button:hover svg { color: #fff; }
 .content-context-separator { height: 1px; margin: 4px 1px; background: var(--border-soft); }
+
+/* 侧栏变量右键菜单：与内容浏览器菜单保持同一套工作台视觉。 */
+.sidebar-context-menu {
+  position: fixed; z-index: 1200; min-width: 156px; padding: 5px 0;
+  border: 1px solid var(--border); background: #252525; box-shadow: 0 12px 26px rgba(0, 0, 0, .5);
+}
+.sidebar-context-menu button {
+  width: 100%; display: flex; align-items: center; gap: 9px; padding: 6px 13px;
+  border: 0; background: transparent; color: var(--text); font-size: 12px; text-align: left; cursor: default;
+}
+.sidebar-context-menu button:hover { background: #094771; color: #fff; }
+.sidebar-context-menu-icon { width: 13px; height: 13px; color: var(--blue); flex: 0 0 13px; }
+.sidebar-context-menu button:hover .sidebar-context-menu-icon { color: #fff; }
 
 @media (max-width: 1120px) {
   .product-name { display: none; }
@@ -1507,32 +1581,82 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 
 @media (max-width: 1100px) { .live-legend { display: none; } }
 
-/* ===== 变量引用面板（删除被引用变量时列出所有引用者） ===== */
+/* ===== 变量引用面板（删除被引用变量时列出所有引用者） =====
+   平面层级：模块头、工具栏、分组头与行只靠背景明度和低对比度细线区分；
+   悬停只改背景，不给行描亮边（见 DESIGN_RULES「禁止卡片亮边」）。
+   左缘那条 2px 细线是「画布连线 / 参数引用 / 初始化输入」的状态标记。 */
 .variable-references-module { min-width: 0; min-height: 0; overflow: hidden; background: #1b1b1b; }
-.variable-references { width: 100%; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; outline: none; }
-.variable-references-header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: #1f1f1f; }
-.variable-references-heading { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
-.variable-references-heading strong { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.variable-references { width: 100%; height: 100%; display: flex; flex-direction: column; outline: none; }
+.variable-references-header { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: #1f1f1f; }
+.variable-references-icon { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 3px; background: #262626; color: #9aa4ae; }
+.variable-references-heading { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.variable-references-title { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.variable-references-title strong { min-width: 0; font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .variable-references-heading small { font-size: 11px; color: var(--muted); }
-.variable-references-body { min-height: 0; overflow-y: auto; padding: 8px; }
-.variable-references-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.variable-references-chip { flex: none; padding: 0 5px; border: 1px solid #3a3a3a; border-radius: 2px; background: #262626; color: #9aa0a6; font-size: 10px; line-height: 15px; }
+.variable-references-chip.type { color: #9fb0bd; }
+.variable-references-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.variable-references-actions .panel-action { width: 24px; height: 24px; margin-left: 0; }
+
+.variable-references-toolbar { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--border); background: #1e1e1e; }
+.variable-references-search { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid #383838; border-radius: 13px; background: #151515; color: #8a8a8a; }
+.variable-references-search:focus-within { border-color: #4a5a66; color: #b6bcc2; }
+.variable-references-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #d4d4d4; font-size: 11px; }
+.variable-references-search input::placeholder { color: #696969; }
+.variable-references-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.variable-references-filter { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border: 1px solid #383838; border-radius: 10px; background: #232323; color: #a4a9ae; font-size: 10px; cursor: pointer; }
+.variable-references-filter:hover:not(:disabled) { background: #2d2d2d; color: #d2d6da; }
+.variable-references-filter.active { background: #2f3a42; border-color: #3f4f5a; color: #d7e2ea; }
+.variable-references-filter:disabled { opacity: .42; cursor: default; }
+.variable-references-filter-count { color: #7f858b; font-variant-numeric: tabular-nums; }
+.variable-references-filter.active .variable-references-filter-count { color: #9fb8c8; }
+
+.variable-references-body { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; overflow-y: auto; padding: 4px 8px 10px; }
+.variable-reference-group { flex: none; }
+.variable-reference-group + .variable-reference-group { margin-top: 10px; }
+.variable-reference-group-head { position: sticky; top: -4px; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 5px 2px; background: #1b1b1b; font-size: 11px; }
+.variable-reference-group-order { flex: none; min-width: 22px; color: #6f767c; font: 10px/16px Consolas, monospace; font-variant-numeric: tabular-nums; }
+.variable-reference-group-name { min-width: 0; color: #d8dce0; font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.variable-reference-group-action { flex: none; color: #8f979e; font-size: 10px; }
+.variable-reference-group-parent { min-width: 0; color: #7d848a; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.variable-reference-group-count { flex: none; margin-left: auto; color: #7f858b; font-size: 10px; font-variant-numeric: tabular-nums; }
+.variable-reference-group-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.variable-reference-group-list li { min-width: 0; }
+
 .variable-reference-row {
-  width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left;
-  border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); cursor: default;
+  width: 100%; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left;
+  border: 1px solid var(--border); border-left-width: 2px; border-radius: 3px;
+  background: var(--surface); color: var(--text); cursor: default;
 }
-.variable-reference-row:hover { background: var(--surface-hover); border-color: #3d5a70; }
-.variable-reference-row.linked { border-left: 2px solid #5f7f96; }
-.variable-reference-row.initializer { border-left: 2px solid #7d6a3a; }
+.variable-reference-row:hover { background: var(--surface-hover); }
+.variable-reference-row:focus-visible { outline: 1px solid #4f84a3; outline-offset: -1px; }
+.variable-reference-row.linked { border-left-color: #4d6b7d; }
+.variable-reference-row.param { border-left-color: #3c3c3c; }
+.variable-reference-row.initializer { border-left-color: #6f5f36; }
 .variable-reference-icon { flex: none; display: grid; place-items: center; color: var(--muted); }
-.variable-reference-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
-.variable-reference-text strong { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.variable-reference-text small { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.variable-reference-row.linked .variable-reference-icon { color: #8fb2c6; }
+.variable-reference-row.initializer .variable-reference-icon { color: #b09a63; }
+.variable-reference-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.variable-reference-text strong { min-width: 0; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.variable-reference-ref { min-width: 0; color: #8d959c; font: 10px/13px Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .variable-reference-badge { flex: none; padding: 1px 6px; border-radius: 9px; border: 1px solid var(--border); background: #26282d; color: var(--muted); font-size: 10px; }
 .variable-reference-badge.linked { border-color: #35566d; background: #1f3038; color: #a8cfe0; }
-.variable-references-footer { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: #1f1f1f; }
+.variable-reference-badge.initializer { border-color: #5c4f2e; background: #2f2a1a; color: #d6c184; }
+.variable-reference-jump { flex: none; display: inline-flex; align-items: center; gap: 3px; color: #8b939a; font-size: 10px; opacity: 0; }
+.variable-reference-row:hover .variable-reference-jump,
+.variable-reference-row:focus-visible .variable-reference-jump { opacity: 1; }
+
+.variable-references-empty { flex: 1 1 auto; min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 18px 14px; color: var(--muted); font-size: 11px; text-align: center; }
+.variable-references-empty-icon { color: #5f676e; }
+.variable-references-empty strong { color: #b9bfc5; font-size: 12px; font-weight: 600; }
+.variable-references-empty-note { color: #7d848a; }
+.variable-references-reset { margin-top: 2px; height: 22px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 11px; background: #262626; color: #c3c8cd; font-size: 11px; cursor: pointer; }
+.variable-references-reset:hover { background: #303030; }
+
+.variable-references-footer { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: #1f1f1f; }
 .variable-references-hint { flex: 1; font-size: 11px; color: var(--muted); }
 .variable-references-footer .panel-action.danger { width: auto; height: 26px; margin-left: 0; padding: 0 9px; grid-auto-flow: column; gap: 5px; border: 1px solid #7a3a3f; background: #3a2326; color: #f0b6ba; }
-.variable-references-footer .panel-action.danger:hover:not(:disabled) { background: #4a2a2e; border-color: #8d4449; }
+.variable-references-footer .panel-action.danger:hover:not(:disabled) { background: #4a2a2e; }
 .variable-references-footer .panel-action.danger span { font-size: 12px; }
 
 /* ===== 模板浏览器（按 assets/templates 子文件夹分类的缩略图列表） ===== */

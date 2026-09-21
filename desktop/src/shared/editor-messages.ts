@@ -22,6 +22,8 @@ export interface SidebarVariable {
   scope: 'inputs' | 'variables';
   public?: boolean;
   onCard?: boolean;
+  /** 变量当前被引用的处数（参数引用 + 初始化输入 + 画布连线）；0 表示未被引用。 */
+  refCount?: number;
 }
 
 /** 详细信息面板的选中项（画布投影给壳层转发）。 */
@@ -59,6 +61,7 @@ export interface InspectorRequestedMessage {
 /** F2 重命名：文档画布请宿主把「聚焦详情栏名称输入框」转给详细信息镜像。 */
 export interface InspectorRenameRequestedMessage {
   type: 'inspectorRenameRequested';
+  inspectorSelection?: unknown;
 }
 
 export interface SidebarStateChangedMessage {
@@ -197,6 +200,23 @@ export interface VariableReferencesRequestedMessage {
   scope: 'inputs' | 'variables';
   name: string;
   displayName?: string;
+  /** 变量类型（`number` / `string` …）：面板头部显示类型标签用。 */
+  variableType?: string;
+  /** 变量默认值的紧凑写法：删除后引用回落成什么，面板提示里带上它。 */
+  defaultText?: string;
+  entries?: unknown;
+}
+
+/** 变量改名会改写 N 处引用：画布请壳层先展示影响范围，确认后才真正改名。 */
+export interface VariableRenameImpactRequestedMessage {
+  type: 'variableRenameImpactRequested';
+  scope: 'inputs' | 'variables';
+  oldName: string;
+  /** 用户输入的新名字（显示名）。 */
+  name: string;
+  /** 将被改写的引用处数。 */
+  count: number;
+  /** 影响清单（与「变量引用」面板同构），确认框里展示细节。 */
   entries?: unknown;
 }
 
@@ -284,6 +304,7 @@ export type EditorMessage =
   | OpenWorkflowTreeMessage
   | OpenReferencesMessage
   | VariableReferencesRequestedMessage
+  | VariableRenameImpactRequestedMessage
   | EditorErrorMessage
   | RefreshWorkflowsMessage
   | ClipboardWriteMessage;
@@ -317,6 +338,7 @@ export const EDITOR_MESSAGE_TYPES = [
   'openWorkflowTree',
   'openReferences',
   'variableReferencesRequested',
+  'variableRenameImpactRequested',
   'error',
   'clipboardWrite',
 ] as const;

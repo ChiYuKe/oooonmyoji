@@ -43,6 +43,8 @@ export interface SidebarStateDeps {
   collectNodeCardVariableRefs(): Set<string>;
   nodes(): SidebarNodeSource[];
   currentInspectorSelection(): unknown;
+  /** 变量引用处数：参数引用 + 初始化输入；`collectNodeCardVariableRefs` 之外的画布连线按引用计数计入。 */
+  references(scope: 'inputs' | 'variables', name: string): unknown[];
   vscode: { postMessage(message: unknown): void };
 }
 
@@ -55,7 +57,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export function createSidebarState(deps: SidebarStateDeps): SidebarStateController {
-  const { state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode } = deps;
+  const { state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode, references } = deps;
   let lastSidebarState = '';
 
   function postSidebarState(): void {
@@ -73,6 +75,7 @@ export function createSidebarState(deps: SidebarStateDeps): SidebarStateControll
           scope: 'inputs',
           public: true,
           onCard: nodeCardVariableRefs.has(`inputs.${name}`),
+          refCount: references('inputs', name).length,
         };
       });
     const runtimeVariables = asRecord(state.raw?.variables);
@@ -86,6 +89,7 @@ export function createSidebarState(deps: SidebarStateDeps): SidebarStateControll
         scope: 'variables',
         public: Boolean(definition.initial_from),
         onCard: nodeCardVariableRefs.has(`variables.${name}`),
+        refCount: references('variables', name).length,
       };
     });
     const selectedDefinitions = state.selectedVariableScope === 'variables' ? runtimeVariables : inputs;

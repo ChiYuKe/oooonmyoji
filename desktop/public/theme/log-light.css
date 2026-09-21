@@ -58,6 +58,21 @@
 :root[data-theme="light"] .inline-param-editor .inline-param-input:focus:not(:focus-visible) {
     outline-color: var(--inline-focus-line, #bbbbbb)
 }
+:root[data-theme="light"] .inline-node-name-editor {
+    border: 1px solid color-mix(in srgb, var(--card-line, #d7d7d7) 72%, var(--inline-focus-line, #bbbbbb));
+    background: color-mix(in srgb, var(--card-head, #e6e6e6) 92%, #f7f7f7 8%)
+}
+:root[data-theme="light"] .inline-node-name-editor:focus-within {
+    border-color: color-mix(in srgb, var(--inline-focus-line, #bbbbbb) 72%, var(--card-line, #d7d7d7))
+}
+:root[data-theme="light"] .inline-node-name-input {
+    color: var(--card-text, #232323);
+    caret-color: var(--inline-focus-line, #696969)
+}
+:root[data-theme="light"] .inline-node-name-input::selection {
+    background: color-mix(in srgb, var(--inline-focus-line, #cccccc) 30%, transparent);
+    color: var(--card-text, #232323)
+}
 :root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple {
     --inline-cell-line: var(--card-line, #696969)
 }

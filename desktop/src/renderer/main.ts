@@ -84,6 +84,7 @@ import {
 } from './docking';
 import { createReferenceViewer } from './reference-viewer';
 import { createVariableReferences } from './variable-references';
+import { createImpactConfirm } from './impact-confirm';
 import { contentName, createContentBrowser, relativeToProject, type ContentBrowser, type ContentBrowserItem } from './content-browser';
 import { createOverview } from './overview';
 import { createRuntimeLog } from './runtime-log';
@@ -209,6 +210,18 @@ const roiPickerHint = document.querySelector<HTMLElement>('#roi-picker-hint')!;
 const roiPickerCancel = document.querySelector<HTMLButtonElement>('#roi-picker-cancel')!;
 const roiPickerConfirm = document.querySelector<HTMLButtonElement>('#roi-picker-confirm')!;
 const roiPickerClose = document.querySelector<HTMLButtonElement>('#roi-picker-close')!;
+
+const impactConfirmModal = document.querySelector<HTMLElement>('#impact-confirm-modal')!;
+const impactConfirmTitle = document.querySelector<HTMLElement>('#impact-confirm-title')!;
+const impactConfirmSubtitle = document.querySelector<HTMLElement>('#impact-confirm-subtitle')!;
+const impactConfirmBody = document.querySelector<HTMLElement>('#impact-confirm-body')!;
+const impactConfirmOk = document.querySelector<HTMLButtonElement>('#impact-confirm-ok')!;
+const impactConfirmCancel = document.querySelector<HTMLButtonElement>('#impact-confirm-cancel')!;
+const impactConfirmClose = document.querySelector<HTMLButtonElement>('#impact-confirm-close')!;
+const impactConfirm = createImpactConfirm(
+  impactConfirmModal, impactConfirmTitle, impactConfirmSubtitle, impactConfirmBody,
+  impactConfirmOk, impactConfirmCancel, impactConfirmClose,
+);
 
 let bootstrap: BootstrapData | undefined;
 let selectedInstance = '';
@@ -491,9 +504,11 @@ const referenceViewer = createReferenceViewer({
 
 const variableReferences = createVariableReferences({
   getSharedPanels: () => sharedPanelDockBridge,
-  focusNode: (source, nodeId) => source.post('focusNode', nodeId),
+  focusNode: (source, nodeId, param) => source.post('focusNode', { nodeId, param: param || '' }),
   selectVariable: (source, scope, name) => source.post('selectVariable', { scope, name }),
   deleteVariable: (source, scope, name) => source.post('deleteVariable', { scope, name }),
+  disconnectReference: (source, entry) => source.post('disconnectVariableReference', { entry }),
+  disconnectAllReferences: (source, scope, name) => source.post('disconnectAllVariableReferences', { scope, name }),
   showToast,
 });
 
@@ -560,6 +575,7 @@ const editorHost = createEditorHost({
     else showToast('无法定位当前工作流的项目路径', true);
   },
   showVariableReferences: (data, source) => variableReferences.open(data, source),
+  showImpactConfirm: (request) => impactConfirm.open(request),
   getDocumentFrame: (uri) => workspace.getDocumentRuntimes().get(uri)?.frame,
   getSelectedInstance: () => selectedInstance,
   createNewWorkflow,

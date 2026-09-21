@@ -30,6 +30,11 @@ export interface ViewportDeps {
   nodeRowHeight?(node: any): number;
   /** 变量卡输出口在卡片内的纵向位置。 */
   variableCardPortY?: number;
+  /**
+   * 组内视图里被组边界行代表的变量（`作用域.变量名`）：这些卡片组内不画，组内排列也不碰。
+   * 与 `editor.variableCardList()` 的过滤用同一个来源（`boundaryVariableRefs()`）。
+   */
+  groupRepresentedRefs?(): Set<string>;
   wrap: HTMLElement;
   /** 视口尺寸测量（缓存读，避免每帧强制同步布局）；缺省按 `wrap` 自行创建。 */
   measurement?: CanvasWrapMeasurement;
@@ -132,6 +137,8 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
           variableCardHeight,
           // 进着某个组时只动组内的东西：组卡位置与组外卡片保持原样。
           groupScopeId: String(state.nodeGroupId || ''),
+          // 组内被边界行代表的卡片组内不画，组内排列也不碰（与 variableCardList 同一条规则）。
+          groupRepresentedRefs: deps.groupRepresentedRefs?.(),
         });
       }
     };

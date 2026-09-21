@@ -18,6 +18,7 @@ import type { CanvasDetailLevel } from './zoom-level';
 import { VIEWPORT_PADDING_CSS, showsDataEdges } from './zoom-level';
 import { createSpatialIndex, rectsIntersect, type CanvasSpatialIndex, type SpatialRect } from './spatial-index';
 import { createRenderScheduler, type CanvasRenderScheduler, type RenderFlags } from './render-scheduler';
+import { isGroupBoundaryPin } from '../model/node-groups';
 
 export interface GraphEdgeGeometry {
   id: string;
@@ -260,6 +261,8 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
   let nodeSetKey = '';
   let cardSetKey = '';
   let edgeStateKey = '';
+  let edgeDocumentFingerprintToken = '';
+  let edgeDocumentFingerprintValue = '';
   let detailLevel: CanvasDetailLevel | null = null;
   let renderAll = false;
   let graphVersionSeen = -1;
@@ -357,6 +360,8 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
     nodeSetKey = '';
     cardSetKey = '';
     edgeStateKey = '';
+    edgeDocumentFingerprintToken = '';
+    edgeDocumentFingerprintValue = '';
     indexDirty = true;
   }
 
@@ -651,10 +656,12 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
     // 结构线独立按自己的曲线包围盒裁剪。以前依赖「两端卡片都在视口」，
     // 放大时只要一端越过裁剪线，明明还在画面内的整条线也会被卸载。
     const visibleStructuralEdges = new Set<string>();
+    const visibleStructuralGeometry = new Map<string, EdgeGeometry>();
     for (const edge of edgeList) {
       const geometry = context.edgeGeometry('structural', edge.parentId, edge.childId);
       if (renderAll || (geometry && rectsIntersect(edgeGeometryRect(geometry), edgeViewRect))) {
         visibleStructuralEdges.add(edge.id);
+        if (geometry) visibleStructuralGeometry.set(edge.id, geometry);
         // 连线元素仍然保持「两端都已挂载」的交互契约；画外端点会走占位壳。
         if (byId.has(edge.parentId)) keepNodes.add(edge.parentId);
         if (byId.has(edge.childId)) keepNodes.add(edge.childId);
@@ -716,7 +723,7 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
         context.nodeVariablePins(node).forEach((pin) => {
           if (!pin.variable) return;
           // 卡片优先按显式链接解析，退化到「作用域.变量名」的唯一卡片。
-          keepCardRef(links[`${pin.targetNodeId || node.id}:${pin.targetParam || pin.param}`]);
+          keepCardRef(links[`${isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id}:${isGroupBoundaryPin(pin) ? pin.targetParam : pin.param}`]);
           keepCardRef(`${pin.scope}.${pin.variable}`);
         });
       }
@@ -796,12 +803,46 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
     let edgePairs = '';
     for (const edge of edgeList) {
       if (!visibleStructuralEdges.has(edge.id)) continue;
-      edgePairs += `${edge.parentId}>${edge.childId},`;
+      const geometry = visibleStructuralGeometry.get(edge.id);
+      edgePairs += geometry
+        ? `${edge.parentId}>${edge.childId}@${geometry.from.x},${geometry.from.y},${geometry.to.x},${geometry.to.y},`
+        : `${edge.parentId}>${edge.childId},`;
+    }
+    for (const card of runList) {
+      const geometry = context.edgeGeometry('instance', card.node?.id, runKeyOf(card));
+      if (geometry) edgePairs += `run:${runKeyOf(card)}@${geometry.from.x},${geometry.from.y},${geometry.to.x},${geometry.to.y},`;
     }
     const nextNodeKey = edgePairs;
-    const nextCardKey = [...edgeCardIds].join(',');
+    const nextCardKey = [...edgeCardIds].map((id) => {
+      const card = cardById.get(id);
+      return card ? `${id}@${card.x},${card.y}` : id;
+    }).join(',');
+    // 数据边没有独立的结构列表：端点位置或参数绑定变化时，用紧凑指纹让其与结构边
+    // 一起重建。指纹只在文档版本/整层修订变化时计算；拖拽帧仍走局部补丁。
+    const edgeDocumentToken = `${signatureToken}|${docToken}`;
+    if (edgeDocumentToken !== edgeDocumentFingerprintToken) {
+      edgeDocumentFingerprintToken = edgeDocumentToken;
+      const parts: string[] = [];
+      if (dataEdgesVisible) {
+        for (const node of nodeList) {
+          const pins = context.nodeVariablePins(node);
+          if (!pins.length) continue;
+          const pos = context.position(node);
+          parts.push(`n:${node.id}@${pos.x},${pos.y},${context.nodeHeight(node)}`);
+          for (const pin of pins) {
+            const value = pin?.value;
+            const reference = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' ? value.ref : '';
+            parts.push(`p:${isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id}:${isGroupBoundaryPin(pin) ? pin.targetParam : pin.param}:${pin.scope || ''}:${pin.variable || ''}:${reference}`);
+          }
+        }
+        for (const card of runList) {
+          parts.push(`r:${runKeyOf(card)}@${card.x},${card.y}:${JSON.stringify(card.run?.inputs || {})}`);
+        }
+      }
+      edgeDocumentFingerprintValue = parts.join('|');
+    }
     // 数据边档位也要进 key：概览档不画变量/引用线，跨档时必须重画一次。
-    const nextEdgeStateKey = `${state.selectedEdge ? `${state.selectedEdge.parent}>${state.selectedEdge.child}` : ''}|${signatureToken}|${renderAll ? 'all' : 'cull'}|${dataEdgesVisible ? 'data' : 'plain'}`;
+    const nextEdgeStateKey = `${state.selectedEdge ? `${state.selectedEdge.parent}>${state.selectedEdge.child}` : ''}|${signatureToken}|${edgeDocumentFingerprintValue}|${renderAll ? 'all' : 'cull'}|${dataEdgesVisible ? 'data' : 'plain'}`;
     if (nextNodeKey !== nodeSetKey || nextCardKey !== cardSetKey || nextEdgeStateKey !== edgeStateKey) {
       nodeSetKey = nextNodeKey;
       cardSetKey = nextCardKey;

@@ -33,6 +33,8 @@ export interface VariableInspectorsDeps {
   allRefs(node: any, definition?: any, includePossible?: boolean): string[];
   referenceLabel(ref: string): string;
   fieldLabel(name: string): string;
+  /** 动作显示名：面板的节点分组头用它说明「这是个什么节点」。 */
+  actionLabel?(name: string): string;
   disconnect(nodeId: string, childId: string): void;
   bindAssetPreview(input: UiNode): void;
   openAssetBrowser(...args: any[]): void;
@@ -63,6 +65,8 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
     vscode,
     selectInput, textInput, checkbox, field, section, clearInspector,
   } = deps;
+  /** 改名影响范围待确认：壳层弹确认框期间暂存，确认后按它真正改名。 */
+  let pendingRename: { scope: 'inputs' | 'variables'; oldName: string; name: string } | undefined;
   function renderEdgeInspector(): void {
     const edge = state.selectedEdge;
     const body = clearInspector('连接');
@@ -508,20 +512,58 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
     if (references.length) {
       // 有引用时不再只丢一句「不能删除」：把引用清单交给「变量引用」面板，
       // 那边可以逐个跳过去断开，也可以直接删除变量并让引用回落默认值。
-      vscode.postMessage({
-        type: 'variableReferencesRequested',
-        scope,
-        name,
-        displayName: VariableSystem.label(state.raw, scope, name),
-        entries: variableReferenceEntries(scope, name, references),
-      });
+      showVariableReferences(scope, name, references);
       return;
     }
     deleteVariableDefinition(scope, name);
   }
 
+  /** 主动查看变量引用：即使没有引用也打开面板，让用户得到明确的空结果。 */
+  function showVariableReferences(scope: string, name: string, knownReferences?: any[]): void {
+    if (scope !== 'inputs' && scope !== 'variables') return;
+    if (!name || !state.raw?.[scope] || !Object.prototype.hasOwnProperty.call(state.raw[scope], name)) return;
+    const references = knownReferences ?? VariableSystem.references(state.raw, scope, name);
+    const definition = state.raw[scope][name];
+    vscode.postMessage({
+      type: 'variableReferencesRequested',
+      scope,
+      name,
+      displayName: VariableSystem.label(state.raw, scope, name),
+      variableType: definition && typeof definition.type === 'string' ? definition.type : '',
+      defaultText: compactVariableText(definition ? definition.default : undefined),
+      entries: variableReferenceEntries(scope, name, references),
+    });
+  }
+
   /** 把 VariableSystem 的引用记录补成面板能直接渲染的条目。 */
   function variableReferenceEntries(scope: string, name: string, references: any[]): any[] {
+    // 面板按节点分组并显示序号，所以先把「节点 id → 工作流里的位置 / 动作 / 父节点」算好：
+    // 序号与「结构」面板的遍历顺序一致，用户在画布上一眼就能对上号。
+    const workflowNodes: any[] = Array.isArray(state.raw?.nodes) ? state.raw.nodes : [];
+    const nodeOrder = new Map<string, number>();
+    const nodeParents = new Map<string, string>();
+    workflowNodes.forEach((node: any, index: number) => {
+      const id = node && typeof node.id === 'string' ? node.id : '';
+      if (!id) return;
+      nodeOrder.set(id, index + 1);
+      for (const child of Array.isArray(node.children) ? node.children : []) {
+        if (typeof child !== 'string' || nodeParents.has(child)) continue;
+        nodeParents.set(child, typeof node.name === 'string' && node.name ? node.name : id);
+      }
+    });
+    const actionName = (node: any): string => (node && typeof node.action === 'string' ? node.action : '');
+    const actionTitle = deps.actionLabel ?? ((value: string): string => value);
+    // 组接口端点：成员参数一旦被显式暴露到组边界（`_nodeGroups[*].pins`），
+    // 它在组外的组卡/接口卡上就有对应端点，引用会跨组边界可见——面板据此给「组接口」筛选。
+    const groupExposedPins = new Set<string>();
+    for (const group of Object.values<any>(state.raw?._nodeGroups || {})) {
+      if (!group || !Array.isArray(group.pins)) continue;
+      for (const pin of group.pins) {
+        if (pin && typeof pin.nodeId === 'string' && typeof pin.param === 'string') {
+          groupExposedPins.add(`${pin.nodeId}\u0000${pin.param}`);
+        }
+      }
+    }
     return references.map((reference: any) => {
       const path = typeof reference.path === 'string' ? reference.path : '';
       const initializer = reference.initializer === true;
@@ -534,20 +576,46 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
       const param = start >= 0 ? parts.slice(start + (parts[start] === 'params' ? 1 : 0)).join('.') : '';
       const key = nodeId && param ? `${nodeId}:${param}` : '';
       const cardId = key ? variableLinks()[key] : undefined;
+      // 初始化引用来自 `variables.<id>.initial_from`：报出被初始化的那个变量，比一句
+      // 「变量由这个输入初始化」更知道该去哪里看。
+      const initializerName = initializer && parts[1] ? VariableSystem.label(state.raw, 'variables', parts[1]) : '';
+      const action = actionName(node);
       return {
         nodeId,
         nodeName: node && typeof node.name === 'string' ? node.name : nodeId,
+        nodeAction: action ? actionTitle(action) : '',
+        nodeIndex: nodeOrder.get(nodeId),
+        parentName: nodeParents.get(nodeId) || '',
         param,
         ref: typeof reference.ref === 'string' ? reference.ref : '',
         label: initializer
-          ? '变量由这个输入初始化'
+          ? initializerName
+            ? `变量「${initializerName}」的初始化输入`
+            : '变量由这个输入初始化'
           : param
             ? `参数「${fieldLabel(param)}」`
             : '参数引用',
         linked: Boolean(cardId),
         initializer,
+        // 初始化引用指向的变量 id：`variables.<id>.initial_from` 的 `<id>`，断开时按它定位。
+        initializerId: initializer && parts[1] ? parts[1] : '',
+        groupInterface: Boolean(nodeId && param && groupExposedPins.has(`${nodeId}\u0000${param}`)),
       };
     });
+  }
+
+  /** 变量类型与默认值的紧凑写法：面板头部与删除提示用，不追求完整 JSON。 */
+  function compactVariableText(value: unknown): string {
+    if (value === undefined) return '';
+    const text = typeof value === 'string' ? value : (() => {
+      try {
+        const encoded = JSON.stringify(value);
+        return typeof encoded === 'string' ? encoded : String(value);
+      } catch {
+        return String(value);
+      }
+    })();
+    return text.length > 40 ? `${text.slice(0, 39)}…` : text;
   }
 
   /** 强制删除：先清掉所有引用（参数回落到动作默认值），再删定义与变量卡片。 */
@@ -621,6 +689,59 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
         if (variable && variable.initial_from === name) delete variable.initial_from;
       }
     }
+  }
+
+  /** 断开单条引用的变更体：参数引用/实例输入引用删除绑定，初始化绑定解除。 */
+  function disconnectEntry(entry: any): void {
+    if (!entry || typeof entry !== 'object') return;
+    if (entry.initializer === true) {
+      // 初始化引用来自 `variables.<id>.initial_from`：优先用条目里带出的 id，
+      // 面板直传的旧载荷（只有 ref 路径）再按路径解析。
+      let variableId = String(entry.initializerId || '');
+      if (!variableId && typeof entry.ref === 'string') {
+        const parts = entry.ref.split('.');
+        if (parts[0] === 'variables' && parts[1]) variableId = parts[1];
+      }
+      const definition = variableId && state.raw.variables ? state.raw.variables[variableId] : null;
+      if (definition && typeof definition === 'object') delete definition.initial_from;
+      return;
+    }
+    const nodeId = String(entry.nodeId || '');
+    const param = String(entry.param || '');
+    if (!nodeId || !param) return;
+    const node = nodeById(nodeId);
+    if (!node) return;
+    const segments = param.split('.');
+    if (segments[0] === 'runs') {
+      const run = Array.isArray(node.runs) ? node.runs[Number(segments[1])] : null;
+      const key = segments.slice(3).join('.');
+      if (run && run.inputs && typeof run.inputs === 'object' && !Array.isArray(run.inputs) && key) delete run.inputs[key];
+    } else if (segments[0] === 'inputs') {
+      const key = segments.slice(1).join('.');
+      if (node.params && node.params.inputs && typeof node.params.inputs === 'object' && !Array.isArray(node.params.inputs) && key) {
+        delete node.params.inputs[key];
+      }
+    } else if (node.params && typeof node.params === 'object') {
+      delete node.params[param];
+    }
+    delete variableLinks()[`${nodeId}:${param}`];
+  }
+
+  /** 「变量引用」面板的单条断开：一次历史记录，Ctrl+Z 可撤销。 */
+  function disconnectVariableReference(entry: any): void {
+    if (!entry || typeof entry !== 'object') return;
+    const wasInitializer = entry.initializer === true;
+    mutate(() => disconnectEntry(entry));
+    toast(wasInitializer ? '已解除初始化绑定' : `已断开参数 ${entry.param || ''}`);
+  }
+
+  /** 批量断开全部引用：合并为一次历史记录，可整体撤销；返回断开处数。 */
+  function disconnectAllVariableReferences(scope: string, name: string): number {
+    if (scope !== 'inputs' && scope !== 'variables') return 0;
+    const entries = variableReferenceEntries(scope, name, VariableSystem.references(state.raw, scope, name));
+    if (!entries.length) return 0;
+    mutate(() => { for (const entry of entries) disconnectEntry(entry); });
+    return entries.length;
   }
 
   function addVariable(scope: string = 'variables'): void {
@@ -712,9 +833,34 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
     body.appendChild(remove);
   }
 
-  function renameVariableDefault(scope: string, oldName: string, name: string): void {
-    if (!name || name === variableDisplayName(scope,oldName)) return;
+  function renameVariableDefault(scope: string, oldName: string, name: string, force = false): void {
+    if (!name || name === variableDisplayName(scope, oldName)) return;
+    const refs = VariableSystem.references(state.raw, scope, oldName);
+    if (refs.length && !force) {
+      // 改名会改写多处引用：先把影响范围交给壳层确认（弹出影响清单），确认后才真正改名。
+      pendingRename = { scope: scope === 'variables' ? 'variables' : 'inputs', oldName, name };
+      vscode.postMessage({
+        type: 'variableRenameImpactRequested',
+        scope, oldName, name,
+        count: refs.length,
+        entries: variableReferenceEntries(scope, oldName, refs),
+      });
+      return;
+    }
+    pendingRename = undefined;
     try { mutate(()=>{VariableSystem.rename(state.raw,scope,oldName,name);syncExposedInput(state.raw[scope][oldName],oldName);}); } catch(error: any) { toast(error.message,true); }
+  }
+
+  /** 影响范围确认后真正改名：绕过确认，直接按暂存的名字执行。 */
+  function confirmPendingRename(): void {
+    const pending = pendingRename;
+    pendingRename = undefined;
+    if (pending) renameVariableDefault(pending.scope, pending.oldName, pending.name, true);
+  }
+
+  /** 影响范围被取消：丢弃暂存的改名请求。 */
+  function cancelPendingRename(): void {
+    pendingRename = undefined;
   }
 
   function variableDisplayName(scope: string, name: string): string { return state.raw?.[scope]?.[name]?.display_name || name; }
@@ -765,7 +911,9 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
   return {
     renderEdgeInspector, renderLimitControl, renderWorkflowInspector, sameDefinitionValue, definitionAcceptsValue,
     changeDefinitionType, initialDefinitionValue, definitionValueControl, variableReferenceCount, convertInputToVariable,
-    removeVariable, deleteVariable, addVariable, renderVariablesInspector, renameVariable, variableDisplayName, syncExposedInput,
+    removeVariable, deleteVariable, showVariableReferences, addVariable, renderVariablesInspector, renameVariable, variableDisplayName, syncExposedInput,
+    disconnectVariableReference, disconnectAllVariableReferences, variableReferenceEntries,
+    confirmPendingRename, cancelPendingRename,
     valueBindingMenu,
   };
 }

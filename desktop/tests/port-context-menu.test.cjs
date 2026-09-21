@@ -56,9 +56,10 @@ function createPortMenuFor(ctx) {
     fieldLabel: (param) => (typeof ctx.fieldLabel === 'function' ? ctx.fieldLabel(param) : param),
     toast: (...args) => call(ctx, 'toast', ...args),
     typeNames: ctx.TYPE_NAMES || {},
-    nodeGroupPinExposure: (...args) => typeof ctx.nodeGroupPinExposure === 'function' ? ctx.nodeGroupPinExposure(...args) : null,
-    setNodeGroupPinExposed: (...args) => call(ctx, 'setNodeGroupPinExposed', ...args),
+    nodeGroupPinMenu: (nodeId, param) => (typeof ctx.nodeGroupPinMenu === 'function' ? ctx.nodeGroupPinMenu(nodeId, param) : null),
     get nodeWidth() { return typeof ctx.NODE_W === 'number' ? ctx.NODE_W : 260; },
+    get variableCardWidth() { return typeof ctx.variableCardWidth === 'number' ? ctx.variableCardWidth : 168; },
+    get variableCardPortY() { return typeof ctx.variableCardPortY === 'number' ? ctx.variableCardPortY : 29; },
     getNavigator: () => ctx.navigator,
   });
   box.menu = menu;
@@ -241,8 +242,11 @@ test('组内变量端点由用户通过右键菜单按需添加和移除', () =>
   let exposed = false;
   const context = contextWith({
     variableCardList: () => [],
-    nodeGroupPinExposure: () => exposed,
-    setNodeGroupPinExposed: (nodeId, param, value) => { calls.push([nodeId, param, value]); exposed = value; },
+    nodeGroupPinMenu: (nodeId, param) => ({
+      label: exposed ? '从组接口移除' : '添加到组接口',
+      danger: exposed,
+      run: () => { calls.push([nodeId, param, !exposed]); exposed = !exposed; },
+    }),
   });
   const nodeVariablePinMenuItems = runFunction('nodeVariablePinMenuItems', context);
   let items = nodeVariablePinMenuItems('task_1', { param: 'count', variable: '', scope: 'inputs' }, { x: 0, y: 0 });
@@ -255,6 +259,17 @@ test('组内变量端点由用户通过右键菜单按需添加和移除', () =>
   assert.equal(items.at(-1).danger, true);
   items.at(-1).run();
   assert.deepEqual(calls[1], ['task_1', 'count', false]);
+});
+
+test('组内变量端点菜单：不在节点组内时不下发组接口项', () => {
+  const context = contextWith({
+    variableCardList: () => [],
+    nodeGroupPinMenu: () => null,
+  });
+  const nodeVariablePinMenuItems = runFunction('nodeVariablePinMenuItems', context);
+  const items = nodeVariablePinMenuItems('task_1', { param: 'count', variable: '', scope: 'inputs' }, { x: 0, y: 0 });
+  assert.equal(items.length, 3, '未绑定时只有连线与提升为变量两项');
+  assert.equal(items.at(-1).label, '提升为变量');
 });
 
 test('实例运行卡变量端口菜单：绑定与未绑定两种形态', () => {
@@ -409,6 +424,31 @@ test('提升为变量：把字面量转成输入定义、绑定端口，并创�
   assert.deepEqual(JSON.parse(JSON.stringify(cards.card_new)), { name: '模板', scope: 'inputs', x: 40, y: 80 });
   assert.equal(links['task_1:template'], 'card_new');
   assert.deepEqual(calls, [['toast', '已创建变量「模板」并连接端口']]);
+});
+
+test('变量线松在空白处时，新变量卡的输出端点对齐实际落点', () => {
+  const node = { id: 'task_1', type: 'task', params: { retry: 5 } };
+  const cards = {};
+  const context = contextWith({
+    nodeById: () => node,
+    fieldLabel: () => '重试次数',
+    variableCards: () => cards,
+    variableLinks: () => ({}),
+    nextVariableCardId: () => 'card_drop',
+    variableCardPosition: () => ({ x: 0, y: 0 }),
+    variableCardWidth: 168,
+    variableCardPortY: 29,
+    nodeVariablePins: () => [{ param: 'retry' }],
+    toast: () => {},
+    state: { raw: { inputs: {} } },
+  });
+  runFunction('promotePinToVariable', context)(
+    'task_1', 'retry', { param: 'retry', type: 'integer' }, { x: 420, y: 260 },
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(cards.card_drop)), {
+    name: '重试次数', scope: 'inputs', x: 252, y: 231,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(node.params.retry)), { ref: 'inputs.重试次数' });
 });
 
 test('提升为变量：数组元素、对象字段与边界一起带过去，变量详情才有结构化控件', () => {
@@ -589,7 +629,7 @@ test('五类端口都接入了右键菜单，UE 交互（常驻搜索、子菜�
   const portMenuSource = fs.readFileSync(path.join(__dirname, '../src/canvas/interactions/port-menu.ts'), 'utf8');
   assert.match(portMenuSource, /function insertNodeAbove\(childId: string, type: string\)/);
   assert.match(portMenuSource, /function addChildNode\(parentId: string, type: string, point: PortPoint\)/);
-  assert.match(portMenuSource, /function promotePinToVariable\(nodeId: string, param: string, pin: PortPin\)/);
+  assert.match(portMenuSource, /function promotePinToVariable\(nodeId: string, param: string, pin: PortPin, point\?: PortPoint\)/);
   assert.match(portMenuSource, /function copyVariableReferenceDefault\(scope: string, name: string\)/);
   // UE 风格：搜索框常驻顶部（菜单浮层已迁到 src/canvas/ui/overlays.ts）
   const overlaysSource = fs.readFileSync(path.join(__dirname, '../src/canvas/ui/overlays.ts'), 'utf8');

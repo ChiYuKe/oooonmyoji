@@ -51,7 +51,9 @@ test('light adapters are current, scoped, parseable and do not invert image pixe
     const css=fs.readFileSync(path.join(root,`public/theme/${name}-light.css`),'utf8');
     assert.equal(css,generate(files));
     postcss.parse(css).walkRules(rule=>assert(rule.selector.includes('[data-theme="light"]')));
-    assert.doesNotMatch(css,/filter\s*:/);
+    // 只认「声明位置」的 filter：类名里带 filter 的选择器（`.variable-references-filter:hover`）
+    // 也会被 /filter\s*:/ 匹配到，那是误报。
+    assert.doesNotMatch(css,/(?:^|[;{])\s*filter\s*:/m);
   }
   assert.equal(convert("url('data:image/svg+xml,%23ffffff')",'background'),"url('data:image/svg+xml,%23ffffff')");
   assert.equal(convert('#191919','background'),'#f3f3f3');

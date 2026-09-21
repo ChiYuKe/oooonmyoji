@@ -24,6 +24,8 @@ function harness(raw, options = {}) {
     nodeHeight: options.nodeHeight || (() => 96),
     // 自动排列按变量端点判断卡片归属；缺省时只看显式连线。
     nodeVariablePins: options.nodeVariablePins,
+    // 组内被边界行代表的变量（组内不画的卡片）：组内排列不得碰它们。
+    groupRepresentedRefs: options.groupRepresentedRefs,
     wrap,
     minimap: () => options.minimap || null,
     render: () => { calls.rendered += 1; },
@@ -219,6 +221,51 @@ test('组内自动排列：只排成员，组卡位置与组外卡片一律不�
   assert.deepEqual(h.state.raw._variableCards.card_out, {name: 'v_out', scope: 'variables', x: -128, y: 2832});
   // 挂在成员 b 上的卡片贴着 b 放：x = 0 - 168 - 56 → -224，纵向对齐 b 的那一行。
   assert.deepEqual(h.state.raw._variableCards.card_in, {name: 'v_in', scope: 'variables', x: -224, y: 288});
+});
+
+test('组内自动排列：被组边界行代表的卡片不动（组内根本不画它）', () => {
+  // 组边界卡的「重新校验」行代表 inputs.v_edge：组内视图不画这张卡（variableCardList 过滤掉了），
+  // 组内排列也不许搬它——否则用户在组内看不到任何变化，出组才发现外层那张卡片跳走了。
+  const raw = {
+    root: 'root',
+    nodes: [
+      {id: 'b', type: 'task', params: {x: {ref: 'inputs.v_in'}, y: {ref: 'inputs.v_edge'}}},
+      {id: 'c', type: 'task', params: {}},
+    ],
+    inputs: {v_in: {type: 'number'}, v_edge: {type: 'number'}},
+    _variableCards: {
+      card_edge: {name: 'v_edge', scope: 'inputs', x: -224, y: 544},
+      card_in: {name: 'v_in', scope: 'inputs', x: 100, y: 200},
+    },
+    _nodeGroups: {node_group_1: {name: '节点组 1', nodeIds: ['b', 'c'], pins: [{nodeId: 'b', param: 'y'}]}},
+    _layout: {b: {x: -504, y: 176}, c: {x: 496, y: 664}, node_group_1: {x: 0, y: 416}},
+  };
+  const projection = () => [
+    {id: '__node_group_interface__:node_group_1', type: 'node_group_interface', children: ['b'], _nodeGroupInterface: true},
+    {id: '__node_group_variables__:node_group_1', type: 'node_group_variables', children: [], _nodeGroupVariables: true},
+    {id: 'b', type: 'task', children: ['c']},
+    {id: 'c', type: 'task', children: []},
+  ];
+  const pins = (node) => node.id === 'b'
+    ? [{param: 'x', scope: 'inputs', variable: 'v_in'}, {param: 'y', scope: 'inputs', variable: 'v_edge'}]
+    : [];
+  const h = harness(raw, {
+    nodes: projection,
+    nodeVariablePins: pins,
+    // editor.variableCardList() 在组内会过滤掉这个引用对应的卡片（边界行代替了它）。
+    groupRepresentedRefs: () => new Set(['inputs.v_edge']),
+  });
+  h.state.nodeGroupId = 'node_group_1';
+  h.viewport.autoLayout();
+
+  // 被边界行代表的卡片：坐标逐字不变（它的绑定节点 b 这次确实被重排了）。
+  assert.deepEqual(h.state.raw._variableCards.card_edge, {name: 'v_edge', scope: 'inputs', x: -224, y: 544});
+  // 没被边界行代表的卡片照旧贴着成员走。
+  assert.deepEqual(h.state.raw._variableCards.card_in, {name: 'v_in', scope: 'inputs', x: -224, y: 288});
+  // 反过来：外层排列（不在组内）时两条规则都不生效，被代表的卡片照旧贴到节点旁边。
+  const outer = harness(JSON.parse(JSON.stringify(raw)), {nodeVariablePins: pins});
+  outer.viewport.autoLayout();
+  assert.deepEqual(outer.state.raw._variableCards.card_edge, {name: 'v_edge', scope: 'inputs', x: -224, y: 104});
 });
 
 test('组内视图的包围盒只算本组内容：组外卡片不会把 fitView 拉远', () => {

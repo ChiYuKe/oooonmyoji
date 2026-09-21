@@ -12,6 +12,7 @@ function harness(raw, nodeCardRefs = []) {
     collectNodeCardVariableRefs: () => new Set(nodeCardRefs),
     nodes: () => (Array.isArray(raw.nodes) ? raw.nodes : []).map((node, index) => ({ id: node.id || `node_${index}`, ...node })),
     currentInspectorSelection: () => ({ kind: 'none' }),
+    references: () => [],
     vscode: { postMessage: (message) => messages.push(message) },
   });
   controller.postSidebarState();
@@ -30,7 +31,7 @@ test('变量列表包含已经连到节点卡片上的变量，并标记 onCard'
   const onCard = {};
   for (const item of messages[0].variables) onCard[`${item.scope}.${item.name}`] = item.onCard === true;
   assert.deepEqual(plain(onCard), { 'inputs.超时': true, 'inputs.未使用': false, 'variables.轮数': true });
-  assert.deepEqual(plain(messages[0].variables[0]), { name: '超时', displayName: '超时', group: '', type: 'number', scope: 'inputs', public: true, onCard: true });
+  assert.deepEqual(plain(messages[0].variables[0]), { name: '超时', displayName: '超时', group: '', type: 'number', scope: 'inputs', public: true, onCard: true, refCount: 0 });
 });
 
 test('没有连线的变量不会被标记为已连接', () => {

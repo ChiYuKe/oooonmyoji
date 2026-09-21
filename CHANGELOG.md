@@ -161,6 +161,53 @@
   详细信息是镜像画布，面板里的指令因此发给文档的真画布，改完再把详情栏同步回来。
   「变量引用」是共享停靠面板，默认就叠在**内容浏览器**旁边（和运行日志同一套路），
   内容浏览器被拖到内层或外层，它都跟着开在同一层、同一个标签组里。
+- 「变量引用」面板改成**按节点分组的引用清单**：原来是一串看不出上下文的行（只有节点名、
+  参数名和一枚类型徽标），引用一多就分不清谁是谁、也不好定位。现在
+  - 组头给出节点在**工作流里的序号**（与「结构」面板顺序一致）、节点名与动作显示名，
+    引用落在别的分支里时还标出「在「X」内」，能直接和画布上的位置对上号；
+  - 每行给出参数显示名与引用原文（`inputs.等待`，等宽字体），右侧是「画布连线 / 参数引用 /
+    初始化输入」徽标与悬停才出现的「定位」提示，点一行仍跳到那张卡片；
+  - 顶部新增搜索（节点名、动作、参数、引用原文都能搜，回车跳第一条）与类型筛选
+    （计数跟着搜索词实时变，计数为 0 的类型点不动），方向键在行间移动焦点，
+    Esc 先清筛选、再按一次才关面板；
+  - 头部标出变量作用域与类型，并加「刷新」按钮：请来源画布重算清单（同一变量的筛选状态保留）；
+    删除提示带上变量默认值；空结果分成「本来就没有引用」与「筛选没命中」两种，后者给「清除筛选」。
+  - 面板里的节点序号 / 动作 / 父节点、变量的类型与默认值都由画布侧随清单一起送来
+    （`variableReferenceEntries`），面板仍不读写工作流；行的悬停也顺手从「亮边框」改成纯背景变化，
+    符合「禁止卡片亮边」的设计规则。
+  （`desktop/src/renderer/variable-references.ts`、`renderer/styles.css`、
+  `canvas/inspector/variable-inspectors.ts`、`renderer/editor-host.ts`、`shared/editor-messages.ts`、
+  `tests/variable-references-panel.test.cjs`；浅色适配器断言顺带收紧为只认「声明位置」的
+  `filter:`，否则类名里的 `.variable-references-filter:hover` 会被 `/filter\s*:/` 误判，
+  `tests/theme-settings.test.cjs`）
+- **变量引用面板补全「定位 / 断开」闭环**（阶段 4）：
+  - **变量行显示引用数量**：左侧变量列表每行右侧出现「N 引用」徽标（未引用不显示），
+    悬浮提示带上处数；引用数由画布侧 `VariableSystem.references` 实时算出随列表推送
+    （`canvas/model/sidebar-state.ts`、`shared/editor-messages.ts`、`panels/sidebar.ts`）。
+  - **组接口筛选**：引用清单新增「组接口」类型——引用所在参数被显式暴露到节点组边界时
+    归入这一档，筛选按钮、行徽标与计数同步生效；画布侧按 `_nodeGroups[*].pins` 打标
+    （`canvas/inspector/variable-inspectors.ts` 的 `groupInterface`、`renderer/variable-references.ts`）。
+  - **每条引用独立的「断开」按钮**：行尾的断开图标把这一条引用解除（参数回落到字面量 /
+    初始化绑定解除），画布按一次历史记录、Ctrl+Z 可撤销；底部新增「断开全部引用（N 处）」，
+    一次合并成一条历史，整体撤销。断开后面板自动请来源画布重算清单
+    （`variable-inspectors.disconnectVariableReference / disconnectAllVariableReferences`、
+    `editor-command-dispatch` 新命令、`renderer/main.ts` 接线）。
+  - **定位后闪烁**：面板「定位」把视野移过去时，节点卡片与**参数端点**一起短暂高亮
+    （1.4 秒后消退）；搜索与结构树定位共用同一条 `focusNode(id, param?)` 路径，同样闪烁
+    （`canvas/render/render-entry.ts` 的 `flashNode`、`public/legacy/workflow-editor.css` 的
+    `.node-flash` / `.param-row-flash`）。
+  - **改名、删除前显示影响范围**：删除仍走「变量引用」面板（影响一目了然）；**改名**改为
+    先弹出影响范围确认框——列出将被影响的 N 处引用（节点 · 参数 + 引用原文），确认后才真正
+    改名，取消则保持原名。确认框是新的通用「影响范围确认」弹窗（`renderer/impact-confirm.ts`、
+    `index.html` 的 `#impact-confirm-modal`），后续外部文件变化三选、旧格式迁移也复用它，保证
+    全套确认界面一致（`canvas/inspector/variable-inspectors.ts` 的暂存改名、
+    `editor-command-dispatch` 的 `confirmRenameVariable` / `cancelRenameVariable`、
+    `renderer/editor-host.ts` 的 `variableRenameImpactRequested` 分支、
+    `shared/editor-messages.ts` 新消息类型）。
+  - 回归测试：面板的组接口筛选 / 单条断开 / 批量断开（含计数与刷新）、定位带参数、
+    侧栏引用徽标、断开的参数与连线映射清理、改名影响范围（确认 / 取消 / 无引用直改）、
+    新命令分派（`tests/variable-references-panel.test.cjs`、`variable-references-delete.test.cjs`、
+    `variables-panel.test.cjs`、`sidebar-variable-list.test.cjs`、`rename-shortcuts.test.cjs`）。
 - 卡片值行的编辑态：行内浮层静止时与卡片值框同色（`card-head` / `card-line`），
   聚焦只在值框内侧描一圈同色系高亮，不再换成亮青色的 `card-port` 边框；数组行只
   提亮正在编辑的那一格，不再整行都跟着亮。
@@ -174,6 +221,32 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **组变量卡出来的线几乎是直斜线**（不好看）：映射线是贝塞尔，但头段控制点一直按「接口卡端口在
+  左边缘」往左推，而组变量卡的端口在**右边缘**、线是往右走的——长距离时曲线被压成一条直斜线。
+  现在头段控制点跟着出线口那一侧走（变量卡 `x1 + bend`、接口卡 `x1 - bend`），末端仍从左侧切入
+  成员卡引脚，形状与普通变量线一致。回归用例直接断言两条映射线的 `d`（含控制点方向与数值）
+  （`desktop/src/canvas/canvas/edges.ts`、`desktop/tests/canvas-edges.test.cjs`）。
+- **组内视图里同一个变量被画了两遍**：组边界行（组变量卡上的 `成员 · 参数 ← 变量名`）已经代表了
+  那个变量，画布上却还照画一张同名变量卡片，两者并排出现、还连着一条线。现在组内视图会把
+  **已被组边界端点代表的变量**从画布的变量卡列表里剔除（`boundaryVariableRefs()`），
+  渲染、命中测试、连线、包围盒与画布签名共用这一份过滤后的列表：重复的卡片不画，
+  指向它的那条连线也不会留半截（边界行到真实成员参数的映射线照旧）。文档里的卡片本身不动——
+  退出组后照旧显示，只是**组内**不重复表达同一件事。回归用例：边界代表的变量集合（进组生效、
+  退出组失效、从组接口移除后失效）、变量卡被隐藏时不出现悬空连线、以及画布入口确实把过滤后的
+  列表交给所有画布消费者
+  （`desktop/src/canvas/model/node-groups.ts`、`canvas/editor.ts`、
+  `desktop/tests/canvas-node-groups.test.cjs`、`desktop/tests/canvas-edges.test.cjs`）。
+- **组边界的数据线不再自成一派**：组接口 / 组变量卡映射到真实成员参数的那条线以前单独用
+  `.group-interface-edge`（1.4px 虚线、固定灰色、`pointer-events: none`）——既不是变量线的标准
+  样式，也点不到、断不开。现在它就是**变量线**：实线、按身份取色（`--data-tone` → `--edge-tone`）、
+  1.8px、悬停提亮，并带 14px 透明命中线，可以 Alt + 左键直接断开（作用到真实成员参数，与在组接口
+  端口上断线同一条路径）；`group-interface-edge` 只保留为语义标记，不再声明任何样式。
+  `editor-light.css` 由 `build-light-palette.cjs` 重新生成，浅色主题里的灰色映射线一并消失
+  （`desktop/src/canvas/canvas/edges.ts`、`desktop/public/legacy/workflow-editor.css`、
+  `desktop/tests/canvas-edges.test.cjs`）。
+- 浅色适配器测试的误报：`/filter\s*:/` 会把类名里带 filter 的选择器
+  （`.variable-references-filter:hover`）当成滤镜声明，改为只匹配声明位置
+  （`(?:^|[;{])\s*filter\s*:`，`desktop/tests/theme-settings.test.cjs`）。
 - **自动排列「排得更好看」**（组内尤其明显）：
   - **组内也按树排**：自动排列以前只从 `state.raw.root` 开始递归，而进组后文档 root 不在投影里，
     递归一次都没跑起来——成员被当成一堆孤立节点平铺成一行。现在从**当前视图的根**开始：
@@ -199,6 +272,15 @@
   （否则进组时成员又会出现在别处）。回归用例：组内排列后组卡与组外卡片的坐标必须逐字不变，
   只允许挂在成员上的卡片跟着成员走
   （`desktop/src/canvas/canvas/card-follow-layout.ts`、`canvas/viewport.ts`、
+  `desktop/tests/canvas-viewport.test.cjs`）。
+  **组内根本不画的卡片也不碰**：被组左侧边界行代表的变量在组内视图里没有画布卡片
+  （`editor.variableCardList()` 按 `boundaryVariableRefs()` 把它过滤掉了），但归位逻辑以前只问
+  「卡片绑的节点是不是本组成员」，于是照搬——用户在组内看不到任何变化，出组才发现外层那张卡片
+  跳了位（`workflows/活动副本.json` 的 `重新校验` 卡正是这种：绑在 `tap_exit_after_battle:revalidate`
+  上，进「节点组 2」后由边界行代表）。现在「组内画不画」与「组内排不排」用同一条规则：组内排列
+  跳过被边界行代表的卡片，外层排列照旧（两条规则都不生效）。回归用例覆盖「被边界行代表的卡片
+  坐标逐字不变 / 未被代表的照旧贴着成员走 / 外层排列照旧贴边」
+  （`desktop/src/canvas/canvas/card-follow-layout.ts`、`canvas/viewport.ts`、`canvas/editor.ts`、
   `desktop/tests/canvas-viewport.test.cjs`）。
 - **拖动卡片时连线不跟着走**（卡片动了、线留在原地，端点悬在空白处）：上一条「元素位置同步」
   会先把 `transform` 写成最新值，于是 `applyPatches` 里 `nodeTransform` 恒返回 false（DOM 没变），

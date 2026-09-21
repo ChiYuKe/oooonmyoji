@@ -187,6 +187,30 @@
 /* 内描边画在 input 自己身上（不是 shell 的 box-shadow）：不受拖动、动画或裁剪影响。 */
 .inline-param-editor .inline-param-input:focus { outline: 1px solid var(--inline-focus-line, #8b98a5); outline-offset: -1px; }
 .inline-param-editor .inline-param-input:focus:not(:focus-visible) { outline-color: var(--inline-focus-line, #8b98a5); }
+.inline-node-name-editor {
+  position: fixed; z-index: 250; display: flex; align-items: center; box-sizing: border-box;
+  padding: 2px; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--card-line, #424a51) 72%, var(--inline-focus-line, #8b98a5));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--card-head, #2e3338) 92%, #111 8%);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .24), inset 0 0 0 1px rgba(255, 255, 255, .035);
+  transition: border-color .1s ease, box-shadow .1s ease;
+}
+.inline-node-name-editor:focus-within {
+  border-color: color-mix(in srgb, var(--inline-focus-line, #8b98a5) 72%, var(--card-line, #424a51));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .28), inset 0 0 0 1px rgba(255, 255, 255, .055);
+}
+.inline-node-name-input {
+  box-sizing: border-box; appearance: none;
+  width: 100%; height: 100%; min-width: 0; min-height: 0;
+  padding: 0 7px; border: 0; border-radius: 3px; outline: 0;
+  background: transparent; color: var(--card-text, #e2e7ec); caret-color: var(--inline-focus-line, #8b98a5);
+  font: inherit; font-size: 12px; font-weight: 650; line-height: 1; text-align: left;
+}
+.inline-node-name-input::selection {
+  background: color-mix(in srgb, var(--inline-focus-line, #8b98a5) 30%, transparent);
+  color: var(--card-text, #e2e7ec);
+}
 /* 固定卡片的值行在框内左对齐：浮层要用同一种对齐，点开才看不出跳变。 */
 .inline-param-editor.value-align-left .inline-param-input { text-align: left; }
 /* 固定长度数组：浮层本身就是 N 个输入格，盒子与卡片上的输入格逐格重合（18px 高、4px 间隔）。 */

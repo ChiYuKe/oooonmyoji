@@ -96,6 +96,8 @@ export interface ToolbarDeps {
   requestSave?(): void;
   /** 上一个 / 下一个校验问题（错误与提醒一起走）。 */
   gotoIssue?(step: 1 | -1): void;
+  /** 布局体检与修复：只重建布局。 */
+  repairLayout?(): void;
 }
 
 export interface ToolbarController {
@@ -284,6 +286,9 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
         // 问题导航：画布上的红标记走到哪都能一键跳到下一个（F8 / Shift+F8 同一条命令）。
         { label: '下一个问题 (F8)', run: () => deps.gotoIssue?.(1) },
         { label: '上一个问题 (Shift+F8)', run: () => deps.gotoIssue?.(-1) },
+        'separator',
+        // 布局体检：坐标坏了只重建布局，不动节点数据。
+        { label: '重建布局（只动坐标）', run: () => deps.repairLayout?.() },
         'separator',
         { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
         { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },

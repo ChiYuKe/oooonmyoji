@@ -46,7 +46,11 @@ export interface ViewportDeps {
   /** 视口尺寸测量（缓存读，避免每帧强制同步布局）；缺省按 `wrap` 自行创建。 */
   measurement?: CanvasWrapMeasurement;
   minimap(): HTMLElement | null;
-  render(): void;
+  /**
+   * 重绘入口。缩放这类只改视口的操作会带上 `viewport` 标记：画布、连线、小地图视口框
+   * 都要更新，但**不必**顺带重建面板（详情栏/侧栏/校验徽标与缩放无关）。
+   */
+  render(flags?: { viewport?: boolean }): void;
   nodeWidth: number;
   baseHeight: number;
   runCardWidth: number;
@@ -287,7 +291,10 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
     state.panX = x - (x - state.panX) * ratio;
     state.panY = y - (y - state.panY) * ratio;
     state.zoom = next;
-    render();
+    // 缩放只改视口：走 viewport 标记，「缩放分级」跨档时渲染入口自己会补一次图形重绘。
+    // 用无标记的 render() 会顺带重建面板（详情栏/侧栏/校验徽标都与缩放无关），
+    // 在 500 节点上这部分就是每帧几毫秒的纯浪费。
+    render({ viewport: true });
   }
 
   function worldPoint(event: { clientX: number; clientY: number }): { x: number; y: number } {

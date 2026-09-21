@@ -123,6 +123,9 @@ export function createInputBridge(deps: InputBridgeDeps) {
       if (!editing && matchesShortcut(event, 'editor.fitView')) { event.preventDefault(); fitView(); }
       if (!editing && matchesShortcut(event, 'editor.nextIssue')) { event.preventDefault(); executeEditorCommand('nextIssue'); }
       if (!editing && matchesShortcut(event, 'editor.previousIssue')) { event.preventDefault(); executeEditorCommand('previousIssue'); }
+      // 画布位置前进/后退：与视口工具条的 ↩ / ↪ 是同一条命令，菜单里也标了同样的键。
+      if (!editing && matchesShortcut(event, 'editor.viewportBack')) { event.preventDefault(); executeEditorCommand('viewportBack'); }
+      if (!editing && matchesShortcut(event, 'editor.viewportForward')) { event.preventDefault(); executeEditorCommand('viewportForward'); }
       if (!editing && matchesShortcut(event, 'editor.focusNode') && state.selected.size === 1) {
         const node = nodeById([...state.selected][0]);
         const pos = position(node);

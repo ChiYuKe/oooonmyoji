@@ -245,6 +245,48 @@
     预览虚影的出现与消失、定位闪烁（高亮后 1.4 秒消退）、新命令分派与工具条接线
     （`tests/canvas-viewport.test.cjs`、`canvas-layout-locks.test.cjs`、`canvas-minimap.test.cjs`、
     `canvas-render-entry.test.cjs`、`canvas-navigation.test.cjs`）。
+- **恢复与一致性**（阶段 7—8）：
+  - **崩溃恢复副本**：画布每次改动都往 localStorage 留一份档（每份文档最近 5 份，内容相同只
+    更新时间戳，正文超过 1.5 MB 不留），刷新/崩溃/强退后重新打开文档时会问一句
+    「发现未保存的恢复副本（时间 + 差异摘要）：恢复未保存内容 / 用磁盘版本」——选了恢复才
+    替换正文并标成未保存。**写盘成功后副本立刻清掉**，所以正常情况下永远看不到这个提示；
+    存储不可用（隐私模式、配额满）时整条链路安全退化，不影响编辑
+    （`renderer/recovery-store.ts`、`document-lifecycle.ts` 的 `resolveRecovery`、
+    `editor-host.ts` 的 `recordRecovery`、`workspace.ts` 的 `onDocumentSaved`）。
+  - **外部文件变化三选**：磁盘被外部改写（内容浏览器改名/移动触发的引用重写等）而本地又有
+    未保存修改时，不再默默跳过——弹窗给出**对比 / 保留本地 / 使用磁盘版本**：
+    「对比」在同一弹窗里展示行数变化与前几处不同的行并可反复查看，「保留本地」保持现状并
+    照旧提示，「使用磁盘版本」丢弃内存副本重新读盘。没有注入选择器的环境退化为旧行为
+    （`document-lifecycle.ts` 的 `resolveExternalChange`、`main.ts` 的
+    `summarizeTextDiff` / `resolveExternalChangeDraft`）。
+  - **旧格式打开时可撤销迁移**：打开文档时补齐 `schema_version` / `version`，并移除 schema v4
+    已废弃的 `public` 字段（曾经公开过的定义留 `_migratedPublic` 痕迹），迁移**包在一次
+    `mutate` 里**——Ctrl+Z 就能回到打开时的原样，提示里也这么写；幂等，已经是 v4 的文档一动不动
+    （`canvas/model/document-health.ts` 的 `migrateDocument`、`shell/messages.ts` 的 init 分支）。
+  - **布局异常只重建布局**：坐标缺失 / 不是有限数 / 量级超过 1e6 / 指向不存在节点的残留项会被
+    体检出来（`inspectLayout`），修的时候**只重算坐标**（复用阶段 5 的 `autoLayoutPreview` +
+    `applyLayoutPositions`）并顺手清掉残留项，节点、参数、连线数据一个字节都不动；「更多 → 重建布局」
+    也能手动触发，走一次历史可撤销。
+  - **缩放不再重建面板（性能）**：`zoomAt` 以前用无标记的 `render()`，每次滚轮缩放都会顺带重建
+    详情栏、侧栏与校验徽标——与缩放毫无关系却占了大头。现在缩放走 `{viewport: true}`，
+    跨缩放分级时渲染入口自己补一次图形重绘。500 节点基准里缩放输入延迟 P95 从 ~16 ms
+    （贴着 60 Hz 一帧的判定线、时过时不过）降到 **~7 ms**，稳定通过 `--enforce`
+    （`canvas/canvas/viewport.ts`、`canvas-render-entry.test.cjs` 的 `recordViewportSoon` 契约不变）。
+  - **统一的快捷键、菜单、确认界面与键盘导航**：
+    - 确认界面统一到 `impact-confirm`：改名影响范围、保存被拦下、崩溃恢复、外部文件变化四处的
+      外观与键盘行为完全一致；新增可选的**第三个动作**（「对比」）与多行差异正文，取消按钮文案
+      可自定义（「返回修改」「用磁盘版本」「保留本地」）；
+    - 弹窗键盘契约：打开即聚焦主操作、`Esc` 取消、**Tab / Shift+Tab 在可见按钮间循环**
+      （隐藏/禁用的按钮不参与，焦点不会跑到弹窗外）、关闭后**把焦点还给打开它的元素**；
+    - 快捷键补齐并集中登记：`editor.nextIssue` (F8) / `editor.previousIssue` (Shift+F8) /
+      `editor.viewportBack` (Alt+←) / `editor.viewportForward` (Alt+→)，右键菜单与「更多」
+      菜单里的文案标出同样的键，菜单项与快捷键指向**同一条命令**
+      （`public/shortcuts/shortcuts.js`、`interactions/input-bridge.ts`、`toolbar.ts`、`editor.ts`）。
+  - 回归测试：恢复副本的留档/去重/上限/清洗/配额退化、迁移的三个步骤与幂等性、
+    布局体检四类异常与「只动坐标」的接线、打开文档先问恢复、外部改写三选的两个分支、
+    弹窗的单次结算 / 焦点陷阱 / 焦点归还 / 第三个动作、菜单与快捷键一致
+    （`tests/recovery-store.test.cjs`、`document-health.test.cjs`、`impact-confirm.test.cjs`、
+    `recovery-consistency.test.cjs`）。
 - **校验与错误就地可见、可导航**（阶段 6）：
   - **错误直接标在连线、节点、参数端点上**：节点级错误照旧点红点，参数级错误落到具体那一行；
     新增**连线标红**——`children` 路径的问题落到父节点到那个子节点的那条边上，成环 / 父节点数量

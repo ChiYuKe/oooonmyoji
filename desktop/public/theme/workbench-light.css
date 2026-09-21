@@ -977,6 +977,11 @@
 :root[data-theme="light"] .impact-confirm-footer .overview-config-button.primary.danger:hover {
     background: #f6e6e8
 }
+:root[data-theme="light"] .impact-confirm-preview {
+    border: 1px solid #dddddd;
+    background: #efefef;
+    color: #363636
+}
 :root[data-theme="light"] .roi-picker-modal {
     background: rgba(251, 251, 251, 0.78)
 }

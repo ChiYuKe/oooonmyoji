@@ -85,6 +85,7 @@ import {
 import { createReferenceViewer } from './reference-viewer';
 import { createVariableReferences } from './variable-references';
 import { createImpactConfirm } from './impact-confirm';
+import { createRecoveryStore } from './recovery-store';
 import { contentName, createContentBrowser, relativeToProject, type ContentBrowser, type ContentBrowserItem } from './content-browser';
 import { createOverview } from './overview';
 import { createRuntimeLog } from './runtime-log';
@@ -218,10 +219,20 @@ const impactConfirmBody = document.querySelector<HTMLElement>('#impact-confirm-b
 const impactConfirmOk = document.querySelector<HTMLButtonElement>('#impact-confirm-ok')!;
 const impactConfirmCancel = document.querySelector<HTMLButtonElement>('#impact-confirm-cancel')!;
 const impactConfirmClose = document.querySelector<HTMLButtonElement>('#impact-confirm-close')!;
+/** 第三个动作（外部文件变化的「对比」等）；缺省时隐藏。 */
+const impactConfirmExtra = document.querySelector<HTMLButtonElement>('#impact-confirm-extra')!;
 const impactConfirm = createImpactConfirm(
   impactConfirmModal, impactConfirmTitle, impactConfirmSubtitle, impactConfirmBody,
-  impactConfirmOk, impactConfirmCancel, impactConfirmClose,
+  impactConfirmOk, impactConfirmCancel, impactConfirmClose, impactConfirmExtra,
 );
+
+/**
+ * 崩溃恢复副本：画布每次改动留一份档（localStorage），刷新/崩溃后还能捡回未保存内容。
+ * 写盘成功即清掉；打开文档时若有比磁盘更新的副本，会先问用户要不要恢复。
+ */
+const recovery = createRecoveryStore();
+/** 同一个文档在一次会话里只问一次「要不要恢复」。 */
+const recoveryAsked = new Set<string>();
 
 let bootstrap: BootstrapData | undefined;
 let selectedInstance = '';
@@ -235,6 +246,8 @@ const workspace = createWorkspace({
   errorMessage,
   setStatus,
   syncDocumentTabs: () => lifecycle.syncDocumentTabs(),
+  // 落盘即清恢复副本：下次打开不该再问「要不要恢复」。
+  onDocumentSaved: (uri) => recovery.clear(uri),
 });
 let toastTimer: number | undefined;
 let docking: DockingController | undefined;
@@ -545,7 +558,97 @@ const lifecycle = createDocumentLifecycle({
   errorMessage,
   setDocumentPanelDirty,
   resetSharedPanelSurfaces: () => sharedPanelDockBridge?.resetSurfaces(),
+  // 崩溃恢复：有比磁盘更新的副本时问一句；三个选项走同一个确认弹窗样式。
+  resolveRecovery: (uri, diskText) => resolveRecoveryDraft(uri, diskText),
+  // 外部改写 + 本地未保存：对比 / 保留本地 / 使用磁盘版本。
+  resolveExternalChange: (uri) => resolveExternalChangeDraft(uri),
 });
+
+/**
+ * 两份正文的差异摘要（阶段 7—8 的「对比」）：给出行数变化与前几处不同的行。
+ * 只做逐行比较，不做 LCS——目的是让人一眼看出「大致改了哪些地方」，不是做合并工具。
+ */
+function summarizeTextDiff(localText: string, diskText: string, limit = 8): { summary: string; preview: string } {
+  const local = String(localText || '').split(/\r?\n/);
+  const disk = String(diskText || '').split(/\r?\n/);
+  if (localText === diskText) return { summary: '两边内容一致', preview: '' };
+  const max = Math.max(local.length, disk.length);
+  const lines: string[] = [];
+  let changed = 0;
+  for (let index = 0; index < max; index += 1) {
+    const a = local[index];
+    const b = disk[index];
+    if (a === b) continue;
+    changed += 1;
+    if (lines.length < limit) {
+      const at = index + 1;
+      if (b !== undefined) lines.push(`- ${at}  磁盘：${b.slice(0, 160)}`);
+      if (a !== undefined) lines.push(`+ ${at}  本地：${a.slice(0, 160)}`);
+    }
+  }
+  const more = changed > limit ? `\n… 另外还有 ${changed - limit} 处不同` : '';
+  return {
+    summary: `本地 ${local.length} 行 / 磁盘 ${disk.length} 行，共 ${changed} 处不同`,
+    preview: (lines.join('\n') || '（只差结尾空行）') + more,
+  };
+}
+
+/** 崩溃恢复：问一次「要不要用恢复副本」，`'restore'` 时把副本正文交回去。 */
+async function resolveRecoveryDraft(uri: string, diskText: string): Promise<string | null> {
+  if (recoveryAsked.has(uri)) return null;
+  recoveryAsked.add(uri);
+  const snapshot = recovery.latest(uri);
+  if (!snapshot || snapshot.text === diskText) {
+    // 副本与磁盘一致（或者本来就保存过）：直接清掉，不留垃圾。
+    if (snapshot) recovery.clear(uri);
+    return null;
+  }
+  const when = new Date(snapshot.at);
+  const stamp = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')} `
+    + `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
+  const diff = summarizeTextDiff(snapshot.text, diskText, 5);
+  const answer = await impactConfirm.open({
+    title: '发现未保存的恢复副本',
+    summary: `${stamp} 的编辑还没写盘（${diff.summary}）。要用它覆盖当前打开的版本吗？`,
+    preview: diff.preview,
+    confirmLabel: '恢复未保存内容',
+    cancelLabel: '用磁盘版本',
+  });
+  if (answer === true) return snapshot.text;
+  recovery.clear(uri);
+  return null;
+}
+
+/**
+ * 外部改写 + 本地未保存：对比 / 保留本地 / 使用磁盘版本。
+ * 「对比」在同一弹窗里展示差异后继续问，直到用户明确选一边。
+ */
+async function resolveExternalChangeDraft(uri: string): Promise<'local' | 'disk'> {
+  const localText = workspace.activeText?.() && workspace.activeUri() === uri
+    ? workspace.activeText()
+    : workspace.tab(uri)?.text || '';
+  let diskText = '';
+  try {
+    diskText = (await api.getWorkflowInit(uri, selectedInstance, false)).document.text || '';
+  } catch {
+    diskText = '';
+  }
+  for (;;) {
+    const diff = summarizeTextDiff(localText, diskText, 8);
+    const answer = await impactConfirm.open({
+      title: '磁盘上的文件被外部改写了',
+      summary: `这份文档在本地还有未保存的修改（${diff.summary}）。保留本地，还是用磁盘版本覆盖？`,
+      confirmLabel: '使用磁盘版本',
+      danger: true,
+      cancelLabel: '保留本地',
+      extra: { label: '对比', value: 'compare' },
+      preview: diff.preview,
+    });
+    if (answer === true) return 'disk';
+    if (answer === false) return 'local';
+    // 选了「对比」：差异已经展示在弹窗里了，再问一次同样的选择。
+  }
+}
 
 const editorHost = createEditorHost({
   api,
@@ -556,8 +659,7 @@ const editorHost = createEditorHost({
   showToast,
   errorMessage,
   setStatus,
-  showDetailsPanel: () => { docking?.showPanel('details'); },
-  showRuntimePanel: () => {
+  showDetailsPanel: () => { docking?.showPanel('details'); },  showRuntimePanel: () => {
     if (sharedPanelDockBridge) sharedPanelDockBridge.show('runtime');
     else docking?.showPanel('runtime');
   },
@@ -575,7 +677,9 @@ const editorHost = createEditorHost({
     else showToast('无法定位当前工作流的项目路径', true);
   },
   showVariableReferences: (data, source) => variableReferences.open(data, source),
-  showImpactConfirm: (request) => impactConfirm.open(request),
+  showImpactConfirm: async (request) => (await impactConfirm.open(request)) === true,
+  // 画布每次改动留一份崩溃恢复副本（写盘成功后由 workspace 清掉）。
+  recordRecovery: (uri, text, dirty) => recovery.record(uri, text, dirty),
   getDocumentFrame: (uri) => workspace.getDocumentRuntimes().get(uri)?.frame,
   getSelectedInstance: () => selectedInstance,
   createNewWorkflow,

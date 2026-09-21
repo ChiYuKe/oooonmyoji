@@ -40,6 +40,8 @@ export interface EditorCommandDispatchDeps {
   groupIssueSummary(groupId: string): { errors: number; warnings: number; first: string };
   /** 连线上的问题（连线涂红 + 悬停说明）。 */
   edgeIssues(parentId: string, childId: string): any[];
+  /** 布局体检与修复：只重建布局（可撤销）。 */
+  repairLayout(record?: boolean): boolean;
   copySelection(): void;
   cutSelection(): void;
   pasteClipboard(): void;
@@ -83,8 +85,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     disconnectVariableReference, disconnectAllVariableReferences, confirmPendingRename, cancelPendingRename,
     previewArrange, confirmArrangePreview, cancelArrangePreview, toggleNodeLock, viewportBack, viewportForward,
     toggleNodeFilter, clearNodeFilter,
-    requestSave, forceSave, gotoIssue,
-    VariableSystem,
+    requestSave, forceSave, gotoIssue, repairLayout,    VariableSystem,
   } = deps;
   const selectionNodeById = deps.selectionNodeById ?? nodeById;
   function executeEditorCommand(command: string, value?: any): any {
@@ -173,6 +174,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     else if (command === 'forceSave') forceSave();
     else if (command === 'nextIssue') gotoIssue(1);
     else if (command === 'previousIssue') gotoIssue(-1);
+    else if (command === 'repairLayout') repairLayout(true);
     else if (command === 'fitView') fitView();
     else if (command === 'exportImage') exportFullCanvasImage();
     else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }

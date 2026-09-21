@@ -40,6 +40,16 @@ export interface DocumentLifecycleDeps {
   setDocumentPanelDirty(panelId: string, dirty: boolean): void;
   /** 重置布局时同步恢复共享面板到默认停靠面（没有共享桥时为空操作）。 */
   resetSharedPanelSurfaces(): void;
+  /**
+   * 打开文档时的崩溃恢复：有比磁盘更新的恢复副本时问用户，返回要采用的正文
+   * （`null` = 继续用磁盘版本）。缺省表示不做恢复。
+   */
+  resolveRecovery?(uri: string, diskText: string): Promise<string | null>;
+  /**
+   * 磁盘被外部改写、本地又有未保存修改时的三选：返回 `'local'`（保留本地）/`'disk'`（用磁盘版）。
+   * 缺省退化为「保留本地」（旧行为：跳过这个文档）。
+   */
+  resolveExternalChange?(uri: string): Promise<'local' | 'disk'>;
 }
 
 export interface DocumentLifecycleController {
@@ -272,7 +282,15 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
     loadingMask.classList.remove('hidden');
     try {
       const init = await api.getWorkflowInit(uri, getSelectedInstance(), tab.backStack.length > 0);
-      const documentText = tab.text || init.document.text;
+      let documentText = tab.text || init.document.text;
+      // 崩溃恢复：文档还没有内存副本、磁盘版本又比恢复副本旧时，先问用户要不要捡回未保存内容。
+      if (!tab.text && deps.resolveRecovery) {
+        const recovered = await deps.resolveRecovery(uri, documentText);
+        if (recovered && recovered !== documentText) {
+          documentText = recovered;
+          tab.dirty = true;
+        }
+      }
       init.document.text = documentText;
       if (init.document.uri !== workspace.activeUri()) sidebar.resetCollapsed();
       workspace.setDocumentText(uri, documentText);
@@ -316,17 +334,26 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
   /**
    * 磁盘被外部改写后强制重新读盘。`loadWorkflow` 优先沿用内存正文（`tab.text`）以保留未保存的
    * 改动，所以被外部改写的文档必须先丢掉内存副本：否则画布会继续显示旧引用，下一次自动保存
-   * 还会把旧内容写回磁盘，把刚完成的重定向覆盖掉。有未保存修改的文档保持不动并返回给调用方提示。
+   * 还会把旧内容写回磁盘，把刚完成的重定向覆盖掉。
+   *
+   * 本地有未保存修改时不再默默跳过：交给 `resolveExternalChange` 让用户三选
+   * （对比 / 保留本地 / 使用磁盘版本）。选择「使用磁盘版本」就丢掉内存副本重新读盘；
+   * 「保留本地」保持现状并把这个文档回报给调用方（照旧提示）。没有注入选择器时退化为保留本地。
    */
   async function reloadDocuments(uris: readonly string[]): Promise<string[]> {
     const skipped: string[] = [];
     const reloaded: string[] = [];
+    const forced: string[] = [];
     for (const uri of uris) {
       const tab = uri ? workspace.tab(uri) : undefined;
       if (!tab) continue;
       if (tab.dirty) {
-        skipped.push(uri);
-        continue;
+        const choice = deps.resolveExternalChange ? await deps.resolveExternalChange(uri) : 'local';
+        if (choice !== 'disk') {
+          skipped.push(uri);
+          continue;
+        }
+        forced.push(uri);
       }
       workspace.cancelAutoSave(uri);
       workspace.setDocumentText(uri, '');
@@ -339,6 +366,8 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
     const active = workspace.activeUri();
     if (active && reloaded.includes(active)) await loadWorkflow(active);
     else syncDocumentTabs();
+    // 明确选了「使用磁盘版本」的文档：丢弃内存里的修改，别再报成「跳过」。
+    void forced;
     return skipped;
   }
 

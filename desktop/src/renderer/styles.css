@@ -1228,6 +1228,23 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .impact-confirm-footer { min-height: 54px; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 0 14px; border-top: 1px solid #34373b; background: #27292c; }
 .impact-confirm-footer .overview-config-button.primary.danger { background: #a8434c; border-color: #c05560; }
 .impact-confirm-footer .overview-config-button.primary.danger:hover { background: #bc4f5a; }
+/* 第三个动作（外部文件变化的「对比」）靠左，与「取消/确认」拉开距离，避免误点。 */
+.impact-confirm-spacer { flex: 1; }
+.impact-confirm-footer #impact-confirm-extra { margin-right: auto; }
+/* 差异预览：等宽、可滚动，长行不撑破弹窗。 */
+.impact-confirm-preview {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid #34373b;
+  border-radius: 4px;
+  background: #1f2124;
+  color: #c8ced4;
+  font: 11px/1.6 Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 
 /* ---------- 截取模板：挂在桌面主窗口上，避免被右侧详情 iframe 裁剪 ---------- */
 .roi-picker-modal {

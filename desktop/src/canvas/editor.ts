@@ -17,6 +17,7 @@ import { createCanvasEdges } from './canvas/edges';
 import { createCanvasMinimap } from './canvas/minimap';
 import { createCanvasViewport } from './canvas/viewport';
 import { groupMemberIdsOf } from './canvas/card-follow-layout';
+import { inspectLayout, migrateDocument, pruneOrphanLayout } from './model/document-health';
 import {
   groupIssueSummary as summarizeGroupIssues,
   issueTargets as computeIssueTargets,
@@ -657,9 +658,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const StudioToolbar = createEditorToolbar({
     state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes: viewNodes, focusNode,
     currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
-    // 保存走把关入口（只拦运行时会拒绝的错误）；问题导航给「更多」菜单。
+    // 保存走把关入口（只拦运行时会拒绝的错误）；问题导航与布局重建给「更多」菜单。
     requestSave: () => requestSave(),
     gotoIssue: (step) => gotoIssue(step),
+    repairLayout: () => repairLayout(true),
   });
   const { renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, bindToolbar, searchNodeByName, setWorkflow, setInstance } = StudioToolbar;
   renderNodeGroupBreadcrumb = renderWorkflowBreadcrumb;
@@ -916,6 +918,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     gotoIssue: (step) => gotoIssue(step),
     groupIssueSummary: (groupId) => groupIssueSummary(groupId),
     edgeIssues: (parentId, childId) => edgeIssues(parentId, childId),
+    // 布局异常时只重建布局（可撤销）。
+    repairLayout: (record) => repairLayout(record !== false),
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
     deleteVariable,
     showVariableReferences: VariableInspectors.showVariableReferences,
@@ -991,8 +995,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
       },
     });
     items.push('separator');
-    items.push({ label: '画布后退', run: () => { if (!viewportBack()) toast('已经是最早的位置'); } });
-    items.push({ label: '画布前进', run: () => { if (!viewportForward()) toast('已经是最新的位置'); } });
+    items.push({ label: '画布后退 (Alt+←)', run: () => { if (!viewportBack()) toast('已经是最早的位置'); } });
+    items.push({ label: '画布前进 (Alt+→)', run: () => { if (!viewportForward()) toast('已经是最新的位置'); } });
+    items.push('separator');
+    items.push({ label: '重建布局（只动坐标）', run: () => repairLayout(true) });
     if (nodeFilterActive()) items.push({ label: '清除按状态/类型隐藏', run: () => clearNodeFilter() });
     showMenu(event.clientX, event.clientY, items);
   });
@@ -1034,7 +1040,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   InputBridge.install();
   const CanvasMessages = createCanvasMessages({
-    state, $, mutate, nodeById, normalizeRaw, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
+    state, $, mutate, nodeById, normalizeRaw, migrateDocument, repairLayout, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
     renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, renderInspector, renderAssetBrowser,
     renderWorkflowBrowser, resolveWorkflowRef,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
@@ -1301,6 +1307,32 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     }
     const label = target.severity === 'error' ? '错误' : '提醒';
     toast(`${label} ${issueCursor + 1}/${count}：${target.message}`, target.severity === 'error');
+    return true;
+  }
+
+  /**
+   * 布局体检与修复：坐标缺失/非法/量级异常时**只重建布局**（外加清掉指向不存在节点的残留坐标），
+   * 绝不碰节点、参数与连线数据。
+   *
+   * `record` = true 时整段修复是一条历史（可 Ctrl+Z）；打开文档时的兜底修复不进历史，
+   * 因为那一步的历史本来就是空的，用户要撤的是「打开之后做的事」。
+   */
+  function repairLayout(record = true): boolean {
+    const health = inspectLayout(state.raw);
+    if (!health.needsRebuild && !health.needsPrune) return false;
+    const positions = health.needsRebuild ? autoLayoutPreview('all') : null;
+    const apply = (): void => {
+      if (positions) applyLayoutPositions(positions);
+      pruneOrphanLayout(state.raw);
+    };
+    if (record) mutate(apply); else apply();
+    renderGraph();
+    if (record) {
+      toast(`布局数据异常（${health.summary}），已只重建布局（Ctrl+Z 可撤销）`);
+      setDirty(true);
+    } else if (health.needsRebuild || health.needsPrune) {
+      toast(`布局数据异常（${health.summary}），已自动重建布局`);
+    }
     return true;
   }
 

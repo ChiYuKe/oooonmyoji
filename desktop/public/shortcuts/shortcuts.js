@@ -32,6 +32,8 @@
     { id: 'editor.focusNode', group: 'editor', label: '聚焦到唯一选中的节点', defaultBinding: 'f' },
     { id: 'editor.nextIssue', group: 'editor', label: '跳到下一个校验问题', defaultBinding: 'f8' },
     { id: 'editor.previousIssue', group: 'editor', label: '跳到上一个校验问题', defaultBinding: 'shift+f8' },
+    { id: 'editor.viewportBack', group: 'editor', label: '画布位置后退', defaultBinding: 'alt+arrowleft' },
+    { id: 'editor.viewportForward', group: 'editor', label: '画布位置前进', defaultBinding: 'alt+arrowright' },
   ];
 
   const byId = new Map(DEFINITIONS.map((definition) => [definition.id, definition]));

@@ -39,6 +39,8 @@ export interface EditorHostDeps {
   }) => Promise<boolean>;
   /** 重新读取脚本目录（工作流列表），并推送给所有画布。 */
   refreshWorkflows?: () => Promise<void>;
+  /** 记录一份崩溃恢复副本（画布每次改动都会调用）。 */
+  recordRecovery?: (uri: string, text: string, dirty: boolean) => void;
   /** 文档画布的 iframe：详情栏是镜像，写文档的指令要发给它。 */
   getDocumentFrame?: (uri: string) => HTMLIFrameElement | undefined;
   getSelectedInstance: () => string;
@@ -61,7 +63,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
   const {
     api, workspace, detailsFrame, sidebar, roiPicker, showToast, errorMessage, setStatus,
     showDetailsPanel, showRuntimePanel, openContentBrowserSearch, openReferences,
-    showVariableReferences, showImpactConfirm, getDocumentFrame,
+    showVariableReferences, showImpactConfirm, getDocumentFrame, recordRecovery,
     getSelectedInstance, createNewWorkflow, switchWorkflow, ensureDocument, openWorkflowTab,
     loadWorkflow, loadDocumentOnce, sendDocumentInit, resolveWorkflow, selectInstance, refreshWorkflows,
   } = deps;
@@ -109,6 +111,9 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           if (!text) return;
           workspace.setDocumentText(targetUri, text);
           workspace.syncWorkflowDescriptor(targetUri, text);
+          // 崩溃恢复副本：每次正文变化都留档（防抖在存储侧按内容去重），
+          // 刷新/崩溃后还能把未保存内容捡回来；写盘成功后会清掉（见 workspace 的 onSaved）。
+          recordRecovery?.(targetUri, text, message.dirty !== false);
           // 详情栏是镜像：它报上来的正文属于活动文档，同样要写进这份文档的运行时快照，
           // 否则镜像重载（移到独立窗口、Dockview 重挂）时会拿回旧正文。
           const targetRuntime = runtime ?? (targetUri ? workspace.getDocumentRuntimes().get(targetUri) : undefined);

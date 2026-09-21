@@ -13,6 +13,10 @@ export interface CanvasMessagesDeps {
   mutate(fn: () => void): void;
   nodeById(id: string): any;
   normalizeRaw(raw: any): any;
+  /** 旧格式就地迁移（幂等）：调用方负责包进 mutate，迁移因此可撤销。 */
+  migrateDocument(raw: any): { changed: boolean; steps: string[] };
+  /** 布局体检与修复：只重建布局，不动节点数据；返回是否真的修过。 */
+  repairLayout(record?: boolean): boolean;
   clearVariableCardSelection(): void;
   setDirty(value?: boolean): void;
   render(): void;
@@ -41,7 +45,7 @@ export interface CanvasMessagesDeps {
 
 export function createCanvasMessages(deps: CanvasMessagesDeps) {
   const {
-    state, $, mutate, nodeById, normalizeRaw, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
+    state, $, mutate, nodeById, normalizeRaw, migrateDocument, repairLayout, clearVariableCardSelection, setDirty, render, fitView, ensureLayout,
     renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, renderInspector, renderAssetBrowser,
     renderWorkflowBrowser,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
@@ -119,6 +123,15 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     state.instanceId = typeof message.selectedInstance === 'string' ? message.selectedInstance : '';
     state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); state.undo = []; state.redo = []; state.run.clear(); state.paramLiteralCache = {}; state.inspector = 'node'; state.nodeSearch = { query: '', ids: [], index: -1 };
     $('btn-back').classList.toggle('hidden', !message.canGoBack);
+    // 旧格式迁移与布局体检都必须在「历史已清空」之后、首次渲染之前跑：
+    // 前者要成为这一步的第一条可撤销记录，后者要在画布画出来之前把坏坐标修好。
+    let migrationSteps: string[] = [];
+    mutate(() => { migrationSteps = migrateDocument(state.raw).steps; });
+    if (migrationSteps.length) {
+      toast(`已迁移旧格式：${migrationSteps.join('；')}（Ctrl+Z 可撤销）`);
+      setDirty(true);
+    }
+    if (repairLayout(false)) setDirty(true);
     renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(prunedWorkflowInputs); render();
     requestAssetInventory();
     setTimeout(() => { if (!sameDocument) fitView(); }, 0);

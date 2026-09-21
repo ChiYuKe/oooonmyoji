@@ -10,7 +10,7 @@ function harness(raw, options = {}) {
   const state = createCanvasState();
   state.raw = raw;
   const model = createWorkflowModel(state);
-  const calls = {rendered: 0, mutated: 0};
+  const calls = {rendered: 0, mutated: 0, renderFlags: []};
   const wrap = {getBoundingClientRect: () => ({left: 0, top: 0, width: 400, height: 300}), clientWidth: 400, clientHeight: 300};
   const viewport = createCanvasViewport({
     state,
@@ -31,7 +31,7 @@ function harness(raw, options = {}) {
     currentNodeGroupId: options.currentNodeGroupId,
     wrap,
     minimap: () => options.minimap || null,
-    render: () => { calls.rendered += 1; },
+    render: (flags) => { calls.rendered += 1; calls.renderFlags.push(flags); },
     nodeWidth: 260,
     baseHeight: 96,
     runCardWidth: 250,
@@ -334,6 +334,8 @@ test('worldPoint 与 zoomAt 按视口换算并限制缩放范围', () => {
   assert.equal(h.state.panX, -40);
   assert.equal(h.state.panY, -54);
   assert.equal(h.calls.rendered, 1);
+  // 缩放只改视口：重绘必须带 viewport 标记，不能顺带重建面板（500 节点上就是每帧几毫秒）。
+  assert.deepEqual(h.calls.renderFlags, [{viewport: true}]);
 
   h.viewport.zoomAt(10);
   assert.equal(h.state.zoom, 2.5);

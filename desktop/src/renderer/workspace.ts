@@ -38,6 +38,8 @@ export interface WorkspaceDeps {
   errorMessage: (error: unknown) => string;
   setStatus: (message: string) => void;
   syncDocumentTabs: () => void;
+  /** 文档成功写盘后回调（清掉崩溃恢复副本用）。 */
+  onDocumentSaved?: (uri: string) => void;
 }
 
 export interface Workspace {
@@ -127,6 +129,8 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
       store.setDirty(uri, false);
       const runtime = documentRuntimes.get(uri);
       if (runtime?.init) runtime.init.document.text = text;
+      // 内容已经落盘：崩溃恢复副本没有意义了，清掉避免下次打开弹「要不要恢复」。
+      deps.onDocumentSaved?.(uri);
       if (uri === store.activeUri()) {
         postToEditors({ type: 'workflowSaved' });
         setStatus('工作流已自动保存');

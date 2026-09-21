@@ -30,6 +30,16 @@ export interface EditorCommandDispatchDeps {
   /** 按状态/类型临时隐藏的单项开关。 */
   toggleNodeFilter(kind: 'status' | 'type', value: string): void;
   clearNodeFilter(): void;
+  /** 保存：先做「只拦真正跑不起来的错误」的把关。 */
+  requestSave(): void;
+  /** 用户在确认框里坚持保存（带错误写盘）。 */
+  forceSave(): void;
+  /** 上一个 / 下一个问题（校验错误与提醒一起走）。 */
+  gotoIssue(step: 1 | -1): boolean;
+  /** 折叠组内部问题汇总（点组卡徽标进入并定位用）。 */
+  groupIssueSummary(groupId: string): { errors: number; warnings: number; first: string };
+  /** 连线上的问题（连线涂红 + 悬停说明）。 */
+  edgeIssues(parentId: string, childId: string): any[];
   copySelection(): void;
   cutSelection(): void;
   pasteClipboard(): void;
@@ -73,6 +83,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     disconnectVariableReference, disconnectAllVariableReferences, confirmPendingRename, cancelPendingRename,
     previewArrange, confirmArrangePreview, cancelArrangePreview, toggleNodeLock, viewportBack, viewportForward,
     toggleNodeFilter, clearNodeFilter,
+    requestSave, forceSave, gotoIssue,
     VariableSystem,
   } = deps;
   const selectionNodeById = deps.selectionNodeById ?? nodeById;
@@ -158,6 +169,10 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       if (item) toggleNodeFilter(kind, item);
     }
     else if (command === 'clearNodeFilter') clearNodeFilter();
+    else if (command === 'save') requestSave();
+    else if (command === 'forceSave') forceSave();
+    else if (command === 'nextIssue') gotoIssue(1);
+    else if (command === 'previousIssue') gotoIssue(-1);
     else if (command === 'fitView') fitView();
     else if (command === 'exportImage') exportFullCanvasImage();
     else if (command === 'workflowSettings') { state.inspector = 'workflow'; state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; renderInspector(); }

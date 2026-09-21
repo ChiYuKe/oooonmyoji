@@ -345,6 +345,33 @@
 :root[data-theme="light"] .node-locked-badge-glyph {
     fill: #696969
 }
+:root[data-theme="light"] .edge-invalid .edge-line {
+    stroke: #8f4e52
+}
+:root[data-theme="light"] .edge-invalid .edge-order-bg {
+    fill: #696969;
+    stroke: #8f4e52
+}
+:root[data-theme="light"] .edge-invalid .edge-order {
+    fill: #232323
+}
+:root[data-theme="light"] .node-warning-dot {
+    fill: #705b2d
+}
+:root[data-theme="light"] .node-group-issue-bg {
+    fill: #696969;
+    stroke: #8f4e52
+}
+:root[data-theme="light"] .node-group-issue.warning .node-group-issue-bg {
+    fill: #696969;
+    stroke: #705b2d
+}
+:root[data-theme="light"] .node-group-issue-text {
+    fill: #232323
+}
+:root[data-theme="light"] .node-group-issue.warning .node-group-issue-text {
+    fill: #665c41
+}
 :root[data-theme="light"] .arrange-preview-box {
     fill: color-mix(in srgb, var(--accent, #e3f0f9) 10%, transparent);
     stroke: var(--accent, #256793)

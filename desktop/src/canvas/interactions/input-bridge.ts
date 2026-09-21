@@ -121,6 +121,8 @@ export function createInputBridge(deps: InputBridgeDeps) {
       if (!editing && matchesShortcut(event, 'editor.undo')) { event.preventDefault(); undo(); }
       if (!editing && matchesShortcut(event, 'editor.redo')) { event.preventDefault(); redo(); }
       if (!editing && matchesShortcut(event, 'editor.fitView')) { event.preventDefault(); fitView(); }
+      if (!editing && matchesShortcut(event, 'editor.nextIssue')) { event.preventDefault(); executeEditorCommand('nextIssue'); }
+      if (!editing && matchesShortcut(event, 'editor.previousIssue')) { event.preventDefault(); executeEditorCommand('previousIssue'); }
       if (!editing && matchesShortcut(event, 'editor.focusNode') && state.selected.size === 1) {
         const node = nodeById([...state.selected][0]);
         const pos = position(node);

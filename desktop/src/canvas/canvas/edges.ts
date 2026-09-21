@@ -51,6 +51,8 @@ export interface EdgesDeps {
   referenceSourceById?(id: string): EdgeNode | null;
   /** 折叠组的代理执行边实际指向哪些真实节点（运行事件仍使用真实节点 id）。 */
   edgeRunTargetIds?(parentId: string, childId: string): string[];
+  /** 这条连线上的校验问题（空/缺省表示没问题）：连线涂红并给出悬停说明。 */
+  edgeIssues?(parentId: string, childId: string): any[];
   position(node: EdgeNode): EdgePoint;
   nodeHeight(node: EdgeNode): number;
   /** 每个节点自己的参数行高（固定卡片用双行行样式）。 */
@@ -329,9 +331,17 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     const x2 = to.x + nodeWidth / 2;
     const y2 = to.y;
     const runTargetIds = deps.edgeRunTargetIds?.(parent.id, childId) ?? [childId];
-    const group = svgEl('g', { class: structuralEdgeClass(parent.id, childId, runTargetIds), 'data-parent': parent.id, 'data-child': childId }, layer);
+    // 连线上的校验问题：这条边自身不合法，或它牵涉的节点有结构问题（成环、父节点数量不对…）。
+    const edgeIssues = deps.edgeIssues?.(parent.id, childId) ?? [];
+    const classes = [structuralEdgeClass(parent.id, childId, runTargetIds)];
+    if (edgeIssues.length) classes.push('edge-invalid');
+    const group = svgEl('g', { class: classes.join(' '), 'data-parent': parent.id, 'data-child': childId }, layer);
     group.dataset.parent = parent.id;
     group.dataset.child = childId;
+    if (edgeIssues.length) {
+      const title = svgEl('title', {}, group);
+      title.textContent = edgeIssues.map((issue: any) => String(issue && issue.message || '')).filter(Boolean).join('\n');
+    }
     const path = svgEl('path', { class: 'edge-hit', d: bezier(x1, y1, x2, y2) }, group);
     const edgePath = bezier(x1, y1, x2, y2);
     const line = svgEl('path', { class: 'edge-line', d: edgePath }, group);

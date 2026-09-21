@@ -376,6 +376,22 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.node-filtered { display: none; }
 .wires > g.edge-filtered { display: none; }
 
+/* 校验问题直接标在连线上：错误边涂红加粗，顺序徽标也跟着变。 */
+.edge-invalid .edge-line { stroke: #d9767d; stroke-width: 3; }
+.edge-invalid .edge-order-bg { fill: #4a2225; stroke: #d9767d; }
+.edge-invalid .edge-order { fill: #ffd9dc; }
+
+/* 提醒（warning）：琥珀色小点，与红色错误点区分；不阻止保存。 */
+.node-warning-dot { fill: #d6ad55; pointer-events: none; }
+
+/* 折叠组的问题汇总徽标：有错误用红色，只有提醒用琥珀色；点一下进组并定位。 */
+.node-group-issue-bg { fill: #3a2a2c; stroke: #d9767d; }
+.node-group-issue.warning .node-group-issue-bg { fill: #3a352a; stroke: #d6ad55; }
+.node-group-issue-text { fill: #ffd9dc; font-size: 9px; font-weight: 700; pointer-events: none; }
+.node-group-issue.warning .node-group-issue-text { fill: #ffe6a3; }
+.node-group-issue { cursor: pointer; }
+.node-group-issue:hover .node-group-issue-bg { filter: brightness(1.25); }
+
 /* 自动排列预览：虚线虚影 + 底部确认条（确认前不写文档）。 */
 .arrange-preview-box { fill: color-mix(in srgb, var(--accent, #3694d4) 10%, transparent); stroke: var(--accent, #3694d4); stroke-width: 2; stroke-dasharray: 8 5; pointer-events: none; }
 #arrange-preview-bar {

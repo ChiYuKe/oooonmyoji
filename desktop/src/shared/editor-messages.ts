@@ -220,6 +220,20 @@ export interface VariableRenameImpactRequestedMessage {
   entries?: unknown;
 }
 
+/**
+ * 保存被拦下：文档里有**运行时会拒绝**的错误。
+ * 壳层弹统一确认框；用户坚持「仍然保存」时回发 `editorCommand: forceSave`。
+ */
+export interface SaveBlockedRequestedMessage {
+  type: 'saveBlockedRequested';
+  /** 阻止保存的错误数。 */
+  errors: number;
+  /** 不影响保存的提醒数（仅用于说明）。 */
+  warnings: number;
+  /** 错误清单（最多前几条），确认框里展示。 */
+  entries?: unknown;
+}
+
 export interface EditorErrorMessage {
   type: 'error';
   message?: unknown;
@@ -305,6 +319,7 @@ export type EditorMessage =
   | OpenReferencesMessage
   | VariableReferencesRequestedMessage
   | VariableRenameImpactRequestedMessage
+  | SaveBlockedRequestedMessage
   | EditorErrorMessage
   | RefreshWorkflowsMessage
   | ClipboardWriteMessage;
@@ -339,6 +354,7 @@ export const EDITOR_MESSAGE_TYPES = [
   'openReferences',
   'variableReferencesRequested',
   'variableRenameImpactRequested',
+  'saveBlockedRequested',
   'error',
   'clipboardWrite',
 ] as const;

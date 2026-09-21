@@ -90,6 +90,12 @@ export interface ToolbarDeps {
   currentNodeGroup?(): { id: string; name: string } | null;
   leaveNodeGroup?(): boolean;
   groupSelection?(): boolean;
+  /**
+   * 保存入口：先做「只拦真正跑不起来的错误」的把关；缺省时退化为直接写盘。
+   */
+  requestSave?(): void;
+  /** 上一个 / 下一个校验问题（错误与提醒一起走）。 */
+  gotoIssue?(step: 1 | -1): void;
 }
 
 export interface ToolbarController {
@@ -265,6 +271,8 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     }));
     $('btn-stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
     $('btn-save').addEventListener('click', () => {
+      // 保存把关：只有运行时会拒绝的错误才弹确认；提醒直接放行。
+      if (deps.requestSave) { deps.requestSave(); return; }
       vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' });
       setDirty(false);
     });
@@ -272,6 +280,10 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
       const rect = $('btn-more').getBoundingClientRect();
       showMenu(rect.right, rect.bottom + 4, [
         { label: '将所选节点打组', run: () => deps.groupSelection?.() },
+        'separator',
+        // 问题导航：画布上的红标记走到哪都能一键跳到下一个（F8 / Shift+F8 同一条命令）。
+        { label: '下一个问题 (F8)', run: () => deps.gotoIssue?.(1) },
+        { label: '上一个问题 (Shift+F8)', run: () => deps.gotoIssue?.(-1) },
         'separator',
         { label: '新建工作流', run: () => vscode.postMessage({ type: 'newWorkflow' }) },
         { label: '选择其他工作流…', run: () => vscode.postMessage({ type: 'openWorkflowPicker' }) },

@@ -33,6 +33,8 @@ function harness(nodes, options = {}) {
     nodeById: (id) => state.raw.nodes.find((node) => node.id === id) || null,
     referenceSourceById: options.referenceSourceById,
     edgeRunTargetIds: options.edgeRunTargetIds,
+    // 阶段 6：连线上的校验问题（有的话连线涂红并给出悬停说明）。
+    edgeIssues: options.edgeIssues,
     position: (node) => (options.positions && options.positions[node.id]) || {x: 0, y: 0},
     nodeHeight: () => options.nodeHeight ?? 96,
     instanceRunCards: () => options.runCards || [],
@@ -61,8 +63,7 @@ function harness(nodes, options = {}) {
   return {state, edges, calls, layer: fakeNode('g')};
 }
 
-test('renderEdge 绘制选中状态、运行状态与顺序号并支持重连和断开', () => {
-  const h = harness([
+test('renderEdge 绘制选中状态、运行状态与顺序号并支持重连和断开', () => {  const h = harness([
     {id: 'root', type: 'root', children: ['a']},
     {id: 'a', type: 'task'},
   ], {positions: {root: {x: 0, y: 0}, a: {x: 0, y: 300}}});
@@ -547,4 +548,32 @@ test('renderVariableConnection 从卡片、实例输入与变量端点出发', (
   h.edges.renderVariableConnection(h.layer);
   assert.match(h.layer.children[0].attrs.class, /^variable-connection-preview data-tone-\d+$/);
   assert.equal(h.layer.children[0].attrs.d, 'M 110 400 C 5 6');
+});
+
+// —— 阶段 6：连线上的校验问题 ——
+
+test('有校验问题的连线带 edge-invalid 并把问题写在悬停说明里', () => {
+  const h = harness([
+    {id: 'root', type: 'root', children: ['a']},
+    {id: 'a', type: 'task'},
+  ], {
+    positions: {root: {x: 0, y: 0}, a: {x: 0, y: 300}},
+    edgeIssues: (parentId, childId) => (parentId === 'root' && childId === 'a'
+      ? [{message: 'Root 必须恰好连接一个子节点'}, {message: '检测到环：a'}]
+      : []),
+  });
+  h.edges.renderEdge(h.layer, h.state.raw.nodes[0], 'a', 0);
+  const group = h.layer.children[0];
+  assert.match(group.attrs.class, /edge-invalid/, '问题连线带 edge-invalid');
+  const title = group.children.find((child) => child.tag === 'title');
+  assert.equal(title.textContent, 'Root 必须恰好连接一个子节点\n检测到环：a', '悬停能看到每条问题');
+
+  // 没有问题的连线不带这个 class，也不多画一个 title。
+  const clean = harness([
+    {id: 'root', type: 'root', children: ['a']},
+    {id: 'a', type: 'task'},
+  ], {positions: {root: {x: 0, y: 0}, a: {x: 0, y: 300}}});
+  clean.edges.renderEdge(clean.layer, clean.state.raw.nodes[0], 'a', 0);
+  assert.doesNotMatch(clean.layer.children[0].attrs.class, /edge-invalid/);
+  assert.equal(clean.layer.children[0].children.filter((child) => child.tag === 'title').length, 0);
 });

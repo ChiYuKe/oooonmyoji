@@ -26,8 +26,20 @@ import {
 
 const workflowAjv = new Ajv2020({ allErrors: true, strict: false });
 
-function issue(path: (string | number)[], message: string, code: string): ValidationIssue {
-  return { path, message, severity: 'error', code };
+/**
+ * 诊断严重度：
+ * - `error`：**运行时会拒绝**的硬错误（Python `validator.py` 同样会抛 ConfigError）。
+ *   保存时默认被拦下，其余问题不受影响。
+ * - `warning`：编辑器侧的提醒——Python 不检查、文件照常能跑。
+ *   保存放行，只在徽标/问题导航里提示。
+ */
+function issue(
+  path: (string | number)[],
+  message: string,
+  code: string,
+  severity: 'error' | 'warning' = 'error',
+): ValidationIssue {
+  return { path, message, severity, code };
 }
 
 function validateDecorator(
@@ -213,7 +225,11 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
               }
             }
             const retry = node.decorators.find((decorator) => decorator.type === 'retry' && (isObject(decorator.raw.attempts) || Number(decorator.attempts) > 1));
-            if (retry && !spec.retrySafe && root.retry_safe !== true) issues.push(issue([...path, 'decorators'], `Action ${rawNode.action} 不可安全重试`, 'unsafe-retry'));
+            // 警告而不是错误：Python 侧不检查 retry_safe，工作流照常能跑——
+            // 只是这个动作重复执行可能有副作用，值得提醒。
+            if (retry && !spec.retrySafe && root.retry_safe !== true) {
+              issues.push(issue([...path, 'decorators'], `Action ${rawNode.action} 不可安全重试`, 'unsafe-retry', 'warning'));
+            }
           }
         }
       }

@@ -30,6 +30,8 @@
     { id: 'editor.rename', group: 'editor', label: '重命名所选节点', defaultBinding: 'f2' },
     { id: 'editor.fitView', group: 'editor', label: '适应画布', defaultBinding: 'home' },
     { id: 'editor.focusNode', group: 'editor', label: '聚焦到唯一选中的节点', defaultBinding: 'f' },
+    { id: 'editor.nextIssue', group: 'editor', label: '跳到下一个校验问题', defaultBinding: 'f8' },
+    { id: 'editor.previousIssue', group: 'editor', label: '跳到上一个校验问题', defaultBinding: 'shift+f8' },
   ];
 
   const byId = new Map(DEFINITIONS.map((definition) => [definition.id, definition]));

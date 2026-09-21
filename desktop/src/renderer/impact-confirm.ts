@@ -23,6 +23,8 @@ export interface ImpactConfirmRequest {
   items?: ImpactConfirmItem[];
   /** 确认按钮文案，默认「确认」。 */
   confirmLabel?: string;
+  /** 取消按钮文案，默认「取消」；「保存被拦下」这类场景用「返回修改」更准确。 */
+  cancelLabel?: string;
   /** 危险操作（删除类）时确认按钮用红色。 */
   danger?: boolean;
 }
@@ -70,6 +72,7 @@ export function createImpactConfirm(
     subtitleEl.textContent = request.summary;
     okButton.textContent = request.confirmLabel || '确认';
     okButton.classList.toggle('danger', Boolean(request.danger));
+    if (cancelButton) cancelButton.textContent = request.cancelLabel || '取消';
     bodyEl.replaceChildren();
     const items = Array.isArray(request.items) ? request.items : [];
     if (items.length) {

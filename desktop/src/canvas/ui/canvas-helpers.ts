@@ -20,6 +20,8 @@ export interface CanvasHelpersDeps {
   variableCardHeight: number;
   /** 本地校验出的错误数（画布自己跑的工作流校验，比宿主的快照新）。 */
   localErrorCount?(): number;
+  /** 本地校验出的提醒数（warning）：不阻止保存，只在徽标里提示。 */
+  localWarningCount?(): number;
 }
 
 export function createCanvasHelpers(deps: CanvasHelpersDeps) {
@@ -30,12 +32,22 @@ export function createCanvasHelpers(deps: CanvasHelpersDeps) {
   const measurement = deps.measurement ?? createWrapMeasurement(wrap as any);
   function updateIssueBadge(): void {
     const local = localIssueCount();
+    // 宿主快照与本画布各自算过一遍：错误取最大值（谁更新谁更全），提醒只由本画布提供。
     const fromHost = Array.isArray(state.issues) ? state.issues.filter((item) => item.severity === 'error').length : 0;
     const fromCanvas = deps.localErrorCount ? deps.localErrorCount() : 0;
-    const count = Math.max(local, fromHost, fromCanvas);
+    const errors = Math.max(local, fromHost, fromCanvas);
+    const warnings = deps.localWarningCount ? deps.localWarningCount() : 0;
     const badge = $('issue-badge');
-    badge.textContent = count ? `${count} 个问题` : '结构有效';
-    badge.classList.toggle('error', count > 0);
+    if (errors) badge.textContent = warnings ? `${errors} 个错误 · ${warnings} 个提醒` : `${errors} 个错误`;
+    else if (warnings) badge.textContent = `${warnings} 个提醒`;
+    else badge.textContent = '结构有效';
+    badge.classList.toggle('error', errors > 0);
+    badge.classList.toggle('warning', errors === 0 && warnings > 0);
+    badge.title = errors
+      ? `有 ${errors} 个会让运行时拒绝的错误${warnings ? `，另有 ${warnings} 个提醒` : ''}；点「更多 → 下一个问题」逐个查看`
+      : warnings
+        ? `${warnings} 个提醒：不影响保存与运行`
+        : '结构与引用都通过校验';
   }
 
   function localIssueCount(): number {

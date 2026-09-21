@@ -108,6 +108,10 @@ export interface NodeRenderDeps {
   nodeGroupRunSummary?(groupId: string): NodeGroupRunSummary | null;
   /** 该节点位置是否已锁定：卡片显示一把小锁，拖动与自动排列都跳过它。 */
   isNodeLocked?(nodeId: string): boolean;
+  /** 折叠组内部的问题汇总：错误数、提醒数与第一个出问题节点（点组卡徽标直接定位）。 */
+  groupIssueSummary?(groupId: string): { errors: number; warnings: number; first: string };
+  /** 该节点上的提醒（warning）数量：卡片画琥珀色小点，与红色错误点区分。 */
+  nodeWarningCount?(nodeId: string): number;
   nodeWidth: number;
   baseHeight: number;
   portRadius: number;
@@ -153,6 +157,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection, nodeGroupRunSummary,
   } = deps;
   const isNodeLocked = deps.isNodeLocked ?? (() => false);
+  const groupIssueSummary = deps.groupIssueSummary;
+  const nodeWarningCount = deps.nodeWarningCount ?? (() => 0);
   const rowHeightOf = nodeRowHeight ?? (() => runVariableHeight);
   const referencePortY = taskOutputPortY ?? 16;
   const referenceLabel = referenceDisplayNameOf ?? ((ref: unknown) => String(ref || ''));
@@ -305,6 +311,38 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       width: nodeWidth - 44, size: 10,
     });
     if (isCollapsedGroup) svgEl('title', { class: 'node-group-runtime-title' }, group).textContent = `${node.name || '节点组'}\n${runtime?.title || ''}`;
+    // 折叠组内部的问题汇总：组员（含嵌套组）里有多少错误就在组卡上标多少，
+    // 点一下直接进入组内并定位到第一个出错的节点——不用进组一个个找。
+    if (isCollapsedGroup) {
+      const groupId = String(node._nodeGroupId || node.id);
+      const problems = groupIssueSummary?.(groupId) || { errors: 0, warnings: 0, first: '' };
+      if (problems.errors || problems.warnings) {
+        const badge = svgEl('g', {
+          class: `node-group-issue${problems.errors ? ' error' : ' warning'}`, role: 'button', tabindex: 0,
+        }, group);
+        svgEl('rect', { class: 'node-group-issue-bg', x: nodeWidth - 30, y: 6, width: 24, height: 22, rx: 3 }, badge);
+        svgEl('text', { class: 'node-group-issue-text', x: nodeWidth - 18, y: 21, 'text-anchor': 'middle' }, badge)
+          .textContent = problems.errors ? `⚠${problems.errors}` : `!${problems.warnings}`;
+        svgEl('title', {}, badge).textContent = problems.errors
+          ? `组内有 ${problems.errors} 个错误${problems.warnings ? `、${problems.warnings} 个提醒` : ''}\n点击进入组并定位到第一个问题`
+          : `组内有 ${problems.warnings} 个提醒\n点击进入组并定位到第一个问题`;
+        const stop = (event: any): void => { event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.(); };
+        badge.addEventListener('mousedown', stop);
+        badge.addEventListener('pointerdown', stop);
+        badge.addEventListener('click', (event: any) => {
+          stop(event);
+          if (!enterNodeGroup?.(groupId, problems.first || undefined)) {
+            // 进不去（组已被删除等）：至少把视野移到这张组卡上。
+            focusNodeDetail?.(node.id);
+          }
+        });
+        badge.addEventListener('keydown', (event: any) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          stop(event);
+          enterNodeGroup?.(groupId, problems.first || undefined);
+        });
+      }
+    }
     pins.forEach((pin: any, index: number) => {
       const centerY = baseHeight + index * runVariableHeight + runVariableHeight / 2;
       const targetNodeId = isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id;
@@ -437,10 +475,18 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     if (issueInfo && issueInfo.node.length) {
       const dot = svgEl('circle', { class: 'node-error-dot', cx: nodeWidth - 8, cy: 8, r: 4 }, group);
       dot.style.pointerEvents = 'none';
+    } else if (nodeWarningCount(node.id) > 0) {
+      // 只有提醒（warning）时画琥珀色小点：文件照常能跑，不必报警红色。
+      const warnings = nodeWarningCount(node.id);
+      const dot = svgEl('circle', { class: 'node-warning-dot', cx: nodeWidth - 8, cy: 8, r: 4 }, group);
+      dot.style.pointerEvents = 'none';
+      const title = svgEl('title', {}, dot);
+      title.textContent = `${warnings} 个提醒（不阻止保存）`;
     }
-    // 锁定角标：画在标题带右上角，避开错误点（错误时小锁左移一点）。
+    // 锁定角标：画在标题带右上角，避开错误点/提醒点（有圆点时小锁左移一点）。
     if (locked) {
-      const badgeX = issueInfo && issueInfo.node.length ? nodeWidth - 38 : nodeWidth - 22;
+      const hasDot = Boolean(issueInfo && issueInfo.node.length) || nodeWarningCount(node.id) > 0;
+      const badgeX = hasDot ? nodeWidth - 38 : nodeWidth - 22;
       svgEl('rect', { class: 'node-locked-badge', x: badgeX, y: 6, width: 14, height: 12, rx: 3 }, group);
       svgEl('text', { class: 'node-locked-badge-glyph', x: badgeX + 7, y: 15, 'text-anchor': 'middle' }, group).textContent = '锁';
     }

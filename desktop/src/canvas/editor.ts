@@ -16,6 +16,12 @@
 import { createCanvasEdges } from './canvas/edges';
 import { createCanvasMinimap } from './canvas/minimap';
 import { createCanvasViewport } from './canvas/viewport';
+import { groupMemberIdsOf } from './canvas/card-follow-layout';
+import {
+  groupIssueSummary as summarizeGroupIssues,
+  issueTargets as computeIssueTargets,
+  type IssueTarget,
+} from './model/issue-navigation';
 import { createWrapMeasurement } from './canvas/wrap-measurement';
 import { validateWorkflow } from '../shared/workflow/validate';
 import { createEditorExport } from './export';
@@ -39,7 +45,8 @@ import { createVariableInspectors } from './inspector/variable-inspectors';
 import { createCanvasWorkflowModel } from './model/canvas-workflow-model';
 import { isNodeLocked, toggleNodeLock } from './model/layout-locks';
 import { createNodeGroups, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from './model/node-groups';
-import { issuesByNode, issueTitle, nodeIssues } from './model/card-issues';
+import { issuesByEdge, issueTitle, issuesByNode, nodeIssues, splitBySeverity, warningsByNode } from './model/card-issues';
+import { editorAdvisories } from './model/advisories';
 import { createCanvasReferences } from './model/references';
 import { createEditorSchema } from './model/schema';
 import { createSidebarState } from './model/sidebar-state';
@@ -133,6 +140,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   // Initialize before publishing the editor handle: declarations below return
   // never execute, even when their neighboring function declarations are hoisted.
   let issuesCache: { version: number; raw: unknown; byNode: Map<string, any> } | null = null;
+  let issuesListCache: { version: number; raw: unknown; list: any[] } | null = null;
+  // 下面两个缓存与 issuesCache 一样**必须**在建入口之前就绪：
+  // 首次渲染就会问「这个节点有提醒吗 / 这条边有问题吗」，声明放在 return 之后就永远是 TDZ 报错。
+  let warningsNodeCache: { version: number; raw: any; byNode: Map<string, any[]> } | null = null;
+  let edgeIssueCache: { version: number; raw: any; byEdge: Map<string, any[]> } | null = null;
+  /** 上一个/下一个问题：记住当前位置，连续导航才不会来回跳同一个问题。 */
+  let issueCursor = -1;
   const vscode = bridge.editorApi();
   const UI = createUi();
   const VariableSystem = createVariableSystem();
@@ -541,6 +555,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
       for (const info of documentIssues().values()) count += info.node.length + info.params.size;
       return count;
     },
+    // 提醒（warning）单独计数：不阻止保存，只在徽标里提示。
+    localWarningCount: () => splitBySeverity(documentIssueList()).warnings.length,
   });
   const { updateIssueBadge, openPortContextMenu, focusVariableCard } = CanvasHelpers;
 
@@ -580,6 +596,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const Edges = createCanvasEdges({
     state, svgEl, bezier, nodes: viewNodes, nodeById: viewNodeById, referenceSourceById: viewReferenceSourceById,
     edgeRunTargetIds: NodeGroups.viewEdgeRunTargetIds,
+    // 连线上标错：children 路径的问题与成环/父节点数量等结构问题都落到边上。
+    edgeIssues: (parentId, childId) => edgeIssues(parentId, childId),
     position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, instanceRunCards: viewInstanceRunCards, instanceRunInputPosition,
     variableCardList, nodeVariablePins: viewNodeVariablePins, variablePinPosition, disconnect,
     disconnectVariableFromPin, disconnectVariableFromInstanceInput, disconnectReferenceFromPin,
@@ -639,6 +657,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const StudioToolbar = createEditorToolbar({
     state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes: viewNodes, focusNode,
     currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
+    // 保存走把关入口（只拦运行时会拒绝的错误）；问题导航给「更多」菜单。
+    requestSave: () => requestSave(),
+    gotoIssue: (step) => gotoIssue(step),
   });
   const { renderInstancePicker, renderWorkflowPicker, renderWorkflowBreadcrumb, bindToolbar, searchNodeByName, setWorkflow, setInstance } = StudioToolbar;
   renderNodeGroupBreadcrumb = renderWorkflowBreadcrumb;
@@ -765,6 +786,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeGroupRunSummary,
     // 锁定的卡片显示小锁角标（拖动与自动排列都会跳过它）。
     isNodeLocked: (id) => isNodeLocked(state.raw, id),
+    // 阶段 6：折叠组汇总内部问题（点徽标进组并定位）、节点提醒画琥珀点。
+    groupIssueSummary: (groupId) => groupIssueSummary(groupId),
+    nodeWarningCount: (id) => nodeWarningCount(id),
     nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
     runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X, taskOutputPortY: TASK_OUTPUT_PORT_Y, preview: PREVIEW,
   });
@@ -886,6 +910,12 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     viewportForward: () => viewportForward(),
     toggleNodeFilter: (kind, value) => toggleNodeFilterValue(kind, value),
     clearNodeFilter: () => clearNodeFilter(),
+    // 阶段 6：保存把关（只拦真正跑不起来的错误）与上一个/下一个问题。
+    requestSave: () => requestSave(),
+    forceSave: () => commitSave(0, splitBySeverity(documentIssueList()).errors.length),
+    gotoIssue: (step) => gotoIssue(step),
+    groupIssueSummary: (groupId) => groupIssueSummary(groupId),
+    edgeIssues: (parentId, childId) => edgeIssues(parentId, childId),
     addVariable, clearVariableCardSelection, deleteCurrentSelection, renderInspector, addVariableCardCommand,
     deleteVariable,
     showVariableReferences: VariableInspectors.showVariableReferences,
@@ -1140,7 +1170,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     return instanceLabel(instanceId, state.instances, fallback);
   }
 
-  /** 卡片错误标记：文档版本变化时才重跑一次校验，把错误按节点/参数分组。 */
+  /**
+   * 卡片错误标记：文档版本变化时才重跑一次校验，把错误按节点/参数分组。
+   *
+   * 这里刻意只保留缓存逻辑（不含 TS 专有语法）：`tests/canvas-startup-cache.test.cjs`
+   * 会把这段源码原样放进 VM 里跑，用来守住「缓存必须在入口返回渲染句柄之前就绪」。
+   * 校验本身挪到 `validationIssues()`（函数声明提升，位置无所谓）。
+   */
   function documentIssues(): Map<string, any> {
     const version = state.docVersion || 0;
     // 缓存键 = 文档版本 + 文档对象本身：改动走 mutate 会 bump 版本，
@@ -1148,7 +1184,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (issuesCache && issuesCache.version === version && issuesCache.raw === state.raw) return issuesCache.byNode;
     let byNode = new Map<string, any>();
     try {
-      byNode = issuesByNode(state.raw ? validateWorkflow(state.raw, catalogLike()) : []);
+      byNode = issuesByNode(validationIssues());
     } catch {
       // 校验是渲染路径上的附加信息：目录/文档畸形时宁可不标红，也不能让画布画不出来。
       byNode = new Map();
@@ -1159,6 +1195,143 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   function nodeIssueInfo(node: any): { node: any[]; params: Map<string, any[]> } | null {
     return nodeIssues(documentIssues(), node && node.id);
+  }
+
+  /** 文档的完整问题清单：共享校验 + 编辑器侧提醒，同一份缓存。 */
+  function documentIssueList(): any[] {
+    const version = state.docVersion || 0;
+    if (issuesListCache && issuesListCache.version === version && issuesListCache.raw === state.raw) return issuesListCache.list;
+    let list: any[] = [];
+    try {
+      list = validationIssues().slice();
+      const raw = state.raw;
+      if (raw) {
+        list.push(...editorAdvisories(raw, {
+          referenceCount: (scope, name) => VariableSystem.references(raw as any, scope as any, name).length,
+        }));
+      }
+    } catch {
+      list = [];
+    }
+    issuesListCache = { version, raw: state.raw, list };
+    return list;
+  }
+
+  /**
+   * 共享校验的原始清单（与 Python 同规则）：`documentIssues` 从这里取错误。
+   *
+   * 函数声明会提升，放在调用点之后没问题；放在这里还避开了一处源码复现切片——
+   * `tests/canvas-startup-cache.test.cjs` 复制的是「documentIssues → 文档级注释」那一段。
+   */
+  function validationIssues(): any[] {
+    try {
+      return state.raw ? validateWorkflow(state.raw as any, catalogLike()) : [];
+    } catch {
+      // 校验是渲染路径上的附加信息：目录/文档畸形时宁可不标红，也不能让画布画不出来。
+      return [];
+    }
+  }
+
+  /** 每个节点上的提醒数：卡片画琥珀色小点用（错误点仍是红色）。 */
+  function documentWarnings(): Map<string, any[]> {
+    const version = state.docVersion || 0;
+    if (warningsNodeCache && warningsNodeCache.version === version && warningsNodeCache.raw === state.raw) return warningsNodeCache.byNode;
+    const byNode = warningsByNode(documentIssueList());
+    warningsNodeCache = { version, raw: state.raw, byNode };
+    return byNode;
+  }
+  function nodeWarningCount(nodeId: string): number {
+    return (documentWarnings().get(String(nodeId)) || []).length;
+  }
+
+  /** 连线上的问题：按 `${parent}\u0000${child}` 建索引，渲染连线时直接查。 */
+  function documentEdgeIssues(): Map<string, any[]> {
+    const version = state.docVersion || 0;
+    if (edgeIssueCache && edgeIssueCache.version === version && edgeIssueCache.raw === state.raw) return edgeIssueCache.byEdge;
+    const byEdge = issuesByEdge(documentIssueList(), state.raw);
+    edgeIssueCache = { version, raw: state.raw, byEdge };
+    return byEdge;
+  }
+  function edgeIssues(parentId: string, childId: string): any[] {
+    return documentEdgeIssues().get(`${parentId}\u0000${childId}`) || [];
+  }
+
+  /**
+   * 折叠组内部的问题汇总：计算在 `model/issue-navigation.ts`（纯函数），
+   * 这里只负责把「组员 + 两份缓存」喂进去。
+   */
+  function groupIssueSummary(groupId: string): { errors: number; warnings: number; first: string } {
+    return summarizeGroupIssues(state.raw, groupId, groupMemberIdsOf(state.raw, groupId), documentIssues(), documentWarnings());
+  }
+
+  /** 问题导航用的扁平清单：排序与路径还原都在 `model/issue-navigation.ts`。 */
+  function issueTargets(): IssueTarget[] {
+    return computeIssueTargets(state.raw, documentIssueList());
+  }
+
+  /**
+   * 上一个 / 下一个问题：把视野移到出问题的节点（带参数端点就直接闪那一行），
+   * 结构问题则选中那条连线；到头会绕回另一端。
+   */
+  function gotoIssue(step: 1 | -1): boolean {
+    const targets = issueTargets();
+    if (!targets.length) { toast('当前工作流没有校验问题'); return false; }
+    const count = targets.length;
+    // 第一次导航（或光标越界）时：向后从第一个开始，向前从最后一个开始。
+    if (issueCursor < 0 || issueCursor >= count) issueCursor = step > 0 ? -1 : 0;
+    issueCursor = (issueCursor + step + count) % count;
+    const target = targets[issueCursor];
+    if (target.edgeParent && target.edgeChild && !target.nodeId) {
+      state.selected = new Set();
+      state.selectedEdge = { parent: target.edgeParent, child: target.edgeChild };
+      state.selectedRun = null;
+      state.inspector = 'node';
+      requestInspector({ kind: 'edge', parent: target.edgeParent, child: target.edgeChild });
+      focusNode(target.edgeChild);
+    } else if (target.nodeId && viewNodeById(target.nodeId)) {
+      state.selected = new Set([target.nodeId]);
+      state.selectedEdge = null;
+      state.selectedRun = null;
+      state.inspector = 'node';
+      focusNode(target.nodeId, target.param);
+    } else {
+      // 定位不到具体卡片（工作流级问题）：只提示，不改变选区。
+      toast(`问题 ${issueCursor + 1}/${count}：${target.message}`, target.severity === 'error');
+      return true;
+    }
+    const label = target.severity === 'error' ? '错误' : '提醒';
+    toast(`${label} ${issueCursor + 1}/${count}：${target.message}`, target.severity === 'error');
+    return true;
+  }
+
+  /**
+   * 保存前的把关：只有**运行时会拒绝**的错误才拦（`severity === 'error'`）；
+   * 提醒（warning）一律放行。确认「仍然保存」由宿主弹窗回调 `forceSave` 完成。
+   */
+  function requestSave(): void {
+    const { errors, warnings } = splitBySeverity(documentIssueList());
+    if (!errors.length) {
+      commitSave(warnings.length);
+      return;
+    }
+    // 统一确认界面：画布把待确认内容交给宿主（与「变量改名影响范围」同一条往返）。
+    vscode.postMessage({
+      type: 'saveBlockedRequested',
+      errors: errors.length,
+      warnings: warnings.length,
+      entries: errors.slice(0, 8).map((issue: any) => ({
+        label: String(issue?.message || ''),
+        detail: Array.isArray(issue?.path) ? issue.path.join('.') : '',
+      })),
+    });
+  }
+
+  /** 真正写盘：把文档交给宿主保存，并提示提醒数/强行保存的错误数。 */
+  function commitSave(warnings = 0, forcedErrors = 0): void {
+    vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' });
+    setDirty(false);
+    if (forcedErrors) toast(`已保存，但仍有 ${forcedErrors} 个错误（运行时可能拒绝执行）`, true);
+    else if (warnings) toast(`已保存（${warnings} 个提醒不影响运行）`);
   }
 
   /** 参数行的折叠状态：清单声明了固定卡片的动作按声明显示全部端点（无折叠）；

@@ -245,6 +245,45 @@
     预览虚影的出现与消失、定位闪烁（高亮后 1.4 秒消退）、新命令分派与工具条接线
     （`tests/canvas-viewport.test.cjs`、`canvas-layout-locks.test.cjs`、`canvas-minimap.test.cjs`、
     `canvas-render-entry.test.cjs`、`canvas-navigation.test.cjs`）。
+- **校验与错误就地可见、可导航**（阶段 6）：
+  - **错误直接标在连线、节点、参数端点上**：节点级错误照旧点红点，参数级错误落到具体那一行；
+    新增**连线标红**——`children` 路径的问题落到父节点到那个子节点的那条边上，成环 / 父节点数量
+    不对 / 不可达这类结构问题则把该节点相邻的每条边都标红，悬停给出问题原文；点不到的
+    「未知子节点」仍然只落在父卡上（那条边根本不存在）
+    （`canvas/model/card-issues.ts` 的 `issuesByEdge`、`canvas/canvas/edges.ts` 的 `edgeIssues` dep、
+    `workflow-editor.css` 的 `.edge-invalid`）。
+  - **折叠组汇总内部错误数量**：组卡右上角出现 `⚠N` 徽标（有错误红色、只有提醒琥珀色，
+    只写最严重那一类），悬停说明「组内有 N 个错误、M 个提醒」；组内没有问题时整块不出现。
+    统计只数组员自己的问题——组是扁平模型，成员互不重叠
+    （`canvas/model/issue-navigation.ts` 的 `groupIssueSummary`、`render/node-card.ts`）。
+  - **点组错误直接进入并定位**：点组卡上的问题徽标会**进入该组并选中、聚焦、闪烁第一个出问题的
+    节点**（优先错误，同一类里按文档顺序），徽标自身吞掉 mousedown/pointerdown，不会顺带触发
+    卡片拖动或选中（`enterNodeGroup(groupId, firstProblemNode)`）。
+  - **上一个/下一个问题**：新增 `previousIssue` / `nextIssue` 命令，默认键 **F8 / Shift+F8**，
+    「更多」菜单里也有；问题按文档顺序排列、同一节点先错误后提醒，走到头绕回另一端。定位到节点时
+    带上**参数端点**（那一行一起闪），结构问题则选中对应的连线；工作流级问题只提示不改选区。
+    （`canvas/model/issue-navigation.ts` 的 `issueTargets`、`editor.ts` 的 `gotoIssue`、
+    `interactions/input-bridge.ts`、`public/shortcuts/shortcuts.js`）
+  - **保存只拦真正跑不起来的错误**：`severity` 分成两档——`error` 是运行时会拒绝的硬错误
+    （Python `validator.py` 同样拒绝），`warning` 是编辑器侧提醒。保存时**只有 `error` 会被拦**，
+    提醒直接放行并在 toast/徽标里说明；被拦时走统一的「影响范围确认」弹窗（默认动作是
+    「返回修改」，明确点「仍然保存（N 个错误）」才写盘），确认框的取消按钮文案支持自定义。
+    - 新增编辑器侧提醒模块（不进共享校验契约，两端规则仍然对得上）：
+      没写 `description`、变量/输入**没有被任何地方引用**（自动生成的公开镜像输入除外）；
+    - `unsafe-retry`（对不可安全重试的 Action 挂了 retry）从错误降为提醒：Python 不检查它，
+      工作流照常能跑，只是值得提醒；
+    - 顶部问题徽标改成分别报数（`N 个错误 · M 个提醒` / 只有提醒时用琥珀态），
+      卡片上提醒用琥珀色小点，与红色错误点区分
+      （`shared/workflow/validate.ts`、`canvas/model/card-issues.ts` 的 `splitBySeverity`/`warningsByNode`、
+      `canvas/model/advisories.ts`、`editor.ts` 的 `requestSave`/`commitSave`、
+      `renderer/editor-host.ts` 的 `saveBlockedRequested`、`shared/editor-messages.ts` 新消息类型、
+      `ui/canvas-helpers.ts` 徽标计数）。
+  - 回归测试：`children` 路径与结构问题各自落到哪些边、严重度拆分、按节点收集提醒、
+    `unsafe-retry` 确为 warning 且不阻止保存、编辑器提醒（缺说明 / 未引用 / 坏输入）、
+    保存策略（无错误直接保存、有错误请宿主确认、forceSave 回写、工具栏走同一入口）、
+    问题导航排序与 F8 接线、折叠组汇总与徽标两种状态、提醒点与错误点互斥、连线标红与悬停说明
+    （`tests/canvas-card-issues.test.cjs`、`canvas-issue-navigation.test.cjs`、
+    `canvas-validation-policy.test.cjs`、`node-cards.test.cjs`、`canvas-edges.test.cjs`）。
 - 卡片值行的编辑态：行内浮层静止时与卡片值框同色（`card-head` / `card-line`），
   聚焦只在值框内侧描一圈同色系高亮，不再换成亮青色的 `card-port` 边框；数组行只
   提亮正在编辑的那一格，不再整行都跟着亮。

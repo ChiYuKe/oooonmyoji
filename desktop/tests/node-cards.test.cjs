@@ -142,6 +142,12 @@ function harness() {
     typeNames:ctx.TYPE_NAMES,
     runLabels:ctx.RUN_LABEL,
     nodeGroupRunSummary:(groupId)=>ctx.nodeGroupRunSummary?.(groupId) || null,
+    // 阶段 6：折叠组问题汇总与节点提醒点在用例里按需注入（延迟读 ctx，便于逐例改写）。
+    groupIssueSummary:(groupId)=>ctx.groupIssueSummary?.(groupId) || {errors:0,warnings:0,first:''},
+    nodeWarningCount:(nodeId)=>ctx.nodeWarningCount?.(nodeId) || 0,
+    // 节点级错误（红点）：默认没有，用例按需注入。
+    nodeIssueInfo:(node)=>ctx.nodeIssueInfo?.(node) ?? null,
+    issueTitle:(items)=>items.map((item)=>item.message).join('\n'),
     nodeWidth:260,
     baseHeight:96,
     portRadius:7,
@@ -227,6 +233,60 @@ test('折叠组存在跨组输出引用时显示右侧代理输出口',()=>{
   assert.equal(outputs.length,1);
   assert.equal(outputs[0].attrs.cx,'260');
   assert.equal(outputs[0].attrs.cy,'16');
+});
+
+// —— 阶段 6：折叠组汇总内部问题（点徽标进组并定位）、节点提醒点 ——
+
+test('折叠组按内部问题数显示汇总徽标，点一下就进组并定位到第一个问题',()=>{
+  const {ctx,Element}=harness();
+  const entered=[];
+  ctx.enterNodeGroup=(groupId,nodeId)=>{entered.push([groupId,nodeId]);return true;};
+  ctx.groupIssueSummary=(groupId)=>({errors:3,warnings:1,first:'bad-node'});
+  const layer=new Element('g');
+  ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:2,_groupPins:[],_hasReferenceOutput:false});
+  const card=layer.children[0];
+  const badge=byClass(card,'node-group-issue')[0];
+  assert.ok(badge,'有内部问题时组卡上出现汇总徽标');
+  assert.equal(String(badge.attrs.class).includes('error'),true,'有错误时用错误态');
+  assert.equal(byClass(badge,'node-group-issue-text')[0].textContent,'⚠3','徽标直接写错误数（不是总数）');
+  const stopped=[];
+  badge.events.click[0]({preventDefault(){stopped.push('preventDefault');},stopPropagation(){stopped.push('stopPropagation');},stopImmediatePropagation(){stopped.push('stopImmediatePropagation');}});
+  assert.deepEqual(entered,[['group','bad-node']],'点徽标进入该组并定位第一个问题节点');
+  assert.ok(stopped.includes('stopImmediatePropagation'),'点徽标不能顺带触发卡片拖动/选中');
+});
+
+test('折叠组只有提醒时徽标走琥珀态，没有问题时整块不出现',()=>{
+  const {ctx,Element}=harness();
+  ctx.groupIssueSummary=()=>({errors:0,warnings:2,first:'warn-node'});
+  const layer=new Element('g');
+  ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:1,_groupPins:[],_hasReferenceOutput:false});
+  const card=layer.children[0];
+  const badge=byClass(card,'node-group-issue')[0];
+  assert.equal(String(badge.attrs.class).includes('warning'),true,'只有提醒时用琥珀态');
+  assert.equal(byClass(badge,'node-group-issue-text')[0].textContent,'!2');
+
+  const clean=new Element('g');
+  ctx.groupIssueSummary=()=>({errors:0,warnings:0,first:''});
+  ctx.renderNode(clean,{id:'group2',type:'node_group',name:'干净组',children:[],_nodeGroup:true,_nodeCount:1,_groupPins:[],_hasReferenceOutput:false});
+  assert.equal(byClass(clean.children[0],'node-group-issue').length,0,'没有问题时组卡保持干净');
+});
+
+test('节点上的提醒画琥珀色小点，与红色错误点区分',()=>{
+  const {ctx,Element}=harness();
+  ctx.nodeIssueInfo=()=>({node:[],params:new Map()});
+  ctx.nodeWarningCount=(id)=>(id==='warn'?2:0);
+  const layer=new Element('g');
+  ctx.renderNode(layer,{id:'warn',type:'task',action:'core.log',name:'提醒节点',children:[],params:{}});
+  const card=layer.children[0];
+  assert.equal(byClass(card,'node-warning-dot').length,1,'只有提醒时画琥珀点');
+  assert.equal(byClass(card,'node-error-dot').length,0,'没有错误就不画红点');
+
+  const errorLayer=new Element('g');
+  ctx.nodeIssueInfo=()=>({node:[{message:'缺 Action'}],params:new Map()});
+  ctx.renderNode(errorLayer,{id:'bad',type:'task',name:'错误节点',children:[],params:{}});
+  const badCard=errorLayer.children[0];
+  assert.equal(byClass(badCard,'node-error-dot').length,1,'有错误时仍是红点');
+  assert.equal(byClass(badCard,'node-warning-dot').length,0,'红点优先，不再叠琥珀点');
 });
 test('组内变量卡把数据端点放在右侧且不显示执行端口',()=>{
   const {ctx,Element}=harness();

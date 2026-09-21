@@ -34,6 +34,7 @@ export interface EditorHostDeps {
     summary: string;
     items?: Array<{ label: string; detail?: string }>;
     confirmLabel?: string;
+    cancelLabel?: string;
     danger?: boolean;
   }) => Promise<boolean>;
   /** 重新读取脚本目录（工作流列表），并推送给所有画布。 */
@@ -206,6 +207,33 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           // 改名请求（暂存）在发起它的那份画布里：确认/取消必须回发给它——
           // 侧栏 F2 的请求来自文档画布，详情栏输入框的请求来自镜像画布，各自持有暂存状态。
           workspace.postToFrame(sourceFrame, { type: 'editorCommand', command: ok ? 'confirmRenameVariable' : 'cancelRenameVariable' });
+          return;
+        }
+        case 'saveBlockedRequested': {
+          // 保存被拦下：文档里有运行时会拒绝的错误。提醒（warning）不会走到这里。
+          const saveMessage = message as unknown as {
+            errors?: number; warnings?: number; entries?: unknown[];
+          };
+          const errors = Number(saveMessage.errors) || 0;
+          const warnings = Number(saveMessage.warnings) || 0;
+          const entries = Array.isArray(saveMessage.entries) ? saveMessage.entries : [];
+          const more = errors > entries.length ? `（另有 ${errors - entries.length} 个未列出）` : '';
+          const ok = await (showImpactConfirm?.({
+            title: '保存前发现无法运行的错误',
+            summary: `有 ${errors} 个错误会让运行时拒绝这份工作流${warnings ? `，另有 ${warnings} 个提醒` : ''}${more}。`,
+            items: entries.map((entry) => {
+              const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+              return {
+                label: typeof record.label === 'string' ? record.label : '校验错误',
+                detail: typeof record.detail === 'string' ? record.detail : '',
+              };
+            }),
+            confirmLabel: `仍然保存（${errors} 个错误）`,
+            cancelLabel: '返回修改',
+            danger: true,
+          }) ?? false);
+          // 只有用户明确坚持保存才回画布写盘，否则留在编辑器里继续改。
+          if (ok) workspace.postToFrame(sourceFrame, { type: 'editorCommand', command: 'forceSave' });
           return;
         }
         case 'sidebarStateChanged': {

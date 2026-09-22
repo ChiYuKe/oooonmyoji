@@ -7,6 +7,7 @@ import type {
   RuntimeDebugSettings,
   RuntimeOutputEvent,
   RuntimeStateEvent,
+  RuntimeResourceVariantId,
   SaveCanvasRequest,
   SaveTemplateRequest,
   MoveContentRequest,
@@ -31,6 +32,15 @@ const api: OnmyojiDesktopApi = {
     return () => ipcRenderer.removeListener('appearance:changed', handler);
   },
   writeLayout: (key, value) => ipcRenderer.send('layout:write', key, value),
+  getRuntimeResourceStatus: () => ipcRenderer.invoke('resources:status'),
+  installRuntimeResources: (variant: RuntimeResourceVariantId) => ipcRenderer.invoke('resources:install', variant),
+  activateRuntimeResources: (variant: RuntimeResourceVariantId) => ipcRenderer.invoke('resources:activate', variant),
+  removeRuntimeResources: (variant: RuntimeResourceVariantId) => ipcRenderer.invoke('resources:remove', variant),
+  onRuntimeResourceProgress: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: import('../shared/contracts').RuntimeResourceProgress): void => listener(value);
+    ipcRenderer.on('resources:progress', wrapped);
+    return () => ipcRenderer.removeListener('resources:progress', wrapped);
+  },
   bootstrap: () => ipcRenderer.invoke('project:bootstrap'),
   getWorkflowInit: (uri, selectedInstance, canGoBack) => ipcRenderer.invoke('project:get-workflow-init', uri, selectedInstance, canGoBack),
   saveWorkflow: (uri, text) => ipcRenderer.invoke('project:save-workflow', uri, text),

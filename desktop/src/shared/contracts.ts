@@ -349,6 +349,35 @@ export interface ReferenceGraph {
   references: ReferenceItem[];
 }
 
+export type RuntimeResourceVariantId = 'cpu' | 'gpu';
+
+export interface RuntimeResourceVariantStatus {
+  id: RuntimeResourceVariantId;
+  label: string;
+  description: string;
+  version: string;
+  installedVersion?: string;
+  downloadBytes: number;
+  installed: boolean;
+  ready: boolean;
+  supported: boolean;
+  supportMessage?: string;
+}
+
+export interface RuntimeResourceStatus {
+  ready: boolean;
+  activeVariant?: RuntimeResourceVariantId;
+  variants: RuntimeResourceVariantStatus[];
+}
+
+export interface RuntimeResourceProgress {
+  variant: RuntimeResourceVariantId;
+  phase: 'checking' | 'downloading' | 'verifying' | 'extracting' | 'ready' | 'failed';
+  receivedBytes: number;
+  totalBytes: number;
+  message: string;
+}
+
 export interface OnmyojiDesktopApi {
   minimizeWindow(): Promise<void>;
   toggleMaximizeWindow(): Promise<boolean>;
@@ -359,6 +388,11 @@ export interface OnmyojiDesktopApi {
   setTheme(theme: AppearanceTheme): AppearanceTheme;
   onThemeChanged(listener: (theme: AppearanceTheme) => void): () => void;
   writeLayout(key: string, value: string | null): void;
+  getRuntimeResourceStatus(): Promise<RuntimeResourceStatus>;
+  installRuntimeResources(variant: RuntimeResourceVariantId): Promise<void>;
+  activateRuntimeResources(variant: RuntimeResourceVariantId): Promise<RuntimeResourceStatus>;
+  removeRuntimeResources(variant: RuntimeResourceVariantId): Promise<RuntimeResourceStatus>;
+  onRuntimeResourceProgress(listener: (event: RuntimeResourceProgress) => void): () => void;
   bootstrap(): Promise<BootstrapData>;
   getWorkflowInit(uri: string, selectedInstance: string, canGoBack: boolean): Promise<WorkflowEditorInit>;
   saveWorkflow(uri: string, text: string): Promise<void>;

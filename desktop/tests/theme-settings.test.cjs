@@ -93,7 +93,7 @@ test('settings keeps original controls and separates all categories',()=>{
     assert.equal((html.match(new RegExp(`id="settings-page-${category}"`,'g')) || []).length,1);
     assert.match(html,new RegExp(`aria-controls="settings-page-${category}"`));
   }
-  for(const id of ['settings-content-view','settings-auto-refresh','settings-default-workflow','settings-debug-enabled','settings-debug-annotate','settings-project-root']) {
+  for(const id of ['settings-content-view','settings-auto-refresh','settings-default-workflow','settings-runtime-resources','settings-runtime-progress','settings-debug-enabled','settings-debug-annotate','settings-project-root']) {
     assert.equal((html.match(new RegExp(`id="${id}"`,'g')) || []).length,1);
   }
   const css=fs.readFileSync(path.join(root,'public/settings/settings.css'),'utf8');

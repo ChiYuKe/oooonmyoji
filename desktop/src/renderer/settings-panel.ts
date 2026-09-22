@@ -6,10 +6,17 @@
  * 元素在构造时查询（不在模块顶层），模块可以脱离真实窗口被实例化。
  */
 
+import type { RuntimeResourceProgress, RuntimeResourceStatus, RuntimeResourceVariantId } from '../shared/contracts';
+
 export interface SettingsPanelDeps {
   api: {
     getDebugSettings(): Promise<{ enabled: boolean; annotateScreenshots: boolean }>;
     updateDebugSettings(settings: { enabled: boolean; annotateScreenshots: boolean }): Promise<{ enabled: boolean; annotateScreenshots: boolean }>;
+    getRuntimeResourceStatus(): Promise<RuntimeResourceStatus>;
+    installRuntimeResources(variant: RuntimeResourceVariantId): Promise<void>;
+    activateRuntimeResources(variant: RuntimeResourceVariantId): Promise<RuntimeResourceStatus>;
+    removeRuntimeResources(variant: RuntimeResourceVariantId): Promise<RuntimeResourceStatus>;
+    onRuntimeResourceProgress(listener: (event: RuntimeResourceProgress) => void): () => void;
   };
   contentBrowser: { getView(): string; setView(view: 'grid' | 'list'): void };
   showToast(message: string, error?: boolean): void;
@@ -46,11 +53,62 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
   const restoreSession = document.querySelector<HTMLInputElement>('#settings-restore-session')!;
   const debugEnabled = document.querySelector<HTMLInputElement>('#settings-debug-enabled')!;
   const debugAnnotate = document.querySelector<HTMLInputElement>('#settings-debug-annotate')!;
+  const runtimeResources = document.querySelector<HTMLElement>('#settings-runtime-resources')!;
+  const runtimeProgress = document.querySelector<HTMLElement>('#settings-runtime-progress')!;
 
   let autoRefreshInstances = true;
   let loadDefaultWorkflowOnStart = true;
   let restoreSessionOnStart = true;
   let instanceRefreshTimer: number | undefined;
+  let resourceBusy = false;
+
+  const resourceSize = (bytes: number): string => bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
+    : `${Math.round(bytes / 1024 ** 2)} MB`;
+
+  function renderRuntimeResources(value: RuntimeResourceStatus): void {
+    runtimeResources.textContent = '';
+    for (const item of value.variants) {
+      const card = document.createElement('article');
+      card.className = `runtime-resource-card${value.activeVariant === item.id ? ' active' : ''}${item.supported ? '' : ' unsupported'}`;
+      const icon = document.createElement('span');
+      icon.className = 'runtime-resource-icon';
+      icon.textContent = item.id === 'gpu' ? 'GPU' : 'CPU';
+      const copy = document.createElement('span');
+      copy.className = 'runtime-resource-copy';
+      const title = document.createElement('strong');
+      title.textContent = `${item.label}${value.activeVariant === item.id ? ' · 当前使用' : ''}`;
+      const description = document.createElement('small');
+      description.textContent = item.description;
+      const meta = document.createElement('em');
+      meta.textContent = item.supported
+        ? `${item.ready ? `已安装 ${item.installedVersion}` : `需下载 ${resourceSize(item.downloadBytes)}`} · ${item.supportMessage ?? ''}`
+        : item.supportMessage ?? '当前设备不可用';
+      copy.append(title, description, meta);
+      const actions = document.createElement('span');
+      actions.className = 'runtime-resource-actions';
+      if (!item.ready) {
+        const install = document.createElement('button');
+        install.type = 'button'; install.textContent = '安装'; install.dataset.runtimeAction = 'install'; install.dataset.variant = item.id;
+        install.disabled = resourceBusy || !item.supported;
+        actions.appendChild(install);
+      } else if (value.activeVariant !== item.id) {
+        const activate = document.createElement('button');
+        activate.type = 'button'; activate.textContent = '切换'; activate.dataset.runtimeAction = 'activate'; activate.dataset.variant = item.id;
+        activate.disabled = resourceBusy;
+        const remove = document.createElement('button');
+        remove.type = 'button'; remove.textContent = '删除'; remove.className = 'danger'; remove.dataset.runtimeAction = 'remove'; remove.dataset.variant = item.id;
+        remove.disabled = resourceBusy;
+        actions.append(activate, remove);
+      }
+      card.append(icon, copy, actions);
+      runtimeResources.appendChild(card);
+    }
+  }
+
+  async function refreshRuntimeResources(): Promise<void> {
+    renderRuntimeResources(await api.getRuntimeResourceStatus());
+  }
 
   async function refreshDebugSettings(): Promise<void> {
     const settings = await api.getDebugSettings();
@@ -65,6 +123,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     defaultWorkflow.checked = loadDefaultWorkflowOnStart;
     restoreSession.checked = restoreSessionOnStart;
     void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
+    void refreshRuntimeResources().catch((error) => showToast(`读取运行环境失败：${String(error)}`, true));
     showPanel();
   }
 
@@ -120,7 +179,41 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     };
     debugEnabled.addEventListener('change', () => void saveDebugSettings());
     debugAnnotate.addEventListener('change', () => void saveDebugSettings());
+    runtimeResources.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null;
+      const button = target?.closest<HTMLButtonElement>('[data-runtime-action]');
+      const id = button?.dataset.variant;
+      if (!button || (id !== 'cpu' && id !== 'gpu') || resourceBusy) return;
+      const action = button.dataset.runtimeAction;
+      if (action === 'remove' && !window.confirm('删除该运行环境？以后仍可重新下载。')) return;
+      void (async () => {
+        resourceBusy = true;
+        runtimeProgress.textContent = action === 'install' ? '正在准备下载…' : action === 'activate' ? '正在切换运行环境…' : '正在删除…';
+        await refreshRuntimeResources().catch(() => undefined);
+        try {
+          if (action === 'install') await api.installRuntimeResources(id);
+          else if (action === 'activate') {
+            await api.activateRuntimeResources(id);
+            showToast(`已切换到${id === 'gpu' ? 'NVIDIA GPU 加速版' : 'CPU 通用版'}`);
+            refreshInstances();
+          } else if (action === 'remove') await api.removeRuntimeResources(id);
+          runtimeProgress.textContent = action === 'install' ? '安装完成，可点击“切换”启用。' : '';
+        } catch (error) {
+          runtimeProgress.textContent = '';
+          showToast(`${action === 'install' ? '安装' : action === 'activate' ? '切换' : '删除'}运行环境失败：${String(error)}`, true);
+        } finally {
+          resourceBusy = false;
+          await refreshRuntimeResources().catch(() => undefined);
+        }
+      })();
+    });
   }
+
+  const stopResourceProgress = api.onRuntimeResourceProgress((event) => {
+    runtimeProgress.textContent = event.phase === 'downloading' && event.totalBytes > 0
+      ? `${event.message} ${resourceSize(event.receivedBytes)} / ${resourceSize(event.totalBytes)}`
+      : event.message;
+  });
 
   return {
     readSettings,
@@ -132,6 +225,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     restartInstanceRefresh,
     bind,
     dispose: () => {
+      stopResourceProgress();
       if (instanceRefreshTimer !== undefined) window.clearInterval(instanceRefreshTimer);
       instanceRefreshTimer = undefined;
     },

@@ -20,6 +20,20 @@
 .settings-row select { flex: 0 0 auto; width: 104px; height: 26px; min-height: 26px; padding: 2px 6px; border: 0; border-radius: 3px; background: var(--ui-surface); color: var(--ui-text); font: inherit; }
 .settings-row input.ui-checkbox { width: 13px; height: 13px; min-height: 13px; }
 .settings-row:has(:disabled) .settings-row-copy { opacity: .55; }
+.runtime-resource-list { display: grid; gap: 7px; }
+.runtime-resource-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 62px; padding: 9px 10px; border: 1px solid var(--ui-line); border-radius: 4px; background: color-mix(in srgb, var(--ui-surface) 58%, transparent); }
+.runtime-resource-card.active { border-color: color-mix(in srgb, var(--ui-focus) 55%, var(--ui-line)); box-shadow: inset 2px 0 var(--ui-focus); }
+.runtime-resource-card.unsupported { opacity: .58; }
+.runtime-resource-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 3px; background: var(--ui-surface); color: var(--ui-text); font-size: 9px; font-weight: 600; }
+.runtime-resource-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.runtime-resource-copy strong { color: var(--ui-text); font-size: 11px; font-weight: 500; }
+.runtime-resource-copy small { color: var(--ui-muted); font-size: 9px; line-height: 1.45; }
+.runtime-resource-copy em { color: var(--ui-muted); font-size: 9px; font-style: normal; }
+.runtime-resource-actions { display: flex; gap: 5px; }
+.runtime-resource-actions button { min-width: 48px; height: 25px; padding: 0 8px; border: 1px solid var(--ui-line); border-radius: 3px; background: var(--ui-surface); color: var(--ui-text); font: inherit; font-size: 9px; cursor: pointer; }
+.runtime-resource-actions button:hover:not(:disabled) { border-color: var(--ui-focus); background: var(--ui-hover); }
+.runtime-resource-actions button:disabled { opacity: .45; cursor: default; }
+.runtime-resource-actions .danger { color: #d98a8a; }
 .settings-value { min-width: 0; max-width: 70%; overflow-wrap: anywhere; white-space: normal; color: var(--ui-muted); font-size: 10px; user-select: text; }
 .theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; max-width: 400px; }
 .theme-option { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 6px; border-radius: 4px; cursor: pointer; }

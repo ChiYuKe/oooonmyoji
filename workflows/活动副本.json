@@ -17,11 +17,12 @@
       "display_name": "运行轮数",
       "_autoPublished": true
     },
-    "重新校验": {
+    "v_d6d7ea0c8a134da684e6b392be2825a6": {
       "type": "boolean",
       "description": "点击前重新截图验证匹配是否仍在，默认 true",
       "display_name": "重新校验",
-      "default": true
+      "default": true,
+      "_autoPublished": true
     }
   },
   "variables": {
@@ -32,6 +33,13 @@
       "description": "循环执行次数。",
       "display_name": "运行轮数",
       "initial_from": "v_3a3d58354dbf4aeb8a85bf05bc703c2c"
+    },
+    "v_b8337c03141146eda766b65ef80e0243": {
+      "type": "boolean",
+      "description": "点击前重新截图验证匹配是否仍在，默认 true",
+      "display_name": "重新校验",
+      "default": true,
+      "initial_from": "v_d6d7ea0c8a134da684e6b392be2825a6"
     }
   },
   "nodes": [
@@ -216,7 +224,7 @@
           "ref": "nodes.wait_battle_end.output.0"
         },
         "revalidate": {
-          "ref": "inputs.重新校验"
+          "ref": "variables.v_b8337c03141146eda766b65ef80e0243"
         },
         "verify_gone": true,
         "verify_timeout_seconds": 8,
@@ -345,7 +353,7 @@
       "y": 0
     },
     "repeat_rounds": {
-      "x": 496,
+      "x": 498,
       "y": 208
     },
     "round": {
@@ -396,25 +404,17 @@
       "x": 1496,
       "y": 752
     },
+    "node_group_2": {
+      "x": 996,
+      "y": 1040
+    },
     "node_group_1": {
       "x": 1328,
       "y": 832
     },
-    "__node_group_variables__:node_group_1": {
-      "x": 736,
-      "y": 760
-    },
-    "node_group_2": {
-      "x": 1000,
-      "y": 1040
-    },
     "__node_group_variables__:node_group_2": {
-      "x": 664,
-      "y": 0
-    },
-    "__node_group_interface__:node_group_2": {
-      "x": 166,
-      "y": 0
+      "x": -448,
+      "y": 376
     }
   },
   "_inputParams": {},
@@ -423,8 +423,8 @@
   },
   "_variableCards": {
     "card_1": {
-      "name": "重新校验",
-      "scope": "inputs",
+      "name": "v_b8337c03141146eda766b65ef80e0243",
+      "scope": "variables",
       "x": 1008,
       "y": 1208
     }

@@ -1,0 +1,702 @@
+{
+  "schema_version": 4,
+  "id": "realm_raid_loop",
+  "version": "5.0.0",
+  "description": "结界突破循环：先识别当前页面（结算页 / 可突破的结界），按页面状态分支；每轮结束后回到突破页继续。页面上没有可突破的结界时正常结束；识别不到预期页面时失败退出。",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "root": "root",
+  "inputs": {
+    "运行轮数": {
+      "type": "integer",
+      "default": 30,
+      "min": 1,
+      "description": "最多突破轮数（安全上限）；页面上没有可突破的结界时会提前正常结束。"
+    }
+  },
+  "variables": {},
+  "nodes": [
+    {
+      "id": "root",
+      "type": "root",
+      "children": [
+        "entry"
+      ],
+      "name": "结界突破入口"
+    },
+    {
+      "id": "entry",
+      "type": "selector",
+      "children": [
+        "raid_loop",
+        "finish_no_target"
+      ],
+      "name": "突破循环 / 无目标收尾"
+    },
+    {
+      "id": "raid_loop",
+      "type": "sequence",
+      "children": [
+        "rounds"
+      ],
+      "name": "正常突破循环"
+    },
+    {
+      "id": "rounds",
+      "type": "sequence",
+      "children": [
+        "round"
+      ],
+      "decorators": [
+        {
+          "type": "repeat",
+          "count": {
+            "ref": "inputs.运行轮数"
+          }
+        }
+      ],
+      "name": "按运行轮数循环"
+    },
+    {
+      "id": "round",
+      "type": "selector",
+      "children": [
+        "act_on_page",
+        "conclude_done"
+      ],
+      "name": "单轮：按页面处理，否则判定打完"
+    },
+    {
+      "id": "act_on_page",
+      "type": "sequence",
+      "children": [
+        "classify",
+        "route"
+      ],
+      "name": "按当前页面执行"
+    },
+    {
+      "id": "classify",
+      "type": "task",
+      "action": "vision.detect_state",
+      "params": {
+        "allow_ocr": false,
+        "states": [
+          {
+            "name": "settlement",
+            "template": "assets/templates/jxxx-templates.png",
+            "roi": [
+              720,
+              973,
+              486,
+              107
+            ],
+            "threshold": 0.85
+          },
+          {
+            "name": "target_lit",
+            "template": "assets/templates/task_2-template.png",
+            "roi": [
+              606,
+              195,
+              516,
+              196
+            ],
+            "threshold": 0.85
+          },
+          {
+            "name": "target_dim",
+            "template": "assets/templates/task_2-templates.png",
+            "roi": [
+              606,
+              195,
+              516,
+              196
+            ],
+            "threshold": 0.85
+          }
+        ]
+      },
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 40,
+          "delay_seconds": 0.5
+        }
+      ],
+      "name": "识别当前页面"
+    },
+    {
+      "id": "route",
+      "type": "selector",
+      "children": [
+        "dismiss_settlement",
+        "raid_once"
+      ],
+      "name": "按页面状态分支"
+    },
+    {
+      "id": "dismiss_settlement",
+      "type": "sequence",
+      "children": [
+        "wait_settlement",
+        "tap_continue"
+      ],
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "eq": [
+              {
+                "ref": "nodes.classify.output.state"
+              },
+              "settlement"
+            ]
+          }
+        }
+      ],
+      "name": "点掉停留在结算页"
+    },
+    {
+      "id": "wait_settlement",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/jxxx-templates.png",
+        "present": true,
+        "timeout_seconds": 10,
+        "roi": [
+          720,
+          973,
+          486,
+          107
+        ],
+        "threshold": 0.85
+      },
+      "name": "等待结算页继续文字"
+    },
+    {
+      "id": "tap_continue",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_settlement.output.0"
+        },
+        "revalidate": true,
+        "verify_gone": true,
+        "verify_timeout_seconds": 10,
+        "random_offset": 25,
+        "random_interval": [
+          0.2,
+          0.5
+        ],
+        "disappeared_states": [
+          {
+            "name": "target_lit",
+            "template": "assets/templates/task_2-template.png",
+            "roi": [
+              606,
+              195,
+              516,
+              196
+            ],
+            "threshold": 0.85
+          },
+          {
+            "name": "target_dim",
+            "template": "assets/templates/task_2-templates.png",
+            "roi": [
+              606,
+              195,
+              516,
+              196
+            ],
+            "threshold": 0.85
+          }
+        ],
+        "disappeared_state_timeout_seconds": 5
+      },
+      "name": "点击继续"
+    },
+    {
+      "id": "raid_once",
+      "type": "sequence",
+      "children": [
+        "find_target",
+        "tap_target",
+        "wait_attack",
+        "tap_attack",
+        "wait_result",
+        "tap_result"
+      ],
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "or": [
+              {
+                "eq": [
+                  {
+                    "ref": "nodes.classify.output.state"
+                  },
+                  "target_lit"
+                ]
+              },
+              {
+                "eq": [
+                  {
+                    "ref": "nodes.classify.output.state"
+                  },
+                  "target_dim"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "name": "打一轮突破"
+    },
+    {
+      "id": "find_target",
+      "type": "task",
+      "action": "vision.wait_any",
+      "params": {
+        "templates": [
+          "assets/templates/task_2-template.png",
+          "assets/templates/task_2-templates.png"
+        ],
+        "timeout_seconds": 2,
+        "roi": [
+          606,
+          195,
+          516,
+          196
+        ],
+        "threshold": 0.85
+      },
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 3,
+          "delay_seconds": 0.5
+        }
+      ],
+      "name": "寻找可突破的结界"
+    },
+    {
+      "id": "tap_target",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.find_target.output.match"
+        },
+        "revalidate": true,
+        "verify_gone": false,
+        "random_offset": 15,
+        "random_interval": [
+          0.2,
+          0.5
+        ]
+      },
+      "name": "点击结界"
+    },
+    {
+      "id": "wait_attack",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/jg-template.png",
+        "present": true,
+        "timeout_seconds": 8,
+        "roi": [
+          576,
+          178,
+          1082,
+          552
+        ],
+        "threshold": 0.85
+      },
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 3,
+          "delay_seconds": 1.0
+        }
+      ],
+      "name": "等待进攻按钮"
+    },
+    {
+      "id": "tap_attack",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_attack.output.0"
+        },
+        "revalidate": true,
+        "verify_gone": true,
+        "verify_timeout_seconds": 25,
+        "random_offset": 15,
+        "random_interval": [
+          0.2,
+          0.5
+        ]
+      },
+      "name": "点击进攻"
+    },
+    {
+      "id": "wait_result",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/jxxx-templates.png",
+        "present": true,
+        "timeout_seconds": 240,
+        "roi": [
+          720,
+          973,
+          486,
+          107
+        ],
+        "threshold": 0.85
+      },
+      "name": "等待战斗结算"
+    },
+    {
+      "id": "tap_result",
+      "type": "task",
+      "action": "input.tap_match",
+      "params": {
+        "match": {
+          "ref": "nodes.wait_result.output.0"
+        },
+        "revalidate": true,
+        "verify_gone": true,
+        "verify_timeout_seconds": 10,
+        "random_offset": 25,
+        "random_interval": [
+          0.2,
+          0.5
+        ],
+        "disappeared_states": [
+          {
+            "name": "target_lit",
+            "template": "assets/templates/task_2-template.png",
+            "roi": [
+              606,
+              195,
+              516,
+              196
+            ],
+            "threshold": 0.85
+          },
+          {
+            "name": "target_dim",
+            "template": "assets/templates/task_2-templates.png",
+            "roi": [
+              606,
+              195,
+              516,
+              196
+            ],
+            "threshold": 0.85
+          }
+        ],
+        "disappeared_state_timeout_seconds": 5
+      },
+      "name": "点击结算继续"
+    },
+    {
+      "id": "conclude_done",
+      "type": "sequence",
+      "children": [
+        "assert_realm_page",
+        "assert_not_settlement",
+        "assert_targets_absent",
+        "log_no_target",
+        "break_loop"
+      ],
+      "name": "确认已无可突破的结界"
+    },
+    {
+      "id": "assert_realm_page",
+      "type": "selector",
+      "children": [
+        "realm_title_template",
+        "realm_title_text"
+      ],
+      "name": "确认仍在结界突破页"
+    },
+    {
+      "id": "realm_title_template",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/realm/realm-title.png",
+        "present": true,
+        "timeout_seconds": 3,
+        "threshold": 0.85
+      },
+      "name": "按页面标题模板确认"
+    },
+    {
+      "id": "realm_title_text",
+      "type": "task",
+      "action": "vision.wait_any_text",
+      "params": {
+        "texts": [
+          "结界突破"
+        ],
+        "present": true,
+        "timeout_seconds": 2,
+        "min_confidence": 0.6,
+        "roi": [
+          0,
+          0,
+          1920,
+          260
+        ]
+      },
+      "name": "按页面标题文字确认"
+    },
+    {
+      "id": "assert_not_settlement",
+      "type": "task",
+      "action": "vision.wait_any_text",
+      "params": {
+        "texts": [
+          "点击屏幕继续"
+        ],
+        "present": false,
+        "timeout_seconds": 1,
+        "roi": [
+          720,
+          973,
+          486,
+          107
+        ]
+      },
+      "name": "确认没卡在结算页"
+    },
+    {
+      "id": "assert_targets_absent",
+      "type": "sequence",
+      "children": [
+        "target_lit_absent",
+        "target_dim_absent"
+      ],
+      "name": "确认结界标记都不在"
+    },
+    {
+      "id": "target_lit_absent",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/task_2-template.png",
+        "present": false,
+        "timeout_seconds": 1,
+        "roi": [
+          606,
+          195,
+          516,
+          196
+        ],
+        "threshold": 0.85
+      },
+      "name": "确认星标结界不存在"
+    },
+    {
+      "id": "target_dim_absent",
+      "type": "task",
+      "action": "vision.wait_template",
+      "params": {
+        "template": "assets/templates/task_2-templates.png",
+        "present": false,
+        "timeout_seconds": 1,
+        "roi": [
+          606,
+          195,
+          516,
+          196
+        ],
+        "threshold": 0.85
+      },
+      "name": "确认灰标结界不存在"
+    },
+    {
+      "id": "log_no_target",
+      "type": "task",
+      "action": "core.log",
+      "params": {
+        "message": "结界突破：页面上已无可突破的结界，结束本次运行"
+      },
+      "name": "记录无目标"
+    },
+    {
+      "id": "break_loop",
+      "type": "task",
+      "action": "core.assert",
+      "params": {
+        "value": false,
+        "message": "结界突破：没有可突破的结界"
+      },
+      "name": "终止循环（以失败跳出 repeat）"
+    },
+    {
+      "id": "finish_no_target",
+      "type": "sequence",
+      "children": [
+        "log_finished"
+      ],
+      "decorators": [
+        {
+          "type": "condition",
+          "expression": {
+            "exists": {
+              "ref": "nodes.log_no_target.output.message"
+            }
+          }
+        }
+      ],
+      "name": "无目标时正常结束"
+    },
+    {
+      "id": "log_finished",
+      "type": "task",
+      "action": "core.log",
+      "params": {
+        "message": "结界突破：正常结束（已达到运行轮数 / 已无剩余目标）"
+      },
+      "name": "记录正常结束"
+    }
+  ],
+  "_layout": {
+    "root": {
+      "x": 3910,
+      "y": 0
+    },
+    "entry": {
+      "x": 3910,
+      "y": 208
+    },
+    "raid_loop": {
+      "x": 2380,
+      "y": 416
+    },
+    "rounds": {
+      "x": 2380,
+      "y": 624
+    },
+    "round": {
+      "x": 2380,
+      "y": 832
+    },
+    "act_on_page": {
+      "x": 595,
+      "y": 1040
+    },
+    "classify": {
+      "x": 0,
+      "y": 1248
+    },
+    "route": {
+      "x": 1190,
+      "y": 1248
+    },
+    "dismiss_settlement": {
+      "x": 510,
+      "y": 1456
+    },
+    "wait_settlement": {
+      "x": 340,
+      "y": 1664
+    },
+    "tap_continue": {
+      "x": 680,
+      "y": 1664
+    },
+    "raid_once": {
+      "x": 1870,
+      "y": 1456
+    },
+    "find_target": {
+      "x": 1020,
+      "y": 1664
+    },
+    "tap_target": {
+      "x": 1360,
+      "y": 1664
+    },
+    "wait_attack": {
+      "x": 1700,
+      "y": 1664
+    },
+    "tap_attack": {
+      "x": 2040,
+      "y": 1664
+    },
+    "wait_result": {
+      "x": 2380,
+      "y": 1664
+    },
+    "tap_result": {
+      "x": 2720,
+      "y": 1664
+    },
+    "conclude_done": {
+      "x": 4165,
+      "y": 1040
+    },
+    "assert_realm_page": {
+      "x": 3230,
+      "y": 1248
+    },
+    "realm_title_template": {
+      "x": 3060,
+      "y": 1456
+    },
+    "realm_title_text": {
+      "x": 3400,
+      "y": 1456
+    },
+    "assert_not_settlement": {
+      "x": 3740,
+      "y": 1248
+    },
+    "assert_targets_absent": {
+      "x": 4250,
+      "y": 1248
+    },
+    "target_lit_absent": {
+      "x": 4080,
+      "y": 1456
+    },
+    "target_dim_absent": {
+      "x": 4420,
+      "y": 1456
+    },
+    "log_no_target": {
+      "x": 4760,
+      "y": 1248
+    },
+    "break_loop": {
+      "x": 5100,
+      "y": 1248
+    },
+    "finish_no_target": {
+      "x": 5440,
+      "y": 416
+    },
+    "log_finished": {
+      "x": 5440,
+      "y": 624
+    }
+  },
+  "_variableLinks": {},
+  "_variableCards": {},
+  "_inputParams": {}
+}

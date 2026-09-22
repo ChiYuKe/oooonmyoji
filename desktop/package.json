@@ -11,6 +11,9 @@
     "build:renderer-tests": "tsc -p tsconfig.renderer-tests.json",
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "build": "node scripts/build-light-palette.cjs && npm run typecheck && npm run build:electron && vite build",
+    "package:win": "npm run build && node scripts/package-windows-portable.cjs",
+    "package:win:installer": "npm run build && node scripts/package-windows-installer.cjs",
+    "package:win:initial": "npm run build && node scripts/package-initial-installer.cjs",
     "benchmark:canvas": "node scripts/canvas-benchmark.cjs",
     "benchmark:canvas:enforce": "node scripts/canvas-benchmark.cjs --enforce",
     "fixture:canvas": "node scripts/canvas-fixture.cjs",
@@ -27,6 +30,7 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^44.1.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
     "wait-on": "^9.0.1"

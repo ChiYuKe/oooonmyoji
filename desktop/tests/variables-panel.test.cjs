@@ -197,6 +197,19 @@ test('变量行显示引用数量徽标：有引用才显示，未引用留空',
   assert.equal(h.rows()[1].title, '拖到画布创建引用卡片\nF2 重命名\nDelete 删除');
 });
 
+test('变量行给类型、引用徽标和公开开关各自保留列，窄侧栏也不会换行错位', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const renderer = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/styles.css'), 'utf8');
+  const workbench = fs.readFileSync(path.join(__dirname, '..', 'public/workbench/workbench.css'), 'utf8');
+  for (const css of [renderer, workbench]) {
+    const rowRule = css.match(/(?:#module-variables )?\.variable-row \{[^}]+\}/)?.[0] || '';
+    assert.match(rowRule, /grid-template-columns:\s*14px minmax\(0, 1fr\) 42px max-content 16px/, '五个子元素必须对应五列');
+    const badgeRule = css.match(/(?:#module-variables )?\.variable-ref-count \{[^}]+\}/)?.[0] || '';
+    assert.match(badgeRule, /white-space:\s*nowrap/, '“N 引用”徽标不得逐字换行');
+  }
+});
+
 test('F2 在变量行原地改名：行内输入框 + 画布改名命令', () => {
   const h = harness([{name: '运行轮数', scope: 'inputs', type: 'integer'}, {name: '未用', scope: 'variables', type: 'string'}]);
   assert.equal(h.sidebar.isRenaming(), false);

@@ -675,7 +675,7 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .variable-category-toggle:hover { background: var(--ui-hover, #333); }
 .variable-row[hidden] { display: none; }
 .variable-group-empty { padding: 4px 11px 7px 31px; color: #69727c; font-size: 10px; }
-.variable-row { width: 100%; height: 30px; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 16px; align-items: center; gap: 6px; padding: 0 7px 0 11px; border: 0; background: transparent; color: #cbd0d6; text-align: left; cursor: pointer; }
+.variable-row { width: 100%; height: 30px; display: grid; grid-template-columns: 14px minmax(0, 1fr) 42px max-content 16px; align-items: center; gap: 6px; padding: 0 7px 0 11px; border: 0; background: transparent; color: #cbd0d6; text-align: left; cursor: pointer; }
 .variable-row:hover { background: var(--surface-hover); }
 .variable-row.selected { background: #2b5674; color: #fff; }
 .variable-icon { width: 14px; height: 14px; display: grid; place-items: center; color: #82909c; }
@@ -725,12 +725,12 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .variable-row .row-name-edit { height: 21px; font-size: 11px; }
 :is(.tree-row, .variable-row).renaming { cursor: text; }
 .variable-flags { display: flex; align-items: center; gap: 5px; color: var(--muted); font: 9px/1 Consolas, monospace; }
-.variable-ref-count { margin-left: auto; flex: none; color: var(--accent, #7ab3d9); font: 9px/1.2 "HarmonyOS Sans SC", system-ui, sans-serif; background: color-mix(in srgb, var(--accent, #7ab3d9) 14%, transparent); border-radius: 7px; padding: 1px 6px; }
+.variable-ref-count { justify-self: end; min-width: max-content; white-space: nowrap; color: var(--accent, #7ab3d9); font: 9px/1.2 "HarmonyOS Sans SC", system-ui, sans-serif; background: color-mix(in srgb, var(--accent, #7ab3d9) 14%, transparent); border-radius: 7px; padding: 1px 6px; }
 .variable-ref-count:empty { display: none; }
 .variable-row.selected .variable-ref-count { color: var(--text); }
 .variable-scope { color: #78a9bf; }
 .variable-row.scope-variables .variable-scope { color: #d1b56e; }
-.variable-eye { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; color: var(--muted); }
+.variable-eye { display: inline-flex; align-items: center; justify-content: center; justify-self: center; width: 16px; height: 16px; border-radius: 3px; color: var(--muted); }
 .variable-eye-svg { width: 13px; height: 13px; stroke-width: 1.8; }
 .variable-eye.off { color: #6b757f; }
 .variable-eye.off .variable-eye-svg { opacity: .6; }

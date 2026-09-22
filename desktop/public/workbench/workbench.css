@@ -64,10 +64,12 @@
 #module-variables .panel-action:hover { background: var(--ui-hover); }
 #module-variables .variables-content { padding: 4px 6px 10px; scrollbar-gutter: stable; }
 #module-variables .variable-group-hint { margin-left: auto; color: var(--ui-muted); font-size: 10px; font-weight: 400; }
-#module-variables .variable-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) 42px 16px; align-items: center; gap: 7px; width: 100%; height: 28px; padding: 0 4px 0 5px; border: 0; border-radius: 3px; background: transparent; color: var(--ui-text); text-align: left; font: 11px/16px var(--ui-font); cursor: pointer; }
+#module-variables .variable-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) 42px max-content 16px; align-items: center; gap: 5px; width: 100%; height: 28px; padding: 0 4px 0 5px; border: 0; border-radius: 3px; background: transparent; color: var(--ui-text); text-align: left; font: 11px/16px var(--ui-font); cursor: pointer; }
 #module-variables .variable-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #module-variables .variable-on-card { margin-left: 5px; padding: 0 3px; border-radius: 2px; background: var(--ui-hover); color: var(--ui-muted); font-size: 9px; }
 #module-variables .variable-flags { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--ui-muted); font: 10px/16px var(--ui-font); }
+#module-variables .variable-ref-count { justify-self: end; min-width: max-content; white-space: nowrap; }
+#module-variables .variable-eye { justify-self: center; }
 #module-variables .variable-row:hover { background: var(--ui-hover); }
 #module-variables .variable-row.selected { background: var(--ui-selected); color: var(--ui-text); }
 #module-variables :is(.variable-row,.panel-action):focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }

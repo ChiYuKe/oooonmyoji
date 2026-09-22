@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,18 @@ def _bool(value: object, path: str, default: bool) -> bool:
     return value
 
 
+def _environment_bool(name: str) -> bool | None:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"{name} must be a boolean environment value")
+
+
 def _int(value: object, path: str, default: int, *, minimum: int = 0) -> int:
     if value is None:
         return default
@@ -271,13 +284,16 @@ def load_config(path: Path | str) -> AppConfig:
         ))
 
     ocr_data = _object(raw.get("ocr", {}), "ocr")
+    ocr_gpu_override = _environment_bool("ONMYOJI_OCR_USE_GPU")
     ocr = OcrConfig(
         enabled=_bool(ocr_data.get("enabled"), "ocr.enabled", True),
         language=_string(ocr_data.get("language", "ch"), "ocr.language"),
         workers=_int(ocr_data.get("workers"), "ocr.workers", 1, minimum=1),
         request_timeout_seconds=_float(ocr_data.get("request_timeout_seconds"), "ocr.request_timeout_seconds", 15.0, minimum=0.1),
         min_confidence=_float(ocr_data.get("min_confidence"), "ocr.min_confidence", 0.6, minimum=0.0, maximum=1.0),
-        use_gpu=_bool(ocr_data.get("use_gpu"), "ocr.use_gpu", False),
+        use_gpu=ocr_gpu_override
+        if ocr_gpu_override is not None
+        else _bool(ocr_data.get("use_gpu"), "ocr.use_gpu", False),
     )
 
     retry_data = _object(raw.get("retry", {}), "retry")

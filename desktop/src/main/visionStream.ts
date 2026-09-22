@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { VisionCommand, VisionStreamEvent } from '../shared/contracts';
-import { pythonUtf8Environment } from './core/runtimeInstances';
+import { pythonUtf8Environment, resolvePythonRuntime } from './core/runtimeInstances';
 
 export interface VisionStreamExit {
   code: number | null;
@@ -30,8 +30,7 @@ export class VisionStream extends EventEmitter<{
     private readonly instanceId: string,
   ) {
     super();
-    const venv = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
-    this.pythonPath = fs.existsSync(venv) ? venv : 'python';
+    this.pythonPath = resolvePythonRuntime(projectRoot);
     const configured = path.join(projectRoot, 'config', 'config.json');
     this.configPath = fs.existsSync(configured) ? configured : path.join(projectRoot, 'config', 'config.example.json');
   }
@@ -50,7 +49,7 @@ export class VisionStream extends EventEmitter<{
       '--instance', this.instanceId || 'mumu-0',
     ], {
       cwd: this.projectRoot,
-      env: pythonUtf8Environment(process.env),
+      env: pythonUtf8Environment(process.env, this.projectRoot),
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });

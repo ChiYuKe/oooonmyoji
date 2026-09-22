@@ -60,6 +60,17 @@ def test_config_and_workflow_manifest_validate(tmp_path: Path) -> None:
     assert workflows["simple"].resolution == (1920, 1080)
 
 
+def test_desktop_runtime_selection_overrides_ocr_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = _write_config(tmp_path)
+    monkeypatch.setenv("ONMYOJI_OCR_USE_GPU", "1")
+    assert load_config(config_path).ocr.use_gpu is True
+    monkeypatch.setenv("ONMYOJI_OCR_USE_GPU", "0")
+    assert load_config(config_path).ocr.use_gpu is False
+    monkeypatch.setenv("ONMYOJI_OCR_USE_GPU", "invalid")
+    with pytest.raises(ConfigError, match="ONMYOJI_OCR_USE_GPU"):
+        load_config(config_path)
+
+
 def test_workflow_loader_reuses_snapshot_until_file_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = load_config(_write_config(tmp_path))
     registry = build_action_registry(config.action_dir)
@@ -458,4 +469,3 @@ def test_workflow_variables_accept_new_parameter_types(tmp_path: Path) -> None:
     workflow_path.write_text(json.dumps(body), encoding="utf-8")
     with pytest.raises(ConfigError, match="enum type requires a non-empty enum list"):
         WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")
-

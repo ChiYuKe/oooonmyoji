@@ -14,7 +14,7 @@ import type {
   TemplateCheckRequest,
   TemplateCheckResult,
 } from '../shared/contracts';
-import { parseRuntimeInstances, pythonUtf8Environment } from './core/runtimeInstances';
+import { parseRuntimeInstances, pythonUtf8Environment, resolvePythonRuntime } from './core/runtimeInstances';
 import { createLiveViewEnvironment, LIVE_VIEW_DEFAULT_INTERVAL_MS } from './liveView';
 import type { ProjectService } from './projectService';
 
@@ -39,9 +39,12 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     super();
   }
 
+  get running(): boolean {
+    return Boolean(this.activeProcess && this.activeProcess.exitCode === null);
+  }
+
   private get pythonPath(): string {
-    const venv = path.join(this.project.projectRoot, '.venv', 'Scripts', 'python.exe');
-    return fs.existsSync(venv) ? venv : 'python';
+    return resolvePythonRuntime(this.project.projectRoot);
   }
 
   private get configPath(): string {
@@ -115,7 +118,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     return new Promise((resolve) => {
       const child = spawn(this.pythonPath, args, {
         cwd: this.project.projectRoot,
-        env: pythonUtf8Environment(process.env),
+        env: pythonUtf8Environment(process.env, this.project.projectRoot),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],
       });
@@ -221,7 +224,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     const child = spawn(this.pythonPath, args, {
       cwd: this.project.projectRoot,
       env: {
-        ...pythonUtf8Environment(process.env),
+        ...pythonUtf8Environment(process.env, this.project.projectRoot),
         ...createLiveViewEnvironment(this.liveViewDirectory, this.liveViewIntervalMs),
       },
       windowsHide: true,
@@ -381,7 +384,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(this.pythonPath, args, {
         cwd: this.project.projectRoot,
-        env: pythonUtf8Environment(process.env),
+        env: pythonUtf8Environment(process.env, this.project.projectRoot),
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
       });

@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 export interface RuntimeInstanceInfo {
   id: string;
   backend?: string;
@@ -13,8 +16,45 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 /** Force machine-readable Python CLI output to use the UTF-8 decoding expected by Node. */
-export function pythonUtf8Environment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return { ...environment, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+export function pythonUtf8Environment(
+  environment: NodeJS.ProcessEnv,
+  projectRoot?: string,
+): NodeJS.ProcessEnv {
+  const runtimeEnvironment: NodeJS.ProcessEnv = {
+    ...environment,
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1',
+    PYTHONNOUSERSITE: '1',
+  };
+  if (projectRoot) {
+    const runtimeRoot = typeof environment.ONMYOJI_RUNTIME_ROOT === 'string'
+      ? environment.ONMYOJI_RUNTIME_ROOT.trim()
+      : '';
+    const bundledModelCache = path.join(runtimeRoot || projectRoot, '.paddlex');
+    if (fs.existsSync(bundledModelCache)) runtimeEnvironment.PADDLE_PDX_CACHE_HOME = bundledModelCache;
+  }
+  return runtimeEnvironment;
+}
+
+/**
+ * 运行器优先使用项目随包携带的嵌入式 Python。这样发布目录不依赖接收者安装 Python，
+ * 开发环境仍可回落到普通 venv / PATH。`ONMYOJI_PYTHON` 只作为明确的高级覆盖入口。
+ */
+export function resolvePythonRuntime(projectRoot: string, environment: NodeJS.ProcessEnv = process.env): string {
+  const configured = typeof environment.ONMYOJI_PYTHON === 'string' ? environment.ONMYOJI_PYTHON.trim() : '';
+  if (configured) return path.resolve(configured);
+  const runtimeRoot = typeof environment.ONMYOJI_RUNTIME_ROOT === 'string'
+    ? environment.ONMYOJI_RUNTIME_ROOT.trim()
+    : '';
+  if (runtimeRoot) {
+    const downloaded = path.join(path.resolve(runtimeRoot), 'tools', 'python312-embed', 'python.exe');
+    if (fs.existsSync(downloaded)) return downloaded;
+  }
+  const bundled = path.join(projectRoot, 'tools', 'python312-embed', 'python.exe');
+  if (fs.existsSync(bundled)) return bundled;
+  const venv = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
+  if (fs.existsSync(venv)) return venv;
+  return 'python';
 }
 
 /** 从运行配置中提取可供编辑器选择的实例，忽略空 ID 和重复项。 */

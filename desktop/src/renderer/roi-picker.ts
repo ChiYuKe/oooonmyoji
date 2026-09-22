@@ -2,7 +2,7 @@
  * ROI / 模板截取选择器。
  *
  * 由主窗口承载一个模态层：iframe 请求截取后，主窗口展示当前画面并让用户框选，
- * 再把结果（rect 或保存后的模板路径）回传给来源 iframe。
+ * 再把结果（坐标点、rect 或保存后的模板路径）回传给来源 iframe。
  * 这里通过依赖注入拿到 DOM 引用与回调，自身持有唯一的进行中请求状态。
  */
 import type { SaveTemplateRequest } from '../shared/contracts';
@@ -11,7 +11,8 @@ export interface RoiPickerRequest {
   requestId: string;
   nodeId: string;
   key: string;
-  mode: 'asset' | 'rect';
+  pairedKey?: string;
+  mode: 'asset' | 'rect' | 'point';
   targetPath?: string;
   /** 结果落到哪份画布：持有文档的那一份（详情栏只是镜像，收不到写权）。 */
   sourceFrame: HTMLIFrameElement;
@@ -30,6 +31,7 @@ export interface RoiPickerRequest {
   y2: number;
   dragging: boolean;
   busy: boolean;
+  selected: boolean;
 }
 
 export interface RoiPickerDeps {
@@ -51,7 +53,7 @@ export interface RoiPickerDeps {
 
 export interface RoiPicker {
   /** 打开选择器；已有进行中的请求会先取消。 */
-  open(request: Omit<RoiPickerRequest, 'x1' | 'y1' | 'x2' | 'y2' | 'dragging' | 'busy'>): void;
+  open(request: Omit<RoiPickerRequest, 'x1' | 'y1' | 'x2' | 'y2' | 'dragging' | 'busy' | 'selected'>): void;
   /** 绑定模态层内的指针与按钮事件，只需调用一次。 */
   bind(): void;
   /** 取消当前请求并回传给来源 iframe。 */
@@ -74,6 +76,7 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     modal.setAttribute('aria-hidden', 'true');
     image.removeAttribute('src');
     selection.style.display = 'none';
+    selection.classList.remove('point');
     confirmButton.disabled = false;
     cancelButton.disabled = false;
     closeButton.disabled = false;
@@ -121,11 +124,33 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     const y = Math.min(current.y1, current.y2);
     const width = Math.abs(current.x2 - current.x1);
     const height = Math.abs(current.y2 - current.y1);
+    if (current.mode === 'point') {
+      selection.classList.add('point');
+      selection.style.display = current.selected ? 'block' : 'none';
+      selection.style.left = `${left + current.x1}px`;
+      selection.style.top = `${top + current.y1}px`;
+      selection.style.width = '18px';
+      selection.style.height = '18px';
+      return;
+    }
+    selection.classList.remove('point');
     selection.style.display = width > 0 && height > 0 ? 'block' : 'none';
     selection.style.left = `${left + x}px`;
     selection.style.top = `${top + y}px`;
     selection.style.width = `${width}px`;
     selection.style.height = `${height}px`;
+  }
+
+  function selectedPoint(): [number, number] | undefined {
+    const current = state;
+    const bounds = imageBounds();
+    if (!current?.selected || !bounds) return undefined;
+    const [referenceWidth, referenceHeight] = current.referenceResolution;
+    if (referenceWidth < 1 || referenceHeight < 1) return undefined;
+    return [
+      Math.max(0, Math.min(referenceWidth - 1, Math.round(current.x1 * referenceWidth / bounds.image.width))),
+      Math.max(0, Math.min(referenceHeight - 1, Math.round(current.y1 * referenceHeight / bounds.image.height))),
+    ];
   }
 
   function selectedRoi(): [number, number, number, number] | undefined {
@@ -156,6 +181,24 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
   async function confirm(): Promise<void> {
     const current = state;
     if (!current || current.busy) return;
+    if (current.mode === 'point') {
+      const point = selectedPoint();
+      if (!point) {
+        showToast('请在画面中选择一个坐标', true);
+        return;
+      }
+      state = undefined;
+      hide();
+      reply(current, {
+        type: 'pointPickerResult',
+        requestId: current.requestId,
+        nodeId: current.nodeId,
+        key: current.key,
+        pairedKey: current.pairedKey,
+        point,
+      });
+      return;
+    }
     const roi = selectedRoi();
     if (!roi) {
       showToast('请选择有效区域', true);
@@ -220,12 +263,12 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     }
   }
 
-  function open(request: Omit<RoiPickerRequest, 'x1' | 'y1' | 'x2' | 'y2' | 'dragging' | 'busy'>): void {
+  function open(request: Omit<RoiPickerRequest, 'x1' | 'y1' | 'x2' | 'y2' | 'dragging' | 'busy' | 'selected'>): void {
     if (state) cancel();
-    state = { ...request, x1: 0, y1: 0, x2: 0, y2: 0, dragging: false, busy: false };
-    title.textContent = request.targetPath ? '重新截取模板' : request.mode === 'asset' ? '截取模板' : '选择区域';
-    subtitle.textContent = request.mode === 'asset' ? '从当前画面框选需要保存的区域' : '从当前画面框选识别区域';
-    hint.textContent = '拖动鼠标框选区域';
+    state = { ...request, x1: 0, y1: 0, x2: 0, y2: 0, dragging: false, busy: false, selected: false };
+    title.textContent = request.mode === 'point' ? '选择坐标' : request.targetPath ? '重新截取模板' : request.mode === 'asset' ? '截取模板' : '选择区域';
+    subtitle.textContent = request.mode === 'point' ? '在当前画面中点击目标位置' : request.mode === 'asset' ? '从当前画面框选需要保存的区域' : '从当前画面框选识别区域';
+    hint.textContent = request.mode === 'point' ? '点击画面选择 X、Y 坐标' : '拖动鼠标框选区域';
     confirmButton.disabled = false;
     selection.style.display = 'none';
     modal.classList.remove('hidden');
@@ -245,8 +288,13 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
       current.y1 = point.y;
       current.x2 = point.x;
       current.y2 = point.y;
-      current.dragging = true;
-      stage.setPointerCapture?.(event.pointerId);
+      current.selected = true;
+      current.dragging = current.mode !== 'point';
+      if (current.mode === 'point') {
+        const picked = selectedPoint();
+        hint.textContent = picked ? `X ${picked[0]}  ·  Y ${picked[1]}` : '点击画面选择 X、Y 坐标';
+      }
+      if (current.dragging) stage.setPointerCapture?.(event.pointerId);
       renderSelection();
     });
     stage.addEventListener('pointermove', (event) => {

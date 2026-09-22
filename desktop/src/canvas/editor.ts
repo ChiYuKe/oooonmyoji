@@ -686,7 +686,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     selectInput, textInput, checkbox, segmentedInput, field,
   });
   const {
-    actionDropdown, renderParameter, rememberParameterLiteral, restoreParameterLiteral, clearParameterLiteralCache,
+    actionDropdown, renderParameter, renderCoordinatePair, rememberParameterLiteral, restoreParameterLiteral, clearParameterLiteralCache,
     convertWaitTemplateToAny, convertWaitAnyToTemplate, complexValueControl, iconButton, addRowButton,
     conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions,
   } = ParameterControls;
@@ -698,7 +698,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     runtimeInstanceLabel, workflowInputs, resolveWorkflowRef,
     workflowReference, requestOpenWorkflowReference,
     definitionSchema, compatibleRefType,
-    actionDropdown, renderParameter, complexValueControl,
+    actionDropdown, renderParameter, renderCoordinatePair, complexValueControl,
     displayNameOfDefinition, compactValue, renderInspector,
     selectInput, textInput, field, section, clearInspector,
   });

@@ -192,6 +192,26 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     }
     toast('区域已更新');
   }
+  else if (message.type === 'pointPickerResult' && (state.roi && state.roi.requestId === message.requestId || message.nodeId)) {
+    const request = state.roi && state.roi.requestId === message.requestId ? state.roi : null;
+    const point = Array.isArray(message.point) ? message.point.map(Number) : [];
+    if (point.length !== 2 || point.some((item: any) => !Number.isFinite(item))) return;
+    const nodeId = request ? request.nodeId : message.nodeId;
+    const key = request ? request.key : message.key;
+    const pairedKey = request?.pairedKey || message.pairedKey;
+    const node = nodeById(nodeId);
+    if (typeof request?.applyValue === 'function') mutate(() => request.applyValue(point));
+    else if (!node || typeof key !== 'string' || !key || typeof pairedKey !== 'string' || !pairedKey) return;
+    else mutate(() => {
+      node.params[key] = point[0];
+      node.params[pairedKey] = point[1];
+    });
+    if (request) {
+      state.roi = null;
+      const overlay = $('roi-picker'); if (overlay) overlay.classList.add('hidden');
+    }
+    toast(`坐标已更新：X ${point[0]}，Y ${point[1]}`);
+  }
   else if (message.type === 'templateSaved' && (state.roi && state.roi.requestId === message.requestId || message.nodeId)) {
     const request = state.roi && state.roi.requestId === message.requestId ? state.roi : null;
     const browser = request && request.returnToAssetBrowser ? state.assetBrowser : null;

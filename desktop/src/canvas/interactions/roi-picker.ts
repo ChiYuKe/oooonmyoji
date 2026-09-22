@@ -5,7 +5,8 @@
 
 export interface RoiRequestState {
   requestId: string;
-  mode: 'asset' | 'rect';
+  mode: 'asset' | 'rect' | 'point';
+  pairedKey?: string;
   targetPath?: string;
   nodeId: string;
   key: string;

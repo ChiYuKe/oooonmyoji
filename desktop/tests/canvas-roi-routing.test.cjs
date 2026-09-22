@@ -80,6 +80,24 @@ test('roiPickerResult 拒绝非法矩形，不写坏值', () => {
   assert.deepEqual(state.raw.nodes.find((item) => item.id === 't').params, {});
 });
 
+test('pointPickerResult 把选中的 X/Y 原子写回配对参数', () => {
+  const { state, messages, toasts } = harness();
+  messages.handleMessage({
+    type: 'pointPickerResult', requestId: 'point-1', nodeId: 't',
+    key: 'x', pairedKey: 'y', point: [960, 540],
+  });
+  assert.deepEqual(state.raw.nodes.find((item) => item.id === 't').params, { x: 960, y: 540 });
+  assert.deepEqual(toasts, [['坐标已更新：X 960，Y 540', false]]);
+});
+
+test('pointPickerResult 拒绝非法坐标或缺少配对参数', () => {
+  const { state, messages } = harness();
+  messages.handleMessage({ type: 'pointPickerResult', nodeId: 't', key: 'x', pairedKey: 'y', point: [1] });
+  messages.handleMessage({ type: 'pointPickerResult', nodeId: 't', key: 'x', pairedKey: 'y', point: [1, 'bad'] });
+  messages.handleMessage({ type: 'pointPickerResult', nodeId: 't', key: 'x', point: [1, 2] });
+  assert.deepEqual(state.raw.nodes.find((item) => item.id === 't').params, {});
+});
+
 test('子工作流取消公开输入后清理父节点对应的传参与连线', () => {
   const uri = 'file:///project/workflows/child.json';
   const raw = {

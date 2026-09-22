@@ -268,6 +268,38 @@ test('详情栏标量控件覆盖坐标点/颜色/按键/时长', () => {
   assert.equal(controls.itemDefaultValue({type:'enum',enum:['甲','乙']}),'甲');
 });
 
+test('坐标点击详情把 X/Y 合并为一行，并从当前画面选点回填', () => {
+  const {UI,doc}=harness(); const requests=[];
+  const el=(tag,className,text)=>{const node=doc.createElement(tag);node.className=className||'';if(text!==undefined)node.textContent=text;return node;};
+  const textInput=(value,onChange,options={})=>{
+    const input=doc.createElement('input'); input.value=String(value ?? ''); input.type=options.type||'text';
+    input.addEventListener('change',()=>onChange(input.value)); return input;
+  };
+  const controls=createParameterControls({
+    state:{},mutate:fn=>fn(),UI:{ICON_SVG:{},icon:()=>null},el,textInput,
+    clone:v=>JSON.parse(JSON.stringify(v)),defaultValue:()=>0,
+    requestRoi:(...args)=>requests.push(args),
+  });
+  const body=doc.createElement('div');
+  const node={id:'tap_1',action:'input.tap',params:{x:120,y:360}};
+  controls.renderCoordinatePair(body,node,{type:'number',required:true},{type:'number',required:true});
+
+  const shell=body.children[0].children[2];
+  assert.equal(shell.className,'coordinate-control');
+  assert.equal(shell.children.length,3,'X、Y 与选点按钮处于同一行');
+  assert.equal(shell.children[0].children[0].textContent,'X');
+  assert.equal(shell.children[1].children[0].textContent,'Y');
+  shell.children[0].children[1].value='240'; shell.children[0].children[1].fire('change');
+  assert.deepEqual(node.params,{x:240,y:360});
+
+  shell.children[2].click();
+  assert.equal(requests.length,1);
+  assert.deepEqual(requests[0].slice(0,3),['tap_1','x','point']);
+  assert.equal(requests[0][3].pairedKey,'y');
+  requests[0][3].applyValue([960,540]);
+  assert.deepEqual(node.params,{x:960,y:540});
+});
+
 test('任务参数结构化控件：固定长度数组给固定输入，未声明字段的对象按值推断', () => {
   const {UI,doc}=harness();
   const el=(tag,className,text)=>{const node=doc.createElement(tag);node.className=className||'';if(text!==undefined)node.textContent=text;return node;};

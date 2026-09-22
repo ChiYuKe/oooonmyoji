@@ -128,6 +128,8 @@ export interface PickRoiMessage {
   nodeId?: unknown;
   stepId?: unknown;
   key?: unknown;
+  /** 选点模式下与 key 配对写入的第二个参数（例如 input.tap 的 y）。 */
+  pairedKey?: unknown;
   mode?: unknown;
   targetPath?: unknown;
   instanceId?: unknown;

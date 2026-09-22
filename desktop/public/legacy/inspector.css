@@ -72,6 +72,13 @@
   font-weight: 600; white-space: normal; overflow-wrap: anywhere;
 }
 #inspector-body .parameter-heading-actions { display: flex; align-items: center; justify-content: flex-end; flex: 0 1 auto; gap: 5px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+#inspector-body .coordinate-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 5px; min-width: 0; }
+#inspector-body .coordinate-axis { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; min-width: 0; border: 1px solid var(--ui-line); border-radius: 3px; background: var(--ui-input-bg, #1b1b1b); }
+#inspector-body .coordinate-axis:focus-within { border-color: var(--ui-accent); }
+#inspector-body .coordinate-axis > span { color: var(--ui-muted); font-size: 9px; text-align: center; user-select: none; }
+#inspector-body .coordinate-axis > input { min-width: 0; border: 0; background: transparent; box-shadow: none; }
+#inspector-body .coordinate-axis > input:focus { border: 0; box-shadow: none; }
+#inspector-body .coordinate-pick { min-width: 42px; height: var(--ui-compact); padding: 0 7px; white-space: nowrap; }
 #inspector-body .parameter-enable, #inspector-body .check-label {
   display: inline-flex; align-items: center; gap: 4px; min-height: 22px; font-size: 10px; color: var(--ui-muted);
 }

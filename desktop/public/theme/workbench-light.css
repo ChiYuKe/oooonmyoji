@@ -1014,6 +1014,12 @@
     border: 2px solid #4490b0;
     background: rgba(28, 106, 140, 0.16)
 }
+:root[data-theme="light"] .roi-picker-selection.point {
+    background: rgba(28, 106, 140, 0.22)
+}
+:root[data-theme="light"] .roi-picker-selection.point::before, :root[data-theme="light"] .roi-picker-selection.point::after {
+    background: #f5fcff
+}
 :root[data-theme="light"] .roi-picker-footer {
     border-top: 1px solid #dddddd;
     background: #ebebeb

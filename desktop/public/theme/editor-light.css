@@ -1060,6 +1060,9 @@
 :root[data-theme="light"] #inspector-body .section-header:hover {
     background: #e2e2e2
 }
+:root[data-theme="light"] #inspector-body .coordinate-axis {
+    background: var(--ui-input-bg, #f2f2f2)
+}
 :root[data-theme="light"] #inspector-body .parameter-bound-note {
     color: #696969
 }

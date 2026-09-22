@@ -32,6 +32,7 @@ export interface DetailInspectorsDeps {
   compatibleRefType(expected: any, actual: any): boolean;
   actionDropdown(node: any): UiNode;
   renderParameter(body: UiNode, node: any, name: string, definition: any): void;
+  renderCoordinatePair(body: UiNode, node: any, xDefinition: any, yDefinition: any): void;
   complexValueControl(key: string, definition: any, value: any, set: (value: any) => void, ctx?: any): UiNode;
   displayNameOfDefinition(definition: any, name?: string): string;
   compactValue(value: any, limit?: number): string;
@@ -48,7 +49,7 @@ export function createDetailInspectors(deps: DetailInspectorsDeps) {
     state, mutate, UI, el, $, nodeById, catalogByName, clone, defaultValue, referenceLabel, enumOption,
     runtimeInstanceLabel, workflowInputs, workflowReference, requestOpenWorkflowReference,
     definitionSchema, compatibleRefType, selectInput, textInput, field, section, clearInspector,
-    actionDropdown, renderParameter, complexValueControl, displayNameOfDefinition, compactValue, renderInspector,
+    actionDropdown, renderParameter, renderCoordinatePair, complexValueControl, displayNameOfDefinition, compactValue, renderInspector,
   } = deps;
   const resolveWorkflowRef = deps.resolveWorkflowRef || ((value: any) => typeof value === 'string' ? value.trim() : '');
   function renderTaskInspector(body: UiNode, node: any): void {
@@ -63,11 +64,23 @@ export function createDetailInspectors(deps: DetailInspectorsDeps) {
       body.appendChild(el('div', 'empty-section', '无参数'));
       return;
     }
+    const tapCoordinates = node.action === 'input.tap'
+      && spec.parameters.x && spec.parameters.y
+      && !isParameterBinding(node.params.x) && !isParameterBinding(node.params.y);
     for (const [name, definition] of Object.entries(spec.parameters)) {
       if (node.action === 'workflow.run' && name === 'inputs') continue;
+      if (tapCoordinates && name === 'x') {
+        renderCoordinatePair(body, node, spec.parameters.x, spec.parameters.y);
+        continue;
+      }
+      if (tapCoordinates && name === 'y') continue;
       renderParameter(body, node, name, definition);
     }
     if (node.action === 'workflow.run') renderPublicWorkflowInputs(body, node.params, resolveWorkflowRef(node.params.workflow), true, `${node.id}:inputs:`);
+  }
+
+  function isParameterBinding(value: any): boolean {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string');
   }
 
   function removeInstanceRun(node: any, index: number): void {

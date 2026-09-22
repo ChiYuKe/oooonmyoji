@@ -48,7 +48,7 @@ export function createAssetActions(deps: AssetActionsDeps) {
   function requestRoi(nodeId: string, key: string, mode: string, options: any = {}): void {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     state.roi = { requestId, nodeId, key, mode, ...options };
-    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, mode, targetPath: options.targetPath, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
+    vscode.postMessage({ type: 'pickRoi', requestId, nodeId, key, pairedKey: options.pairedKey, mode, targetPath: options.targetPath, instanceId: state.instanceId, referenceResolution: state.raw.resolution || [1920, 1080] });
   }
 
   return { normalizedAssetPath, assetPathStatus, requestAssetInventory, appendMissingAssetAction, requestRoi };

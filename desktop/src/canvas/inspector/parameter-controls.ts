@@ -155,6 +155,48 @@ export function createParameterControls(deps: ParameterControlsDeps) {
     body.appendChild(block);
   }
 
+  /** input.tap 的 X/Y 是同一个坐标语义：详情栏合并编辑，并可从当前画面直接选点。 */
+  function renderCoordinatePair(body: UiNode, node: any, xDefinition: any, yDefinition: any): void {
+    const block = el('div', 'parameter-block coordinate-parameter-block');
+    const heading = el('div', 'parameter-heading');
+    const headingName = el('span', '', `坐标${xDefinition.required || yDefinition.required ? ' *' : ''}`);
+    headingName.title = 'x / y';
+    heading.appendChild(headingName);
+    block.appendChild(heading);
+    block.appendChild(el('div', 'field-hint', '点击坐标（参考分辨率坐标）'));
+
+    const xValue = Object.prototype.hasOwnProperty.call(node.params, 'x') ? node.params.x : defaultValue(xDefinition);
+    const yValue = Object.prototype.hasOwnProperty.call(node.params, 'y') ? node.params.y : defaultValue(yDefinition);
+    const shell = el('div', 'coordinate-control');
+    const writeAxis = (axis: 'x' | 'y', raw: string): void => mutate(() => {
+      const parsed = Number(raw);
+      node.params[axis] = Number.isFinite(parsed) ? parsed : 0;
+    });
+    (['x', 'y'] as const).forEach((axis) => {
+      const axisShell = el('label', 'coordinate-axis');
+      axisShell.appendChild(el('span', '', axis.toUpperCase()));
+      const input = textInput(axis === 'x' ? xValue : yValue, (next: string) => writeAxis(axis, next), {
+        type: 'number', step: 'any',
+      });
+      axisShell.appendChild(input);
+      shell.appendChild(axisShell);
+    });
+    const pick = el('button', 'coordinate-pick', '选点');
+    pick.type = 'button';
+    pick.title = '从当前画面选择坐标';
+    pick.addEventListener('click', () => requestRoi(node.id, 'x', 'point', {
+      pairedKey: 'y',
+      applyValue: (point: any) => {
+        if (!Array.isArray(point) || point.length !== 2) return;
+        node.params.x = Number(point[0]);
+        node.params.y = Number(point[1]);
+      },
+    }));
+    shell.appendChild(pick);
+    block.appendChild(shell);
+    body.appendChild(block);
+  }
+
   function rememberParameterLiteral(node: any, name: string, value: any): void {
     if (!node || value === undefined || isBindingValue(value)) return;
     parameterLiteralCache(state)[parameterLiteralCacheKey(node, name)] = clone(value);
@@ -860,7 +902,7 @@ export function createParameterControls(deps: ParameterControlsDeps) {
   }
 
   return {
-    actionDropdown, renderParameter,
+    actionDropdown, renderParameter, renderCoordinatePair,
     parameterLiteralCache: () => parameterLiteralCache(state),
     parameterLiteralCacheKey,
     rememberParameterLiteral,

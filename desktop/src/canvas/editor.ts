@@ -1275,6 +1275,17 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     return computeIssueTargets(state.raw, documentIssueList());
   }
 
+  /** 折叠视图中真实节点不可见；问题导航先找出它所属的扁平节点组。 */
+  function issueNodeGroupId(nodeId: string): string {
+    if (!nodeId || state.nodeGroupId) return '';
+    const groups = state.raw?._nodeGroups;
+    if (!groups || typeof groups !== 'object' || Array.isArray(groups)) return '';
+    for (const [groupId, group] of Object.entries<any>(groups)) {
+      if (Array.isArray(group?.nodeIds) && group.nodeIds.some((id: any) => String(id) === nodeId)) return groupId;
+    }
+    return '';
+  }
+
   /**
    * 上一个 / 下一个问题：把视野移到出问题的节点（带参数端点就直接闪那一行），
    * 结构问题则选中那条连线；到头会绕回另一端。
@@ -1287,14 +1298,22 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (issueCursor < 0 || issueCursor >= count) issueCursor = step > 0 ? -1 : 0;
     issueCursor = (issueCursor + step + count) % count;
     const target = targets[issueCursor];
-    if (target.edgeParent && target.edgeChild && !target.nodeId) {
+    if (target.edgeParent && target.edgeChild) {
+      const groupId = issueNodeGroupId(target.edgeParent) || issueNodeGroupId(target.edgeChild);
+      if (groupId) enterGroup(groupId, target.edgeChild || target.edgeParent);
       state.selected = new Set();
       state.selectedEdge = { parent: target.edgeParent, child: target.edgeChild };
       state.selectedRun = null;
       state.inspector = 'node';
       requestInspector({ kind: 'edge', parent: target.edgeParent, child: target.edgeChild });
       focusNode(target.edgeChild);
-    } else if (target.nodeId && viewNodeById(target.nodeId)) {
+    } else if (target.nodeId) {
+      const groupId = issueNodeGroupId(target.nodeId);
+      if (groupId) enterGroup(groupId, target.nodeId);
+      if (!viewNodeById(target.nodeId)) {
+        toast(`问题 ${issueCursor + 1}/${count}：${target.message}`, target.severity === 'error');
+        return true;
+      }
       state.selected = new Set([target.nodeId]);
       state.selectedEdge = null;
       state.selectedRun = null;

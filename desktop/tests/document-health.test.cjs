@@ -48,6 +48,17 @@ test('已经是 v4 的文档不会被迁移改动', () => {
   assert.deepEqual(migrateDocument('nope'), { changed: false, steps: [] });
 });
 
+test('未来或未知 schema 保持原文，不会被旧编辑器降级或删除字段', () => {
+  for (const schema_version of [5, '5']) {
+    const raw = {
+      schema_version, id: 'future', inputs: { 新语义: { type: 'string', public: true } }, nodes: [],
+    };
+    const snapshot = JSON.stringify(raw);
+    assert.deepEqual(migrateDocument(raw), { changed: false, steps: [] });
+    assert.equal(JSON.stringify(raw), snapshot);
+  }
+});
+
 test('布局体检：缺坐标 / 坐标非法 / 量级离谱 / 残留项分别认出来', () => {
   const raw = {
     nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
@@ -95,6 +106,25 @@ test('清理残留坐标只删指向不存在节点的项，并返回条数', ()
   assert.equal(pruneOrphanLayout({ nodes: [] }), 0);
 });
 
+test('节点组及其两张组内接口卡是合法布局项，不会被当作残留删除', () => {
+  const raw = {
+    nodes: [{ id: 'a' }],
+    _nodeGroups: { grp: { name: '组', nodeIds: ['a'], pins: [] } },
+    _layout: {
+      a: { x: 1, y: 2 },
+      grp: { x: 10, y: 20 },
+      '__node_group_interface__:grp': { x: 30, y: 40 },
+      '__node_group_variables__:grp': { x: 50, y: 60 },
+      ghost: { x: 0, y: 0 },
+    },
+  };
+  assert.deepEqual(inspectLayout(raw).orphan, ['ghost']);
+  assert.equal(pruneOrphanLayout(raw), 1);
+  assert.deepEqual(Object.keys(raw._layout), [
+    'a', 'grp', '__node_group_interface__:grp', '__node_group_variables__:grp',
+  ]);
+});
+
 test('迁移与布局修复都接在画布入口上，且迁移走一次历史（可撤销）', () => {
   const editor = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/editor.ts'), 'utf8');
   const repair = editor.slice(editor.indexOf('function repairLayout('), editor.indexOf('function requestSave('));
@@ -108,6 +138,7 @@ test('迁移与布局修复都接在画布入口上，且迁移走一次历史�
   const initBlock = messages.slice(messages.indexOf("message.type === 'init'"), messages.indexOf("message.type === 'workflows'"));
   assert.match(initBlock, /mutate\(\(\) => \{ migrationSteps = migrateDocument\(state\.raw\)\.steps; \}\)/, '迁移包进 mutate：Ctrl+Z 能回到打开时的原样');
   assert.match(initBlock, /repairLayout\(false\)/, '打开文档时顺手修布局（不进历史）');
+  assert.match(initBlock, /else if \(!migrationSteps\.length && !repairedLayout\) setDirty\(false\)/, '迁移或布局修复后不把脏状态覆盖回 false');
   assert.match(initBlock, /Ctrl\+Z 可撤销/, '迁移后告诉用户可撤销');
   const dispatch = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/state/editor-command-dispatch.ts'), 'utf8');
   assert.match(dispatch, /command === 'repairLayout'\) repairLayout\(true\)/);

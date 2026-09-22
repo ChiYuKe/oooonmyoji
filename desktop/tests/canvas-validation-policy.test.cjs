@@ -110,4 +110,6 @@ test('问题导航：F8 / Shift+F8 接上命令，飞索在问题之间绕行', 
   assert.match(goto, /issueCursor = \(issueCursor \+ step \+ count\) % count/, '到头绕回另一端');
   assert.match(goto, /focusNode\(target\.nodeId, target\.param\)/, '定位节点时带上参数端点（闪烁那一行）');
   assert.match(goto, /state\.selectedEdge = \{ parent: target\.edgeParent, child: target\.edgeChild \}/, '结构问题选中那条连线');
+  assert.match(goto, /issueNodeGroupId\(target\.nodeId\)/, '折叠组里的节点问题会先解析所属组');
+  assert.match(goto, /enterGroup\(groupId, target\.nodeId\)/, '定位组内问题时先进入组并选中真实节点');
 });

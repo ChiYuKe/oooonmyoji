@@ -131,8 +131,13 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
       toast(`已迁移旧格式：${migrationSteps.join('；')}（Ctrl+Z 可撤销）`);
       setDirty(true);
     }
-    if (repairLayout(false)) setDirty(true);
-    renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout(); setDirty(prunedWorkflowInputs); render();
+    const repairedLayout = repairLayout(false);
+    if (repairedLayout) setDirty(true);
+    renderWorkflowPicker(); renderWorkflowBreadcrumb(); renderInstancePicker(); ensureLayout();
+    // 不要用通常为 false 的 prunedWorkflowInputs 覆盖前面迁移/修复产生的脏状态。
+    if (prunedWorkflowInputs) setDirty(true);
+    else if (!migrationSteps.length && !repairedLayout) setDirty(false);
+    render();
     requestAssetInventory();
     setTimeout(() => { if (!sameDocument) fitView(); }, 0);
   } else if (message.type === 'workflows') {

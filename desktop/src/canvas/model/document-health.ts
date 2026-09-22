@@ -32,6 +32,15 @@ function isRecord(value: unknown): value is Record<string, any> {
 export function migrateDocument(raw: any): MigrationOutcome {
   const steps: string[] = [];
   if (!isRecord(raw)) return { changed: false, steps };
+  // 新版编辑器写出的文档可能重新定义字段语义。旧版编辑器既不能把它谎报成 v4，
+  // 也不能按 v4 规则删除字段；保持原文，交给版本兼容提示处理。
+  if (typeof raw.schema_version === 'number' && raw.schema_version > WORKFLOW_SCHEMA_VERSION) {
+    return { changed: false, steps };
+  }
+  // 非数字且非缺失的版本同样不能安全推断，避免把损坏/未知格式原地改写成 v4。
+  if (raw.schema_version !== undefined && typeof raw.schema_version !== 'number') {
+    return { changed: false, steps };
+  }
   if (raw.schema_version !== WORKFLOW_SCHEMA_VERSION) {
     const previous = raw.schema_version;
     raw.schema_version = WORKFLOW_SCHEMA_VERSION;
@@ -81,18 +90,37 @@ export interface LayoutHealth {
 /** 坐标量级上限：超过它基本可以断定不是人放的位置。 */
 export const LAYOUT_COORDINATE_LIMIT = 1_000_000;
 
+/**
+ * `_layout` 不只保存运行时节点：折叠组卡、组内入口卡和组变量接口卡也需要持久坐标。
+ * 它们虽然不在 `raw.nodes`，却是编辑器的合法布局拥有者，不能当作残留项清掉。
+ */
+function layoutOwnerIds(raw: any): Set<string> {
+  const ids = new Set<string>();
+  for (const node of Array.isArray(raw?.nodes) ? raw.nodes : []) {
+    const id = String(node?.id ?? '');
+    if (id) ids.add(id);
+  }
+  const groups = isRecord(raw?._nodeGroups) ? raw._nodeGroups : {};
+  for (const groupId of Object.keys(groups)) {
+    if (!groupId) continue;
+    ids.add(groupId);
+    ids.add(`__node_group_interface__:${groupId}`);
+    ids.add(`__node_group_variables__:${groupId}`);
+  }
+  return ids;
+}
+
 /** 体检当前布局：只读，不改文档。 */
 export function inspectLayout(raw: any): LayoutHealth {
   const layout = isRecord(raw?._layout) ? raw._layout : {};
   const nodes = Array.isArray(raw?.nodes) ? raw.nodes : [];
-  const ids = new Set<string>();
+  const ids = layoutOwnerIds(raw);
   const missing: string[] = [];
   const invalid: string[] = [];
   const absurd: string[] = [];
   for (const node of nodes) {
     const id = String(node?.id ?? '');
     if (!id) continue;
-    ids.add(id);
     const value = layout[id];
     const x = Number(value?.x);
     const y = Number(value?.y);
@@ -118,11 +146,7 @@ export function inspectLayout(raw: any): LayoutHealth {
 export function pruneOrphanLayout(raw: any): number {
   const layout = isRecord(raw?._layout) ? raw._layout : null;
   if (!layout) return 0;
-  const ids = new Set<string>();
-  for (const node of Array.isArray(raw?.nodes) ? raw.nodes : []) {
-    const id = String(node?.id ?? '');
-    if (id) ids.add(id);
-  }
+  const ids = layoutOwnerIds(raw);
   let removed = 0;
   for (const key of Object.keys(layout)) {
     if (ids.has(key)) continue;

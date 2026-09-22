@@ -1,0 +1,17 @@
+appId: com.oooonmyoji.studio
+productName: Onmyoji Studio
+artifactName: Onmyoji-Studio-Initial-Setup-${version}.${ext}
+directories:
+  output: release/initial-installer
+publish: null
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Onmyoji Studio
+  uninstallDisplayName: Onmyoji Studio
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true

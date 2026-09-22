@@ -479,3 +479,40 @@ ADB 和 3 批性能基准）：
 - 桌面端在 `desktop/` 下运行 `npm run typecheck` 与 `npm test`。
 
 `.github/workflows/ci.yml` 会在 push 和 PR 时自动执行以上检查。
+
+## Windows 解压即用版
+
+需要发给没有开发环境的用户时，在开发机的 `desktop/` 目录执行：
+
+```powershell
+npm run package:win
+```
+
+成品位于 `desktop/release/OnmyojiStudio-win-x64/`。发送时必须复制整个目录，
+接收者解压后双击 `Onmyoji Studio.exe` 即可，不需要另装 Node.js 或 Python。
+发布包使用通用配置且默认关闭 GPU OCR，不会带上开发机 `config/config.json` 中的
+本地路径；接收者只需先启动 MuMu，无法自动发现时再按包内“使用说明”设置路径。
+
+完整 OCR/Paddle 运行环境体积较大，目录通常超过 5 GB。当前可执行文件尚未进行
+代码签名，Windows 首次启动可能显示“未知发布者”提示。
+
+需要带安装向导、桌面快捷方式和卸载入口的安装版时执行：
+
+```powershell
+npm run package:win:installer
+```
+
+安装程序输出到 `desktop/release/installer/`。为了控制单文件安装包体积并兼容没有
+NVIDIA 显卡的电脑，安装版默认使用 CPU OCR；便携版仍保留完整 GPU 运行库。
+
+推荐对外发布“初始安装包 + GitHub Release 运行资源”：
+
+```powershell
+npm run package:win:initial
+```
+
+命令会在 `desktop/release/initial-installer/` 生成小型安装程序，并在
+`desktop/release/runtime-assets/` 生成带 SHA-256 清单的 CPU 基础包与 NVIDIA GPU
+分片资源。用户首次启动可选择 CPU 通用版或 GPU 加速版；没有兼容 NVIDIA 驱动时
+GPU 选项会自动停用。两套资源可同时保存在用户数据目录，并可在“设置 → 运行 →
+OCR 运行环境”中安装、切换或删除，升级主程序时不会重复下载。

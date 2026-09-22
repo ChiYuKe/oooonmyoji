@@ -22,6 +22,7 @@ export default defineConfig({
         canvas: path.resolve(import.meta.dirname, 'src/renderer/canvas.html'),
         'canvas-benchmark': path.resolve(import.meta.dirname, 'src/renderer/canvas-benchmark.html'),
         'ui-showcase': path.resolve(import.meta.dirname, 'src/renderer/ui-showcase.html'),
+        setup: path.resolve(import.meta.dirname, 'src/renderer/setup.html'),
       },
     },
   },

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self';" />
+  <title>Onmyoji Studio 初始化</title>
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css" />
+  <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css" />
+  <link rel="stylesheet" href="/theme/theme.css" />
+  <script src="/theme/theme.js"></script>
+  <link rel="stylesheet" href="./setup.css" />
+</head>
+<body>
+  <div class="setup-shell">
+    <header class="setup-titlebar">
+      <img src="./assets/onmyoji-icon.png" alt="" draggable="false" />
+      <span>Onmyoji Studio</span>
+      <span class="setup-title-section">初始化</span>
+      <div class="setup-window-controls">
+        <button id="setup-minimize" type="button" aria-label="最小化">—</button>
+        <button id="setup-maximize" type="button" aria-label="最大化">□</button>
+        <button id="setup-close" class="close" type="button" aria-label="关闭">×</button>
+      </div>
+    </header>
+    <main class="setup-stage">
+      <section class="setup-panel">
+        <header class="setup-panel-header">
+          <span class="setup-step-dot"></span>
+          <div><strong>准备运行环境</strong><span>首次启动配置</span></div>
+        </header>
+        <div class="setup-panel-body">
+          <p>选择适合这台电脑的 OCR 运行环境。CPU 兼容性最好，NVIDIA GPU 处理速度更快。</p>
+          <div id="runtime-options" class="setup-runtime-options" role="radiogroup" aria-label="OCR 运行环境"></div>
+          <div class="setup-resource-row">
+            <div class="setup-resource-icon">OCR</div>
+            <div class="setup-resource-copy"><strong>视觉识别运行资源</strong><span id="status">正在检查资源…</span></div>
+            <div id="detail" class="setup-resource-size"></div>
+          </div>
+          <div class="progress" role="progressbar" aria-label="初始化进度"><div id="bar" class="bar"></div></div>
+          <div class="setup-note">安装过程中可以关闭窗口，下次启动会重新检查并继续初始化。</div>
+          <div class="setup-actions"><button id="retry" type="button">重新下载</button><button id="install" type="button">安装并继续</button></div>
+        </div>
+      </section>
+    </main>
+    <footer class="setup-statusbar"><span class="setup-status-dot"></span><span>运行资源初始化</span></footer>
+  </div>
+  <script type="module" src="./setup.ts"></script>
+</body>
+</html>

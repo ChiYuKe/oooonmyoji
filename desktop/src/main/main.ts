@@ -1,7 +1,7 @@
 import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTheme } from '../shared/appearance';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import {
@@ -19,6 +19,7 @@ import type {
   RoiCaptureRequest,
   RunWorkflowRequest,
   RuntimeDebugSettings,
+  RuntimeResourceVariantId,
   SaveCanvasRequest,
   SaveTemplateRequest,
   TemplateCheckRequest,
@@ -35,6 +36,7 @@ import {
 } from './liveView';
 import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
+import { RuntimeResourceManager } from './runtimeResources';
 import { VisionStream } from './visionStream';
 
 protocol.registerSchemesAsPrivileged([
@@ -45,6 +47,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | undefined;
+let setupWindow: BrowserWindow | undefined;
 /** 画布性能基准窗口（仅 `ONMYOJI_BENCHMARK=1` 时创建）。 */
 let benchmarkWindow: BrowserWindow | undefined;
 let project: ProjectService;
@@ -61,6 +64,8 @@ let liveViewWatching = false;
 let liveViewSeq = -1;
 let liveViewIntervalMs = LIVE_VIEW_DEFAULT_INTERVAL_MS;
 let isQuitting = false;
+let resourceManager: RuntimeResourceManager | undefined;
+let runtimeInitialized = false;
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 const THEME_STORE_KEY = 'onmyoji-studio.appearance';
 const LIVE_VIEW_INTERVAL_STORE_KEY = 'onmyoji-studio.live-view.interval-ms';
@@ -281,29 +286,8 @@ function openLiveViewWindow(instanceId: string): void {
 }
 
 function registerIpc(): void {
-  ipcMain.handle('window:minimize', (event) => ownerWindow(event).minimize());
-  ipcMain.handle('window:toggle-maximize', (event) => {
-    const window = ownerWindow(event);
-    const wasMaximized = window.isMaximized();
-    if (wasMaximized) window.unmaximize();
-    else window.maximize();
-    return !wasMaximized;
-  });
-  ipcMain.handle('window:close', (event) => ownerWindow(event).close());
-  ipcMain.handle('window:is-maximized', (event) => ownerWindow(event).isMaximized());
   ipcMain.on('layout:read', (event, key: unknown) => {
     event.returnValue = typeof key === 'string' ? readLayoutStore()[key] ?? null : null;
-  });
-  ipcMain.on('appearance:read', (event) => { event.returnValue = readTheme(); });
-  ipcMain.on('appearance:write', (event, value: unknown) => {
-    if (isAppearanceTheme(value)) writeLayout(THEME_STORE_KEY, value);
-    const theme = readTheme();
-    nativeTheme.themeSource = themeColorScheme(theme);
-    for (const window of BrowserWindow.getAllWindows()) {
-      window.setBackgroundColor(themeBackground(theme));
-      window.webContents.send('appearance:changed', theme);
-    }
-    event.returnValue = theme;
   });
   ipcMain.on('layout:write', (_event, key: unknown, value: unknown) => {
     writeLayout(key, value);
@@ -396,6 +380,30 @@ function registerIpc(): void {
   ipcMain.handle('vision:stop', (event) => {
     if (ownerWindow(event) !== visionTestWindow) return;
     stopVisionTestStream();
+  });
+}
+
+function registerShellIpc(): void {
+  ipcMain.handle('window:minimize', (event) => ownerWindow(event).minimize());
+  ipcMain.handle('window:toggle-maximize', (event) => {
+    const window = ownerWindow(event);
+    const wasMaximized = window.isMaximized();
+    if (wasMaximized) window.unmaximize();
+    else window.maximize();
+    return !wasMaximized;
+  });
+  ipcMain.handle('window:close', (event) => ownerWindow(event).close());
+  ipcMain.handle('window:is-maximized', (event) => ownerWindow(event).isMaximized());
+  ipcMain.on('appearance:read', (event) => { event.returnValue = readTheme(); });
+  ipcMain.on('appearance:write', (event, value: unknown) => {
+    if (isAppearanceTheme(value)) writeLayout(THEME_STORE_KEY, value);
+    const theme = readTheme();
+    nativeTheme.themeSource = themeColorScheme(theme);
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.setBackgroundColor(themeBackground(theme));
+      window.webContents.send('appearance:changed', theme);
+    }
+    event.returnValue = theme;
   });
 }
 
@@ -513,36 +521,123 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
-app.whenReady().then(async () => {
-  nativeTheme.themeSource = themeColorScheme(readTheme());
-  const configuredRoot = process.env.ONMYOJI_PROJECT_ROOT;
-  const projectRoot = configuredRoot ? path.resolve(configuredRoot) : path.resolve(app.getAppPath(), '..');
+function createSetupWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 700,
+    height: 460,
+    minWidth: 620,
+    minHeight: 400,
+    show: false,
+    frame: false,
+    title: 'Onmyoji Studio 初始化',
+    backgroundColor: '#151515',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  window.once('ready-to-show', () => window.show());
+  window.on('closed', () => { if (setupWindow === window) setupWindow = undefined; });
+  void window.loadURL(`${rendererBaseUrl}/setup.html`);
+  return window;
+}
+
+async function initializeRuntimeServices(projectRoot: string): Promise<void> {
+  if (runtimeInitialized) return;
+  runtimeInitialized = true;
   project = new ProjectService(projectRoot);
   runtime = new RuntimeService(project);
   liveViewRequest = new LiveViewRequest(runtime.liveViewDirectory);
-
   await protocol.handle('onmyoji-resource', (request) => {
     const file = project.resolveResourceUrl(request.url);
     if (!file) return new Response('Forbidden', { status: 403 });
     return net.fetch(pathToFileURL(file).toString());
   });
   registerIpc();
-
   runtime.on('output', (event) => mainWindow?.webContents.send('runtime:output', event));
   runtime.on('state', (event) => mainWindow?.webContents.send('runtime:state', event));
   runtime.on('runEvent', (event) => mainWindow?.webContents.send('runtime:run-event', event));
+}
+
+function registerResourceIpc(projectRoot: string): void {
+  ipcMain.handle('resources:status', () => resourceManager?.status() ?? {
+    ready: true,
+    activeVariant: 'cpu',
+    variants: [{
+      id: 'cpu', label: '内置运行环境', description: '此版本已内置运行资源。', version: app.getVersion(),
+      installedVersion: app.getVersion(), downloadBytes: 0, installed: true, ready: true,
+      supported: true, supportMessage: '已内置',
+    }],
+  });
+  const variantId = (value: unknown): RuntimeResourceVariantId => {
+    if (value !== 'cpu' && value !== 'gpu') throw new Error('未知的运行环境类型');
+    return value;
+  };
+  ipcMain.handle('resources:install', async (event, value: unknown) => {
+    if (!resourceManager) return;
+    const id = variantId(value);
+    await resourceManager.install(
+      id,
+      (url) => net.fetch(url),
+      (progress) => event.sender.send('resources:progress', progress),
+    );
+  });
+  ipcMain.handle('resources:activate', async (_event, value: unknown) => {
+    if (!resourceManager) throw new Error('当前版本使用内置运行环境，无法切换');
+    if (runtime?.running || visionTestStream?.running) throw new Error('有任务或画面测试正在运行，请先停止后再切换');
+    const result = resourceManager.activate(variantId(value));
+    process.env.ONMYOJI_RUNTIME_ROOT = resourceManager.runtimeRoot;
+    process.env.ONMYOJI_OCR_USE_GPU = result.activeVariant === 'gpu' ? '1' : '0';
+    await initializeRuntimeServices(projectRoot);
+    if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createWindow();
+    setupWindow?.close();
+    return result;
+  });
+  ipcMain.handle('resources:remove', (_event, value: unknown) => {
+    if (!resourceManager) throw new Error('当前版本使用内置运行环境，无法删除');
+    if (runtime?.running || visionTestStream?.running) throw new Error('有任务或画面测试正在运行，请先停止后再管理运行环境');
+    return resourceManager.remove(variantId(value));
+  });
+}
+
+app.whenReady().then(async () => {
+  nativeTheme.themeSource = themeColorScheme(readTheme());
+  const configuredRoot = process.env.ONMYOJI_PROJECT_ROOT;
+  const projectRoot = configuredRoot ? path.resolve(configuredRoot) : path.resolve(app.getAppPath(), '..');
   const devUrl = process.env.ONMYOJI_DESKTOP_DEV_URL;
   rendererBaseUrl = devUrl ? new URL(devUrl).origin : await startRendererServer(path.join(app.getAppPath(), 'dist', 'renderer'));
+  registerShellIpc();
+  const manifestPath = path.join(projectRoot, 'runtime-manifest.json');
+  const bundledPython = path.join(projectRoot, 'tools', 'python312-embed', 'python.exe');
+  if (!existsSync(bundledPython) && existsSync(manifestPath)) {
+    resourceManager = new RuntimeResourceManager(projectRoot, app.getPath('userData'), manifestPath);
+  }
+  registerResourceIpc(projectRoot);
+  const resourceStatus = resourceManager?.status();
+  if (resourceStatus?.ready && resourceManager) {
+    process.env.ONMYOJI_RUNTIME_ROOT = resourceManager.runtimeRoot;
+    process.env.ONMYOJI_OCR_USE_GPU = resourceStatus.activeVariant === 'gpu' ? '1' : '0';
+  }
+  if (!resourceManager || resourceManager.status().ready) await initializeRuntimeServices(projectRoot);
   // 画布性能基准：只加载基准宿主页（隐藏窗口），不创建主工作台窗口。
   // 由 desktop/scripts/canvas-benchmark.cjs 通过调试端口驱动，不参与正常使用。
   if (process.env.ONMYOJI_BENCHMARK === '1') {
     benchmarkWindow = createBenchmarkWindow();
-  } else {
+  } else if (runtimeInitialized) {
     mainWindow = createWindow();
+  } else {
+    setupWindow = createSetupWindow();
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (runtimeInitialized) mainWindow = createWindow();
+      else setupWindow = createSetupWindow();
+    }
   });
 });
 

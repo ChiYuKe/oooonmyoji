@@ -120,10 +120,19 @@ test('第三个动作返回它自己的值（外部文件变化的「对比」�
   });
   assert.equal(h.extra.classes.has('hidden'), false);
   assert.equal(h.extra.textContent, '对比');
-  assert.equal(h.extra.dataset.value, undefined, 'value 由 finish 读取 dataset，缺省时用 extra');
   assert.equal(h.body.children[0].tag, 'pre', '对比正文用等宽 pre');
   h.extra.events.click[0]();
-  assert.equal(await promise, 'extra');
+  assert.equal(await promise, 'compare');
+});
+
+test('第三个动作缺省返回 extra，连续打开不会沿用上一次的值', async () => {
+  const h = harness();
+  const first = h.confirm.open({ title: '一', summary: '', extra: { label: '对比', value: 'compare' } });
+  h.extra.events.click[0]();
+  assert.equal(await first, 'compare');
+  const second = h.confirm.open({ title: '二', summary: '', extra: { label: '稍后' } });
+  h.extra.events.click[0]();
+  assert.equal(await second, 'extra');
 });
 
 test('没有第三个动作时按钮隐藏；没有 preview 时不渲染 pre', async () => {

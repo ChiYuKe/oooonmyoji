@@ -61,6 +61,8 @@ export function createImpactConfirm(
   let settle: ((value: ImpactConfirmAnswer) => void) | undefined;
   /** 关闭后要还回去的焦点（打开弹窗时抢走了它）。 */
   let restoreFocus: HTMLElement | null = null;
+  /** 当前第三个动作的返回值；不借用 DOM dataset，避免连续打开时读到旧值。 */
+  let extraValue = 'extra';
 
   function isOpen(): boolean {
     return settle !== undefined;
@@ -124,6 +126,7 @@ export function createImpactConfirm(
       const extra = request.extra;
       extraButton.classList.toggle('hidden', !extra);
       extraButton.textContent = extra ? extra.label : '';
+      extraValue = extra?.value || 'extra';
     }
     bodyEl.replaceChildren();
     const items = Array.isArray(request.items) ? request.items : [];
@@ -164,7 +167,7 @@ export function createImpactConfirm(
   okButton.addEventListener('click', () => finish(true));
   cancelButton.addEventListener('click', () => finish(false));
   closeButton.addEventListener('click', () => finish(false));
-  extraButton?.addEventListener('click', () => finish(extraButton.dataset.value || 'extra'));
+  extraButton?.addEventListener('click', () => finish(extraValue));
   modal.addEventListener('pointerdown', (event) => {
     if (event.target === modal) finish(false);
   });

@@ -137,6 +137,9 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
       return position(node).x - baseX;
     };
 
+    // 先只定横坐标与层号：纵坐标要等所有层都排完，按每层**最高**的卡片算行距。
+    const depthOf = new Map<string, number>();
+    const xOf = new Map<string, number>();
     const place = (id: string, depth: number): number => {
       const node = map.get(id);
       if (!node || placed.has(id)) return currentRelativeX(id);
@@ -154,7 +157,8 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
       }
       // 锁定：位置保持原样，只把它当前的横坐标交回去给父级居中。
       if (locked.has(id)) return currentRelativeX(id);
-      out[id] = { x: Math.round(x + baseX), y: Math.round(depth * (baseHeight + yGap) + baseY) };
+      depthOf.set(id, depth);
+      xOf.set(id, x);
       return x;
     };
 
@@ -181,10 +185,29 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
     if (!scopeIds) {
       for (const node of list) {
         if (!placed.has(String(node.id))) {
-          out[String(node.id)] = { x: leaf * (nodeWidth + xGap), y: 0 };
+          depthOf.set(String(node.id), 0);
+          xOf.set(String(node.id), leaf * (nodeWidth + xGap));
           leaf += 1;
         }
       }
+    }
+
+    // 行距按每层**最高**的卡片算，而不是写死的 `baseHeight`：卡片高度随参数行数变化
+    // （固定卡片一行 28px，6 项的卡就有 264px），写死 208px 的行距会把高卡片压到下一层，
+    // 预览里看到的就是一层层互相叠住的虚线框。层内仍共用一行，父节点居中关系不变。
+    const rowHeight = new Map<number, number>();
+    for (const [id, depth] of depthOf) {
+      rowHeight.set(depth, Math.max(rowHeight.get(depth) ?? 0, nodeHeight(map.get(id))));
+    }
+    const rowY = new Map<number, number>();
+    let cursor = baseY;
+    const deepest = depthOf.size ? Math.max(...depthOf.values()) : -1;
+    for (let depth = 0; depth <= deepest; depth += 1) {
+      rowY.set(depth, Math.round(cursor));
+      cursor += (rowHeight.get(depth) ?? baseHeight) + yGap;
+    }
+    for (const [id, depth] of depthOf) {
+      out[id] = { x: Math.round((xOf.get(id) ?? 0) + baseX), y: rowY.get(depth) ?? Math.round(baseY) };
     }
     return out;
   }

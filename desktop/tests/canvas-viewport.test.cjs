@@ -65,6 +65,27 @@ test('autoLayout 叶子横向排开、父节点居中、深度决定纵向', () 
   assert.equal(recorded.calls.mutated, 1);
 });
 
+test('自动排列的行距跟着卡片实际高度走：高卡片不会压到下一层', () => {
+  // 卡片高度随参数行数变化（固定卡片一行 28px，6 项的卡就有 264px）。行距写死 baseHeight + 112
+  // 时，高卡片会盖住下一层的卡片——预览里看到的就是一层层互相叠住的虚线框。
+  const raw = {root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['big']},
+    {id: 'big', type: 'task', children: ['leaf'], params: {}},
+    {id: 'leaf', type: 'task', params: {}},
+  ]};
+  const tall = 264;
+  const h = harness(raw, {nodeHeight: (node) => (node.id === 'big' ? tall : 96)});
+  const positions = h.viewport.autoLayoutPreview('all');
+  assert.equal(positions.root.y, 0);
+  assert.equal(positions.big.y, 96 + 112, '第一层按 root 的实际高度让位');
+  assert.equal(positions.leaf.y, positions.big.y + tall + 112, '下一层要按 big 的实际高度让位，而不是固定 208');
+  assert(positions.leaf.y - positions.big.y >= tall, '层与层之间不能重叠');
+
+  // 高度都是 baseHeight 时行为不变：老用例（深度 × 208）继续成立。
+  const plain = harness(tree());
+  assert.deepEqual(plain.viewport.autoLayoutPreview('all'), {a: {x: 0, y: 416}, b: {x: 332, y: 416}, seq: {x: 166, y: 208}, root: {x: 166, y: 0}});
+});
+
 test('autoLayout 为未连边的孤立节点补位', () => {
   const h = harness({root: 'root', nodes: [
     {id: 'root', type: 'root', children: []},

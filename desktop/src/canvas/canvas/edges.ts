@@ -206,6 +206,55 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   }
 
   /**
+   * 数据线末端的箭头（UE 的数据线在落点前收一个小三角，方向一目了然）。
+   *
+   * Chrome 的 marker **不支持** `context-stroke`（箭头不会跟着引用它的那条线的颜色走），
+   * 所以只能按颜色建 marker；色相按 15° 归并，于是 marker 数量上限是 24 个，
+   * 不随工作流里的变量/引用数量无限增长。
+   * marker 挂在图层父节点（`.graph-world`）上：数据线图层每帧整层重建，父节点不重建，
+   * 所以 marker 建一次就一直在，不会被逐帧清掉重建。
+   */
+  const WIRE_ARROW_HUE_STEP = 15;
+  const wireArrowIds = new Map<string, string>();
+  let wireArrowDefs: any = null;
+  let wireArrowSeq = 0;
+
+  /** 把 `hsl(H 62% 60%)` 的色相归并到 15° 一档（只用于箭头，线本身仍是完整散列色）。 */
+  function wireArrowColor(color: string): string {
+    const match = /^hsl\(\s*([\d.]+)/i.exec(String(color || ''));
+    if (!match) return color;
+    const step = Math.round(Number(match[1]) / WIRE_ARROW_HUE_STEP) * WIRE_ARROW_HUE_STEP;
+    return `hsl($((step % 360) + 360) % 360 62% 60%)`;
+  }
+
+  /** 取（或建立）这条数据线颜色对应的箭头 marker，返回它的 id；无法建 marker 时返回 null。 */
+  function wireArrowMarker(layer: any, color: string): string | null {
+    const host = layer && layer.parentNode;
+    if (!host || typeof host.appendChild !== 'function') return null;
+    const key = wireArrowColor(color);
+    const cached = wireArrowIds.get(key);
+    if (cached) {
+      if (wireArrowDefs && wireArrowDefs.parentNode !== host) host.appendChild(wireArrowDefs);
+      return cached;
+    }
+    if (!wireArrowDefs || wireArrowDefs.parentNode !== host) wireArrowDefs = svgEl('defs', { class: 'wire-arrows' }, host);
+    const id = `wire-arrow-${wireArrowSeq++}`;
+    const marker = svgEl('marker', {
+      id,
+      viewBox: '0 0 10 10',
+      refX: 9,
+      refY: 5,
+      markerWidth: 7,
+      markerHeight: 7,
+      markerUnits: 'userSpaceOnUse',
+      orient: 'auto',
+    }, wireArrowDefs);
+    svgEl('path', { class: 'wire-arrow', d: 'M 0 1 L 9 5 L 0 9 Z', fill: key }, marker);
+    wireArrowIds.set(key, id);
+    return id;
+  }
+
+  /**
    * 画一条可快速断开的细线：可见线保持细，另叠一条透明的加粗命中线
    * （`.xxx-hit`，屏幕空间恒定宽度，不随缩放/线宽变细），Alt + 左键点在命中线上即断开。
    * 命中线在卡片下层，所以不会挡住卡片与引脚的点击；它排在可见线**前面**，
@@ -214,7 +263,15 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   function renderDisconnectableEdge(layer: any, className: string, hitClassName: string, d: string, disconnectEdge: () => void, toneKey = ''): any[] {
     const hit = svgEl('path', { class: hitClassName, d }, layer);
     bindVariableEdgeQuickDisconnect(hit, disconnectEdge);
-    const visible = svgEl('path', { class: className, d, style: `--data-tone:${dataToneColor(toneKey)};--edge-tone:var(--data-tone)` }, layer);
+    const tone = dataToneColor(toneKey);
+    const arrow = wireArrowMarker(layer, tone);
+    const visible = svgEl('path', {
+      class: className,
+      d,
+      style: `--data-tone:${tone};--edge-tone:var(--data-tone)`,
+      // 箭头画在可见线上（命中线不画），方向由 marker 的 `orient="auto"` 沿末端切线决定。
+      'marker-end': arrow ? `url(#${arrow})` : undefined,
+    }, layer);
     return [hit, visible];
   }
 

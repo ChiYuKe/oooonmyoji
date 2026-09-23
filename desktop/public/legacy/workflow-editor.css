@@ -261,10 +261,11 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .mini-viewport { fill: rgba(75, 163, 211, 0.06); stroke: #71818a; stroke-width: 3; }
 
 .edge-line, .edge-flow { fill: none; stroke-linecap: round; pointer-events: none; vector-effect: non-scaling-stroke; }
-.edge-line { stroke: var(--wire); stroke-width: 2; transition: stroke 120ms ease, stroke-width 120ms ease, opacity 120ms ease; }
+/* 执行流连线：UE 的主分支连线是粗而亮的浅色线，比数据线明显更重（见下面的 .variable-edge / .reference-edge）。 */
+.edge-line { stroke: var(--wire); stroke-width: 2.5; transition: stroke 120ms ease, stroke-width 120ms ease, opacity 120ms ease; }
 .edge-flow { stroke: transparent; stroke-width: 3; }
 .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
-.edge:hover .edge-line, .edge.selected .edge-line { stroke: #6bc2ea; stroke-width: 3.5; }
+.edge:hover .edge-line, .edge.selected .edge-line { stroke: color-mix(in srgb, var(--wire) 34%, var(--ui-text, #ffffff)); stroke-width: 3.5; }
 .edge.edge-collapsed-group .edge-hit, .edge.edge-collapsed-group .edge-rewire { display: none; }
 .edge.edge-collapsed-group { pointer-events: none; }
 .edge.run-running .edge-line { stroke: #c9952e; stroke-width: 3; }
@@ -288,8 +289,9 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .edge-order { fill: #e2e3e6; font-size: 10px; font-weight: 700; pointer-events: none; }
 .edge-rewire { fill: #777c86; stroke: #e2e3e6; stroke-width: 1; cursor: grab; opacity: 0; }
 .edge:hover .edge-rewire, .edge.selected .edge-rewire { opacity: 1; }
-.connection-preview { fill: none; stroke: #58b7e4; stroke-width: 3; stroke-dasharray: 7 5; pointer-events: none; }
-.connection-preview.snapped { stroke: #7ed28a; stroke-dasharray: none; }
+/* 拖线预览：UE 拖出来的是一条浅色线，落到兼容端点上时整条变亮并收掉虚线。 */
+.connection-preview { fill: none; stroke: color-mix(in srgb, var(--wire) 58%, var(--ui-text, #ffffff)); stroke-width: 2.5; stroke-dasharray: 9 6; pointer-events: none; }
+.connection-preview.snapped { stroke: var(--ui-text, #ffffff); stroke-width: 3; stroke-dasharray: none; }
 .instance-run-edge-line { fill: none; stroke: #7aaabd; stroke-width: 2.25; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 /* 数据身份色：每个变量/引用按稳定身份散列到一个色号，同一数据在卡片、端点和线上始终同色。 */
 .data-tone-0 { --data-tone: #ef767a; --edge-tone: var(--data-tone); }
@@ -312,6 +314,9 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 /* 节点输出引用线：从任务卡右侧输出口连到参数行，同样是实线、比执行连线细。 */
 .reference-edge { fill: none; stroke: var(--edge-tone, #e7a84b); stroke-width: 1.8; opacity: 0.92; pointer-events: none; vector-effect: non-scaling-stroke; }
 .reference-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
+/* 数据线末端的箭头：形状与颜色由 marker 自己带着（`canvas/canvas/edges.ts` 按线的颜色建），
+ * 这里只声明它不描边、不吃事件。 */
+.wire-arrow { stroke: none; pointer-events: none; }
 /* 悬停（指针在命中范围内）时把细线提亮 + 略加粗，明确「这条线可以 Alt 点击断开」。
  * 用显式颜色而不是 filter：浅色主题由 build-light-palette 生成加深版本。 */
 .reference-edge-hit:hover + .reference-edge,

@@ -309,20 +309,26 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const {
     currentGroup, runSummary: nodeGroupRunSummary, viewNodes, viewNodeById, viewReferenceSourceById, adjacentEdges, groupSelection, enterGroup, leaveGroup, ungroup, renameGroup, addToCurrentGroup, removeMembers,
-    setPinExposed, pinMenuEntry, candidateMenu, boundaryVariableRefs,
+    setPinExposed, pinMenuEntry, candidateMenu, boundaryVariableRefs, visibleVariableCardIds,
   } = NodeGroups;
   /**
    * 画布上该画哪些变量卡片。
    *
-   * 组内视图里，已经被**组边界卡**代表了的变量不再重复画一张卡片——否则同一个变量会同时
-   * 出现在边界行和画布上的同名卡片里（「一个变量画了两遍」）。文档里的卡片本身不动
+   * 组内视图只画**和这个组有关**的卡片（`NodeGroups.visibleVariableCardIds()`：归属于本组
+   * 成员、还没归属任何节点、或本组成员引用到的变量）。归属在组外的卡片不画——否则进组之后
+   * 画布上还飘着组外节点的变量卡，看起来就是「组里混进了别人的卡片」。
+   *
+   * 另外，已经被**组边界卡**代表了的变量也不再重复画一张——否则同一个变量会同时出现在边界
+   * 行和画布上的同名卡片里（「一个变量画了两遍」）。文档里的卡片本身不动
    * （`documentVariableCardList`），退出组后照旧显示；渲染、命中测试、连线、包围盒与
    * 画布签名都走这一份列表，行为一致。
    */
   const variableCardList = (): any[] => {
+    const cards = documentVariableCardList();
+    if (!currentGroup()) return cards;
     const refs = boundaryVariableRefs();
-    if (!refs.size) return documentVariableCardList();
-    return documentVariableCardList().filter((card: any) => !refs.has(`${card.scope}.${card.name}`));
+    const visible = visibleVariableCardIds();
+    return cards.filter((card: any) => !refs.has(`${card.scope}.${card.name}`) && visible.has(String(card.id)));
   };
   /**
    * 「当前组」：已经进入的组优先；没进组时退化为选中的那张组卡所代表的组

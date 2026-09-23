@@ -1,6 +1,6 @@
 import type { CanvasState } from '../state/canvas-state';
 import type { MenuEntry } from '../ui/overlays';
-import { groupCardPosition } from '../canvas/card-follow-layout';
+import { groupCardPosition, groupVariableCardIds } from '../canvas/card-follow-layout';
 import { summarizeNodeGroupRun } from './node-group-runtime';
 
 export interface NodeGroupRecord {
@@ -310,6 +310,30 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
       refs.add(`${pin.scope === 'variables' ? 'variables' : 'inputs'}.${pin.variable}`);
     }
     return refs;
+  }
+
+  /**
+   * 组内视图该画哪些变量卡片（卡 id 集合）。不在组内时返回空集合，调用方照旧画全部卡片。
+   *
+   * 只在**文档版本、当前组或成员表**变化时重算：这份集合要扫全部节点的端点与引用
+   * （`groupVariableCardIds`），而 `editor.variableCardList()` 在渲染、命中测试、连线与
+   * 画布签名里每帧都会被调用好几次，不能每次都算。
+   */
+  let cardScopeKey = '';
+  let cardScopeValue = new Set<string>();
+  function visibleVariableCardIds(): Set<string> {
+    const scope = currentGroup();
+    if (!scope) {
+      cardScopeKey = '';
+      cardScopeValue = new Set();
+      return cardScopeValue;
+    }
+    const key = `${Number(state.docVersion || 0)}|${scope.id}|${scope.nodeIds.join(',')}`;
+    if (key !== cardScopeKey) {
+      cardScopeKey = key;
+      cardScopeValue = groupVariableCardIds(state.raw, scope.id, nodes(), nodeVariablePins);
+    }
+    return cardScopeValue;
   }
 
   /** 读取真实成员节点的即时运行态；不依赖投影缓存，也不污染持久化组元数据。 */
@@ -717,6 +741,6 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
   return {
     groups, groupById, currentGroup, runSummary, viewNodes, viewNodeById, viewReferenceSourceById, viewEdgeRunTargetIds, adjacentEdges,
     groupSelection, enterGroup, leaveGroup, ungroup, renameGroup, addToCurrentGroup, removeMembers,
-    pinExposure, pinCandidates, setPinExposed, pinMenuEntry, candidateMenu, boundaryVariableRefs,
+    pinExposure, pinCandidates, setPinExposed, pinMenuEntry, candidateMenu, boundaryVariableRefs, visibleVariableCardIds,
   };
 }

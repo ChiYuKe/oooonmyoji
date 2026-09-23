@@ -310,6 +310,57 @@ function collectVariableRefs(value: any, depth = 0, out: string[] = []): string[
   return out;
 }
 
+/**
+ * 组内视图里还该画哪些变量卡片（卡 id 集合）。
+ *
+ * 组内视图只画**和这个组有关**的卡片：归属于本组成员的，或还没有归属任何节点的
+ * （刚放下、还没连线，组内也得看得见）。归属在组外的卡片一律不画——否则进组之后画布上
+ * 还飘着组外节点的变量卡，看起来就是「组里混进了别人的卡片」。
+ *
+ * 例外一条：**本组成员引用到的变量**，卡片即使归属在组外也照画。变量卡是端点右键菜单里
+ * 「定位到变量卡片」的目标，卡片一旦不画，菜单会以为这个变量没有卡片，于是
+ * 「创建变量卡片（Get）」会再建一张同名卡——同一个变量两张卡。
+ *
+ * 与 `viewport.scopedVariableCards()` 的差别是**故意的**：包围盒比这里更严，没有归属的
+ * 卡片不算进去，免得一张飘在几千像素外的卡片把 `fitView` 拉远。
+ */
+export function groupVariableCardIds(
+  raw: any,
+  groupId: string,
+  nodes: Array<{ id: string }>,
+  pinsOf: (node: any) => any[],
+): Set<string> {
+  const cards = recordOf(raw?._variableCards);
+  const ids = Object.keys(cards);
+  const members = new Set(groupMemberIdsOf(raw, groupId));
+  // 组没有合法成员（已解散、成员被删光）时不隐藏任何卡片：宁可多画，也不要整屏空掉。
+  if (!members.size) return new Set(ids);
+  const owners = cardOwnerIndex(raw, nodes, pinsOf);
+  // 本组成员引用到的变量（`作用域.变量名`）：端点与节点里任意位置的 `{ref}` 都算。
+  const memberRefs = new Set<string>();
+  for (const node of nodes) {
+    if (!members.has(String(node.id))) continue;
+    for (const pin of pinsOf(node) || []) {
+      if (!pin || !pin.variable) continue;
+      memberRefs.add(`${pin.scope === 'variables' ? 'variables' : 'inputs'}.${String(pin.variable)}`);
+    }
+    for (const reference of collectVariableRefs(node)) {
+      const match = /^(inputs|variables)\.([^\.]+)/.exec(reference);
+      if (match) memberRefs.add(`${match[1]}.${match[2]}`);
+    }
+  }
+  const visible = new Set<string>();
+  for (const id of ids) {
+    const owner = owners.get(id);
+    if (!owner || members.has(owner.nodeId)) {
+      visible.add(id);
+      continue;
+    }
+    if (memberRefs.has(cardReferenceOf(id, cards[id]))) visible.add(id);
+  }
+  return visible;
+}
+
 /** 整张图的包围盒位移：没有绑定的卡片按它跟随，保持相对图左上角的偏移。 */
 function graphDelta(previous: Record<string, any>, layout: Record<string, any>, nodes: Array<{ id: string }>): { x: number; y: number } {
   const before = nodes.map((node) => previous[node.id]).filter(isFinitePoint);

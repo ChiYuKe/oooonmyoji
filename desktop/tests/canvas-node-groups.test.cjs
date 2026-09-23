@@ -496,4 +496,64 @@ test('画布入口把「组边界代表的变量」从变量卡列表里剔除�
   assert.match(source, /boundaryVariableRefs/, '画布入口必须用组边界代表的变量过滤卡片');
   assert.match(source, /const variableCardList = \(\) => \{/, '变量卡列表要收敛成作用域内的一份实现');
   assert.match(source, /documentVariableCardList/, '文档里的卡片列表改名保留：组内隐藏只是一层视图过滤');
+  assert.match(source, /visibleVariableCardIds/, '组内还要按卡片归属过滤：组外节点的变量卡不进组内视图');
+});
+
+test('组内视图只画本组的变量卡片：组外节点的不画，没归属的照画', () => {
+  const raw = {
+    root: 'root',
+    nodes: [
+      {id: 'root', type: 'root', children: ['b']},
+      {id: 'b', type: 'task', params: {}},
+      {id: 'c', type: 'task', params: {}},
+      {id: 'outside', type: 'task', params: {x: {ref: 'variables.v_out'}}},
+    ],
+    variables: {v_out: {type: 'number'}, v_in: {type: 'number'}, v_free: {type: 'number'}},
+    _variableCards: {
+      card_out: {name: 'v_out', scope: 'variables', x: 5000, y: 6000},
+      card_in: {name: 'v_in', scope: 'variables', x: 0, y: 0},
+      card_free: {name: 'v_free', scope: 'variables', x: 0, y: 0},
+    },
+    _variableLinks: {'outside:x': 'card_out', 'b:x': 'card_in'},
+    _nodeGroups: {node_group_1: {name: '节点组 1', nodeIds: ['b', 'c'], pins: []}},
+    _layout: {},
+  };
+  const h = harness({nodeVariablePins: () => []});
+  h.state.raw = raw;
+
+  assert.equal(h.groups.visibleVariableCardIds().size, 0, '不在组内视图时不做这层过滤（调用方画全部卡片）');
+  h.groups.enterGroup('node_group_1');
+  assert.deepEqual([...h.groups.visibleVariableCardIds()].sort(), ['card_free', 'card_in'],
+    '组外节点的卡片不画；成员绑定的与还没归属的照画');
+  h.groups.leaveGroup();
+  assert.equal(h.groups.visibleVariableCardIds().size, 0, '退出组后恢复成画全部卡片');
+});
+
+test('组成员端点绑定的变量：卡片归属在组外也照画（右键菜单要能找到它）', () => {
+  // 变量卡是端点菜单里「定位到变量卡片」的目标：卡片一旦不画，菜单会以为这个变量没有卡片，
+  // 于是「创建变量卡片（Get）」会再建一张同名卡——同一个变量两张卡。
+  const raw = {
+    root: 'root',
+    nodes: [
+      {id: 'root', type: 'root', children: ['b']},
+      {id: 'b', type: 'task', params: {}},
+      {id: 'c', type: 'task', params: {}},
+      {id: 'outside', type: 'task', params: {}},
+    ],
+    inputs: {计数: {type: 'integer'}},
+    _variableCards: {card_count: {name: '计数', scope: 'inputs', x: 0, y: 0}},
+    _variableLinks: {'outside:count': 'card_count'},
+    _nodeGroups: {node_group_1: {name: '节点组 1', nodeIds: ['b', 'c'], pins: []}},
+    _layout: {},
+  };
+  let pinsForB = [{param: 'count', scope: 'inputs', variable: '计数'}];
+  const h = harness({nodeVariablePins: (node) => (node.id === 'b' ? pinsForB : [])});
+  h.state.raw = raw;
+  h.groups.enterGroup('node_group_1');
+  assert.deepEqual([...h.groups.visibleVariableCardIds()], ['card_count'], '成员的端点绑着它，组内就得看得见这张卡');
+
+  // 端点解绑后不再由它兜底：卡片只剩组外归属，组内就不画了。
+  pinsForB = [];
+  h.state.docVersion = (h.state.docVersion || 0) + 1;
+  assert.equal(h.groups.visibleVariableCardIds().size, 0, '成员不再引用这个变量后，组外卡片退出组内视图');
 });

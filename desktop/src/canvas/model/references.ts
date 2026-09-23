@@ -6,6 +6,7 @@
  * 只读文档与目录，不修改状态；schema 解析与变量可见性由注入的模块提供。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { actionLabel, outputFieldLabel } from '../ui/labels';
 
 export interface CanvasReferencesDeps {
   state: CanvasState;
@@ -176,9 +177,43 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
     return candidates.filter((candidate) => compatibleRefType(expected, candidate.schema)).map((candidate) => candidate.ref);
   }
 
+  /**
+   * id → 节点 索引。只在节点数组的引用或长度变化时重建：改名、改参数读到的都是同一个
+   * 对象，所以不会过期；增删节点会改变长度，因此也能及时失效。
+   */
+  let nodeIndexSource: any[] | null = null;
+  let nodeIndexSize = -1;
+  let nodeIndexMap = new Map<string, any>();
+  function nodeIndex(): Map<string, any> {
+    const list = nodes();
+    if (nodeIndexSource !== list || nodeIndexSize !== list.length) {
+      nodeIndexSource = list;
+      nodeIndexSize = list.length;
+      nodeIndexMap = new Map(list.filter((item) => item && item.id).map((item) => [item.id, item]));
+    }
+    return nodeIndexMap;
+  }
+
+  /**
+   * 把 `nodes.<节点id>.output.<字段>` 渲染成「节点名 › 字段名」。
+   * 原始路径对新手是天书，但 id 是唯一稳定的锚点，所以节点名缺失时逐级回退到
+   * 动作中文名、再到 id——任何时候都不会返回一个看不懂的裸路径。
+   */
+  function nodeReferenceLabel(ref: string): string {
+    const [, nodeId, slot, ...tail] = ref.split('.');
+    const source = nodeIndex().get(nodeId);
+    const sourceName = (source && source.name)
+      || (source && source.action ? actionLabel(source.action) : '')
+      || nodeId;
+    if (slot !== 'output') return `${sourceName}（${nodeId}）`;
+    const segments = tail.map((part) => (/^\d+$/.test(part) ? `第 ${Number(part) + 1} 项` : outputFieldLabel(part)));
+    return `${sourceName} › ${segments.length ? segments.join(' › ') : '输出'}`;
+  }
+
   function referenceLabel(ref: string | null | undefined): string {
     if (!ref) return '无可用引用';
     if (ref.startsWith('inputs.') || ref.startsWith('variables.')) return variableSystem.referenceLabel(state.raw, ref);
+    if (ref.startsWith('nodes.')) return nodeReferenceLabel(ref);
     return ref;
   }
 

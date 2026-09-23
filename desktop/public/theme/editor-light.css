@@ -119,7 +119,7 @@
     stroke: #696969
 }
 :root[data-theme="light"] .edge:hover .edge-line, :root[data-theme="light"] .edge.selected .edge-line {
-    stroke: #376479
+    stroke: color-mix(in srgb, var(--wire) 34%, var(--ui-text, #232323))
 }
 :root[data-theme="light"] .edge.run-running .edge-line {
     stroke: #795a1c
@@ -163,10 +163,10 @@
     stroke: #232323
 }
 :root[data-theme="light"] .connection-preview {
-    stroke: #31657e
+    stroke: color-mix(in srgb, var(--wire) 58%, var(--ui-text, #232323))
 }
 :root[data-theme="light"] .connection-preview.snapped {
-    stroke: #3e6744
+    stroke: var(--ui-text, #232323)
 }
 :root[data-theme="light"] .instance-run-edge-line {
     stroke: #46616c
@@ -995,23 +995,21 @@
     scrollbar-color: #696969 transparent
 }
 :root[data-theme="light"] .inline-param-editor {
-    border: 1px solid var(--card-line, #d7d7d7);
-    background: var(--card-head, #e6e6e6)
+    --card-field: var(--ui-field, #696969);
+    --card-line: color-mix(in srgb, var(--ui-field, #696969) 30%, var(--ui-line, #696969));
+    --card-text: var(--ui-text, #252525);
+    --card-muted: var(--ui-muted, #5a5a5a);
+    --card-port: var(--ui-text, #252525)
 }
 :root[data-theme="light"] {
-    --inline-focus-line: #696969
+    --inline-focus-line: color-mix(in srgb, var(--ui-focus, #696969) 55%, var(--ui-line, #696969))
 }
 :root[data-theme="light"] .inline-param-editor:focus-within {
     border-color: var(--inline-focus-line, #bbbbbb)
 }
-:root[data-theme="light"] .inline-param-editor .inline-param-input {
+:root[data-theme="light"] .inline-param-editor .inline-param-input::selection {
+    background: color-mix(in srgb, var(--inline-focus-line, #cccccc) 42%, transparent);
     color: var(--card-text, #232323)
-}
-:root[data-theme="light"] .inline-param-editor .inline-param-input:focus {
-    outline: 1px solid var(--inline-focus-line, #bbbbbb)
-}
-:root[data-theme="light"] .inline-param-editor .inline-param-input:focus:not(:focus-visible) {
-    outline-color: var(--inline-focus-line, #bbbbbb)
 }
 :root[data-theme="light"] .inline-node-name-editor {
     border: 1px solid color-mix(in srgb, var(--card-line, #d7d7d7) 72%, var(--inline-focus-line, #bbbbbb));
@@ -1031,16 +1029,10 @@
 :root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple {
     --inline-cell-line: var(--card-line, #696969)
 }
-:root[data-theme="light"][data-theme] .inline-param-editor.inline-param-tuple .inline-param-input {
-    background: var(--card-head, #e6e6e6)
-}
 :root[data-theme="light"] .inline-param-editor.inline-param-tuple .inline-param-input:focus {
     --inline-cell-line: var(--inline-focus-line, #696969)
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-axis-label {
-    color: var(--card-muted, #696969)
-}
-:root[data-theme="light"] .inline-param-editor .inline-param-unit {
     color: var(--card-muted, #696969)
 }
 :root[data-theme="light"] .inline-param-editor .inline-param-swatch {

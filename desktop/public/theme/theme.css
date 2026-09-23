@@ -3,7 +3,7 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   background: #141414; color: #dedede;
-  --dark-chrome: #181818; --dark-canvas: #141414; --dark-header: #292929;
+  --dark-chrome: #181818; --dark-canvas: #202020; --dark-header: #292929;
   --dark-selection: #414141; --dark-selection-text: #f2f2f2;
   --ui-bg: #1c1c1c; --ui-panel: #232323; --ui-field: #191919;
   --ui-surface: #303030; --ui-hover: #383838; --ui-selected: var(--dark-selection);
@@ -18,7 +18,7 @@
   --button: #4a4a4a; --button-hover: #595959;
   --green: #8bc6a4; --red: #ed9098; --yellow: #dbbc7e;
   --success: var(--green); --danger: var(--red); --warning: var(--yellow); --info: var(--blue);
-  --wire: #aaaaaa; --grid: rgba(255,255,255,.035);
+  --wire: #aaaaaa; --grid: rgba(255,255,255,.035); --canvas-grid: rgba(255,255,255,.05);
   --content-folder-icon: #d0d0d0; --content-folder-tile: #303030;
   --content-file-icon: #c3c3c3; --content-file-tile: #2b2b2b;
   --content-selection-surface: rgba(255,255,255,.07); --content-selection-frame: #666666;
@@ -76,7 +76,7 @@
 :root[data-theme="dark"] :is(.menu-trigger:hover, .menu-root.open > .menu-trigger, .window-control:not(.close):hover) { background: var(--ui-hover); }
 :root[data-theme="dark"] :is(.menu-separator, .desktop-more-separator) { background: var(--ui-line); }
 :root[data-theme="dark"] :is(.reference-graph, #canvas-wrap) { background-color: var(--dark-canvas); }
-:root[data-theme="dark"] #canvas-wrap { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
+:root[data-theme="dark"] #canvas-wrap { background-image: linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px); }
 :root[data-theme="dark"] #workflow-breadcrumb { background: rgba(28,28,28,.92); color: var(--ui-muted); }
 :root[data-theme="dark"] #minimap { background: #1e1e1e; border: 1px solid var(--border); box-shadow: none; }
 :root[data-theme="dark"] .mini-node { fill: #777777; stroke: #aaaaaa; }

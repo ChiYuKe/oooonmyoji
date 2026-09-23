@@ -791,10 +791,20 @@ export function createParameterControls(deps: ParameterControlsDeps) {
   const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'];
   const CONDITION_GROUP_OPERATORS = ['and', 'or'];
   const CONDITION_UNARY_OPERATORS = ['not'];
+  /** 装饰器条件可以直接是固定真假值；这个伪操作符只在下拉里代表「不加判断」。 */
+  const CONDITION_LITERAL_OPERATOR = 'literal';
 
+  /**
+   * 条件编辑器的唯一实现：参数（repeat_until.condition、branch.conditions）和装饰器
+   * condition 都走这里。任何一层都能继续嵌套 且/或/非，用户永远看不到裸 JSON。
+   *
+   * ctx.allowLiteral：装饰器专有——操作符下拉多一个「固定条件」，对应布尔真值。
+   */
   function conditionControl(value: any, onChange: (value: any) => void, ctx: any = {}): UiNode {
     const wrap = el('div', 'condition-control');
-    if (typeof value === 'boolean' || value === undefined || value === null) {
+    const allowLiteral = !!ctx.allowLiteral;
+    const literal = typeof value === 'boolean' || value === undefined || value === null;
+    if (literal && !allowLiteral) {
       const current = !!value;
       const row = el('div', 'scalar-array-row');
       row.appendChild(selectInput(String(current), [{ value: 'true', label: '真' }, { value: 'false', label: '假' }], (next) => onChange(next === 'true'), 'full'));
@@ -804,15 +814,26 @@ export function createParameterControls(deps: ParameterControlsDeps) {
       wrap.appendChild(hint);
       return wrap;
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!literal && (!value || typeof value !== 'object' || Array.isArray(value))) {
       onChange({ eq: [1, 1] });
       return wrap;
     }
-    const operator = Object.keys(value)[0];
-    const operands = value[operator];
+    const operator = literal ? CONDITION_LITERAL_OPERATOR : Object.keys(value)[0];
+    const operands = literal ? undefined : value[operator];
     const head = el('div', 'condition-head');
-    head.appendChild(selectInput(operator, CONDITION_OPERATORS.map((item) => ({ value: item, label: conditionOperatorLabel(item) })), (next) => onChange(conditionOperatorDefault(next)), 'condition-operator'));
+    const choices = allowLiteral
+      ? [{ value: CONDITION_LITERAL_OPERATOR, label: conditionOperatorLabel(CONDITION_LITERAL_OPERATOR) }, ...CONDITION_OPERATORS.map((item) => ({ value: item, label: conditionOperatorLabel(item) }))]
+      : CONDITION_OPERATORS.map((item) => ({ value: item, label: conditionOperatorLabel(item) }));
+    head.appendChild(selectInput(operator, choices, (next) => onChange(next === CONDITION_LITERAL_OPERATOR ? true : conditionOperatorDefault(next)), 'condition-operator'));
     wrap.appendChild(head);
+    if (operator === CONDITION_LITERAL_OPERATOR) {
+      wrap.classList.add('condition-literal');
+      const toggle = el('label', 'check-label');
+      toggle.appendChild(checkbox(!!value, (next) => onChange(next)));
+      toggle.appendChild(el('span', '', '满足条件'));
+      wrap.appendChild(toggle);
+      return wrap;
+    }
     const applyOperands = (next: any) => onChange({ [operator]: next });
     const replaceOperatorValue = (next: any) => onChange(next);
     if (CONDITION_GROUP_OPERATORS.includes(operator)) {
@@ -849,10 +870,24 @@ export function createParameterControls(deps: ParameterControlsDeps) {
   }
 
   function conditionOperatorLabel(operator: string): string {
-    return { exists: '存在引用 (exists)', eq: '等于 (eq)', ne: '不等于 (ne)', gt: '大于 (gt)', gte: '大于等于 (gte)', lt: '小于 (lt)', lte: '小于等于 (lte)', contains: '包含 (contains)', and: '且 (and)', or: '或 (or)', not: '非 (not)' }[operator] || operator;
+    return {
+      literal: '固定条件',
+      exists: '存在 (exists)',
+      eq: '等于 (eq)',
+      ne: '不等于 (ne)',
+      gt: '大于 (gt)',
+      gte: '大于等于 (gte)',
+      lt: '小于 (lt)',
+      lte: '小于等于 (lte)',
+      contains: '包含 (contains)',
+      and: '全部满足 (and)',
+      or: '任一满足 (or)',
+      not: '取反 (not)',
+    }[operator] || operator;
   }
 
   function conditionOperatorDefault(operator: string): any {
+    if (operator === CONDITION_LITERAL_OPERATOR) return true;
     if (CONDITION_GROUP_OPERATORS.includes(operator)) return { [operator]: [{ eq: [1, 1] }] };
     if (CONDITION_UNARY_OPERATORS.includes(operator)) return { [operator]: { eq: [1, 1] } };
     if (operator === 'exists') return { exists: { ref: '' } };
@@ -911,6 +946,7 @@ export function createParameterControls(deps: ParameterControlsDeps) {
     structuredControl, objectFieldsControl, bindingControl, nestedValueControl, scalarValueControl,
     tupleControl, scalarArrayControl, itemDefaultValue, objectArrayControl, objectArraySummary, iconButton,
     ICON_SVG, iconSvg, addRowButton, CONDITION_OPERATORS, CONDITION_GROUP_OPERATORS, CONDITION_UNARY_OPERATORS,
+    CONDITION_LITERAL_OPERATOR,
     conditionControl, conditionOperatorLabel, conditionOperatorDefault, conditionOperandControl,
     conditionLiteralDefault, conditionParseLiteral, nodeChildrenOptions,
   };

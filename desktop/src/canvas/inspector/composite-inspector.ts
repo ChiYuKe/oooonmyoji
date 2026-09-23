@@ -48,9 +48,11 @@ export interface CompositeInspectorDeps {
   textInput(value: unknown, onChange: (value: string) => void, options?: { type?: string; min?: number; step?: number; className?: string }): UiNode;
   iconButton(className: string, tip: string, icon: string, onClick: () => void): UiNode;
   addRowButton(label: string, onClick: () => void): UiNode;
-  conditionControl(value: unknown, onChange: (value: unknown) => void, options: { node: CompositeNode }): UiNode;
+  conditionControl(value: unknown, onChange: (value: unknown) => void, options: { node: CompositeNode; allowLiteral?: boolean }): UiNode;
   conditionOperandControl(value: unknown, onChange: (value: unknown) => void, options: { node: CompositeNode }): UiNode;
   conditionParseLiteral(value: string): unknown;
+  /** 条件表达式 → 中文回读整句；认不出来时返回空串。 */
+  conditionSentence(expression: unknown): string;
   nodeChildrenOptions(node: CompositeNode, current?: unknown): SelectOption[];
   nodeById(id: string): { name?: string } | undefined;
   mutate(fn: () => void): void;
@@ -84,7 +86,7 @@ export interface CompositeInspector {
 export function createCompositeInspector(deps: CompositeInspectorDeps): CompositeInspector {
   const {
     el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton,
-    conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions, nodeById,
+    conditionControl, conditionOperandControl, conditionParseLiteral, conditionSentence, nodeChildrenOptions, nodeById,
     mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state,
     decoratorLabel, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
   } = deps;
@@ -482,44 +484,25 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
     toast(`循环次数已公开为输入：${name}`);
   }
 
+  /**
+   * 装饰器条件编辑器：结构和参数区共用同一套 conditionControl，所以「全部满足 / 任一满足」
+   * 会就地长出子条件行，不再退化成一段要手写的 JSON。上方那句中文回读是给新手的保险——
+   * 只要这句话读得通，条件就是对的。
+   */
   function conditionDecoratorControl(node: CompositeNode, decorator: DecoratorLike): UiNode {
-    const shell = el('div', 'condition-control');
-    const expression = decorator.expression;
-    const op = expression && typeof expression === 'object' && !Array.isArray(expression) ? Object.keys(expression)[0] : 'literal';
-    const choices = ['literal', 'exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'];
-    const labels: Record<string, string> = { literal: '固定条件', exists: '存在', eq: '等于', ne: '不等于', gt: '大于', gte: '大于等于', lt: '小于', lte: '小于等于', contains: '包含', and: '全部满足', or: '任一满足', not: '取反' };
-    shell.appendChild(selectInput(op, choices.map((value) => ({ value, label: labels[value] })), (next) => mutate(() => {
-      if (next === 'literal') decorator.expression = true;
-      else if (next === 'exists') decorator.expression = { exists: { ref: allRefs(node, undefined, true)[0] || '' } };
-      else if (next === 'and' || next === 'or') decorator.expression = { [next]: [true, true] };
-      else if (next === 'not') decorator.expression = { not: true };
-      else decorator.expression = { [next]: [{ ref: allRefs(node)[0] || '' }, null] };
-    }), 'when-op'));
-    if (op === 'literal') {
-      shell.classList.add('condition-literal');
-      const toggle = el('label', 'check-label');
-      toggle.appendChild(checkbox(!!expression, (value) => mutate(() => { decorator.expression = value; })));
-      toggle.appendChild(el('span', '', '满足条件'));
-      shell.appendChild(toggle);
-    } else if (op === 'exists') {
-      const ref = expression.exists && expression.exists.ref;
-      const refs = allRefs(node, undefined, true);
-      const options = ref && !refs.includes(ref) ? [ref, ...refs] : refs;
-      shell.appendChild(selectInput(ref || '', (options.length ? options : ['']).map((value) => ({ value, label: referenceLabel(value) })), (value) => mutate(() => { decorator.expression = { exists: { ref: value } }; }), 'full'));
-    } else if (['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains'].includes(op)) {
-      const refs = allRefs(node);
-      const operands = Array.isArray(expression[op]) ? expression[op] : [{ ref: refs[0] || '' }, null];
-      const left = operands[0] && operands[0].ref ? operands[0].ref : refs[0] || '';
-      const options = left && !refs.includes(left) ? [left, ...refs] : refs;
-      shell.appendChild(selectInput(left, (options.length ? options : ['']).map((value) => ({ value, label: referenceLabel(value) })), (value) => mutate(() => { decorator.expression[op][0] = { ref: value }; }), 'full'));
-      const right = textInput(JSON.stringify(operands[1]), (value) => { try { mutate(() => { decorator.expression[op][1] = JSON.parse(value); }); } catch { toast('比较值不是有效 JSON', true); } });
-      shell.appendChild(right);
-    } else {
-      const area = el('textarea', 'json-value');
-      area.value = JSON.stringify(expression, null, 2);
-      area.addEventListener('change', () => { try { const value = JSON.parse(area.value); mutate(() => { decorator.expression = value; }); } catch { toast('条件不是有效 JSON', true); } });
-      shell.appendChild(area);
-    }
+    const shell = el('div', 'decorator-condition');
+    const readback = el('div', 'condition-readback');
+    const refresh = () => {
+      const sentence = conditionSentence(decorator.expression);
+      readback.textContent = sentence;
+      readback.classList.toggle('hidden', !sentence);
+    };
+    refresh();
+    shell.appendChild(readback);
+    shell.appendChild(conditionControl(decorator.expression, (value) => mutate(() => {
+      decorator.expression = value;
+      refresh();
+    }), { node, allowLiteral: true }));
     return shell;
   }
 

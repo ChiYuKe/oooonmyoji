@@ -12,10 +12,13 @@ export interface SubworkflowDeps {
   $(id: string): HTMLElement;
   showMenu(...args: any[]): void;
   compactValue(value: any, limit?: number): string;
+  /** 引用路径 → 中文标签；缺省时回读里保留原始路径。 */
+  referenceLabel?(ref: string): string;
 }
 
 export function createSubworkflowHelpers(deps: SubworkflowDeps) {
   const { state, vscode, nodeById, $, showMenu, compactValue } = deps;
+  const referenceLabel = deps.referenceLabel || ((ref: string) => ref);
   /**
    * 工作流引用可以是卡片上的字面量，也可以是 workflow 类型变量。
    * 编辑期用变量默认值解析子工作流，这样输入面板和双击进入都能继续工作。
@@ -71,7 +74,10 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
 
   function decoratorLabel(decorator: any): string {
     if (!decorator) return 'Decorator';
-    if (decorator.type === 'condition') return `Condition · ${conditionSummary(decorator.expression)}`;
+    if (decorator.type === 'condition') {
+      const text = conditionToText(decorator.expression) || conditionSummary(decorator.expression);
+      return `Condition · ${compactValue(text, 60)}`;
+    }
     if (decorator.type === 'cooldown') return `Cooldown · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
     if (decorator.type === 'timeout') return `Time Limit · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
     if (decorator.type === 'retry') return `Retry · ${compactValue(decorator.attempts, 22)}${isBindingValue(decorator.attempts) ? '' : ' 次'}`;
@@ -87,5 +93,59 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
     return key ? key.toUpperCase() : '未配置';
   }
 
-  return { resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel, conditionSummary };
+  const CONDITION_VERBS: Record<string, string> = {
+    eq: '等于', ne: '不等于', gt: '大于', gte: '大于等于', lt: '小于', lte: '小于等于', contains: '包含',
+  };
+
+  /** 条件的最大解释深度；再深就停下来，避免病态嵌套把回读整句撑爆。 */
+  const CONDITION_MAX_DEPTH = 6;
+
+  function conditionOperandText(value: any, depth: number): string {
+    if (isBindingValue(value)) return referenceLabel(value.ref);
+    if (value === null || value === undefined) return '空';
+    if (typeof value === 'string') return `“${value}”`;
+    if (typeof value === 'object') return depth >= CONDITION_MAX_DEPTH ? '…' : JSON.stringify(value);
+    return String(value);
+  }
+
+  /**
+   * 把条件表达式读成一句中文，供详情面板回读和卡片摘要使用。
+   * 认不出来的结构返回空串，让调用方隐藏这一行——宁可不说，也不能说错。
+   */
+  function conditionToText(expression: any, depth = 0): string {
+    if (typeof expression === 'boolean') return expression ? '始终满足' : '始终不满足';
+    if (!expression || typeof expression !== 'object' || Array.isArray(expression)) return '';
+    if (depth >= CONDITION_MAX_DEPTH) return '';
+    const key = Object.keys(expression)[0];
+    if (!key) return '';
+    const operands = expression[key];
+    if (key === 'exists') return isBindingValue(operands) ? `${referenceLabel(operands.ref)} 存在` : '';
+    if (key === 'not') {
+      const inner = conditionToText(operands, depth + 1);
+      return inner ? `不是（${inner}）` : '';
+    }
+    if (key === 'and' || key === 'or') {
+      const parts = (Array.isArray(operands) ? operands : [])
+        .map((item: any) => conditionToText(item, depth + 1))
+        .filter(Boolean);
+      if (!parts.length) return '';
+      if (parts.length === 1) return parts[0];
+      return `（${parts.join(key === 'and' ? ' 并且 ' : ' 或者 ')}）`;
+    }
+    const verb = CONDITION_VERBS[key];
+    const pair = Array.isArray(operands) ? operands : [];
+    if (!verb || pair.length < 2) return '';
+    return `${conditionOperandText(pair[0], depth)} ${verb} ${conditionOperandText(pair[1], depth)}`;
+  }
+
+  /** 装饰器条件的中文回读整句；解释不了时返回空串。 */
+  function conditionSentence(expression: any): string {
+    const text = conditionToText(expression);
+    return text ? `当 ${text} 时执行` : '';
+  }
+
+  return {
+    resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference,
+    compositeSubtitle, decoratorLabel, conditionSummary, conditionToText, conditionSentence,
+  };
 }

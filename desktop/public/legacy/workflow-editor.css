@@ -985,6 +985,21 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .condition-operand > .ui-dropdown:first-child { width: 64px; flex: 0 0 auto; }
 .condition-operand > *:last-child { flex: 1 1 0; width: auto; }
 
+/* 条件回读：把当前条件读成一句中文，读得通就说明配对了。
+   刻意只用主题变量：明暗两套主题自动跟随，无需在生成的 editor-light.css 里加规则。
+   正文用 --ui-text 而不是 --warning：浅色主题下 #806323 配 12% 底色的对比度只有约 4.4:1，
+   11px 小字不够读；告警感交给左侧色条和底色就够了。 */
+.decorator-condition { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.condition-readback {
+  padding: 5px 7px;
+  border-left: 2px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, var(--ui-panel));
+  color: var(--ui-text);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* rect / 行内小按钮 */
 .rect-control { gap: 3px; }
 .rect-control input { padding: 2px 4px; }

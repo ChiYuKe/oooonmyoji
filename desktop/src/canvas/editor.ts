@@ -160,8 +160,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const RUN_CARD_W = 250;
   const RUN_CARD_BASE_H = 78;
   const RUN_VARIABLE_H = 24;
-  /** 清单声明了固定卡片的 Action：双行行样式（标签一行、值一行）的行高。 */
-  const CARD_ROW_H = 40;
+  /** 清单声明了固定卡片的 Action：左右单行控件的行高。 */
+  const CARD_ROW_H = 30;
   const RUN_CARD_GAP_X = 48;
   const RUN_CARD_GAP_Y = 92;
   const PREVIEW = { x: 174, y: 56, width: 72, height: 30 };
@@ -171,6 +171,12 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const VARIABLE_PIN_X = 10;
   /** 任务卡右侧「节点输出引用」口在节点内的 Y 偏移（表头中线）。 */
   const TASK_OUTPUT_PORT_Y = 16;
+  /**
+   * 「节点输出引用」口在节点内的 X 偏移：端点整体收在卡片右缘以内，
+   * 与参数行值框的右边距（`param-rows` 的 `nodeWidth - 12`）对齐，
+   * 不再半个圆挂在卡片外面。
+   */
+  const TASK_OUTPUT_PORT_X = NODE_W - 12;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'];
   const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
@@ -239,10 +245,11 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   /** 子流程 task（workflow.run）的引用解析与摘要，状态/模型层即可构建。 */
   const SubworkflowHelpers = createSubworkflowHelpers({
-    state, vscode, nodeById, $, showMenu, compactValue,
+    state, vscode, nodeById, $, showMenu, compactValue, referenceLabel,
   });
   const {
-    resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle, decoratorLabel,
+    resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle,
+    decoratorLabel, conditionSentence,
   } = SubworkflowHelpers;
 
   const History = createEditorHistory({
@@ -606,7 +613,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     worldPoint, captureConnectionPointer: (event) => captureConnectionPointer(event),
     nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
     variableCardWidth: VARIABLE_CARD_W, variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
-    taskOutputPortY: TASK_OUTPUT_PORT_Y,
+    taskOutputPortY: TASK_OUTPUT_PORT_Y, taskOutputPortX: TASK_OUTPUT_PORT_X,
   });
   const {
     renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection,
@@ -720,7 +727,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   const StudioCompositeInspector = createCompositeInspector({
     el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton,
-    conditionControl, conditionOperandControl, conditionParseLiteral, nodeChildrenOptions, nodeById,
+    conditionControl, conditionOperandControl, conditionParseLiteral, conditionSentence, nodeChildrenOptions, nodeById,
     mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state,
     decoratorLabel, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
   });
@@ -792,7 +799,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     groupIssueSummary: (groupId) => groupIssueSummary(groupId),
     nodeWarningCount: (id) => nodeWarningCount(id),
     nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
-    runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X, taskOutputPortY: TASK_OUTPUT_PORT_Y, preview: PREVIEW,
+    runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X,
+    taskOutputPortY: TASK_OUTPUT_PORT_Y, taskOutputPortX: TASK_OUTPUT_PORT_X, preview: PREVIEW,
   });
   const { renderNode, patchNodeRuntime } = NodeCard;
 
@@ -1139,7 +1147,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   }
 
   /**
-   * 每个节点自己的参数行高：声明了固定卡片的动作用双行行样式（标签一行、值一行）。
+   * 每个节点自己的参数行高：固定卡片的左右单行控件比普通摘要行略高。
    * nodeHeight、参数行几何、变量端点、连线与命中测试共用这一个公式。
    */
   function nodeRowHeight(node: any): number {
@@ -1392,7 +1400,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     const spec = nodeActionSpec(node);
     if (hasCardLayout(spec)) {
       const total = cardRowParams(spec)?.length ?? 0;
-      return { expanded: true, total, hidden: 0, fixed: true, twoLine: true };
+      return { expanded: true, total, hidden: 0, fixed: true, twoLine: false };
     }
     const total = spec && spec.parameters ? Object.keys(spec.parameters).length : 0;
     const expanded = paramRowsExpanded().has(node && node.id);

@@ -154,6 +154,8 @@ function harness() {
     decoratorHeight:22,
     runVariableHeight:24,
     variablePinX:10,
+    // 输出口收在卡片右缘以内（nodeWidth - 12），与编辑器里的 TASK_OUTPUT_PORT_X 一致。
+    taskOutputPortX:248,
     preview:{x:174,y:56,width:72,height:30},
   });
   ctx.renderNode=nodeCard.renderNode;
@@ -231,7 +233,7 @@ test('折叠组存在跨组输出引用时显示右侧代理输出口',()=>{
   const card=layer.children[0];
   const outputs=byClass(card,'port-out-reference');
   assert.equal(outputs.length,1);
-  assert.equal(outputs[0].attrs.cx,'260');
+  assert.equal(outputs[0].attrs.cx,'248');
   assert.equal(outputs[0].attrs.cy,'16');
 });
 
@@ -548,6 +550,7 @@ function rowHarness(options={}) {
     copySelection:()=>{},cutSelection:()=>{},deleteSelection:()=>{},
     typeIcons:ctx.TYPE_ICON,typeNames:ctx.TYPE_NAMES,runLabels:ctx.RUN_LABEL,
     nodeWidth:260,baseHeight:96,portRadius:7,decoratorHeight:22,runVariableHeight:24,variablePinX:10,
+    taskOutputPortX:248,
     preview:{x:174,y:56,width:72,height:30},
     compactValue:ctx.compactValue,
     paramRowInfo:info,
@@ -620,7 +623,7 @@ test('参数行点击分派：值区打开编辑器、勾选框切换、引脚�
   const referencePorts=byClass(card,'port-out-reference');
   assert.equal(byClass(card,'port-out').length,1);
   assert.equal(referencePorts.length,1);
-  assert.equal(referencePorts[0].attrs.cx,'260','输出口贴在卡片右侧');
+  assert.equal(referencePorts[0].attrs.cx,'248','输出口收在卡片右缘以内');
   assert.equal(referencePorts[0].attrs.cy,'16','输出口在表头中线');
   assert.equal(referencePorts[0].events.pointerdown.length,1);
   assert.equal(byClass(card,'port-in')[0].events.pointerdown.length,1);
@@ -686,7 +689,8 @@ test('折叠箭头显示隐藏数量并回调切换，未接入信息时不渲�
     requestInspector:()=>{},requestOpenSubWorkflow:()=>{},render:()=>{},contextMenuSuppressedByPan:()=>false,
     copySelection:()=>{},cutSelection:()=>{},deleteSelection:()=>{},typeIcons:legacy.ctx.TYPE_ICON,typeNames:legacy.ctx.TYPE_NAMES,
     runLabels:legacy.ctx.RUN_LABEL,nodeWidth:260,baseHeight:96,portRadius:7,decoratorHeight:22,runVariableHeight:24,
-    variablePinX:10,preview:{x:174,y:56,width:72,height:30},compactValue:legacy.ctx.compactValue});
+    variablePinX:10,preview:{x:174,y:56,width:72,height:30},compactValue:legacy.ctx.compactValue,
+    taskOutputPortX:248});
   const plainLayer=new legacy.Element('g');
   legacyRenderer.renderNode(plainLayer,rowNode);
   assert.equal(byClass(plainLayer.children[0],'param-rows-toggle').length,0);
@@ -903,7 +907,7 @@ test('固定卡片渲染成双行行样式：值行是可见输入框、无折�
     ['type-asset','type-duration','type-boolean','type-rect','type-number','type-boolean']);
   assert.equal(byClass(card,'variable-port-hit').length,6);
   assert.equal(byClass(card,'port-out').length,1,'任务卡右侧有节点输出引用口');
-  assert.equal(byClass(card,'port-out-reference')[0].attrs.cx,'260');
+  assert.equal(byClass(card,'port-out-reference')[0].attrs.cx,'248');
 });
 
 test('识别区域四格完整显示常见四位坐标，不产生省略号',()=>{

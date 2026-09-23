@@ -59,6 +59,7 @@ function harness(nodes, options = {}) {
     variableCardPortY: 29,
     variablePinX: 10,
     taskOutputPortY: 16,
+    taskOutputPortX: 248,
   });
   return {state, edges, calls, layer: fakeNode('g')};
 }
@@ -487,7 +488,7 @@ test('折叠组上的引用边连接可见组卡，但断开仍作用于真实�
   h.edges.renderReferenceEdges(h.layer);
 
   const visible = h.layer.children.find((child) => child.attrs.class.includes('reference-edge data-tone-'));
-  assert.match(visible.attrs.d, /^M 260 16 /, '引用从可见的组外来源输出口出发');
+  assert.match(visible.attrs.d, /^M 248 16 /, '引用从可见的组外来源输出口出发');
   assert.match(visible.attrs.d, /, 410 308$/, '引用落到组卡代理参数端点');
   const hit = h.layer.children.find((child) => child.attrs.class === 'reference-edge-hit');
   hit.fire('pointerdown', {altKey: true, clientX: 10, clientY: 10});
@@ -509,7 +510,7 @@ test('引用源折叠在组内时从组卡输出口连到组外参数', () => {
   h.edges.renderReferenceEdges(h.layer);
 
   const visible = h.layer.children.find((child) => child.attrs.class.includes('reference-edge data-tone-'));
-  assert.match(visible.attrs.d, /^M 260 16 /, '隐藏的真实来源由组卡右侧输出口代理');
+  assert.match(visible.attrs.d, /^M 248 16 /, '隐藏的真实来源由组卡右侧输出口代理');
   assert.match(visible.attrs.d, /, 410 308$/);
 });
 
@@ -524,7 +525,7 @@ test('节点拖动时引用线同时跟随输出源和参数目标', () => {
   positions.tap = {x: 100, y: 50};
   assert.equal(h.edges.patchNodeDataEdges('tap'), 1);
   assert.notEqual(visible.attrs.d, initial, '移动输出源后起点应更新');
-  assert.match(visible.attrs.d, /^M 360 66 /);
+  assert.match(visible.attrs.d, /^M 348 66 /);
 
   positions.use = {x: 700, y: 400};
   assert.equal(h.edges.patchNodeDataEdges('use'), 1);

@@ -81,6 +81,8 @@ export interface EdgesDeps {
   variablePinX: number;
   /** 任务卡右侧输出口在节点内的 Y 偏移（表头中线）。 */
   taskOutputPortY: number;
+  /** 任务卡右侧输出口在节点内的 X 偏移（收在卡片右缘以内）。默认贴右缘。 */
+  taskOutputPortX?: number;
 }
 
 export interface CanvasEdges {
@@ -127,6 +129,8 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     disconnectReferenceFromPin, referenceSourceById,
   } = deps;
   const rowHeightOf = deps.nodeRowHeight ?? (() => runVariableHeight);
+  /** 输出口横向位置：与卡片渲染共用同一份「节点内偏移」，两边永远同一个点。 */
+  const referencePortX = deps.taskOutputPortX ?? nodeWidth;
 
   /**
    * 已挂载连线的元素索引：`patchEdge` 用它做局部更新，不必查询 DOM。
@@ -540,7 +544,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   /** 任务卡右侧输出口的世界坐标。 */
   function referencePortPosition(node: any): EdgePoint {
     const pos = position(node);
-    return { x: pos.x + nodeWidth, y: pos.y + taskOutputPortY };
+    return { x: pos.x + referencePortX, y: pos.y + taskOutputPortY };
   }
 
   /**

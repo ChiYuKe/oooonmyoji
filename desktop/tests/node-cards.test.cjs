@@ -729,15 +729,17 @@ test('固定长度数组在固定卡片上拆成并排的输入格',()=>{
   assert.deepEqual(values.slice(0,2).map(node=>node.attrs.x),['31','88.5']);
   assert.deepEqual(values.slice(0,2).map(node=>node.attrs['text-anchor']),['start','start']);
   assert.deepEqual(values.slice(0,2).map(node=>node.children[0].textContent),['随机间隔（秒） 第 1 项','随机间隔（秒） 第 2 项']);
-  // 整行一个热区（点哪一格都开同一个行内编辑器），且不画 ›：它是直接在卡片上改的。
+  // 两格各有热区，悬停只点亮所在格；点击第二格会聚焦第二个输入框。
   const hits=byClass(card,'param-row-hit');
-  assert.deepEqual(hits.map(node=>node.attrs['data-param']),['random_interval','disappeared_states']);
-  assert.deepEqual(hits.map(node=>node.attrs.width),['111','111'],'热区就是一格值框：数组的两个小格都在里面');
+  assert.deepEqual(hits.map(node=>node.attrs['data-param']),['random_interval','random_interval','disappeared_states']);
+  assert.deepEqual(hits.map(node=>node.attrs.x),['22','79.5','22']);
+  assert.deepEqual(hits.map(node=>node.attrs.width),['53.5','53.5','111']);
   assert.equal(byClass(card,'param-row-caret').length,1,'只有去详情栏的对象数组画 ›');
-  assert.deepEqual(hits.map(node=>node.attrs.class.includes('kind-picker')),[false,true],'去详情栏的行是手型光标');
-  hits[0].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:40,clientY:120});
+  assert.deepEqual(hits.map(node=>node.attrs.class.includes('kind-picker')),[false,false,true],'去详情栏的行是手型光标');
+  hits[1].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:95,clientY:120});
   assert.deepEqual(calls.editors.map(request=>request.pin.param),['random_interval']);
   assert.equal(calls.editors[0].valueAlign,'left');
+  assert.equal(calls.editors[0].inputIndex,1);
   // 长度不定的对象数组仍然是一个虚线框、点击去详情栏。
   const complexField=byClass(card,'param-row-field').find(node=>node.attrs.class.includes('goes-inspector'));
   assert.ok(complexField,'长度不定的数组仍是虚线框');
@@ -773,6 +775,37 @@ test('校验错误的行标红：参数级标在那一行，节点级标在卡�
   assert.equal(byClass(card,'node-error-dot')[0].attrs.r,'4');
   const groupTitle=card.children.find((child)=>child.tag==='title');
   assert.match(groupTitle.textContent,/Task 必须定义 Action/);
+});
+
+test('固定卡片按左名称右控件排布，区域编辑保留四坐标宽度',()=>{
+  const {ctx,Element,calls,renderer}=rowHarness({nodeRowHeight:()=>30,paramRowInfo:()=>({expanded:true,total:6,hidden:0,fixed:true,twoLine:false})});
+  ctx.nodeHeight=(node)=>96+(node.pins||[]).length*30;
+  const layer=new Element('g');
+  renderer.renderNode(layer,fixedCardNode);
+  const card=layer.children[0];
+  assert.equal(byClass(card,'card-body')[0].attrs.height,'276');
+  assert.deepEqual(byClass(card,'port-variable').map(node=>node.attrs.cy),['111','141','171','201','231','261']);
+  const labels=byClass(card,'param-row-label');
+  const values=byClass(card,'param-row-value');
+  assert.deepEqual(labels.map(node=>node.attrs.x),Array(6).fill('22'));
+  assert.deepEqual(labels.map(node=>node.attrs.y),['115','145','175','205','235','265']);
+  assert.deepEqual(values.map(node=>node.attrs.y),labels.map(node=>node.attrs.y));
+  assert.deepEqual(values.map(node=>node.textContent),['battle.png','未设置','等待出现','60,120 200×80','0.85','关闭']);
+  const fields=byClass(card,'param-row-field');
+  assert.deepEqual(fields.map(node=>node.attrs.x),Array(6).fill('151'));
+  assert.deepEqual(fields.map(node=>node.attrs.width),Array(6).fill('97'));
+  assert.deepEqual(fields.map(node=>node.attrs.height),Array(6).fill('20'));
+  assert.equal(byClass(card,'param-row-rect-cell').length,0);
+  const hits=byClass(card,'param-row-hit');
+  assert.deepEqual(hits.map(node=>node.attrs.x),Array(6).fill('151'));
+  hits[3].events.click[0]({preventDefault:()=>{},stopPropagation:()=>{},clientX:200,clientY:200});
+  assert.deepEqual(calls.editors[0].rect,{x:22,y:191,width:226,height:20});
+  assert.equal(calls.editors[0].valueAlign,'left');
+  const tupleLayer=new Element('g');
+  renderer.renderNode(tupleLayer,tupleCardNode);
+  const tupleCells=byClass(tupleLayer.children[0],'param-row-cell');
+  assert.deepEqual(tupleCells.map(node=>node.attrs.x),['151','201.5']);
+  assert.deepEqual(tupleCells.map(node=>node.attrs.width),['46.5','46.5']);
 });
 
 test('固定卡片渲染成双行行样式：值行是可见输入框、无折叠箭头、布尔带状态文案',()=>{

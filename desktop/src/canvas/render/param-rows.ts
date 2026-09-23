@@ -179,13 +179,33 @@ export function paramRowGeometry(options: {
   rowHeight: number;
   index: number;
   pinX?: number;
-  /** 双行行样式：标签一行、值一行（值行是可见的输入框/控件）。 */
+  /** 双行行样式：标签一行、值一行（保留供旧卡片使用）。 */
   twoLine?: boolean;
+  /** 固定卡片的左右单行样式：左标签、右输入框。 */
+  boxedInline?: boolean;
 }): ParamRowGeometry {
   const { nodeWidth, baseHeight, rowHeight, index } = options;
   const pinX = options.pinX ?? 10;
   const y = baseHeight + index * rowHeight;
   const valueRight = nodeWidth - 12;
+  if (options.boxedInline) {
+    const labelX = pinX + 12;
+    const valueLeft = Math.round(nodeWidth * .58);
+    const baseline = y + rowHeight / 2 + 4;
+    return {
+      y,
+      centerY: y + rowHeight / 2,
+      portX: pinX,
+      labelX,
+      labelWidth: Math.max(24, valueLeft - labelX - 6),
+      valueLeft,
+      valueRight,
+      valueWidth: Math.max(24, valueRight - valueLeft),
+      hit: { x: valueLeft, y: y + 5, width: Math.max(24, valueRight - valueLeft), height: rowHeight - 10 },
+      labelY: baseline,
+      valueY: baseline,
+    };
+  }
   if (options.twoLine) {
     const labelX = pinX + 12;
     // 值行是一个可见的输入框/控件：行内浮层就贴在同一个矩形上，点上去像「框获得焦点」。

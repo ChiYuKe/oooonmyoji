@@ -82,8 +82,3 @@ export function cardRowToggleLabels(
   const offLabel = row && typeof row.off_label === 'string' && row.off_label.trim() ? row.off_label.trim() : off;
   return { on: onLabel, off: offLabel };
 }
-
-/** 声明了卡片的节点用双行行样式（标签一行、值一行），行高与单行样式不同。 */
-export function cardRowUsesTwoLine(spec: CardActionSpec | null | undefined): boolean {
-  return hasCardLayout(spec);
-}

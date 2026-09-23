@@ -33,7 +33,7 @@ function harness(catalog) {
     catalogByName: (name) => catalog.find((item) => item.name === name),
     fieldLabel: (name) => ({ template: '模板', timeout_seconds: '超时（秒）' }[name] || name),
     workflowNodeInputs: () => [], nextVariableCardId: () => '', workflowReference: () => '',
-    nodeRowHeight: () => 40,
+    nodeRowHeight: () => 30,
   });
   context.paramRowNames = model.paramRowNames;
   context.nodeVariablePins = model.nodeVariablePins;
@@ -45,9 +45,9 @@ const WAIT_TEMPLATE = {
   name: 'vision.wait_template',
   parameters: {
     template: { type: 'asset', required: true },
-    timeout_seconds: { type: 'duration', required: true, min: 0 },
+    timeout_seconds: { type: 'duration', default: 10, min: 0 },
     present: { type: 'boolean', default: true },
-    roi: { type: 'rect' },
+    roi: { type: 'rect', default: [0, 0, 1920, 1080] },
     threshold: { type: 'number', default: 0.85 },
     scale_search: { type: 'boolean', default: false },
   },
@@ -118,8 +118,9 @@ test('声明卡片的节点按清单顺序给端点，忽略展开状态', () =>
     ['template', 'timeout_seconds', 'present', 'roi', 'threshold', 'scale_search']);
   assert.deepEqual(pins.map((pin) => pin.type), ['asset', 'duration', 'boolean', 'rect', 'number', 'boolean']);
   // 已配置状态与必填标记仍然来自节点参数，不是卡片声明。
+  // 超时现在带默认值（10 秒），所以不再是必填；模板是唯一必填项。
   assert.deepEqual(pins.map((pin) => pin.configured), [true, false, false, false, false, false]);
-  assert.deepEqual(pins.map((pin) => pin.required), [true, true, false, false, false, false]);
+  assert.deepEqual(pins.map((pin) => pin.required), [true, false, false, false, false, false]);
   // 布尔行的两种状态名跟着声明走，卡片才能显示「等待出现 / 等待消失」。
   const present = pins.find((pin) => pin.param === 'present');
   assert.equal(present.onLabel, '等待出现');
@@ -141,9 +142,9 @@ test('没声明卡片的动作保持「必填 + 已配置」的旧行为', () =>
 test('端点位置用节点自己的行高，固定卡片不会与连线错位', () => {
   const context = harness([WAIT_TEMPLATE]);
   const node = { id: 't', type: 'task', action: 'vision.wait_template', params: {} };
-  // 位置与渲染共用同一个 rowHeight=40：第 3 行中心 = 96 + 2*40 + 20。
-  assert.deepEqual(context.variablePinPosition(node, 2), { x: 10, y: 196 });
-  assert.deepEqual(context.variablePinPosition(node, 5), { x: 10, y: 316 });
+  // 左右布局的行高为 30；第 3 行中心 = 96 + 2*30 + 15。
+  assert.deepEqual(context.variablePinPosition(node, 2), { x: 10, y: 171 });
+  assert.deepEqual(context.variablePinPosition(node, 5), { x: 10, y: 261 });
 });
 
 test('内置 manifest 的卡片声明引用真实参数并覆盖全部必填参数', () => {
@@ -197,8 +198,8 @@ test('等待模板的卡片就是用户指定的六个端点', () => {
   const pins = Array.from(context.nodeVariablePins(node));
   assert.deepEqual(pins.map((pin) => Rows.paramEditorAction(pin)),
     ['asset-menu', 'input', 'toggle', 'roi-menu', 'input', 'toggle']);
-  // 值文本按类型给出可读形式。
+  // 值文本按类型给出可读形式；没配置的走清单默认值（超时 10 秒、识别区域整屏）。
   const compact = (value, max = 18) => String(value ?? '').slice(0, max);
   assert.deepEqual(pins.map((pin) => Rows.paramRowValueView(pin, compact).text),
-    ['未设置', '未设置', 'true', '未设置', '0.85', 'false']);
+    ['未设置', '10s', 'true', '0,0 1920×1080', '0.85', 'false']);
 });

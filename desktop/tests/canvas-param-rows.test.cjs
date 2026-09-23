@@ -106,7 +106,19 @@ test('paramRowEditable 放行标量、资源、区域与固定长度数组，只
   for (const kind of ['complex']) assert.equal(rows.paramRowEditable(kind), false, kind);
 });
 
-test('paramRowGeometry 支持固定卡片的双行行样式', () => {
+test('固定卡片的标签与值框在同一行，端点居中', () => {
+  const first = rows.paramRowGeometry({ nodeWidth: 260, baseHeight: 96, rowHeight: 30, index: 0, boxedInline: true });
+  const second = rows.paramRowGeometry({ nodeWidth: 260, baseHeight: 96, rowHeight: 30, index: 1, boxedInline: true });
+  assert.equal(first.labelY, first.valueY);
+  assert.equal(first.centerY, 111);
+  assert.equal(first.labelX, 22);
+  assert.equal(first.labelWidth, 123);
+  assert.deepEqual(first.hit, { x: 151, y: 101, width: 97, height: 20 });
+  assert.equal(second.centerY - first.centerY, 30);
+  assert.equal(first.hit.x + first.hit.width, first.valueRight);
+});
+
+test('paramRowGeometry 支持旧卡片的双行行样式', () => {
   const base = 96;
   const rowHeight = 40;
   const first = rows.paramRowGeometry({ nodeWidth: 260, baseHeight: base, rowHeight, index: 0, twoLine: true });

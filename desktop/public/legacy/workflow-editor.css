@@ -212,7 +212,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
   overflow: hidden;
   background-color: var(--bg);
   background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-size: var(--canvas-grid-size, 24px) var(--canvas-grid-size, 24px);
+  background-position: var(--canvas-grid-pan-x, 0px) var(--canvas-grid-pan-y, 0px);
 }
 #graph { width: 100%; height: 100%; display: block; user-select: none; touch-action: none; }
 #viewport-tools {

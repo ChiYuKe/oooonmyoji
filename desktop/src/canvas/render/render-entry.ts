@@ -556,6 +556,12 @@ export function createRenderEntry(deps: RenderEntryDeps) {
       const viewportKey = `${state.panX},${state.panY},${state.zoom}`;
       if (viewportKey !== lastViewportKey) {
         lastViewportKey = viewportKey;
+        const gridStyle = wrap.style;
+        if (gridStyle && typeof gridStyle.setProperty === 'function') {
+          gridStyle.setProperty('--canvas-grid-size', `${24 * state.zoom}px`);
+          gridStyle.setProperty('--canvas-grid-pan-x', `${state.panX}px`);
+          gridStyle.setProperty('--canvas-grid-pan-y', `${state.panY}px`);
+        }
         deps.recordViewportSoon?.();
       }
     }

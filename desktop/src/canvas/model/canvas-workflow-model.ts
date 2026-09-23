@@ -412,12 +412,74 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   /** 卡片渲染/测试可覆盖端点计算；默认使用本地实现。 */
   const nodeVariablePins = deps.nodeVariablePins ?? nodeVariablePinsDefault;
 
+  /**
+   * 端点连接状态：扫一遍文档反推出「哪些节点的输出被引用」「哪些变量被用到」。
+   *
+   * 引用文本自带来源（`nodes.<id>.output[.字段]`、`inputs.X`、`variables.X`），所以不需要
+   * 额外的连线记录，也不会和文档不同步。两处扫描刻意**各自对齐实际画出来的线**：
+   * - 输出引用只看节点的参数行，因为 `renderReferenceEdges` 也只扫参数行；
+   * - 变量连实例卡输入也算，因为 `renderVariableEdges` 会为 `runs[].inputs` 画线。
+   * 按文档版本缓存：卡片渲染每帧都要问端点连没连，全图扫描不能每帧做。
+   */
+  let portLinkVersion = -1;
+  let portLinkOutputs = new Set<string>();
+  let portLinkVariables = new Set<string>();
+  function portLinks(): void {
+    const version = Number(state.docVersion || 0);
+    if (version === portLinkVersion) return;
+    const outputs = new Set<string>();
+    const variables = new Set<string>();
+    const collect = (reference: unknown): void => {
+      const ref = typeof reference === 'string' ? reference : '';
+      if (!ref) return;
+      const output = /^nodes\.([^\.]+)\.output(?:\.|$)/.exec(ref);
+      if (output) {
+        outputs.add(output[1]);
+        return;
+      }
+      const variable = /^(inputs|variables)\.([^\.]+)/.exec(ref);
+      if (variable) variables.add(`${variable[1]}.${variable[2]}`);
+    };
+    for (const node of nodes()) {
+      if (!node) continue;
+      for (const pin of nodeVariablePins(node) || []) {
+        const value = pin && pin.value;
+        if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') collect(value.ref);
+      }
+    }
+    for (const runCard of instanceRunCards()) {
+      const inputs = runCard.run && typeof runCard.run.inputs === 'object' && !Array.isArray(runCard.run.inputs)
+        ? runCard.run.inputs
+        : {};
+      for (const variable of runCard.variables || []) {
+        const value = inputs[variable.name];
+        if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string') collect(value.ref);
+      }
+    }
+    portLinkVersion = version;
+    portLinkOutputs = outputs;
+    portLinkVariables = variables;
+  }
+
+  /** 任务卡的「节点输出引用」口是否已经连出去：连了画实心，没连是空心环。 */
+  function outputReferenced(nodeId: string): boolean {
+    portLinks();
+    return portLinkOutputs.has(String(nodeId));
+  }
+
+  /** 变量卡片的输出口是否已经连出去（有没有端点或实例卡输入引用这个变量）。 */
+  function variableInUse(scope: string, name: string): boolean {
+    portLinks();
+    return portLinkVariables.has(`${scope === 'variables' ? 'variables' : 'inputs'}.${name}`);
+  }
+
   return {
     variableTypeOf, nodeVariablePins, collectNodeCardVariableRefs, variableCardPosition, inputParameterNames, paramRowNames,
     paramRowsExpanded: () => paramRowsExpandedSet(state),
     syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition, variableCompatibleWithPin,
     variableCompatibleWithInstanceInput, workflowDescriptor, workflowInputs, instanceRunCards, instanceRunInputPosition,
     nodeOutputFields, referenceCompatibleWithPin, referenceFieldsForPin, referenceDisplayName,
+    outputReferenced, variableInUse,
   };
 }
 

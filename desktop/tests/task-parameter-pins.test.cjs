@@ -5,7 +5,7 @@ const vm = require('node:vm');
 function harness() {
   let context;
   context = vm.createContext({
-    state: { raw: { _inputParams: {} }, catalog: [] },
+    state: { raw: { _inputParams: {} }, catalog: [], nodes: [], docVersion: 0 },
     catalogByName: (name) => context.state.catalog.find((item) => item.name === name),
     workflowNodeInputs: () => [],
     variableTypeOf: () => 'any',
@@ -19,7 +19,7 @@ function harness() {
     },
   }];
   const model = require('../dist-test-renderer/canvas/model/canvas-workflow-model.js').createCanvasWorkflowModel({
-    state: context.state, Model: {}, VariableSystem: {}, nodes: () => [], position: () => ({ x: 0, y: 0 }),
+    state: context.state, Model: {}, VariableSystem: {}, nodes: () => context.state.nodes, position: () => ({ x: 0, y: 0 }),
     variableCards: () => ({}), compatibleRefType: () => true, definitionSchema: definition => definition, nodeHeight: () => 0,
     baseHeight: 96, nodeWidth: 260, decoHeight: 22, variableCardWidth: 168, variableCardHeight: 58,
     variableCardPortY: 29, variablePinX: 10, runCardWidth: 250, runCardBaseHeight: 78, runVariableHeight: 24,
@@ -32,6 +32,8 @@ function harness() {
   context.nodeVariablePins = model.nodeVariablePins;
   context.paramRowNames = model.paramRowNames;
   context.paramRowsExpanded = model.paramRowsExpanded;
+  context.outputReferenced = model.outputReferenced;
+  context.variableInUse = model.variableInUse;
   return context;
 }
 
@@ -181,4 +183,33 @@ test('子工作流输入行用子工作流声明的显示名，不是自动生�
   const plain = Array.from(fallback.nodeVariablePins({ id: 'capture', type: 'task', action: 'workflow.run', params: { inputs: {} } }));
   assert.equal(plain[0].label, 'v_plain');
   assert.equal(plain[0].configured, false);
+});
+
+test('端点连接状态：输出被谁引用、变量有没有人在用', () => {
+  const context = harness();
+  context.state.nodes = [
+    { id: 'scan', type: 'task', action: 'core.log', params: {} },
+    { id: 'tap', type: 'task', action: 'core.log', params: { message: { ref: 'nodes.scan.output.message' }, fields: { ref: 'inputs.计数' } } },
+  ];
+  context.state.docVersion = 1;
+  assert.equal(context.outputReferenced('scan'), true, '有节点把 scan 的输出引用了');
+  assert.equal(context.outputReferenced('tap'), false, '没人引用 tap 的输出');
+  assert.equal(context.variableInUse('inputs', '计数'), true, '有端点绑着这个变量');
+  assert.equal(context.variableInUse('inputs', '没人用'), false);
+  assert.equal(context.variableInUse('variables', '计数'), false, '同名也要区分作用域');
+});
+
+test('端点连接状态按文档版本缓存：同一版本内不重扫全图', () => {
+  const context = harness();
+  context.state.nodes = [{ id: 'scan', type: 'task', action: 'core.log', params: {} }];
+  context.state.docVersion = 1;
+  assert.equal(context.outputReferenced('scan'), false);
+  // 不 bump docVersion 就改文档：缓存照旧（卡片渲染每帧都要问一次，不能每帧重扫）。
+  context.state.nodes = [
+    { id: 'scan', type: 'task', action: 'core.log', params: {} },
+    { id: 'tap', type: 'task', action: 'core.log', params: { message: { ref: 'nodes.scan.output.message' } } },
+  ];
+  assert.equal(context.outputReferenced('scan'), false, '同一版本内直接用缓存');
+  context.state.docVersion = 2;
+  assert.equal(context.outputReferenced('scan'), true, '文档版本一变就重算');
 });

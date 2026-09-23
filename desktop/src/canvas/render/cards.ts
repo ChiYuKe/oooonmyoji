@@ -71,6 +71,8 @@ export interface CardsDeps {
   removeInstanceRun(node: any, index: number): void;
   removeVariableCard(id: string): void;
   setVariableCardSelection(ids: unknown): void;
+  /** 变量卡片的输出口是否已经连出去（有没有端点或实例卡输入引用这个变量）。 */
+  variableInUse?(scope: string, name: string): boolean;
   /** 当前文档的变量卡片列表（含位置），用于记录整组拖拽的起点。 */
   variableCardList(): CardsVariableCard[];
   worldPoint(event: { clientX: number; clientY: number }): { x: number; y: number };
@@ -99,6 +101,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     openPortContextMenu, showMenu, instanceRunPinMenuItems, variableCardPortMenuItems, requestInspector,
     requestOpenWorkflowReference, openWorkflowBrowser, render, contextMenuSuppressedByPan, removeInstanceRun, removeVariableCard,
     setVariableCardSelection, variableCardList, worldPoint, snapshot,
+    variableInUse,
     runCardWidth, runCardBaseHeight, runVariableHeight, portRadius,
     variableCardWidth, variableCardHeight, variableCardPortY,
   } = deps;
@@ -244,7 +247,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
       const swatch = paramColorSwatch(live ? value : definition.default);
       if (swatch) svgEl('rect', { class: 'variable-card-swatch', x: variableCardWidth - 66, y: 41, width: 8, height: 8, rx: 2, fill: swatch }, group);
     }
-    svgEl('circle', { class: `port port-variable-out type-${type} data-tone-${tone}`, style: toneStyle, cx: variableCardWidth, cy: variableCardPortY, r: portRadius - 2.5 }, group);
+    svgEl('circle', { class: `port port-variable-out type-${type} data-tone-${tone}${variableInUse?.(card.scope, card.name) ? ' connected' : ''}`, style: toneStyle, cx: variableCardWidth, cy: variableCardPortY, r: portRadius - 2.5 }, group);
     svgEl('path', {
       class: 'port-glyph port-glyph-data', style: toneStyle,
       d: dataPinArrow(variableCardWidth, variableCardPortY, portRadius - 2.5),

@@ -96,6 +96,7 @@ function harness() {
     removeVariableCard:(...args)=>ctx.removeVariableCard?.(...args),
     setVariableCardSelection:(ids)=>ctx.setVariableCardSelection?.(ids),
     variableCardList:()=>model.variableCardList(),
+    variableInUse:(scope,name)=>ctx.variableInUse?.(scope,name) ?? false,
     worldPoint:(event)=>({x:event.clientX,y:event.clientY}),
     snapshot:()=>JSON.stringify(ctx.state.raw),
     runCardWidth:250,runCardBaseHeight:78,runVariableHeight:24,portRadius:7,
@@ -156,6 +157,8 @@ function harness() {
     variablePinX:10,
     // 输出口收在卡片右缘以内（nodeWidth - 12），与编辑器里的 TASK_OUTPUT_PORT_X 一致。
     taskOutputPortX:248,
+    // 输出口连没连：默认没连（空心环），用例按需注入。
+    outputReferenced:(nodeId)=>ctx.outputReferenced?.(nodeId) ?? false,
     preview:{x:174,y:56,width:72,height:30},
   });
   ctx.renderNode=nodeCard.renderNode;
@@ -551,6 +554,8 @@ function rowHarness(options={}) {
     typeIcons:ctx.TYPE_ICON,typeNames:ctx.TYPE_NAMES,runLabels:ctx.RUN_LABEL,
     nodeWidth:260,baseHeight:96,portRadius:7,decoratorHeight:22,runVariableHeight:24,variablePinX:10,
     taskOutputPortX:248,
+    // 输出口连没连：默认没连（空心环），用例按需注入 ctx.outputReferenced。
+    outputReferenced:(nodeId)=>ctx.outputReferenced?.(nodeId) ?? false,
     preview:{x:174,y:56,width:72,height:30},
     compactValue:ctx.compactValue,
     paramRowInfo:info,
@@ -627,6 +632,31 @@ test('参数行点击分派：值区打开编辑器、勾选框切换、引脚�
   assert.equal(referencePorts[0].attrs.cy,'16','输出口在表头中线');
   assert.equal(referencePorts[0].events.pointerdown.length,1);
   assert.equal(byClass(card,'port-in')[0].events.pointerdown.length,1);
+  assert.equal(referencePorts[0].attrs.class.includes('connected'),false,'没有引用时是空心环');
+});
+test('输出口按连接状态切换：没连出去是空心环，连出去才填满',()=>{
+  const {ctx,Element,renderer}=rowHarness();
+  const layer=new Element('g');
+  renderer.renderNode(layer,rowNode);
+  assert.equal(byClass(layer.children[0],'port-out-reference')[0].attrs.class.includes('connected'),false,'没人引用时中空');
+  // 有节点引用了这个节点的输出之后，同一个口要变成实心（与输入口「连接即填满」同一套语言）。
+  ctx.outputReferenced=(nodeId)=>nodeId==='tap';
+  const wired=new Element('g');
+  renderer.renderNode(wired,rowNode);
+  const port=byClass(wired.children[0],'port-out-reference')[0];
+  assert.equal(port.attrs.class.includes('connected'),true,'被引用后填满');
+  assert.equal(port.attrs.cx,'248','连接状态只改样式，不动端点位置');
+});
+test('变量卡输出口按「这个变量有没有人在用」切换中空与填满',()=>{
+  const {ctx,Element}=harness();
+  ctx.state.raw.inputs={v_used:{type:'integer',default:0},v_idle:{type:'integer',default:0}};
+  ctx.variableInUse=(scope,name)=>scope==='inputs'&&name==='v_used';
+  const idle=new Element('g');
+  ctx.renderVariableCard(idle,{name:'v_idle',scope:'inputs',id:'v_idle',x:0,y:0});
+  assert.equal(byClass(idle.children[0],'port-variable-out')[0].attrs.class.includes('connected'),false,'没人用这个变量时中空');
+  const used=new Element('g');
+  ctx.renderVariableCard(used,{name:'v_used',scope:'inputs',id:'v_used',x:0,y:0});
+  assert.equal(byClass(used.children[0],'port-variable-out')[0].attrs.class.includes('connected'),true,'有人在用就填满');
 });
 const typeRowNode={id:'types',type:'task',name:'新类型参数',action:'studio.preview_types',params:{realm_popup_close_point:{x:960,y:540},tint:'#ff8c3a',wait_for:'any',stable_seconds:1.5,keycode:'BACK'},pins:[
   {param:'realm_popup_close_point',label:'结界弹窗关闭位置',type:'point',configured:true,value:{x:960,y:540},definition:{type:'point'}},
@@ -940,16 +970,26 @@ test('task categories have distinct, stable identities and reach the rendered SV
   const local=new Map();
   css.walkRules(rule=>{if(rule.selector==='.studio-card')rule.walkDecls(d=>local.set(d.prop,d.value));});
   for(const token of ['--card-bg','--card-head','--card-text','--card-muted','--success','--danger','--warning']) assert(local.has(token),token+' must be owned by cards, not inherited from the theme');
-  // 端点按数据身份着色：已有字面量用同色浅填充，已绑定用实心；invalid 仍覆盖成危险色。
+  // 端点按数据身份着色：未连接是中空粗环，连接后整颗填满（仍是同一个身份色）；invalid 仍覆盖成危险色。
   let configuredUsesIdentityColor=false, invalidOverrides=false;
+  let hollowRing=false, thickRing=false, connectedFills=false;
   css.walkRules(rule=>{
     if(!rule.selector.includes('.port-variable'))return;
     const decls=new Map();rule.walkDecls(d=>decls.set(d.prop,d.value));
     if(/\.configured/.test(rule.selector)){configuredUsesIdentityColor=Boolean(decls.get('fill')?.includes('--data-tone')&&decls.get('stroke')?.includes('--data-tone'));}
     if(/\.invalid/.test(rule.selector))invalidOverrides=decls.get('fill')?.includes('--danger')??false;
+    // 中空那一档：数据端点的基础规则（不带状态类）用卡身底色填中间，并且环要够厚。
+    if(!/\.configured|\.bound|\.connected|\.invalid/.test(rule.selector)){
+      if(decls.get('fill')?.includes('--card-bg'))hollowRing=true;
+      if(Number(decls.get('stroke-width'))>=2)thickRing=true;
+    }
+    if(/\.connected/.test(rule.selector))connectedFills=Boolean(decls.get('fill')?.includes('--data-tone'));
   });
-  assert(configuredUsesIdentityColor,'.configured 要用数据身份色做浅填充与描边');
+  assert(configuredUsesIdentityColor,'.configured 要用数据身份色做填充与描边');
   assert(invalidOverrides,'.invalid 仍要把端点标红');
+  assert(hollowRing,'未连接的数据端点中间要中空（卡身底色）');
+  assert(thickRing,'数据端点的环要厚：stroke-width 不小于 2');
+  assert(connectedFills,'连出去的输出口（.connected）要整颗填满身份色');
   // 卡面跟随当前界面主题；分类色落在标题带上（否则分类看不出来）。两者都要在 .studio-card 里声明。
   assert.match(local.get('--card-bg'),/var\(--ui-panel/,'卡面底色应跟随界面主题');
   assert.match(local.get('--card-head'),/var\(--ui-surface/,'标题带底色应跟随界面主题');

@@ -288,6 +288,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeVariablePins, collectNodeCardVariableRefs, variableCardPosition, paramRowsExpanded, nodeOutputFields,
     referenceFieldsForPin, referenceDisplayName, syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition,
     variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards, instanceRunInputPosition,
+    outputReferenced, variableInUse,
   } = CanvasWorkflowModel;
   workflowInputs = CanvasWorkflowModel.workflowInputs;
 
@@ -753,6 +754,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     openPortContextMenu, showMenu, instanceRunPinMenuItems, variableCardPortMenuItems, requestInspector,
     requestOpenWorkflowReference, openWorkflowBrowser, render, contextMenuSuppressedByPan,
     removeInstanceRun, removeVariableCard, setVariableCardSelection, variableCardList, worldPoint, snapshot,
+    variableInUse,
     runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H, portRadius: PORT_R,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H, variableCardPortY: VARIABLE_CARD_PORT_Y,
   });
@@ -806,7 +808,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeWarningCount: (id) => nodeWarningCount(id),
     nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
     runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X,
-    taskOutputPortY: TASK_OUTPUT_PORT_Y, taskOutputPortX: TASK_OUTPUT_PORT_X, preview: PREVIEW,
+    taskOutputPortY: TASK_OUTPUT_PORT_Y, taskOutputPortX: TASK_OUTPUT_PORT_X, preview: PREVIEW, outputReferenced,
   });
   const { renderNode, patchNodeRuntime } = NodeCard;
 

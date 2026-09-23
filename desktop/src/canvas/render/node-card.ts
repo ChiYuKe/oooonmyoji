@@ -80,6 +80,8 @@ export interface NodeRenderDeps {
   startReferenceConnection?(event: any, nodeId: string): void;
   /** 任务卡输出口的右键菜单（列出输出字段、复制引用、断开全部引用）。 */
   nodeReferencePortMenuItems?(nodeId: string, point: { x: number; y: number }): any[];
+  /** 这个节点的输出是否已经被别的节点引用：连了画实心，没连是空心环。 */
+  outputReferenced?(nodeId: string): boolean;
   /** 组内左侧变量卡的“新增接口变量”菜单。 */
   nodeGroupVariableMenuItems?(groupId: string): any[];
   startNodeDrag(event: any, nodeId: string): void;
@@ -159,6 +161,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     typeIcons, typeNames, runLabels, nodeWidth, baseHeight, portRadius, decoratorHeight, runVariableHeight,
     variablePinX, preview, taskOutputPortY, taskOutputPortX, startReferenceConnection, nodeReferencePortMenuItems, nodeGroupVariableMenuItems, referenceDisplayNameOf,
     nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection, nodeGroupRunSummary,
+    outputReferenced,
   } = deps;
   const isNodeLocked = deps.isNodeLocked ?? (() => false);
   const groupIssueSummary = deps.groupIssueSummary;
@@ -401,7 +404,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     if (node._hasReferenceOutput) {
       const referenceTone = dataToneColor(`nodes.${node._nodeGroupId || node.id}.output`);
       const output = svgEl('circle', {
-        class: 'port port-out port-out-reference node-group-port',
+        // 这个口只在组内确实有输出被引用时才画（`_hasReferenceOutput`），所以画出来就是「已连接」。
+        class: 'port port-out port-out-reference node-group-port connected',
         style: `--data-tone:${referenceTone}`,
         cx: referencePortX, cy: referencePortY, r: portRadius - 2.5,
       }, group);
@@ -854,7 +858,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       // 任务节点是叶子，没有执行流输出；右侧这个口是「节点输出引用」口，
       // 拖到别的节点的参数行即可绑定 nodes.<id>.output.<字段>。
       const output = svgEl('circle', {
-        class: `port port-out port-out-reference data-tone-${dataTone(`nodes.${node.id}.output`)}${state.referenceConnect && state.referenceConnect.nodeId === node.id ? ' active' : ''}`,
+        class: `port port-out port-out-reference data-tone-${dataTone(`nodes.${node.id}.output`)}${outputReferenced?.(node.id) ? ' connected' : ''}${state.referenceConnect && state.referenceConnect.nodeId === node.id ? ' active' : ''}`,
         style: `--data-tone:${dataToneColor(`nodes.${node.id}.output`)}`,
         cx: referencePortX,
         cy: referencePortY,

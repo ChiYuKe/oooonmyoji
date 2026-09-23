@@ -7,7 +7,7 @@
 import type { CanvasState } from '../state/canvas-state';
 import { cardRowLabel, cardRowOf, cardRowParams, hasCardLayout } from '../render/card-layout';
 
-/** 数组输出最多给到第几项的下标引用；单层对象字段最多展开几个。 */
+/** 清单声明了长度的数组输出，最多给到第几项的下标引用；单层对象字段最多展开几个。 */
 const REFERENCE_INDEX_LIMIT = 4;
 const REFERENCE_FIELD_LIMIT = 12;
 
@@ -255,12 +255,16 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   }
 
   /**
-   * 节点输出候选：对象输出逐字段给出引用，数组输出给出整体 + 前几项（元素及其字段），
+   * 节点输出候选：对象输出逐字段给出引用，数组输出给出整体 + 第 1 项（元素及其字段），
    * 其余输出只有整体一个候选。`ref` 就是写进参数的引用文本。
    *
    * 数组为什么要给到「项」：`vision.wait_template` 这类输出是匹配数组，而目标参数
    * （例如 `input.tap_match.match`）只要一个对象——运行时的引用语法支持下标
-   * （`nodes.<id>.output.0`），所以拖过去应该能连，只是要选第几项。
+   * （`nodes.<id>.output.0`），所以拖过去应该能连。
+   *
+   * 为什么只给第 1 项：自由数组（找模板、OCR）的元素彼此同形，第 2 项起的下标既没有
+   * 独立语义，运行时也可能不存在（只命中 1 个时引用下标会直接报错）。要列更多项，
+   * 得靠清单声明 prefixItems / maxItems 把长度写死。
    */
   function nodeOutputFields(node: any): Array<{ field: string; label: string; schema: any; ref: string }> {
     if (!node || !node.id) return [];
@@ -295,9 +299,12 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
       : (schema.items && typeof schema.items === 'object' ? schema.items : null);
     // 元素类型未知（没有 items）时不瞎给下标：那种引用在运行时也解析不出字段。
     if (!itemSchema || !itemSchema.type) return candidates;
+    // 下标只有两种来源才算「有语义」：声明了 prefixItems（定长元组）或 maxItems（长度有界）。
+    // 自由长度的数组（匹配结果、OCR 结果）没有声明长度，多列几个下标只会给出同样内容、
+    // 运行时还可能解析不到——所以只给第 1 项。
     const declared = Array.isArray(schema.prefixItems) && schema.prefixItems.length
       ? schema.prefixItems.length
-      : (typeof schema.maxItems === 'number' ? schema.maxItems : REFERENCE_INDEX_LIMIT);
+      : (typeof schema.maxItems === 'number' ? schema.maxItems : 1);
     const indexes = Math.max(1, Math.min(REFERENCE_INDEX_LIMIT, declared));
     for (let index = 0; index < indexes; index += 1) {
       push(String(index), `第 ${index + 1} 项`, itemSchema);

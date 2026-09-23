@@ -94,15 +94,16 @@ test('nodeOutputFields 对象输出逐字段给引用，数组输出给整体 + 
   // 元素类型未知的数组（只有 type: array）不给下标引用：运行时也解析不出字段。
   const wait = { id: 'n2', type: 'task', name: '等待战斗结束', action: 'vision.wait_template' };
   assert.deepEqual(model.nodeOutputFields(wait).map((item) => [item.field, item.ref]), [['', 'nodes.n2.output']]);
-  // 匹配数组（items 是对象）：整体 + 第 1..4 项 + 每项的一层字段，这样才能喂给「单个对象」参数。
+  // 匹配数组（items 是对象）：整体 + 第 1 项 + 该项的一层字段，这样才能喂给「单个对象」参数。
+  // 自由数组不列第 2 项起：元素同形、下标无语义，运行时还可能不存在。
   const matches = { id: 'n3', type: 'task', name: '等待战斗结束', action: 'vision.wait_matches' };
   assert.deepEqual(model.nodeOutputFields(matches).map((item) => item.field), [
-    '', '0', '0.x', '0.confidence', '1', '1.x', '1.confidence', '2', '2.x', '2.confidence', '3', '3.x', '3.confidence',
+    '', '0', '0.x', '0.confidence',
   ]);
   assert.equal(model.nodeOutputFields(matches)[1].ref, 'nodes.n3.output.0');
   assert.equal(model.nodeOutputFields(matches)[2].label, '第 1 项 · x');
-  // 超过上限的项不再给候选。
-  assert.equal(model.nodeOutputFields(matches).some((item) => item.field.startsWith('4')), false);
+  // 没有声明长度的数组不再补下标。
+  assert.equal(model.nodeOutputFields(matches).some((item) => /^[1-9]/.test(item.field)), false);
   // 没有 action / 清单里没有这个 Action：没有输出候选。
   assert.deepEqual(model.nodeOutputFields({ id: 'n4', type: 'task' }), []);
   assert.deepEqual(model.nodeOutputFields({ id: 'n5', type: 'task', action: 'nope' }), []);
@@ -131,15 +132,15 @@ test('referenceCompatibleWithPin 按值类型判断，引用显示名用节点�
   assert.equal(model.referenceDisplayName('nodes.n2.output'), '等待战斗结束');
   assert.equal(model.referenceDisplayName('nodes.n2.output.0'), '等待战斗结束[0]');
   assert.equal(model.referenceDisplayName('nodes.n2.output.0.confidence'), '等待战斗结束[0].置信度');
-  // 匹配数组 → 单个对象参数：拖过去应该给出「第 N 项」，而不是因为数组≠对象连不上。
+  // 匹配数组 → 单个对象参数：拖过去应该给出「第 1 项」，而不是因为数组≠对象连不上。
   const matches = { id: 'm1', type: 'task', name: '等待战斗结束', action: 'vision.wait_matches' };
   const tapThing = { id: 'm2', type: 'task', name: '点击匹配项', action: 'input.tap_thing', params: {} };
-  assert.deepEqual(model.referenceFieldsForPin(matches, tapThing, 'match').map((item) => item.field), ['0', '1', '2', '3']);
+  assert.deepEqual(model.referenceFieldsForPin(matches, tapThing, 'match').map((item) => item.field), ['0']);
   assert.equal(model.referenceFieldsForPin(matches, tapThing, 'match')[0].ref, 'nodes.m1.output.0');
-  // 数值参数只接受「第 N 项 · 数值字段」，不接受整个对象项。
+  // 数值参数只接受「第 1 项 · 数值字段」，不接受整个对象项。
   const numeric = { id: 'm3', type: 'task', name: '数值', action: 'core.sleep', params: {} };
   assert.deepEqual(model.referenceFieldsForPin(matches, numeric, 'seconds').map((item) => item.field),
-    ['0.x', '0.confidence', '1.x', '1.confidence', '2.x', '2.confidence', '3.x', '3.confidence']);
+    ['0.x', '0.confidence']);
   // 源节点已删除时用 id 兜底，字段名仍走共享标签。
   assert.equal(model.referenceDisplayName('nodes.gone.output.state'), 'gone.页面状态');
   assert.equal(model.referenceDisplayName('inputs.x'), 'inputs.x');

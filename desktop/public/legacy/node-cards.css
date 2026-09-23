@@ -1,18 +1,25 @@
 /* Cards own the --card-* palette: theme palettes on :root must never set --card-* directly.
  * 卡面底色取自当前界面主题的语义表面色 --ui-*（默认/石墨/暖色/对比/浅色都自动跟随），
- * 分类色只落在标题带、左侧色条、图标与描边上——卡身保持中性，一屏几十张卡也不花。 */
+ * 分类色落在**标题带**（UE 蓝图那种整条色带）、图标与描边上——卡身保持中性，一屏几十张卡也不花。 */
 .studio-card {
   --card-tint: #98a6bc;
+  /* 卡身沿用面板中性灰，与画布区分但不压成黑块。 */
   --card-bg: var(--ui-panel, #22262d);
-  --card-head: color-mix(in srgb, var(--card-tint) 32%, var(--ui-surface, #2b313a));
-  --card-line: color-mix(in srgb, var(--card-tint) 30%, var(--ui-line, #454e5a));
+  /* UE 标题带：分类色占主导（不再是 32% 的淡染），标题文字直接压在色带上。 */
+  --card-head: color-mix(in srgb, var(--card-tint) 56%, var(--ui-surface, #2b313a));
+  /* 色带上沿的一道浅色内描边：UE 靠它把标题带和卡身分开，而不是靠发光。 */
+  --card-head-line: color-mix(in srgb, var(--card-tint) 24%, var(--ui-line, #343434));
+  --card-line: color-mix(in srgb, var(--ui-field, #1a1f27) 30%, var(--ui-line, #343434));
   --card-field: var(--ui-field, #1a1f27);
   --card-text: var(--ui-text, #f1f4fa);
   --card-secondary: color-mix(in srgb, var(--ui-text, #f1f4fa) 70%, var(--ui-muted, #aab7c9));
   --card-muted: var(--ui-muted, #aab7c9);
   --card-icon-bg: color-mix(in srgb, var(--card-tint) 16%, var(--card-head));
-  --card-icon: color-mix(in srgb, var(--card-tint) 72%, var(--ui-text, #ffffff));
-  --card-port: color-mix(in srgb, var(--card-tint) 78%, var(--ui-text, #b8cce6));
+  --card-icon: color-mix(in srgb, var(--ui-text, #ffffff) 88%, var(--card-tint));
+  --card-port: var(--ui-text, #dedede);
+  /* 执行流端点（箭头）：UE 里接近白色的中性色，混一点分类色避免死白。 */
+  --card-exec: color-mix(in srgb, var(--ui-text, #f1f4fa) 86%, var(--card-tint));
+  --card-exec-hot: var(--ui-text, #ffffff);
   --success: var(--green, #8cd4a3); --warning: var(--yellow, #f0c977); --danger: var(--red, #f1939e);
 }
 /* 分类只改 --card-tint：标题带/色条/图标按它派生，卡身不动。 */
@@ -29,30 +36,37 @@
 .studio-card.category-utility { --card-tint: #a3aebd; }
 .studio-card.variable-card { --card-tint: #9fbe8a; }
 .studio-card {
-  --card-selected: color-mix(in srgb, var(--card-tint) 18%, var(--card-bg));
   --card-selected-head: color-mix(in srgb, var(--card-tint) 26%, var(--card-head));
-  --card-rule: color-mix(in srgb, var(--card-tint) 14%, var(--card-bg));
+  --card-rule: color-mix(in srgb, var(--card-bg) 90%, var(--ui-text, #dedede));
 }
-:root[data-theme] .studio-card .card-body { fill: var(--card-bg); stroke: var(--card-line); stroke-width: 1; filter: none; }
-:root[data-theme] .studio-card .card-head { fill: var(--card-head); filter: none; }
-:root[data-theme] .studio-card.selected .card-body { fill: var(--card-selected); stroke: var(--card-tint); stroke-width: 2; filter: none; }
-:root[data-theme] .studio-card.selected .card-head { fill: var(--card-selected-head); }
+:root[data-theme] .studio-card .card-body { fill: var(--card-bg); stroke: color-mix(in srgb, var(--card-bg) 72%, #000000); stroke-width: 1.25; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .34)); }
+:root[data-theme] .studio-card .card-head { fill: var(--card-head); stroke: var(--card-head-line); stroke-width: 1; filter: none; }
+/* 选中描边最后绘制并收在卡片内侧，避免底层网格线穿过外缘。 */
+:root[data-theme] .studio-card.selected .card-body { stroke: none; }
+:root[data-theme] .studio-card .card-selection-outline { display: none; fill: none; stroke: #e5a400; stroke-width: 2; filter: none; pointer-events: none; }
+:root[data-theme] .studio-card.selected .card-selection-outline { display: inline; }
 :root[data-theme] .studio-card .card-title { fill: var(--card-text); font-weight: 600; }
 :root[data-theme] .studio-card .card-description { fill: var(--card-secondary); font-size: 11px; font-weight: 400; }
 :root[data-theme] .studio-card :is(.card-kicker, .card-meta) { fill: var(--card-muted); font-weight: 400; letter-spacing: 0; }
 :root[data-theme] .studio-card .card-kicker { font-size: 10px; }
 :root[data-theme] .studio-card .node-meta { font: 10px var(--ui-font); }
 :root[data-theme] .studio-card :is(.node-header-rule, .instance-run-card-header-rule, .variable-card-header-rule, .instance-variable-rule, .decorator-rule) { stroke: var(--card-rule); stroke-width: 1; }
-:root[data-theme] .studio-card :is(.node-icon-plate, .instance-run-card-icon-plate) { fill: var(--card-icon-bg); stroke: none; filter: none; }
+:root[data-theme] .studio-card :is(.node-icon-plate, .instance-run-card-icon-plate) { fill: transparent; stroke: none; filter: none; }
 :root[data-theme] .studio-card :is(.node-icon, .instance-run-card-icon) { fill: var(--card-icon); font-weight: 500; pointer-events: none; }
 :root[data-theme] .studio-card :is(.pin-variable-name, .instance-variable-name, .variable-card-value) { fill: var(--card-secondary); font-size: 10px; font-weight: 400; }
 :root[data-theme] .studio-card :is(.pin-variable-param, .instance-variable-value, .node-duration, .variable-card-access) { fill: var(--card-muted); font-size: 10px; font-weight: 400; }
 :root[data-theme] .studio-card .variable-card-access { font-size: 9px; }
 :root[data-theme] .studio-card .decorator-label { fill: var(--card-secondary); }
 :root[data-theme] .studio-card .decorator-icon { fill: #b59d74; }
-:root[data-theme] .studio-card .node-preview-frame { fill: var(--card-head); stroke: var(--card-rule); }
-:root[data-theme] .studio-card :is(.port-in, .port-out) { fill: var(--card-bg); stroke: var(--card-port); stroke-width: 1.5; filter: none; }
-:root[data-theme] .studio-card .port:hover { fill: var(--card-port); stroke: var(--card-port); stroke-width: 1.5; filter: none; }
+:root[data-theme] .studio-card .node-preview-frame { fill: var(--card-field); stroke: var(--card-rule); }
+/* UE 执行流端点：原来的圆点退成不可见的几何/命中载体，可见形状是紧跟其后的箭头
+ * （`.port-glyph-exec`，由 `canvas/render/pin-glyphs.ts` 按端点圆心画出来）。
+ * 圆点保留原来的 cx/cy/r 与事件绑定，所以端点位置、命中范围与缩放分级都不受影响。 */
+:root[data-theme] .studio-card :is(.port-in, .port-out:not(.port-out-reference)) { fill: transparent; stroke: none; filter: none; }
+:root[data-theme] .studio-card .port-glyph-exec { fill: var(--card-exec); stroke: none; pointer-events: none; }
+:root[data-theme] .studio-card :is(.port-in, .port-out):hover + .port-glyph-exec { fill: var(--card-exec-hot); }
+/* 拖线时悬停到兼容卡片：卡框变绿的同时，它的执行流端点也点亮。 */
+:root[data-theme] .studio-card:is(.connect-hover, .connect-target) :is(.port-in, .port-out) + .port-glyph-exec { fill: var(--success); }
 :root[data-theme] .studio-card .run-label { fill: var(--card-muted); font-size: 10px; }
 :root[data-theme] .studio-card:is(.run-running, .run-retrying) .run-label { fill: var(--warning); }
 :root[data-theme] .studio-card:is(.run-succeeded, .run-matched) .run-label { fill: var(--success); }
@@ -101,12 +115,15 @@
 :root[data-theme] .studio-card .param-rows-toggle { fill: var(--card-muted); font-size: 10px; font-weight: 600; cursor: pointer; }
 :root[data-theme] .studio-card .param-rows-toggle:hover,
 :root[data-theme] .studio-card .param-rows-toggle.expanded { fill: var(--card-text); }
-/* 数据端点按变量身份着色：空心表示可连接，浅填充表示已有字面量，实心表示已经连线。 */
-:root[data-theme] .studio-card .port-variable { fill: var(--card-bg); stroke: var(--data-tone, var(--card-port)); stroke-width: 2; }
-:root[data-theme] .studio-card .port-variable.configured { fill: color-mix(in srgb, var(--data-tone, var(--card-port)) 28%, var(--card-bg)); stroke: var(--data-tone, var(--card-port)); stroke-width: 2; }
-:root[data-theme] .studio-card .port-variable.bound { fill: var(--data-tone, var(--card-port)); stroke: color-mix(in srgb, var(--data-tone, var(--card-port)) 52%, var(--card-text)); stroke-width: 1.5; }
-:root[data-theme] .studio-card .port-variable-out { fill: var(--data-tone, var(--card-port)); stroke: color-mix(in srgb, var(--data-tone, var(--card-port)) 52%, var(--card-text)); stroke-width: 1.5; }
-
+/* UE 数据端点：彩色圆环或实心圆，右缘带同色小三角；颜色仍跟随数据身份。 */
+:root[data-theme] .studio-card :is(.port-variable, .instance-variable-pin) { fill: var(--card-bg); stroke: var(--data-tone, var(--card-port)); stroke-width: 1.3; }
+:root[data-theme] .studio-card :is(.port-variable, .instance-variable-pin).configured { fill: color-mix(in srgb, var(--data-tone, var(--card-port)) 34%, var(--card-bg)); stroke: var(--data-tone, var(--card-port)); }
+:root[data-theme] .studio-card :is(.port-variable, .instance-variable-pin).bound { fill: var(--data-tone, var(--card-port)); }
+:root[data-theme] .studio-card :is(.port-variable-out, .port-out-reference) { fill: var(--data-tone, var(--card-port)); stroke: var(--data-tone, var(--card-port)); stroke-width: 1.5; filter: none; }
+:root[data-theme] .studio-card .port-glyph-data { fill: var(--data-tone, var(--card-port)); stroke: none; pointer-events: none; }
+:root[data-theme] .studio-card .port-glyph-data.invalid { fill: var(--danger, #e06c75); }
+:root[data-theme] .studio-card .port-out-reference:is(:hover, .active),
+:root[data-theme] .studio-card .port-out-reference:is(:hover, .active) + .port-glyph-data { fill: color-mix(in srgb, var(--data-tone, var(--card-port)) 72%, var(--card-text)); }
 :root[data-theme] .studio-card .card-accent { fill: var(--card-tint); }
 :root[data-theme] .studio-card .run-dot { fill: var(--warning); }
 :root[data-theme] .studio-card:is(.run-succeeded, .run-matched) .run-dot { fill: var(--success); }

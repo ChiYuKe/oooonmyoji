@@ -502,6 +502,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .graph-world.zoom-overview .param-row-rect-axis,
 .graph-world.zoom-overview .param-row-rect-value,
 .graph-world.zoom-overview .port,
+.graph-world.zoom-overview .instance-variable-pin,
+.graph-world.zoom-overview .port-glyph,
 .graph-world.zoom-overview .variable-port-hit,
 .graph-world.zoom-overview .variable-card-head,
 .graph-world.zoom-overview .variable-card-header-rule,

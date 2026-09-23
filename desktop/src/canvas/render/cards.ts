@@ -9,6 +9,8 @@ import { parameterTypeLabel } from '../../shared/parameter-types';
 import { compactValue, variableValueSummary, workflowInputVariableValue } from './card-values';
 import { paramColorSwatch } from './param-rows';
 import { dataTone, dataToneColor, variableDataKey } from '../canvas/data-tones';
+import { dataPinArrow, execPinArrow } from './pin-glyphs';
+import { appendSelectionOutline } from './selection-outline';
 
 export interface CardsNodeCards {
   text(parent: SVGElement, options: {
@@ -152,6 +154,10 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
       const tone = dataTone(toneKey);
       svgEl('line', { class: 'instance-variable-rule', x1: 0, y1: y, x2: runCardWidth, y2: y }, group);
       svgEl('circle', { class: `instance-variable-pin type-${variable.definition.type || 'any'} data-tone-${tone}${inputRef ? ' bound' : ''}${configured ? ' configured' : ''}`, style: `--data-tone:${dataToneColor(toneKey)}`, cx: 10, cy: y + runVariableHeight / 2, r: portRadius - 2 }, group);
+      svgEl('path', {
+        class: 'port-glyph port-glyph-data', style: `--data-tone:${dataToneColor(toneKey)}`,
+        d: dataPinArrow(10, y + runVariableHeight / 2, portRadius - 2),
+      }, group);
       nodeCards.text(group, { className: 'instance-variable-name', x: 22, y: y + 16, value: displayNameOfDefinition(variable.definition, variable.name), width: 104, size: 10 });
       nodeCards.text(group, { className: 'instance-variable-value', x: runCardWidth - 12, y: y + 16, value: workflowInputVariableValue(card.run, variable), width: 102, size: 10, anchor: 'end' });
       const hit = svgEl('circle', { class: 'variable-port-hit', cx: 10, cy: y + runVariableHeight / 2, r: 10, 'data-node': card.node.id, 'data-run-index': card.index, 'data-param': variable.name }, group);
@@ -170,6 +176,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     });
     const input = svgEl('circle', { class: 'port port-in instance-run-port', cx: runCardWidth / 2, cy: 0, r: portRadius }, group);
     input.style.pointerEvents = 'none';
+    svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(runCardWidth / 2, 0, portRadius) }, group);
     group.addEventListener('mousedown', (event: any) => {
       if (!event.target.closest('.card-body, .card-head, text')) return;
       if (event.button !== 0) return;
@@ -197,6 +204,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
       items.push({ label: '删除实例运行项', danger: true, run: () => removeInstanceRun(card.node, card.index) });
       showMenu(event.clientX, event.clientY, items);
     });
+    appendSelectionOutline(group, svgEl, runCardWidth, card.height, 5);
     return group;
   }
 
@@ -237,6 +245,10 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
       if (swatch) svgEl('rect', { class: 'variable-card-swatch', x: variableCardWidth - 66, y: 41, width: 8, height: 8, rx: 2, fill: swatch }, group);
     }
     svgEl('circle', { class: `port port-variable-out type-${type} data-tone-${tone}`, style: toneStyle, cx: variableCardWidth, cy: variableCardPortY, r: portRadius - 2.5 }, group);
+    svgEl('path', {
+      class: 'port-glyph port-glyph-data', style: toneStyle,
+      d: dataPinArrow(variableCardWidth, variableCardPortY, portRadius - 2.5),
+    }, group);
     const port = svgEl('circle', { class: 'variable-port-hit', cx: variableCardWidth, cy: variableCardPortY, r: 10, 'data-variable': card.name }, group);
     port.addEventListener('pointerdown', (event: any) => startVariableConnectionFromCard(event, card.scope, card.name, card.id));
     port.addEventListener('contextmenu', (event: any) => {
@@ -310,6 +322,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
         { label: '删除变量卡片', run: () => removeVariableCard(card.id) },
       ]);
     });
+    appendSelectionOutline(group, svgEl, variableCardWidth, variableCardHeight, 5);
     return group;
   }
 

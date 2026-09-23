@@ -2,7 +2,7 @@
 const { createCompositeInspector } = require('../../dist-test-renderer/canvas/inspector/composite-inspector.js');
 
 function element(tag, className = '', textContent = '') {
-  return {
+  const node = {
     tag, className, textContent, children: [], events: {}, attrs: {}, dataset: {}, style: {}, disabled: false,
     setAttribute(name, value) { this.attrs[name] = String(value); },
     appendChild(child) { this.children.push(child); return child; },
@@ -14,6 +14,14 @@ function element(tag, className = '', textContent = '') {
     addEventListener(name, fn) { this.events[name] = fn; },
     fire(name, extra = {}) { this.events[name]?.({ target: this, preventDefault() {}, stopPropagation() {}, ...extra }); },
   };
+  const has = (name) => String(node.className || '').split(' ').includes(name);
+  node.classList = {
+    add(name) { if (!has(name)) node.className = `${node.className} ${name}`.trim(); },
+    remove(name) { node.className = String(node.className || '').split(' ').filter((item) => item !== name).join(' '); },
+    toggle(name, force) { const on = force === undefined ? !has(name) : Boolean(force); if (on) this.add(name); else this.remove(name); return on; },
+    contains(name) { return has(name); },
+  };
+  return node;
 }
 
 function harness() {
@@ -32,6 +40,7 @@ function harness() {
     conditionControl: () => element('div', 'condition-control'),
     conditionOperandControl: () => element('div', 'condition-control'),
     conditionParseLiteral: (value) => value,
+    conditionSentence: (expression) => expression && typeof expression === 'object' ? '当 条件成立 时执行' : '',
     nodeChildrenOptions: () => [],
     nodeById: (id) => ({ name: `节点 ${id}` }),
     mutate: (fn) => fn(),

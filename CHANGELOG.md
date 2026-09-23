@@ -115,6 +115,25 @@
   （`desktop/src/canvas/canvas/edges.ts`）。
 
 ### 变更
+- 任务卡的「节点输出引用」口从**卡片右缘**收进卡片内侧（`nodeWidth - 12`，与参数行值框的右边距对齐）：
+  端点不再半个圆挂在卡外，拖拽起点与引用线起点（`edges.referencePortPosition`）共用同一个
+  节点内偏移 `TASK_OUTPUT_PORT_X`，卡片绘制与连线起点永远落在同一点
+  （`desktop/src/canvas/editor.ts`、`canvas/canvas/edges.ts`、`render/node-card.ts`）。
+- 画布卡片改成 **UE 蓝图样式**：标题带改由分类色实色填充（`--card-head` 从 32% 淡染提到 72%，
+  上沿加一条浅色内描边把色带与卡身分开），图标不再坐在色块上；执行流端点从圆点改成**朝下的箭头**，
+  数据端点仍是圆环（空心=可连接、浅填充=已有字面量、实心=已连线），指针压上去时命中圈画一圈浅色环。
+  端点圆点保留原来的 `cx/cy/r` 与事件绑定，可见形状交给紧跟其后的 `<path class="port-glyph">`，
+  所以端点位置、命中范围与缩放分级都不变；箭头已进概览档的隐藏清单
+  （`desktop/src/canvas/render/pin-glyphs.ts`、`render/node-card.ts`、`render/cards.ts`、
+  `desktop/public/legacy/node-cards.css`、`workflow-editor.css`）。
+- 连线语言对齐 UE：执行流连线加粗到 2.5px 并保持浅色（选中/悬停再提亮加粗）；变量线与节点输出
+  引用线保持细线，但**在落点前收一个小箭头**——Chrome 的 marker 不支持 `context-stroke`，
+  所以按线色建 marker 并把色相按 15° 归并（上限 24 个，marker 挂在 `.graph-world` 上，
+  不随数据线图层逐帧重建）；拖线预览改成浅色线，吸附到兼容端点时提亮并收掉虚线，
+  同时目标卡片的描边与执行流端点一起点亮
+  （`desktop/src/canvas/canvas/edges.ts`、`desktop/public/legacy/workflow-editor.css`）。
+- 设计规则补一节「画布卡片：UE 蓝图样式」，明确实色标题带是「禁止卡片亮边」的例外与边界：
+  允许用分类色带表达分类，仍然禁止发光与霓虹描边（`desktop/DESIGN_RULES.md`）。
 - 变量默认值里的数组元素挤在一起分不清：每个元素现在是一张独立卡片（边框 + 底色 + 元素间距），
   标题行可**单独折叠**（「▾ 元素 1」，折叠状态在重渲染后保留），删除按钮固定在标题行右侧；
   标题行在 DOM 里排在元素控件之后、用 grid 区域放到上面，所以控件仍是第一个子节点

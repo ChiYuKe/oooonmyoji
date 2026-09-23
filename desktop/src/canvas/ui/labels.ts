@@ -45,6 +45,19 @@ export const ACTION_LABELS: Record<string, string> = {
   'workflow.run': '运行子工作流', 'workflow.select': '子流程选择器', 'workflow.sequence': '子流程序列',
 };
 
+/**
+ * Action **输出**字段名。刻意与 FIELD_LABELS 分开：输出字段的语义和同名参数不同
+ * （参数 `threshold` 是阈值设置，输出里的 `x` 是命中框坐标），合表会互相污染。
+ */
+const OUTPUT_LABELS: Record<string, string> = {
+  state: '状态', source: '来源', confidence: '置信度', match: '匹配详情', matched: '匹配数量',
+  elapsed_seconds: '耗时（秒）', index: '序号', count: '数量', center: '中心点',
+  reference: '参考帧', width: '宽度', height: '高度', failure_frame: '失败现场图',
+  return_attempts: '返回次数', overlay_clicks: '覆盖层点击次数', ok: '是否成功', reason: '原因',
+};
+
 export const fieldLabel = (name: string): string => FIELD_LABELS[name] || name;
 export const enumOption = (value: string): string => ENUM_LABELS[value] === undefined ? value : `${ENUM_LABELS[value]}（${value}）`;
 export const actionLabel = (name: string): string => ACTION_LABELS[name] || name;
+/** 输出字段的中文名；没有专门译名时退回参数译名，再退回原始字段名。 */
+export const outputFieldLabel = (name: string): string => OUTPUT_LABELS[name] || FIELD_LABELS[name] || name;

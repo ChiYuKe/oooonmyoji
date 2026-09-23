@@ -153,6 +153,7 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     editor.shell.style.top = `${Math.round(screen.top)}px`;
     editor.shell.style.width = `${Math.round(screen.width)}px`;
     editor.shell.style.height = `${Math.round(screen.height)}px`;
+    editor.shell.style.setProperty('--inline-editor-zoom', String(state.zoom || 1));
   }
 
   function refreshInlineEditor(): void {

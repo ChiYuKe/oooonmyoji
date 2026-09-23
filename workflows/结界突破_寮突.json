@@ -11,9 +11,48 @@
   "inputs": {
     "运行轮数": {
       "type": "integer",
-      "default": 30,
+      "default": 99,
       "min": 1,
       "description": "最多突破轮数（安全上限）；页面上没有可突破的结界时会提前正常结束。"
+    },
+    "模板": {
+      "type": "asset",
+      "description": "模板图路径",
+      "editor": "asset",
+      "display_name": "模板",
+      "default": "assets/templates/jxxx-templates.png"
+    },
+    "识别区域": {
+      "type": "rect",
+      "description": "裁剪区域 [x, y, w, h]，默认整屏（按工作流参考分辨率 1920×1080）",
+      "display_name": "识别区域",
+      "default": [
+        720,
+        973,
+        486,
+        107
+      ]
+    },
+    "超时_秒": {
+      "type": "duration",
+      "min": 0,
+      "description": "等待超时秒数，超时则失败。默认 10 秒",
+      "display_name": "超时（秒）",
+      "default": 10
+    },
+    "存在性": {
+      "type": "boolean",
+      "description": "true 等待出现；false 等待消失。默认 true",
+      "display_name": "存在性",
+      "default": true
+    },
+    "匹配阈值": {
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "description": "匹配置信度阈值，默认 0.85",
+      "display_name": "匹配阈值",
+      "default": 0.85
     }
   },
   "variables": {},
@@ -164,16 +203,22 @@
       "type": "task",
       "action": "vision.wait_template",
       "params": {
-        "template": "assets/templates/jxxx-templates.png",
-        "present": true,
-        "timeout_seconds": 10,
-        "roi": [
-          720,
-          973,
-          486,
-          107
-        ],
-        "threshold": 0.85
+        "template": {
+          "ref": "inputs.模板"
+        },
+        "present": {
+          "ref": "inputs.存在性"
+        },
+        "timeout_seconds": {
+          "ref": "inputs.超时_秒"
+        },
+        "roi": {
+          "ref": "inputs.识别区域"
+        },
+        "threshold": {
+          "ref": "inputs.匹配阈值"
+        },
+        "scale_search": false
       },
       "name": "等待结算页继续文字"
     },
@@ -182,9 +227,6 @@
       "type": "task",
       "action": "input.tap_match",
       "params": {
-        "match": {
-          "ref": "nodes.wait_settlement.output.0"
-        },
         "revalidate": true,
         "verify_gone": true,
         "verify_timeout_seconds": 10,
@@ -217,7 +259,11 @@
             "threshold": 0.85
           }
         ],
-        "disappeared_state_timeout_seconds": 5
+        "disappeared_state_timeout_seconds": 5,
+        "hold_ms": 0,
+        "match": {
+          "ref": "nodes.wait_settlement.output.0"
+        }
       },
       "name": "点击继续"
     },
@@ -300,7 +346,9 @@
         "random_interval": [
           0.2,
           0.5
-        ]
+        ],
+        "hold_ms": 0,
+        "disappeared_state_timeout_seconds": 0
       },
       "name": "点击结界"
     },
@@ -324,7 +372,7 @@
         {
           "type": "retry",
           "attempts": 3,
-          "delay_seconds": 1.0
+          "delay_seconds": 1
         }
       ],
       "name": "等待进攻按钮"
@@ -408,7 +456,14 @@
         ],
         "disappeared_state_timeout_seconds": 5
       },
-      "name": "点击结算继续"
+      "name": "点击结算继续",
+      "decorators": [
+        {
+          "type": "retry",
+          "attempts": 5,
+          "delay_seconds": 0.5
+        }
+      ]
     },
     {
       "id": "conclude_done",
@@ -588,7 +643,7 @@
       "y": 416
     },
     "rounds": {
-      "x": 2380,
+      "x": 2384,
       "y": 624
     },
     "round": {
@@ -608,44 +663,44 @@
       "y": 1248
     },
     "dismiss_settlement": {
-      "x": 510,
+      "x": 496,
       "y": 1456
     },
     "wait_settlement": {
-      "x": 340,
-      "y": 1664
+      "x": 144,
+      "y": 1768
     },
     "tap_continue": {
-      "x": 680,
+      "x": 688,
       "y": 1664
     },
     "raid_once": {
-      "x": 1870,
-      "y": 1456
+      "x": 1768,
+      "y": 1432
     },
     "find_target": {
-      "x": 1020,
-      "y": 1664
+      "x": 0,
+      "y": 208
     },
     "tap_target": {
-      "x": 1360,
-      "y": 1664
+      "x": 332,
+      "y": 208
     },
     "wait_attack": {
-      "x": 1700,
-      "y": 1664
+      "x": 664,
+      "y": 208
     },
     "tap_attack": {
-      "x": 2040,
-      "y": 1664
+      "x": 996,
+      "y": 208
     },
     "wait_result": {
-      "x": 2380,
-      "y": 1664
+      "x": 1328,
+      "y": 208
     },
     "tap_result": {
-      "x": 2720,
-      "y": 1664
+      "x": 1660,
+      "y": 208
     },
     "conclude_done": {
       "x": 4165,
@@ -694,9 +749,73 @@
     "log_finished": {
       "x": 5440,
       "y": 624
+    },
+    "node_group_1": {
+      "x": 1768,
+      "y": 1648
+    },
+    "__node_group_interface__:node_group_1": {
+      "x": 830,
+      "y": 0
+    },
+    "__node_group_variables__:node_group_1": {
+      "x": 1992,
+      "y": 0
     }
   },
-  "_variableLinks": {},
-  "_variableCards": {},
-  "_inputParams": {}
+  "_variableLinks": {
+    "wait_settlement:template": "card_1",
+    "wait_settlement:roi": "card_2",
+    "wait_settlement:timeout_seconds": "card_3",
+    "wait_settlement:present": "card_4",
+    "wait_settlement:threshold": "card_5"
+  },
+  "_variableCards": {
+    "card_1": {
+      "name": "模板",
+      "scope": "inputs",
+      "x": -184,
+      "y": 1784
+    },
+    "card_2": {
+      "name": "识别区域",
+      "scope": "inputs",
+      "x": -184,
+      "y": 2000
+    },
+    "card_3": {
+      "name": "超时_秒",
+      "scope": "inputs",
+      "x": -176,
+      "y": 1864
+    },
+    "card_4": {
+      "name": "存在性",
+      "scope": "inputs",
+      "x": -184,
+      "y": 1928
+    },
+    "card_5": {
+      "name": "匹配阈值",
+      "scope": "inputs",
+      "x": -192,
+      "y": 2088
+    }
+  },
+  "_inputParams": {},
+  "_nodeGroups": {
+    "node_group_1": {
+      "name": "节点组 1",
+      "nodeIds": [
+        "find_target",
+        "tap_target",
+        "wait_attack",
+        "tap_attack",
+        "wait_result",
+        "tap_result"
+      ],
+      "pins": [],
+      "pinPolicy": "explicit-v1"
+    }
+  }
 }

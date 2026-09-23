@@ -13,9 +13,9 @@
     },
     "timeout_seconds": {
       "type": "duration",
-      "required": true,
+      "default": 10,
       "min": 0,
-      "description": "等待超时秒数，超时则失败"
+      "description": "等待超时秒数，超时则失败。默认 10 秒"
     },
     "present": {
       "type": "boolean",
@@ -24,7 +24,8 @@
     },
     "roi": {
       "type": "rect",
-      "description": "裁剪区域 [x, y, w, h]"
+      "default": [0, 0, 1920, 1080],
+      "description": "裁剪区域 [x, y, w, h]，默认整屏（按工作流参考分辨率 1920×1080）"
     },
     "threshold": {
       "type": "number",

@@ -6,6 +6,137 @@
 ## [Unreleased]
 
 ### 新增
+- **工作流文本格式 v6（`.owf`，P1 文本层）**：磁盘格式从 v5 图文档 JSON 换成自定义文本 DSL，
+  图语义与运行时一字不改（解析产出与 v5 同形、只把 `schema_version` 提到 6），
+  权威契约见 `docs/workflow-dsl-v6.md`。语法要点：
+  - **缩进块 + 统一值语法**：`键: 值` / `键:` + 更深子块 / `- ` 列表项；`[a, b, c]` 行内列表；
+    `{}` / `[]` 空容器；`|` 多行文本块；`#` 注释；引号只在必要时加。
+  - **连线是顶层边表**：`edges:` 块按 `edges` 数组顺序逐行转写
+    `源[:引脚] -> 目标[:引脚]`（`then.0` 与 `in` 省略），
+    `judge:true -> x` / `pick:case.1 -> x` / `wait_round_state:out.match -> y:match` /
+    `var__inputs__模板:out -> z:decorators.0.count`；手工折点用 `waypoints: [[x, y], …]` 缩进挂在连线下面。
+    边序是纯转写，编译报错里的 `edges[i]` 下标不会漂。
+  - **表达式写中缀**：`nodes.a.output.state == challenge`、
+    `a > 1 and not exists inputs.运行轮数`，落盘时降级成运行时的操作数对象；
+    `null == settlement` 里那个 `null` 就是被 `bool_1:left` 连线占着的操作数位。
+    中缀表达不了的形状用子块写（逃生舱），两种写法解析成同一棵树。
+  - **变量节点不写 id**：`var inputs.模板` 由 `(作用域, 键)` 派生成 `var__inputs__模板`；
+    位置字段 `at: [x, y]` ⇄ `{"x": …, "y": …}`。
+  - 验证：两份真实工作流（643 行 → 190 行、1197 行 → 327 行）往返无损、文本是不动点、
+    编译出的运行时文档逐字相同；`tests/fixtures/graph-rules/cases.json` 40 个跨语言契约用例
+    37 个可写盘并全部通过（3 个故意非法的文档写盘期明确拒绝）；
+    用例 `tests/test_workflow_dsl.py`（101 项）、全特性夹具 `tests/fixtures/dsl/kitchen.owf`。
+  - 当时尚未接线：加载链路（`loader.py` / `node_rules.py` / `config/loader.py`）、MCP 写盘、
+    迁移脚本与桌面端（TS 镜像 + 8 处旁路 `JSON.parse` 收敛）——其中 Python 侧已在下一条完成，
+    桌面端仍见规范文末分阶段。
+- **工作流磁盘格式切换完成（磁盘上只剩 `.owf`，P2 接线 Python）**：旧 JSON 一律不再加载，
+  加载、发现、校验与写盘全部走 `.owf` 文本。
+  - **加载链路只读 `.owf`**：`WorkflowLoader.discover()` 只遍历 `*.owf`，`load` 先
+    `parse_document` 得到图文档（`schema_version: 6`）再编译成 v4 走现有校验；子工作流
+    `inputs` 校验（`node_rules.py`）与配置按 id 反查（`config/loader.py`）同样只认 `.owf`。
+  - **后缀替换的向后兼容**：`config/loader.py` 的 `_workflow_path` 会把非 `.owf` 后缀替换成
+    `.owf`，所以配置与命令行里沿用旧习惯写 `活动副本.json` 仍能解析到 `活动副本.owf`
+    （文件必须真的叫 `.owf`）；推荐一律写 `.owf` 或直接写工作流 ID。
+  - **图文档版本 5 → 6**：`graph_schema.GRAPH_SCHEMA_VERSION = 6`，`.owf` 解析出来的文档固定为 6；
+    图语义（节点 / 引脚 / 边 / 编译规则）与运行时一行未改。
+  - **两份工作流已迁移**：`workflows/活动副本.owf`（643 行 JSON → **190 行**）、
+    `workflows/结界突破_寮突.owf`（1197 行 JSON → **327 行**），旧 `.json` 已删除；
+    迁移前后编译出的运行时文档**逐字一致**。
+  - **MCP 模板工厂写 `.owf`**：保存的工作流落在 `workflows/generated/<name>.owf`，文本由
+    `emit_runtime_document` 生成，不再写 `*.json`。
+  - **迁移脚本收敛成一个**：新增 `scripts/migrate_workflows_to_owf.py`（默认只预览，`--apply`
+    写盘并删旧 `.json`，`--keep-json` 保留旧文件），接收 v4 或 v5 的 JSON，写盘前把生成的文本
+    解析回来编译一遍、与原文的运行时文档逐字段比对，**不一致就不写盘**；只产出 v5 JSON 的
+    `scripts/migrate_workflows_to_graph_v5.py` 与 v4 JSON 时代的
+    `scripts/migrate_condition_decorators.py` 一并删除。
+  - 测试：Python 全量 **446 passed / 2 skipped**。
+  - 桌面端当时**尚未**接线 `.owf` 读写（下一步 P3，已在下一条完成）。
+- **桌面端读写 `.owf` 接线完成（P3）**：编辑器不再按 JSON 读盘，两端解析/序列化口径逐字对齐。
+  - **TS 镜像**：新增 `desktop/src/shared/workflow/graph-dsl.ts`（Python `dsl/` 的逐语义移植：
+    缩进块、统一值语法、引用、引号/转义、`|` 多行块、位置字段折叠、`var` 派生与 id 校验、
+    顶层 `edges:` 边表、中缀表达式 ⇄ 操作数对象、带行列号的 `DslError.render()`），
+    从 `shared/workflow` 桶统一导出；契约用例 `desktop/tests/graph-dsl.test.cjs`（**111 项**），
+    与 Python 用同一份 `tests/fixtures/graph-rules/cases.json` 与 `tests/fixtures/dsl/kitchen.owf`。
+  - **读入全部收敛到 `parseDocument`**：画布初始化（`canvas/shell/messages.ts`）、主进程工作流列表 /
+    打开 / 保存语法闸门 / 移动重命名的整份回写（`projectService.ts`）、引用图与按 id 反查
+    （`main/core/references.ts`、`shared/workflow/references.ts`）、运行前的实例并行识别
+    （`runtimeService.ts`）、工作区摘要同步与被引用文件解析（`renderer/workspace.ts`、
+    `renderer/editor-host.ts`）——旁路 `JSON.parse` 一处不剩。
+  - **落盘唯一出口**：删除 `serializeWorkflow`，`canvas/state/document-text.ts` 的 `documentText`
+    改为 `emitRuntimeDocument(state.raw)`；画布状态里区分「树/图」的 `documentFormat` 字段随之删除。
+  - **引用改写成结构级**：移动/重命名不再在序列化文本上跑正则（`.owf` 里引用是裸路径，正则必然误伤），
+    改为「解析 → 改对象 → `emitDocument` 重新序列化」；引用匹配同时认裸文件名、`.owf` 与旧后缀
+    `.json` 三种写法，改名不会漏改。
+  - **后缀与模板**：`.json` 硬编码、内容浏览器支持类型、保存对话框过滤器与新建工作流模板
+    全部换 `.owf`（模板直接写 `emitDocument(workflowTemplate(id))`）。
+  - **修掉实现缺陷（两端同步）**：极小浮点曾被写成 `0.0`（`1e-20`，静默丢数据）——数字文法现在支持
+    科学计数法；条件列表缺 `]` 不再静默吞掉尾字符；顶层键重复（含 `inputs`/`variables`/`nodeTypes`）
+    与 `schema_version` 一律报错；节点 id 含 `:` 时写出的引号写法现在能读回来；
+    `emit` 对缺 `version`/`resolution`/`root` 的文档明确拒绝（写出去会是解析不回来的文本）；
+    `inputs`/`variables` 非对象时规范化与 `emit` 的口径统一。
+  - **落盘换行固定 LF**：Python 文本模式在 Windows 上会把 `\n` 翻成 `\r\n`，会让编辑器每次保存都
+    重写整个文件；迁移与测试写盘显式 `newline="\n"`，并新增
+    `scripts/normalize_workflow_newlines.py` 把已有文件就地转回 LF。
+  - 验证：两个 typecheck 通过；桌面端 `node --test` **935 项通过**（唯一失败是既有的画布连线几何用例，
+    与格式无关）；Python 全量 **451 passed / 2 skipped**；真实项目上 `listWorkflows` /
+    `getWorkflowInit` / `saveWorkflow` 端到端通过，桌面端 emit 的文本与 Python 对同一份文档的
+    输出**逐字节一致**（保存后文件内容不变），坏文档被保存闸门拒绝且不落盘。
+- **值卡片（布尔判断 / 拆分）按 UE 的方式做**：对齐 `K2Node_BreakStruct` 与
+  `K2Node_PromotableOperator`——这两类节点在 UE 里**没有任何 IDetailCustomization**
+  （`StructType` / `OperationName` 都是普通 `UPROPERTY()`），设置走**节点右键菜单**，
+  值就在**引脚上**编辑：
+  - 选中它们不再打开详情面板；卡片右键 = UE 的节点菜单：拆分卡片是
+    「更改拆分来源 ▸ …」（等于 UE 调色板按结构体逐条列出 Break <Struct>）+
+    「断开拆分来源」；布尔判断卡片是「改为 ▸ 等于/不等于/大于/…」
+    （对应 UE 的 `Convert Operator → Convert to …`）。
+  - 布尔判断卡的两个操作数就是两个引脚：各自内联显示值（引用显示成 `← 引用`，
+    字面量直接显示），**点一下就地在原处编辑**，写回表达式对应的操作数位置。
+  - 详情面板里原来的名称/ID/类型/条件表单整体移除；名称改走结构树 F2。
+  - 本仓库特有的两件进阶能力（UE 没有对应物）收进卡片右键菜单的「进阶…」入口：
+    `fields` 字段映射、and/or/not 嵌套条件；面板里只有这两项内容，不再有名称与来源输入框。
+- **「拆分」卡片（`break`）**：UE Blueprint 风格的 Break 节点——把某张卡片的
+  object / array 输出拆开成可单独引用的字段。
+  - 入口：画布空白处右键「＋ Break（拆分卡片）」。卡片是叶子节点，只有一行
+    「拆分来源」参数行：把来源卡片的右侧输出口拖到该行完成绑定（也支持粘贴
+    `nodes.<id>.output` 引用文本）。
+  - 画布交互：绑定成功后卡片按 **UE Break 的排法**重排——左侧是「拆分来源」输入引脚，
+    右缘按输出 schema 逐行排出字段输出引脚（`页面状态 ○` / `置信度 ○`…），两边共用同一套
+    行网格，这一行不再画参数值；从字段引脚拖到别的节点参数行即定向绑定该字段引用，不再弹
+    字段选择菜单；已引用的字段引脚画实心。来源是标量时卡片退回一个通用输出引用口，不画空引脚。
+  - 落点候选只给 object / array：拆分来源列表是「整个输出」+ 复合类型字段，
+    标量字段（例如 `nodes.x.output.state`）与标量变量挡在落点之外——绑过去会得到
+    Python 校验的 `break-target-not-object`。引用边从被引用的那个字段引脚出线。
+  - 来源可以是工作流输入 / 运行变量：`inputs.<键>`、`variables.<键>`（含嵌套路径）
+    会按文档里的定义编译出 schema 再推导输出。**定长元组按分量拆**——区域 `rect`
+    是 `[x, y, w, h]`，自动给出 `X / Y / W / H` 四个输出引脚（引用文本
+    `nodes.<id>.output.0..3`），越界下标保存期即报错；坐标点 `point` 这类对象按属性拆。
+  - 绑定与输出：`ref` 接受全输出 `nodes.<id>.output` 或嵌套路径
+    `nodes.<id>.output.<路径>`；可选 `fields` 是「输出字段名 → 来源路径」映射
+    （点号逐层深入，`1.score` = 数组第 2 项的 score）。不写 `fields` 时输出
+    镜像来源，写了则输出按字段重新拼装的对象，运行时总是成功并登记为
+    `nodes.<id>.output.<字段>`。来源 schema 推导支持拆分卡片串接（break → break）。
+  - 校验：`break` 不能定义 action / params / children / finish_mode，必须有指向
+    object / array 输出的 `ref` 绑定，字段名与路径不能为空、路径必须存在于来源
+    schema 中，且不得作为局部变量 owner。Python 与桌面端共用
+    `tests/fixtures/workflow-rules/cases.json` 规则契约（`valid-break-card`、
+    `valid-break-card-mirror`、`valid-break-input-rect`、`invalid-break-children`、
+    `invalid-break-missing-ref`、`invalid-break-scalar-target`、
+    `invalid-break-bad-field-path`、`invalid-break-tuple-index`）。
+  - 画布：结构树/小地图/卡片着色（玫瑰色系）、卡片上就地编辑来源与拆分字段列表、
+    节点卡片展示「拆分来源」行与逐字段输出引脚，节点卡片预览页新增拆分卡片示例。
+- **「布尔判断」卡片（`bool_judge`）**：把一段判断条件做成可复用的布尔值卡片。
+  - 入口：画布空白处右键「＋ Bool Judge（布尔判断卡片）」，或从父节点输出口菜单
+    「创建并连接节点 → Bool Judge（布尔判断卡片）」。卡片是叶子节点，条件表达式在卡片上
+    就地编辑（点回读行打开浮动面板：结构化控件 + 中文回读 + 输出引用提示）。
+  - 运行语义：卡片总是成功，并把求值结果登记为 `nodes.<id>.output.value`（boolean）。
+    判断节点的「布尔条件」口、Branch / Repeat Until 的结束条件都能直接绑这个引用，
+    同一张卡片可以被多处引用（把它放在 Sequence 里、在任何使用者之前执行即可）。
+  - 卡片左侧也有一个 bool 输入口：可绑变量或另一个节点的 bool 输出（不绑定时用卡片自己的
+    表达式）；右侧是输出引用口，拖到别的节点的参数行即可绑定，引用文本 `nodes.<id>.output.value`。
+  - 校验：`bool_judge` 不能定义 action / params / children / finish_mode，必须有 `expression`，
+    不得作为局部变量 owner；Python 引擎与桌面校验共用
+    `tests/fixtures/workflow-rules/cases.json` 规则契约（`valid-bool-judge-card`、
+    `invalid-bool-judge-children`、`invalid-bool-judge-missing-expression`）。
 - **F2 = 重命名当前选中项**（可在「设置 → 快捷键」改键，默认 `f2`）：不用打开任何对话框，
   直接在**选中的那一行原地**编辑——内容浏览器的文件/文件夹、结构树的节点、变量列表的变量都是
   这一套（Enter/失焦提交、Esc 取消，输入框里打字不触发快捷键）。画布里的选区（没有对应的面板行）
@@ -113,8 +244,223 @@
   与变量边 / 引用边的 Alt 快速断开一致；记入历史可 Ctrl+Z 撤销，且不会再顺手选中该连线或
   触发 Alt 拖拽平移。拖拽重连的旋钮优先于断开，不会被抢走
   （`desktop/src/canvas/canvas/edges.ts`）。
+- **新增「判断」节点类型 `condition`：条件是一个独立节点，不再是挂在卡片上的装饰器。**
+  判断节点底部有 **真 / 假两个执行输出口**（左真右假，各最多接一个子节点）：条件成立走真口那一支、
+  不成立走假口那一支；**该口没接分支 = 这条路径没有内容，节点按失败返回**，交给父节点决定
+  （放在 Selector 里就是「这一支不命中」）；两个口都没接时退化成纯判断——成立成功、不成立失败，
+  可以直接当叶子放进 Selector。分支口位写在 `ports`（与 `children` 对齐，`true`/`false` 各一次；
+  老文档没写时按顺序推导），运行日志里能看到判断这一步的成败
+  （`src/oooonmyoji/workflows/engine.py`、`workflows/{model,validator,node_rules}.py`、
+  `desktop/src/canvas/model/exec-ports.ts`（口位几何与推导，卡片 / 连线 / 命中 / 菜单共用）、
+  `canvas/render/node-card.ts`、`canvas/canvas/edges.ts`、`canvas/interactions/hit-test.ts`）。
+  入口：画布右键「＋ Condition（判断）」、任意执行口右键「从这里开始连线（真口 / 假口）」
+  「创建并连接节点（真/假口）」、工作台调色板「判断」；反向从子节点输入口往上拖也能按落点
+  吸附到最近的口。
+
+- **节点图文档 v5（UE 蓝图式的图，先落 Python 侧一半）**：工作流 JSON 从
+  「Behavior Tree 的有序树」换成「带显式执行边的节点图」。v5 相对 v4 只换结构：
+  执行顺序由顶层 `edges`（`then.<下标>` / `true` / `false` / `case.<下标>` / `default` 引脚）
+  表达，坐标从编辑器旁表 `_layout` 搬进节点自身的 `at`，`_layoutLocks` 变成节点上的 `locked`；
+  节点里的 `action` / `params` / `expression` / `cases[].value` / `decorators` / `runs` 等运行时载荷
+  **同名同形不动**。加载时编译回 v4，`validator.py` / `engine.py` / `supervisor.py` 一行没改。
+  - `graph_schema.py`：v5 结构 schema（节点上不再允许 `children` / `ports` / `default_child`）。
+  - `graph_compile.py`：`compile_graph`（v5→v4，含口位推导、switch 分支重建、一父多子 / 重复引脚 /
+    成环 / 未知引脚的图级报错）与 `decompile_workflow`（v4→v5，迁移与打开老文件用）。
+  - `WorkflowLoader.load` 按 `schema_version` 分派，老文件继续按 v4 跑，不强制迁移。
+  - `scripts/migrate_workflows_to_graph_v5.py`：默认只预览，`--apply` 才写盘；写盘前把迁移结果
+    编译回 v4 与原文比对，**比对不过就不写**。对已经是 v5 的文件走「刷新」（补上新的边表示，
+    同时保留坐标与编辑器私有键）。
+  - 设计契约与分阶段计划见 `docs/graph-document-v5.md`；12 项单测含两份真实工作流的往返等价
+    （`tests/test_graph_document.py`）。
+- **自定义节点类型的编辑器入口（P5 收尾）**：`nodeTypes` 之前只能手写 JSON，现在画布就能建与用。
+  - 右键节点 →「收成自定义类型」：类型名从节点名派生（无名则用动作名、再退化到 id），加 `x-`
+    前缀并自动去重；定义里**只预设字面量**——带 `{"ref": …}` 的参数/表达式不进预设，否则所有实例
+    都会指向同一个来源节点；节点自身载荷一个字段都不动，只打 `_nodeType` 标记。
+  - 画布空白处右键的「＋」菜单底部列出文档里的全部自定义类型（`＋ 自定义类型（N）`），
+    按类型建出来的节点按基类工作、铺上预设、标题取定义的 `title`，并保留自己的类型名。
+  - 新增画布用例 4 项：字面量/引用分流、类型名去重与重复收的拒绝、无名节点与值卡片表达式、
+    按类型新建 → 存盘（`type: x-…` + `nodeTypes`）→ 再读回画布。
+  - 边界同前：**打开、编辑、保存都不会把自定义类型降级成基类**；改类型名暂时要直接编辑
+    `nodeTypes` 的键。
+- **手工折线（UE Knot，P3）**：连线可以手工绕线，折点进图文档。
+  - 文件里折点挂在边上（`edges[].waypoints`，schema 第一轮就预留了）；没有折点的边不写这个字段，
+    画出来的路径与加字段之前逐字相同。
+  - 画布的边是现推出来的、没有对象可挂折点，所以边界用 `_edgeWaypoints` 旁表承接
+    （键是边自身的身份：from/to 的节点与引脚，执行边与数据边不会互相串；`then` 规范成 `then.0`，
+    别名写法不丢折点），写回时再挂回边。
+  - 画布：连线右键「添加折点」/「清除全部折点」、折点可拖（`drag.kind='waypoint'`，只补这一条边的
+    `d` 与折点圆心，不重建整张画布）、折点右键删除；坐标贴 8 像素网格，写操作都进 `mutate`。
+  - 没有折点时渲染仍走原来的 `bezier` 注入路径（老观感与老测试都不受影响），有折点才走按折点
+    走线的几何。
+  - 共享样例新增 2 例（1 有效：执行边与数据边都带折点；1 无效：折点坐标不是整数——
+    编译器本身也会指名报错，不只靠 loader 的 schema），另有画布旁表用例 2 项与桌面端
+    边界往返用例 3 项。
+  - 迁移脚本的「还要不要刷新」判据改成**忽略边顺序**：桌面端保存出来的边顺序与 Python 反编译的
+    顺序不同，不忽略的话编辑器每存一次就会被判成待刷新、文件被反复改写。
+- **注释框（UE Comment，P3）**：画布可以圈出一片区域写一句话，标注本身进图文档。
+  - 文档顶层 `comments`：`{id, text, at, size?, tint?}`；`id` 唯一、坐标整数、尺寸为正，
+    编译期与编辑器诊断都校验（`graph-comment-*`），运行时产物里没有它们。
+  - 画布：右键「＋ 注释框 (Comment)」新建（建完直接进改文字状态）、拖标题栏移动、
+    拖右下角改尺寸、标题栏 × 删除、双击标题栏就地改文字；所有写操作都进 `mutate`，
+    拖拽复用 pointer 模块的生命周期（autoPan、一条撤销记录）。
+  - **独立图层**（`.comments`，挂在 `.graph-world` 最前面，画在连线与卡片之下）：
+    按内容签名整层重建，不进卡片/连线那套增量补丁；无注释时每帧只做一次数组检查，
+    500 节点性能用例仍然通过。浅色主题由 `build-light-palette.cjs` 重新生成。
+  - 共享样例新增 4 例（1 有效 / 3 无效），另有画布模块用例 3 项（新建/命中/删除、
+    id 与网格取整、拖拽与 × 删除）。
+- **节点组搬进图文档（P3 第一件）**：`_nodeGroups` 退场，组结构与三张合成卡的坐标收敛成
+  文档顶层的 `groups`。
+  - 条目形状：`{id, name, nodeIds, pins, pinPolicy, at, interfaceAt, variablesAt}`——
+    组卡、组接口卡（`__node_group_interface__:<id>`）、组变量卡（`__node_group_variables__:<id>`）
+    都不是节点，位置分别落在后三个键上（缺省时编辑器按成员包围盒推导）。
+  - 组是编辑期概念，编译时整体丢弃；但写进文档就要自洽：成员/端点必须存在、端点必须落在组内、
+    id 不能重复，编译期与编辑器诊断都会报（`graph-group-*`）。
+  - 画布内部不变：`toCanvasDocument` 把 `groups` 还原成 `_nodeGroups` + `_layout`，
+    `toGraphDocument` 反向搬回。
+  - 迁移脚本修掉第二个「刷新丢编辑器状态」缺陷：`_nodeGroups` 被当成新表示而排除，
+    导致还没刷新的文件在第一次刷新时丢掉整组。现在旧表示原样带走、新表示（变量节点 / `groups`）
+    推导出来的表最后覆盖同名旧表；两份工作流的组卡坐标也从 git HEAD 补了回来
+    （活动副本两组 + 组变量卡）。
+  - 共享样例新增 4 例（1 有效 / 3 无效）。
+- **变量/输入也走边：变量卡变成图里的变量节点（P4 下半）**：`_variableCards` / `_variableLinks`
+  从 v5 文件里退场，连线收敛成「一张边表」。
+  - 新节点类型 `variable`（`scope` + `name` + `at`）：纯数据源，输出 `out` / `out.<嵌套字段>`，
+    可以喂参数、装饰器字段、`runs.N.inputs.*`、判断/布尔判断的输入口。它**不进运行时文档**，
+    出边落成目标引脚的 `{"ref": "inputs.…" / "variables.…"}`。
+  - 变量节点 id 由 `(作用域, 键)` 推导（`var__<scope>__<name>`）：v4 的引用里只有 `variables.x`，
+    卡片 id 过一趟编译就没了，从引用推导才能让「编译 → 反编译」与反复刷新稳定；同名重复卡片
+    会并成一个变量节点（一个变量 = 图里的一个实体）。
+  - 画布内部不变：`toCanvasDocument` 把变量节点还原成变量卡与 `_variableLinks`（含坐标），
+    `toGraphDocument` 反过来把卡片与内联变量引用折成变量节点与边。
+  - 迁移脚本修掉一个数据丢失缺陷：刷新已迁移文件时变量节点的坐标会被丢掉（编译整颗丢掉变量
+    节点），现在会把坐标经由 `_variableCards` 带过中间态；两份工作流的坐标已补回，
+    刷新幂等。
+  - 共享样例新增 6 例（2 有效 / 4 无效），并把两处示例改成规范形态（内联变量引用写成变量节点 + 边）；
+    `活动副本.json` 5 条数据边 / 2 个变量节点，`结界突破_寮突.json` 13 条数据边 / 6 个变量节点。
+  - 端到端实测：画布读入 → 转图 → 写回（40 节点 / 44 条边 / 6 个变量节点，旁表只剩
+    `_inputParams` / `_nodeGroups`）→ Python 引擎运行结果与 v4 相同。
+- **可扩展节点类型：`x-…` 自定义节点（P5 宏级别）**：节点类型不再是封闭枚举，文档可以声明
+  自己的节点类型——和 UE 一样「类型有定义、实例只存差异」。
+  - `nodeTypes` 定义表（文档顶层，可选）：`base`（必须是内置类型）+ 预设载荷 +
+    `title` / `description` / `tint`；节点只写差异，`params` 逐层深合并、节点优先。
+  - 规矩两端一致（`workflows/graph_types.py`、`shared/workflow/graph-document.ts`）：
+    类型名必须 `x-` 前缀、不得重定义内置类型、必须有内置 `base`、定义里不许写
+    `children` / `ports` / `default_child` / 坐标 / 锁（结构只能由节点与边决定）。
+  - 编译时解析成基类：运行时文档里没有 `x-…`、没有 `nodeTypes`；画布内部按基类工作、
+    节点上记 `_nodeType`，写回图文档时还原——**打开/编辑/保存不会把自定义类型降级**。
+  - 共享样例新增 6 例（2 有效 / 4 无效），两端逐例一致；另有一例用真实 Action 清单
+    走完整加载链路（`core.log` + 预设参数 + 节点覆盖）。
+  - 边界：不能自定义引脚与编译行为（那需要节点类级别的运行时扩展），也没有
+    「把选中节点收成一个自定义类型」的编辑器入口（P3）。
+- **节点输出引用折进 `edges`（P4 上半）**：图文档里的数据连线不再只以参数里的
+  `{"ref": "nodes.x.output.y"}` 字符串存在，而是一条边——和 UE 一样，执行流与数据流
+  同在一张边表里。
+  - 引脚 ⇄ 载荷路径的换算集中在 `workflows/graph_pins.py` 与
+    `shared/workflow/graph-document.ts`（两端同一套规则，共享样例守护）：
+    `out.<字段路径>` → 参数/特殊输入引脚（`timeout_seconds`、`states.0.threshold`、
+    `left` / `right`、`condition`、`ref`、`conditions.<i>`、`decorators.<i>.<字段>`、
+    `runs.<i>.inputs.<名>`）。
+  - **认不出引脚位置的引用原样留在参数里**（例如 `cases[].value` 里的引用），
+    格式换代不吞连线；摘引用时数组元素**留洞**而不是删除——删掉会让相邻元素前移，
+    回填时把同一个比较表达式里的另一个操作数盖掉。
+  - 编译期拦下：数据来源不产出输出、目标引脚认不出、同一个引脚接两条数据边；
+    编辑器诊断对应 `graph-data-source` / `graph-data-target` / `graph-double-data-pin`。
+  - **转换不许改动调用方手里的文档**：载荷原来只做浅拷，数据边写入的 `{"ref": …}` 会穿透到
+    调用方的文档上——表现是文件里同时留下「一条边」和一份内联引用（迁移脚本会把这份
+    就地改动写回磁盘）。两个方向都改成深拷载荷，并各加一条回归用例钉住这个不变量。
+  - 两份工作流已刷新（活动副本 3 条、寮突 7 条数据边）；实测「画布读入 → 转图 → 写回」
+    的边集合与坐标与文件完全一致，写回的文件交给 Python 引擎跑出的行为与 v4 相同。
+- **桌面端读写节点图（P2）**：画布现在能打开与保存 v5 图文档，内部渲染代码一行没改。
+  - `shared/workflow/graph-document.ts`：`toCanvasDocument`（`at` → `_layout`、
+    `edges` → `children`/`ports`/`cases[].child`）、`toGraphDocument`（反向）、
+    `graphDocumentIssues`（未知节点、非法引脚、一个口接两条、一父多子、成环、switch 空分支）
+    与 `serializeWorkflow`。
+  - `canvas/state/document-text.ts` 是**唯一落盘出口**，8 处 `JSON.stringify(state.raw)` 全部改走它；
+    `state.documentFormat` 记住文档格式，**v4 文件保存后仍是 v4**，升级只走迁移脚本；
+    新建工作流由模板直接建成 v5。
+  - 读入边界在 `canvas/shell/messages.ts`：v5 先转成编辑形态再进画布。
+  - `parseWorkflow` 认 v5 并自己转换：主进程的引用建议、引用图与画布都从它取 `children`，
+    否则「哪些节点排在我前面」会全部算空；`validateWorkflow` 接受 v5 并先报图结构问题。
+  - `instanceParallelRuns`：运行宿主原先自己翻 `root.children[0]` 找 `instance_parallel`，
+    图文档下认不出来（运行标签与实例列表会错），改走共享解析。
+  - 跨语言契约 `tests/fixtures/graph-rules/cases.json`（13 例）两端共读：Python 与桌面端必须
+    转出同样的执行结构、报出同样的图结构错误。
+  - `workflows/活动副本.json`、`workflows/结界突破_寮突.json` 已用迁移脚本转成 v5；
+    编辑形态与图文档之间的往返在真实文件上验证过（画布转换 → 写回 → Python 加载并跑通）。
+- **纯数据节点（布尔判断 / 拆分）真的与执行树解耦**：它们不在 `children` 里，引用时才求值。
+  - 可用性判定从「沿 `children` 往上找」换成数据流语义：一张卡片对某个执行点可用，
+    当且仅当**它自己的依赖在那个执行点可用**；没有使用者的卡片不再因为位置报错
+    （`workflows/graph.py` 的 `pure_data_guard` / `_with_lazy_pure_nodes`）。
+  - 卡片按需求值时**每次重算**（`resolver.py` 的 `is_data_node` 回调），循环里 `classify`
+    刷新输出后卡片跟着刷新——不再拿着第一轮的旧结论走第二轮分支；值没变时不重复记事件。
+  - 若按需求值会发生在来源就绪之前（使用者排在来源前面），仍然报
+    「unavailable at this execution point」。
+- **修复 `结界突破_寮突` 的悬空引用**：`bool_1`（是否在结算页）原本拿 `inputs.right` 比较，
+  而工作流并没有这个输入；改为与字面量 `"settlement"` 比较，卡片补上名字。
+- **修复 `bool_judge` / `break` 的可用性与求值语义**：此前两张值卡片要么被塞回 `children`
+  （校验直接拒绝「pure data node cannot be connected to an execution child pin」），
+  要么独立摆放后永远「不可用」，14 项 Python 用例因此长期红着。现在两边一致：
+  卡片独立摆放、按需求值、值随来源刷新。
+
+### 移除
+- **删掉两个旧迁移脚本**：`scripts/migrate_workflows_to_graph_v5.py`（只产出 v5 JSON）与
+  `scripts/migrate_condition_decorators.py`（v4 JSON 时代的装饰器迁移）——磁盘格式换成
+  `.owf` 后由 `scripts/migrate_workflows_to_owf.py` 一条路径接管，仓库里只剩这一个。
+- **删掉 `condition` 装饰器**：判断节点取代它，装饰器列表里只剩 Cooldown / Time Limit / Retry /
+  Repeat / Do Once（`DECORATOR_TYPES`、schema、`node_rules.parse_decorators`、引擎的装饰器前置检查、
+  详情栏的添加菜单与条件装饰器编辑器一起删掉）。
+  - **老文档会自动升级**：载入时 `migrateDocument` 把 `N[condition]` 就地换成等价的
+    `判断(真口 → N)`——判断节点顶替 N 在父节点里的位置、N 与其子树坐标不动、`switch` 的 `cases`
+    指向一起改写、同节点上其余装饰器保留；多个条件装饰器串成 `判断(c1, 真 → 判断(c2, 真 → N))`，
+    语义与旧引擎「全部成立才放行」一致。升级包在 `mutate` 里，画布会提示
+    「已迁移旧格式：把 N 个 condition 装饰器升级为判断节点（Ctrl+Z 可撤销）」并置脏，
+    保存后文件即为新格式（`canvas/model/upgrade-decorators.ts`、`canvas/model/document-health.ts`）。
+  - 仓库里的两份工作流已用脚本迁移：`scripts/migrate_condition_decorators.py`（支持 `--dry-run`，
+    可对备份/其它副本重跑；与编辑器里那份升级规则一致）。
 
 ### 变更
+- **工作流磁盘格式换成 `.owf` 文本**：磁盘上只认 `.owf`，v4 的 Behavior Tree JSON 与 v5 的
+  图文档 JSON 一律不再加载（`discover()` 只遍历 `*.owf`），图文档 `schema_version` 由 5 提到 6；
+  配置与命令行里写旧后缀 `xxx.json` 仍会解析到 `xxx.owf`。细节见「新增」里的磁盘格式切换条目。
+- **值卡片（布尔判断 / 拆分）终于有自己的配色**：它们之前落到通用的 `category-control`
+  兜底色（`#98a6bc`），标题带和别的执行流卡片一模一样，看着就像流程节点。现在按 UE 的
+  「分类只改分类色」规则给它们各自一档：布尔判断冷蓝 `#5b9dc4`、拆分玫瑰 `#bd7f9f`
+  （判断节点补上青绿 `#58a99b`），标题带、色条、图标跟着派生；卡面再补一层身份——
+  类型行、运算符符号与回读行都带一点分类色，值卡片还多了 `.studio-card.value-card` 这个
+  样式钩子（仍是只改 `--card-tint` 派生的颜色，卡身底色与描边不动）
+  （`desktop/public/legacy/node-cards.css`、`canvas/render/node-card.ts`）。
+- **值卡片的标题改成 UE 那样按类型派生**：拆分的标题是 `Break <来源名>`（`K2Node_BreakStruct`
+  就是把节点命名为 `Break <Struct>`），布尔判断的标题是运算符中文名（`等于` / `大于` / `并且` …，
+  对应 `K2Node_PromotableOperator` 的 Equal / Greater）。以前没设过 `name` 的卡片会把内部标识顶在
+  标题位（`break_1` / `bool_1`），现在标题永远是可读的派生文本，稳定 ID 退到卡片悬停提示
+  （`Break 识别当前页面` + `ID: b1`）与引用文本里。三层优先级是**手动 `name` > 类型派生 > 节点 ID**：
+  `name` 是本项目特有的覆盖层（UE 没有逐个改名），设过就始终优先，清空它即回到派生标题。
+  画布卡片、左侧结构树、值卡片浮层、顶栏搜索四条路径共用同一份标题
+  （新增 `desktop/src/canvas/model/node-title.ts`；引用短名走 `canvas/model/references.ts`
+  新增的 `referenceTitle`——裸整体输出不带「› 输出」尾缀；运算符表与条件回读共用同一张
+  `OPERATOR_LABELS`；`desktop/DESIGN_RULES.md` 记下这条标题规则）。
+  - F2 就地改名只写显示名 `name`：没设过的卡片输入框是空的，占位提示给出派生标题，清空提交 =
+    删掉覆盖层；结构树里标题与稳定 ID 不同时，悬停提示补出 ID，方便照着写 `nodes.<id>.output` 引用。
+- **值卡片不再画顶部的执行流入口**：布尔判断（`bool_judge`）与拆分（`break`）只有数据端点——
+  左侧数据输入 + 右侧输出引用口，卡片顶边不再出现那枚朝下的入口箭头。它们的值靠别的节点引用
+  `nodes.<id>.output...` 取用（UE 的纯节点语言），一条悬空的入口箭头只会让人去找并不存在的
+  父连线；父节点的执行线仍可从输出口拖到卡片顶边接上（命中测试按几何算，没变）。
+  普通执行流卡片（Task / 组合节点 / 判断节点）的入口箭头与反向拖线行为完全不变
+  （`desktop/src/canvas/model/exec-ports.ts` 的 `isValueCardNode`、`canvas/render/node-card.ts`、
+  `canvas/interactions/hit-test.ts`）。
+- **自动排列只留「全部」一种范围，确认条改成显眼的「应用排列」**：右键菜单从
+  「全部 / 选中 / 当前组」三项收敛成一项「自动排列（先预览）」，视口 ⤢ 也从范围子菜单改成
+  点一下直接进预览；工具条的「排列」与「工具 → 自动排列」不再绕开预览直接写文档——所有入口
+  统一成「先出虚影、再确认」。预览确认条以前是个和背景同色的灰条加小灰按钮，用户点完排列
+  只看见一层层空虚线框、找不到出口，现在整条改成高对比：文案写明「虚线是虚影，点『应用排列』
+  才写入文档（Ctrl+Z 可撤销）」，按钮是主题反色实心（深色主题近白底深字、浅色主题近黑底浅字）
+  并带呼吸光晕（`prefers-reduced-motion` 下关掉动画）。条上的按钮一律单行、宽度自适应：
+  「取消」原来挂着 `.icon-button`（固定 28px 宽、无内边距），文字会被压成竖排的「取 / 消 / (Esc)」；
+  窄画布下先省略提示文案而不是让按钮换行。另外新增两个可改键的快捷键
+  `editor.arrangeApply`（默认 Enter）/ `editor.arrangeCancel`（默认 Esc）：预览挂着时输入框之外
+  按 Enter 即应用、Esc 即取消（`desktop/src/canvas/editor.ts`、`src/renderer/canvas.html`、
+  `src/renderer/index.html`、`src/canvas/interactions/input-bridge.ts`、
+  `public/legacy/workflow-editor.css`、`public/shortcuts/shortcuts.js`）。
 - 自动排列的行距改成**按每层最高的卡片**算，不再写死 `baseHeight + 112`（208px）：卡片高度随参数行数变化
   （固定卡片一行 30px，这个工作流里就有 240–334px 的卡），写死的行距会让高卡片盖住下一层 32–126px——
   排列预览里看到的就是一层层互相叠住的虚线框。层内仍共用一行，叶子横排、父节点居中的规则不变
@@ -377,6 +723,29 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **布尔判断卡片的表达式形态与卡面不符**：卡面一直按「二元比较」画——左侧两个操作数格
+  （值缺失就显示 `0`）、中间一个从键名直接拿来的运算符文本。于是 `{and: [0, 0]}` 这种卡片看起来
+  像 `0 and 0`，点那个并不存在的操作数还会在卡外弹出一个行内输入框；`{ref: ...}`（整卡绑一个
+  bool 来源）同样被画成两个 `0`。更糟的是往那两个假操作数上拖变量/引用会写出
+  `{and: [{ref: ...}, ...]}`、`{ref: [...]}` 这类 Python 校验直接拒绝的表达式
+  （`{and: [0, 0]}` 本身就过不了校验：and/or 的操作数必须是条件对象或 bool）。现在按
+  **表达式形态**（`comparison` / `binding` / `nested`）决定卡面与端点：
+  比较卡照旧两个操作数；整卡绑定只留一个布尔口（与判断节点的布尔条件口同一套语义，
+  写 `{ref}`、断开回 `{eq: [1, 1]}`）；嵌套条件只回读整句、没有可编辑字段，编辑走
+  「嵌套条件（进阶）…」浮层（点回读行也能打开）。悬停提示里保留完整整句
+  （`canvas/model/exec-ports.ts` 的 `boolJudgeShape`、`canvas-workflow-model.ts` 的引脚投影、
+  `canvas/render/node-card.ts`、`canvas/interactions/connections.ts`）。
+- **Convert Operator 会造出非法表达式**：节点菜单的「改为」列了「与 / 或 / 非」，把比较卡转成
+  `{and: [<左值>, <右值>]}`（此前还带「操作数多于两个就截成两个」的兜底）。UE 的
+  `K2Node_PromotableOperator` 只在同类二元运算之间转换，这里也一样：菜单只列七个比较运算符、
+  且当前表达式必须是比较形态；`setBoolJudgeOperator` 再挡一道（目标不是比较运算符或当前形态
+  不是比较卡就直接拒绝）。嵌套条件只在「嵌套条件（进阶）…」里建
+  （`canvas/interactions/port-menu.ts`、`canvas/state/editor-commands.ts`）。
+- **「在上方插入节点」与「创建并连接节点」永远提示「节点不存在」**：两者都先用 `buildNode`
+  造出新节点再按 id 调 `canConnect`，可新节点此时还没入图，按 id 查必然查不到——
+  整条路径一进去就被自己的校验拦下。现在校验改走节点对象版 `canConnectNodes`（`canConnect`
+  也委托给它，规则一份），新节点按对象判断类型/根/成环与 Simple Parallel 规则
+  （`desktop/src/canvas/state/commands.ts`、`canvas/interactions/port-menu.ts`）。
 - **组变量卡出来的线几乎是直斜线**（不好看）：映射线是贝塞尔，但头段控制点一直按「接口卡端口在
   左边缘」往左推，而组变量卡的端口在**右边缘**、线是往右走的——长距离时曲线被压成一条直斜线。
   现在头段控制点跟着出线口那一侧走（变量卡 `x1 + bend`、接口卡 `x1 - bend`），末端仍从左侧切入

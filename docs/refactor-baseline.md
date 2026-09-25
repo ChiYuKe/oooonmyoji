@@ -100,7 +100,7 @@ IPC 通道名与上表方法一一对应：`window:*`、`layout:*`、`appearance
 
 ## 四、数据契约
 
-- 工作流 JSON：`schema_version` 固定 4；节点类型 `root`、`selector`、`sequence`、`simple_parallel`、`parallel`、`repeat_until`、`branch`、`switch`、`instance_parallel`、`task`；装饰器 `condition`、`cooldown`、`timeout`、`retry`、`repeat`、`do_once`；`finish_mode` 为 `abort_background`、`wait_for_background`；`wait_for` 为 `all`、`any`。
+- 工作流 JSON：`schema_version` 固定 4；节点类型 `root`、`selector`、`sequence`、`simple_parallel`、`parallel`、`repeat_until`、`branch`、`switch`、`instance_parallel`、`condition`、`task`（`condition` 是判断节点：`expression` + 最多两条分支，`children` 与 `ports` 对齐，`ports` 为 `true`/`false`，缺省按顺序推导；一个分支都不接时退化成纯判断）；装饰器 `cooldown`、`timeout`、`retry`、`repeat`、`do_once`（原 `condition` 装饰器已删除，老文档载入时升级为判断节点）；`finish_mode` 为 `abort_background`、`wait_for_background`；`wait_for` 为 `all`、`any`。
 - 编辑器元数据写在顶层下划线字段，Python 侧必须原样保留：`_layout`（节点坐标）、`_variableCards`、`_variableLinks`、`_inputParams`。
 - 运行状态：`RunStatus` 为 `queued`、`running`、`retrying`、`succeeded`、`failed`、`cancelled`、`interrupted`。
 - 两端契约由 `tests/contract_check.py` 检查：4 组常量与运行状态枚举、日志状态映射。

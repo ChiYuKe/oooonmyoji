@@ -1,4 +1,4 @@
-# Onmyoji Studio
+# AutoFlow Studio
 
 独立的 Electron 工作流桌面端。它直接读取项目根目录中的 `workflows/`、`assets/`、`config/` 和 Python 引擎，不依赖 VS Code 或旧插件。
 

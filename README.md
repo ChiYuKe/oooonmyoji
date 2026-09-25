@@ -1,16 +1,23 @@
-# 阴阳师通用自动化底座
+# AutoFlow Studio（通用自动化底座）
 
 本工作区使用 MuMu 的 `external_renderer_ipc.dll` 作为低延迟截图和触控
-后端，提供视觉识别、PaddleOCR、可信本地 Action、JSON 工作流、多实例调度和
+后端，提供视觉识别、PaddleOCR、可信本地 Action、`.owf` 文本工作流、多实例调度和
 本机 CLI。ADB 是显式配置的兼容后端，并只在任务边界作为原生后端的降级选项。
 
 ## 目录结构
 
 - `src/oooonmyoji/`：设备、视觉识别、Action、工作流引擎和运行时源码。
-- `workflows/`：Behavior Tree v4（`schema_version: 4`）的 JSON 工作流。
+- `workflows/`：工作流文件，磁盘上只有一种格式——**`.owf` 文本**（图文档 v6）：节点自带坐标
+  `at`，执行流与数据流都写成顶层 `edges` 显式边；加载时编译回 Behavior Tree v4 执行，
+  运行时语义不变。旧的 v4 Behavior Tree JSON 与 v5 图文档 JSON **一律不再加载**，
+  用 `scripts/migrate_workflows_to_owf.py`（默认只预览，`--apply` 才写盘并删旧 `.json`）
+  显式迁移。语法与规范形式见 [工作流文本格式 v6](docs/workflow-dsl-v6.md)，
+  图语义见 [节点图文档 v5](docs/graph-document-v5.md)。
+  桌面端读写 `.owf` 已接线完成：编辑器直接打开、编辑、保存 `.owf`（落盘唯一出口是
+  `emitRuntimeDocument`，语法错误会带行号列号标出来）。
   - `entrypoints/`：可直接运行的入口工作流（不随仓库提交，编辑器新建时按需生成）。
   - `generated/`：编辑器与工具生成的临时工作流。
-  - 根目录：当前活动副本循环 `活动副本.json`（工作流 ID `activity_loop`）。
+  - 根目录：当前活动副本循环 `活动副本.owf`（工作流 ID `activity_loop`）。
 - `assets/templates/`：按功能和实例分组的游戏模板图。
 - `config/`：示例配置和本机运行配置。
 - `plugins/actions/`：可选的可信本地 Action。
@@ -49,7 +56,7 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 
 ## VS Code 运行
 
-日常使用统一从 VS Code 左侧活动栏的 **Onmyoji** 页面操作：
+日常使用统一从 VS Code 左侧活动栏的 **AutoFlow Studio** 页面操作：
 - **停止**：协作取消当前运行。
 - **运行日志**：查看步骤和奖励统计。
 - **脚本概览**：桌面端在“工作流编辑器”旁提供全部工作流卡片；每张卡片可单独配置输入参数，按勾选顺序建立队列、调整先后并连续执行，某项失败或手动停止时不再启动剩余项。
@@ -57,7 +64,8 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 - **校验错误直接标在卡片上**：画布自己跑工作流校验（按文档版本缓存，改一次算一次），出错的参数那一行当场标红——标签、引脚、值框一起红，悬停给出校验原文；节点级错误（例如 Task 没定义 Action）把卡片描边点红并在标题旁点一个红点。填上值/改好之后红色立刻消失，顶部「N 个问题」徽标同步（宿主推送的问题与画布本地的取较大值）。
 - **节点输出引用**：任务卡右侧有一个输出口（Task 在 Behavior Tree 里是叶子，没有执行流输出，这个口是数据口）。把它拖到别的节点的参数端点上即可写入只读引用 `{"ref": "nodes.<节点id>.output.<字段>"}`，画成金色虚线引用边；参数行显示 `← <源节点名>.<字段>`。落点按**行带**判定——光标压在哪一行就绑哪一行，拖拽中目标卡片和落点行会实时亮起。输出是数组时（如 `vision.wait_template` 的匹配数组）会给「整体输出」和「第 1–4 项（含每项字段）」候选，所以数组输出也能喂给只收单个对象/数值的参数（写成 `nodes.<id>.output.0`、`nodes.<id>.output.0.confidence`），落点有多个候选就弹菜单让你挑。类型实在不兼容时会明确提示「某参数不接受某节点的输出类型」。右键输出口可以复制字段引用、从这里开始连线、一次性断开全部引用；Alt 点击引用边（或参数行右键 → 断开引用）可解绑。
 - **断开连线**：**Alt + 左键**点在执行顺序连线上（或连线中点的序号徽标上）就直接断开父子关系，不用先选中；也可以双击连线断开，或点选后按 Delete。断开计入历史，Ctrl+Z 可撤销，并且不会顺手选中这条连线、也不会触发 Alt + 拖拽的平移。变量连线和节点输出引用边上的 Alt + 左键同样是直接解绑（拖拽重连的小圆点优先于断开）。
-- 工作流编辑器标题栏的播放按钮可运行当前 JSON 工作流。
+- 工作流编辑器标题栏的播放按钮可运行当前打开的工作流；编辑器自身读写的就是磁盘上的
+  `.owf` 文本（保存即规范形式，引用改写走结构级改写）。
 
 插件默认使用项目的 `.venv/Scripts/python.exe` 和 `config/config.json`，无需 BAT
 或单独打开终端。
@@ -72,9 +80,11 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json list-workflows
 ```
 
-`run-workflow` 会直接按 `workflows/` 下指定 JSON 的节点图运行，不需要先在
+`run-workflow` 会直接按 `workflows/` 下指定 `.owf` 的节点图运行，不需要先在
 `config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
-参数可以是工作流 ID、JSON 文件名或 `workflows/` 下的相对路径（包含子目录）；需要覆盖输入时可传入 JSON 文件：
+参数可以是工作流 ID、`.owf` 文件名或 `workflows/` 下的相对路径（包含子目录）——
+沿用旧习惯写 `活动副本.json` 也能解析到 `活动副本.owf`（非 `.owf` 后缀会被替换成 `.owf`），
+但推荐一律写 `.owf` 或直接写工作流 ID；需要覆盖输入时可传入 JSON 文件：
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.oooonmyoji.cli `
@@ -268,39 +278,72 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 
 ## 工作流和 Action 开发
 
-工作流是 Behavior Tree v4（`schema_version: 4`）。`children` 表示有序父子关系，
-执行结果由 `Selector`、`Sequence` 与 `Simple Parallel` 组合节点解释，不再使用
-成功/失败跳转边。权威契约由 `src/oooonmyoji/workflows/validator.py` 中的 JSON
-Schema 强制，目录与入口约定见 [workflows/README.md](workflows/README.md)。
+工作流的**磁盘格式是 `.owf` 文本**（图文档 v6）：节点自带坐标、连接写成顶层 `edges`
+显式边，加载时编译成 Behavior Tree v4 交给运行时。语法、缩进块与规范形式见
+[工作流文本格式 v6](docs/workflow-dsl-v6.md)，图语义（节点/引脚/边/编译规则）见
+[节点图文档 v5](docs/graph-document-v5.md)，目录与入口约定见
+[workflows/README.md](workflows/README.md)。下面这份 `.owf` 查找模板并点击匹配结果：
 
-```json
-{
-  "schema_version": 4,
-  "id": "my_workflow",
-  "version": "3.0.0",
-  "description": "查找目标并点击",
-  "resolution": [1920, 1080],
-  "root": "root",
-  "inputs": { "模板": { "type": "asset", "default": "assets/templates/x.png" } },
-  "variables": {},
-  "nodes": [
-    { "id": "root", "type": "root", "children": ["main"] },
-    { "id": "main", "type": "sequence", "children": ["find", "tap"] },
-    { "id": "find", "type": "task", "action": "vision.match_template", "params": { "template": { "ref": "inputs.模板" } } },
-    { "id": "tap", "type": "task", "action": "input.tap_match", "params": { "match": { "ref": "nodes.find.output.0" } } }
-  ]
-}
+```owf
+workflow my_workflow
+  version: 3.0.0
+  description: 查找目标并点击
+  resolution: [1920, 1080]
+  root: root
+
+  inputs:
+    模板:
+      type: asset
+      default: assets/templates/x.png
+
+  node root root 入口
+    at: [0, 0]
+
+  node main sequence
+    at: [200, 0]
+
+  node find task
+    at: [400, 0]
+    action: vision.match_template
+    params:
+      template: inputs.模板
+
+  node tap task
+    at: [600, 0]
+    action: input.tap_match
+    params:
+      match: nodes.find.output.0
+
+  edges:
+    root -> main
+    main -> find
+    main:then.1 -> tap
 ```
+
+运行时执行的仍是编译出来的 Behavior Tree v4：`children` 表示有序父子关系，执行结果由
+`Selector`、`Sequence` 与 `Simple Parallel` 组合节点解释；节点载荷（`action` / `params` /
+`expression` / `fields` / `cases` / `runs` / 装饰器）的名字与形状不变，编译出的文档由
+`src/oooonmyoji/workflows/validator.py` 中的 JSON Schema 做执行语义校验。
 
 - `root` 恰好连接一个子节点；其他节点恰好有一个父节点，禁止环和孤立节点。
 - `Selector` 遇到成功即停止，`Sequence` 遇到失败即停止；`Simple Parallel` 的
   第一个子节点必须是主 Task，第二个是后台分支。
 - 条件、冷却、超时、重试、重复、只执行一次都作为 `decorators` 挂在节点或子树上。
-- 只读参数绑定使用 `{"ref": "inputs.<键>"}`，运行变量使用
-  `{"ref": "variables.<键>"}`，节点结果使用
-  `{"ref": "nodes.<节点id>.output.<字段>"}`。
+- 只读参数绑定直接写引用：输入用 `inputs.<键>`，运行变量用 `variables.<键>`，
+  节点结果用 `nodes.<节点id>.output.<字段>`（`inputs.` / `variables.` / `nodes.` 开头的裸词
+  就是引用，编译时落回运行时的 `{"ref": …}` 绑定）。
+- `bool_judge`（布尔判断卡片）是叶子节点：只有一个 `expression` 条件表达式，
+  运行时总是成功，并把求值结果登记为 `nodes.<id>.output.value`（boolean）。
+  判断节点的布尔条件口、Branch / Repeat Until 的结束条件都可以直接绑定这个引用，
+  同一张卡片能被多处复用（把它放在 `Sequence` 里、在任何使用者之前执行即可）。
+- `break`（拆分卡片）是叶子节点：绑定一张卡片的 object / array 输出（节点上的 `ref`，
+  如 `ref: nodes.find.output` 或嵌套路径 `ref: nodes.find.output.0`），
+  把它拆开成可单独引用的字段。可选的 `fields` 是 `输出字段名 → 来源路径` 的映射
+  （写成一个子块，如 `amount: value` / `top_score: 1.score`，点号逐层深入、数字是数组下标）；
+  不写 `fields` 时输出镜像来源，写了则输出按字段重新拼装的对象。
+  运行时总是成功并把结果登记为 `nodes.<id>.output.<字段>`。
 - 顶层可选字段 `description` 用于说明工作流用途，并显示在子工作流选择器中。
-- 每次运行使用启动时读取的不可变文件哈希快照；修改 JSON 只影响下一次运行。
+- 每次运行使用启动时读取的不可变文件哈希快照；修改工作流文件只影响下一次运行。
 
 自定义 Action 放在 `plugins/actions/<name>/`，清单是 v2 manifest
 （`schema_version: 2`，字段为 `name`、`entry`、`parameters`、`outputs`、
@@ -320,7 +363,7 @@ class ExampleAction(Action):
 
 例如 `plugins/actions/example/action.json` 可以声明
 `{"schema_version":2,"name":"example.inspect","version":"1.0.0","entry":"action.py:ExampleAction","parameters":{"target":{"type":"string","required":true}}}`。
-Action 代码属于可信本地扩展；更新代码后需要重启监督器，工作流 JSON 则在下一次运行时重新加载。
+Action 代码属于可信本地扩展；更新代码后需要重启监督器，工作流文件则在下一次运行时重新加载。
 
 ### 固定卡片端点（`card`）
 
@@ -488,8 +531,8 @@ ADB 和 3 批性能基准）：
 npm run package:win
 ```
 
-成品位于 `desktop/release/OnmyojiStudio-win-x64/`。发送时必须复制整个目录，
-接收者解压后双击 `Onmyoji Studio.exe` 即可，不需要另装 Node.js 或 Python。
+成品位于 `desktop/release/AutoFlowStudio-win-x64/`。发送时必须复制整个目录，
+接收者解压后双击 `AutoFlow Studio.exe` 即可，不需要另装 Node.js 或 Python。
 发布包使用通用配置且默认关闭 GPU OCR，不会带上开发机 `config/config.json` 中的
 本地路径；接收者只需先启动 MuMu，无法自动发现时再按包内“使用说明”设置路径。
 

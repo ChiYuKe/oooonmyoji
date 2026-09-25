@@ -65,6 +65,46 @@ test('autoLayout 叶子横向排开、父节点居中、深度决定纵向', () 
   assert.equal(recorded.calls.mutated, 1);
 });
 
+test('自动排列：纯数据卡片贴在引用它的卡片左边，不再排到整张图右边', () => {
+  // 值卡片（Break / 布尔判断）没有执行父级：旧算法把它们当成独立的树，
+  // 于是各自占一整条横向档位、被推到整张图最右边，数据线横跨半个画布。
+  const raw = {root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['seq']},
+    {id: 'seq', type: 'sequence', children: ['a', 'cond']},
+    {id: 'a', type: 'task', params: {}},
+    {id: 'break_1', type: 'break', ref: {ref: 'nodes.a.output'}},
+    {id: 'bool_1', type: 'bool_judge', expression: {eq: [{ref: 'nodes.break_1.output.state'}, 'settlement']}},
+    {id: 'cond', type: 'condition', children: [], expression: {ref: 'nodes.bool_1.output.value'}},
+  ]};
+  const pins = {
+    break_1: [{param: 'ref', value: {ref: 'nodes.a.output'}}],
+    bool_1: [{param: 'left', value: {ref: 'nodes.break_1.output.state'}}, {param: 'right', value: 'settlement'}],
+    cond: [{param: 'condition', value: {ref: 'nodes.bool_1.output.value'}}],
+  };
+  const h = harness(raw, {nodeVariablePins: (node) => pins[node.id] || []});
+  h.viewport.autoLayout(false);
+  const layout = h.state.raw._layout;
+  // 数据链读成「左 → 右」：break_1 → bool_1 → cond。
+  assert.ok(layout.bool_1.x < layout.cond.x, `布尔判断应该在判断卡左边（${layout.bool_1.x} < ${layout.cond.x}）`);
+  assert.ok(layout.break_1.x < layout.bool_1.x, `拆分卡应该在布尔判断左边（${layout.break_1.x} < ${layout.bool_1.x}）`);
+  // 与使用者同一行：数据从左侧水平流入，不上下乱跳。
+  assert.equal(layout.bool_1.y, layout.cond.y);
+  assert.equal(layout.break_1.y, layout.bool_1.y);
+});
+
+test('自动排列：没有使用者的孤立值卡片仍补在第一行，不会重叠', () => {
+  const raw = {root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['a']},
+    {id: 'a', type: 'task', params: {}},
+    {id: 'bool_1', type: 'bool_judge', expression: {eq: [0, 0]}},
+  ]};
+  const h = harness(raw, {nodeVariablePins: () => []});
+  h.viewport.autoLayout(false);
+  const layout = h.state.raw._layout;
+  assert.ok(Number.isFinite(layout.bool_1.x) && Number.isFinite(layout.bool_1.y));
+  assert.notEqual(`${layout.bool_1.x},${layout.bool_1.y}`, `${layout.a.x},${layout.a.y}`);
+});
+
 test('自动排列的行距跟着卡片实际高度走：高卡片不会压到下一层', () => {
   // 卡片高度随参数行数变化（固定卡片一行 28px，6 项的卡就有 264px）。行距写死 baseHeight + 112
   // 时，高卡片会盖住下一层的卡片——预览里看到的就是一层层互相叠住的虚线框。

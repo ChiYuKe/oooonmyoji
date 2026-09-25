@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { createSidebarState } = require('../dist-test-renderer/canvas/model/sidebar-state.js');
 
 // 变量列表（桌面端左下角）由编辑器 postSidebarState 推送，这里直接跑生产实现。
-function harness(raw, nodeCardRefs = []) {
+function harness(raw, nodeCardRefs = [], extra = {}) {
   const messages = [];
   const controller = createSidebarState({
     state: { raw, inspector: 'none', selectedVariable: '', selectedVariableScope: 'inputs', selected: new Set() },
@@ -14,6 +14,7 @@ function harness(raw, nodeCardRefs = []) {
     currentInspectorSelection: () => ({ kind: 'none' }),
     references: () => [],
     vscode: { postMessage: (message) => messages.push(message) },
+    ...extra,
   });
   controller.postSidebarState();
   return { messages };
@@ -45,4 +46,24 @@ test('自动生成的初始值输入仍然不出现在变量列表里', () => {
     variables: {},
   }, []);
   assert.deepEqual(plain(messages[0].variables.map((item) => item.name)), ['次数']);
+});
+
+test('结构树节点推派生标题，并把手动显示名单独推给行内改名', () => {
+  const raw = {
+    nodes: [
+      { id: 'break_1', type: 'break', ref: { ref: 'nodes.classify.output' } },
+      { id: 'bool_1', type: 'bool_judge', name: '结界未结算', expression: { eq: [1, 1] } },
+    ],
+  };
+  const { messages } = harness(raw, [], {
+    nodeTitle: (node) => (node.type === 'break' ? 'Break 识别结果' : String(node.name || '等于')),
+  });
+  assert.deepEqual(plain(messages[0].nodes.map((node) => [node.id, node.name, node.explicitName])), [
+    ['break_1', 'Break 识别结果', ''],
+    ['bool_1', '结界未结算', '结界未结算'],
+  ]);
+
+  // 没注入标题解析器时退回 `name || id`（独立窗口等旧调用方的行为不变）。
+  const fallback = harness({ nodes: [{ id: 'break_1', type: 'break' }] });
+  assert.deepEqual(plain(fallback.messages[0].nodes.map((node) => [node.name, node.explicitName])), [['break_1', '']]);
 });

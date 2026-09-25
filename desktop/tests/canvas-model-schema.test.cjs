@@ -9,7 +9,18 @@ const schema = createEditorSchema();
 test('definitionSchema 按定义类型生成引用兼容 schema', () => {
   assert.deepEqual(schema.definitionSchema({type: 'asset'}), {type: 'string'});
   assert.deepEqual(schema.definitionSchema({type: 'path'}), {type: 'string'});
-  assert.deepEqual(schema.definitionSchema({type: 'rect'}), {type: 'array', items: {type: 'integer'}});
+  // 区域是定长四元组 [x, y, w, h]：带 title 的分量让拆分卡片能排出 X / Y / W / H 四个引脚。
+  assert.deepEqual(schema.definitionSchema({type: 'rect'}), {
+    type: 'array',
+    prefixItems: [
+      {type: 'integer', title: 'X'},
+      {type: 'integer', title: 'Y'},
+      {type: 'integer', title: 'W'},
+      {type: 'integer', title: 'H'},
+    ],
+    minItems: 4,
+    maxItems: 4,
+  });
   assert.deepEqual(schema.definitionSchema({type: 'any'}), {});
   assert.deepEqual(schema.definitionSchema({type: 'integer'}), {type: 'integer'});
   assert.deepEqual(schema.definitionSchema({type: 'object', properties: {a: {type: 'integer'}, b: {type: 'asset'}}}), {type: 'object', properties: {a: {type: 'integer'}, b: {type: 'string'}}});

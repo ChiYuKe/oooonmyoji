@@ -145,6 +145,51 @@ test('删除与剪切在同一次 mutate 内回调 onNodesRemoved（节点组元
   assert.deepEqual(removed, [['a']]);
 });
 
+test('判断节点：真/假口各接一个子节点，口位与 children 对齐', () => {
+  const h = harness({root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['judge']},
+    {id: 'judge', type: 'condition', expression: true},
+    {id: 'a', type: 'task', action: 'core.capture', params: {}},
+    {id: 'b', type: 'task', action: 'core.capture', params: {}},
+    {id: 'c', type: 'task', action: 'core.capture', params: {}},
+  ]});
+  const judge = () => h.state.raw.nodes.find((node) => node.id === 'judge');
+
+  // 默认接真口；第一次连接会写出显式的 ports，口位不再靠位置猜。
+  assert.equal(h.commands.connect('judge', 'a'), true);
+  assert.deepEqual(judge().children, ['a']);
+  assert.deepEqual(judge().ports, ['true']);
+
+  // 假口独立：先接假口（真口仍空着），再占用真口。
+  assert.equal(h.commands.connect('judge', 'b', 'false'), true);
+  assert.deepEqual(judge().children, ['a', 'b']);
+  assert.deepEqual(judge().ports, ['true', 'false']);
+
+  // 口位排他：真口被占了就换不了（先断开再连）；两个口都满了报「最多两条分支」。
+  assert.match(h.commands.canConnect('judge', 'c'), /最多两条分支/);
+  assert.equal(h.commands.connect('judge', 'c'), false);
+  h.commands.disconnect('judge', 'b');
+  assert.deepEqual(judge().children, ['a']);
+  assert.match(h.commands.canConnect('judge', 'c'), /真口已经接了/);
+  assert.equal(h.commands.connect('judge', 'c'), false);
+  assert.deepEqual(h.toasts.at(-1), ['真口已经接了「a」，先断开再连', true]);
+
+  // 断开真口：剩下的那支仍然留在假口，口位不会顺势漂到真口。
+  h.commands.connect('judge', 'b', 'false');
+  h.commands.disconnect('judge', 'a');
+  assert.deepEqual(judge().children, ['b']);
+  assert.deepEqual(judge().ports, ['false']);
+
+  // 只接假口时条件成立没有真分支，仍然按失败返回（由父节点决定）。
+  assert.equal(h.commands.canConnect('judge', 'a'), null);
+
+  const condition = h.commands.buildNode('condition');
+  assert.equal(condition.type, 'condition');
+  assert.deepEqual(condition.expression, {eq: [1, 1]});
+  assert.equal(Object.hasOwn(condition, 'children'), false);
+  assert.equal(Object.hasOwn(condition, 'ports'), false);
+});
+
 test('复制粘贴重映射 ID、children 与节点输出引用', () => {
   const h = harness(tree());
   h.state.raw.nodes[3].params = {value: {ref: 'nodes.a.output.value'}};
@@ -156,6 +201,20 @@ test('复制粘贴重映射 ID、children 与节点输出引用', () => {
   assert.deepEqual(copy.children, ['a_1', 'b_1']);
   assert.deepEqual([...h.state.selected].sort(), ['a_1', 'b_1', 'seq_1']);
   assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'b_1').params, {value: {ref: 'nodes.a_1.output.value'}});
+});
+
+test('粘贴判断节点时口位跟着 children 一起重映射', () => {
+  const h = harness({root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['judge']},
+    {id: 'judge', type: 'condition', expression: true, children: ['on_false'], ports: ['false']},
+    {id: 'on_false', type: 'task', action: 'core.capture', params: {}},
+  ], _layout: {root: {x: 0, y: 0}, judge: {x: 0, y: 112}, on_false: {x: 0, y: 224}}});
+  h.state.selected = new Set(['judge']);
+  h.commands.copySelection();
+  h.commands.pasteClipboard({x: 400, y: 300});
+  const copy = h.state.raw.nodes.find((node) => node.id === 'judge_1');
+  assert.deepEqual(copy.children, ['on_false_1']);
+  assert.deepEqual(copy.ports, ['false'], '只接假口的分支粘贴后仍然挂在假口');
 });
 
 test('剪切移除选中子树，空剪贴板粘贴给出提示', () => {

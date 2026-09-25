@@ -29,9 +29,9 @@ function harness() {
   const toasts = [];
   const deps = {
     el: element,
-    section: (body, title) => body.appendChild(element('h3', 'section-header', title)),
+    section: (body, title, action) => { body.appendChild(element('h3', 'section-header', title)); if (action) body.appendChild(action); },
     field: (body, label) => { const node = element('div', 'field'); node.label = label; body.appendChild(node); return node; },
-    selectInput: () => element('select'),
+    selectInput: (value, options, onChange, className) => { const node = element('select', className || ''); node.value = value; node.options = options || []; node.onChange = onChange; return node; },
     checkbox: () => element('input'),
     segmentedInput: () => element('div', 'ui-segmented'),
     textInput: (value, onChange) => { const node = element('input'); node.value = value; node.onChange = onChange; return node; },
@@ -41,6 +41,7 @@ function harness() {
     conditionOperandControl: () => element('div', 'condition-control'),
     conditionParseLiteral: (value) => value,
     conditionSentence: (expression) => expression && typeof expression === 'object' ? '当 条件成立 时执行' : '',
+    conditionToText: (expression) => expression && typeof expression === 'object' ? '条件成立' : '',
     nodeChildrenOptions: () => [],
     nodeById: (id) => ({ name: `节点 ${id}` }),
     mutate: (fn) => fn(),

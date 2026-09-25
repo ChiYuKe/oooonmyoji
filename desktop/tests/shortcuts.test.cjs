@@ -42,6 +42,8 @@ test('默认绑定覆盖全部可配置命令并带多组合', () => {
   assert.equal(api.get('global.rename'), 'f2');
   assert.equal(api.get('editor.rename'), 'f2');
   assert.equal(api.get('editor.save'), 'ctrl+s');
+  assert.equal(api.get('editor.arrangeApply'), 'enter');
+  assert.equal(api.get('editor.arrangeCancel'), 'escape');
   assert.equal(api.format('ctrl+shift+z|ctrl+y'), 'Ctrl+Shift+Z / Ctrl+Y');
   assert.equal(api.format('delete|backspace'), 'Delete / Backspace');
   assert.equal(api.isCustom('editor.undo'), false);

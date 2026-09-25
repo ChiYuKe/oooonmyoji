@@ -76,15 +76,18 @@ test('语义校验接受合法工作流并指出不可用引用', () => {
 });
 
 test('子工作流引用匹配与收集走同一份领域规则', async () => {
-  const files = [{ uri: 'file:///project/workflows/demo.json', name: 'demo.json', rel: 'workflows/demo.json', id: 'demo' }];
+  const files = [{ uri: 'file:///project/workflows/demo.owf', name: 'demo.owf', rel: 'workflows/demo.owf', id: 'demo' }];
   assert.equal(matchWorkflowReference('demo', files), files[0].uri);
-  assert.equal(matchWorkflowReference('workflows/demo.json', files), files[0].uri);
+  assert.equal(matchWorkflowReference('workflows/demo.owf', files), files[0].uri);
+  // 旧文档里写的 `.json` 引用按同一口径命中 `.owf` 文件（解析期也认这个后缀）。
+  assert.equal(matchWorkflowReference('demo.json', files), files[0].uri);
   assert.equal(matchWorkflowReference('missing', files), undefined);
   const raw = workflow();
   raw.nodes[2] = { id: 'run', type: 'task', action: 'workflow.run', name: '入口', params: { workflow: 'demo' } };
   assert.deepEqual(collectWorkflowRunReferences(raw), [{ nodeId: 'run', nodeName: '入口', reference: 'demo' }]);
-  const byId = (uri) => Promise.resolve(uri === files[0].uri ? JSON.stringify({ id: 'demo' }) : '{}');
-  const noNames = [{ uri: 'file:///project/workflows/other.json', name: 'other.json', rel: 'workflows/other.json' }];
+  const documentText = 'workflow demo\n  version: 1.0.0\n  resolution: [100, 100]\n  root: root\n';
+  const byId = (uri) => Promise.resolve(uri === files[0].uri ? documentText : 'workflow other\n  version: 1.0.0\n  resolution: [100, 100]\n  root: root\n');
+  const noNames = [{ uri: 'file:///project/workflows/other.owf', name: 'other.owf', rel: 'workflows/other.owf' }];
   assert.equal(await resolveWorkflowReference('demo', noNames.concat(files), byId), files[0].uri);
 });
 

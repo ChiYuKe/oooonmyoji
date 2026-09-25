@@ -36,6 +36,46 @@ test('旧格式迁移：补 schema_version / version，移除废弃的 public �
   assert.deepEqual(again.steps, []);
 });
 
+test('已删除的 condition 装饰器在载入时升级成判断节点（可撤销、幂等）', () => {
+  const raw = {
+    schema_version: 4, version: '4.0.0', id: 'demo', root: 'root',
+    inputs: {}, variables: {},
+    nodes: [
+      { id: 'root', type: 'root', children: ['route'] },
+      { id: 'route', type: 'selector', children: ['guarded', 'fallback'] },
+      {
+        id: 'guarded',
+        type: 'sequence',
+        name: '清残留结算页',
+        children: ['act'],
+        decorators: [
+          { type: 'condition', expression: { eq: [{ ref: 'nodes.classify.output.state' }, 'settlement'] } },
+          { type: 'retry', attempts: 2 },
+        ],
+      },
+      { id: 'act', type: 'task', action: 'core.capture', params: {} },
+      { id: 'fallback', type: 'task', action: 'core.capture', params: {} },
+    ],
+    _layout: { root: { x: 0, y: 0 }, route: { x: 0, y: 112 }, guarded: { x: -150, y: 224 } },
+  };
+  const outcome = migrateDocument(raw);
+  assert.equal(outcome.changed, true);
+  assert.deepEqual(outcome.steps, ['把 1 个 condition 装饰器升级为判断节点']);
+
+  const judge = raw.nodes.find((node) => node.id === 'guarded_cond');
+  assert.equal(judge.type, 'condition');
+  assert.equal(judge.name, '清残留结算页 · 判断');
+  assert.deepEqual(judge.expression, { eq: [{ ref: 'nodes.classify.output.state' }, 'settlement'] });
+  assert.deepEqual(judge.children, ['guarded']);
+  assert.deepEqual(judge.ports, ['true']);
+  assert.deepEqual(raw.nodes.find((node) => node.id === 'route').children, ['guarded_cond', 'fallback'], '判断节点顶替原位置');
+  assert.deepEqual(raw.nodes.find((node) => node.id === 'guarded').decorators, [{ type: 'retry', attempts: 2 }], '其余装饰器保留');
+  assert.deepEqual(raw._layout.guarded_cond, { x: -75, y: 144 }, '落在父与子之间');
+
+  // 幂等：升级过的文档再迁移什么都不做。
+  assert.deepEqual(migrateDocument(raw), { changed: false, steps: [] });
+});
+
 test('已经是 v4 的文档不会被迁移改动', () => {
   const raw = {
     schema_version: 4, version: '4.0.0', id: 'demo', root: 'root',

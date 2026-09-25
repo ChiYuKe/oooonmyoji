@@ -83,7 +83,7 @@ function harness() {
     disconnectVariableFromInstanceInput:(...args)=>ctx.disconnectVariableFromInstanceInput(...args),
     startVariableConnectionFromInstanceInput:(...args)=>ctx.startVariableConnectionFromInstanceInput(...args),
     startVariableConnectionFromCard:(...args)=>ctx.startVariableConnectionFromCard?.(...args),
-    openPortContextMenu:()=>null,
+    openPortContextMenu:(event)=>ctx.openPortContextMenu?.(event) ?? null,
     showMenu:(...args)=>ctx.showMenu?.(...args),
     instanceRunPinMenuItems:()=>[],
     variableCardPortMenuItems:()=>[],
@@ -120,14 +120,15 @@ function harness() {
     openLightbox:()=>{},
     disconnectVariableFromPin:(...args)=>ctx.disconnectVariableFromPin(...args),
     startVariableConnectionFromPin:(...args)=>ctx.startVariableConnectionFromPin?.(...args),
-    openPortContextMenu:()=>null,
+    openPortContextMenu:(event)=>ctx.openPortContextMenu?.(event) ?? null,
     showMenu:(...args)=>ctx.showMenu?.(...args),
     nodeGroupVariableMenuItems:(...args)=>ctx.nodeGroupVariableMenuItems?.(...args) || [],
-    nodeVariablePinMenuItems:()=>[],
+    nodeVariablePinMenuItems:(...args)=>ctx.nodeVariablePinMenuItems?.(...args) || [],
     nodeInputPortMenuItems:()=>[],
-    nodeOutputPortMenuItems:()=>[],
-    startConnectionFromInput:()=>{},
-    startConnection:()=>{},
+    nodeOutputPortMenuItems:(...args)=>ctx.nodeOutputPortMenuItems?.(...args) || [],
+    startConnectionFromInput:(...args)=>ctx.startConnectionFromInput?.(...args),
+    startConnection:(...args)=>ctx.startConnection?.(...args),
+    startReferenceConnection:(...args)=>ctx.startReferenceConnection?.(...args),
     startNodeDrag:(...args)=>ctx.startNodeDrag?.(...args),
     registerCardPress:cards.registerCardPress,
     requestInspector:()=>{},
@@ -146,6 +147,14 @@ function harness() {
     // 阶段 6：折叠组问题汇总与节点提醒点在用例里按需注入（延迟读 ctx，便于逐例改写）。
     groupIssueSummary:(groupId)=>ctx.groupIssueSummary?.(groupId) || {errors:0,warnings:0,first:''},
     nodeWarningCount:(nodeId)=>ctx.nodeWarningCount?.(nodeId) || 0,
+    // 引用显示名（操作数格与回读行里的 `← 名字`）：默认保持原始引用文本，用例按需注入。
+    referenceDisplayNameOf:(ref)=>ctx.referenceDisplayNameOf?ctx.referenceDisplayNameOf(ref):String(ref||''),
+    // 标题里的引用短名（值卡片的 UE 风格标题用）：默认回落到原始引用文本，用例按需注入。
+    referenceTitleOf:(ref)=>ctx.referenceTitleOf?ctx.referenceTitleOf(ref):String(ref||''),
+    // 嵌套条件的卡面回读（与条件回读共用一份实现）：用例按需注入。
+    conditionToText:(expression)=>ctx.conditionToText?ctx.conditionToText(expression):'',
+    // 点回读行打开值卡片浮层：用例按需注入。
+    openValueCardEditor:(nodeId)=>ctx.openValueCardEditor?.(nodeId),
     // 节点级错误（红点）：默认没有，用例按需注入。
     nodeIssueInfo:(node)=>ctx.nodeIssueInfo?.(node) ?? null,
     issueTitle:(items)=>items.map((item)=>item.message).join('\n'),
@@ -159,6 +168,10 @@ function harness() {
     taskOutputPortX:248,
     // 输出口连没连：默认没连（空心环），用例按需注入。
     outputReferenced:(nodeId)=>ctx.outputReferenced?.(nodeId) ?? false,
+    // 拆分卡片字段引脚：默认没有（未绑定 → 通用输出口），用例按需注入。
+    breakFieldPins:(node)=>ctx.breakFieldPins?.(node) ?? [],
+    breakFieldPinOffset:(node,field)=>ctx.breakFieldPinOffset?.(node,field) ?? null,
+    outputFieldReferenced:(nodeId,field)=>ctx.outputFieldReferenced?.(nodeId,field) ?? false,
     preview:{x:174,y:56,width:72,height:30},
   });
   ctx.renderNode=nodeCard.renderNode;
@@ -192,6 +205,269 @@ function harness() {
   return {ctx,Element,svgEl,NodeCards};
 }
 const byClass=(element,name)=>element.children.filter(c=>(c.attrs.class || '').split(' ').includes(name));
+test('判断卡渲染左侧 bool 数据输入口并绑定交互',()=>{
+  const {ctx,Element}=harness();
+  const layer=new Element('g');
+  const node={id:'judge',type:'condition',name:'布尔判断',expression:{ref:'inputs.enabled'},children:[]};
+  ctx.nodeHeight=()=>112;
+  const started=[];
+  const menus=[];
+  ctx.startVariableConnectionFromPin=(...args)=>started.push(args);
+  ctx.nodeVariablePins=()=>[{
+    param:'condition', variable:'enabled', scope:'inputs', type:'boolean', configured:true,
+    value:{ref:'inputs.enabled'}, definition:{type:'boolean'}, label:'布尔条件',
+  }];
+  ctx.openPortContextMenu=()=>({x:1,y:2});
+  ctx.nodeVariablePinMenuItems=(...args)=>{menus.push(args);return [];};
+  ctx.renderNode(layer,node);
+  const card=layer.children[0];
+  const input=byClass(card,'condition-input')[0];
+  assert.ok(input,'判断卡应渲染 condition-input');
+  // 位置与尺寸和其他卡片的数据口统一：左缘内缩 10、半径 portRadius - 2。
+  assert.equal(input.attrs.cx,'10');
+  assert.equal(input.attrs.cy,'64');
+  assert.match(input.attrs.class,/type-boolean/);
+  const hit=byClass(card,'condition-input-hit')[0];
+  hit.events.pointerdown[0]({button:0,stopPropagation(){}});
+  assert.equal(started.length,1);
+  assert.deepEqual(started[0].slice(1),['judge','condition']);
+  hit.events.contextmenu[0]({clientX:1,clientY:2,preventDefault(){},stopPropagation(){}});
+  assert.equal(menus.length,1);
+});
+
+test('布尔判断卡：左侧左右两个输入端点 + 右侧输出引用口，没有执行输出口',()=>{
+  const {ctx,Element}=harness();
+  const layer=new Element('g');
+  const node={id:'bool_1',type:'bool_judge',name:'结界未结算',expression:{eq:[{ref:'inputs.current'},'settlement']},pins:[
+    {param:'left', variable:'current', scope:'inputs', type:'any', configured:true, value:{ref:'inputs.current'}, definition:{}, label:'左值'},
+    {param:'right', variable:'', scope:'inputs', type:'any', configured:true, value:'settlement', definition:{}, label:'右值'},
+  ]};
+  ctx.nodeHeight=()=>112;
+  const started=[];
+  const references=[];
+  ctx.startVariableConnectionFromPin=(...args)=>started.push(args);
+  ctx.startReferenceConnection=(...args)=>references.push(args);
+  ctx.openPortContextMenu=()=>({x:1,y:2});
+  ctx.renderNode(layer,node);
+  const card=layer.children[0];
+
+  // 左侧两个数据端点分别对应比较表达式的左值与右值。
+  const inputs=byClass(card,'bool-judge-input');
+  assert.equal(inputs.length,2,'布尔判断卡应渲染左值和右值两个输入端点');
+  assert.deepEqual(inputs.map((input)=>[input.attrs['data-param'],input.attrs.cx,input.attrs.cy]),[
+    ['left','10','64'],['right','10','88'],
+  ]);
+  const hits=byClass(card,'bool-judge-input-hit');
+  hits[0].events.pointerdown[0]({button:0,stopPropagation(){}});
+  hits[1].events.pointerdown[0]({button:0,stopPropagation(){}});
+  assert.deepEqual(started.map((item)=>item.slice(1)),[['bool_1','left'],['bool_1','right']]);
+
+  // 右侧输出引用口：卡片靠它输出 `nodes.<id>.output.value`。
+  const outputs=byClass(card,'port-out');
+  assert.equal(outputs.length,1,'布尔判断卡只有右侧一个输出口');
+  assert.equal(outputs[0].attrs.class.includes('port-out-reference'),true);
+  assert.equal(byClass(card,'port-out-true').length,0,'布尔判断卡没有真/假分支口');
+  outputs[0].events.pointerdown[0]({button:0,preventDefault(){},stopPropagation(){}});
+  assert.deepEqual(references[0].slice(1),['bool_1']);
+
+  // 比较节点的卡片内容表现为操作数框、运算符与 bool 输出。
+  assert.equal(byClass(card,'bool-judge-operator')[0].textContent,'==');
+  assert.equal(byClass(card,'bool-judge-output-label')[0].textContent,'bool');
+  assert.equal(byClass(card,'bool-judge-operand-value').length,2);
+  assert.equal(byClass(card,'node-type')[0].textContent,'bool_judge');
+});
+test('值卡片（布尔判断 / 拆分）不画顶部的执行流入口，普通节点照旧',()=>{
+  const {ctx,Element}=harness();
+  ctx.nodeHeight=()=>112;
+  const render=(node)=>{const layer=new Element('g');ctx.renderNode(layer,node);return layer.children[0];};
+  // 布尔判断卡：左侧两个表达式端点 + 右侧输出引用口，顶部没有执行入口（也没有入口箭头）。
+  const bool=render({id:'bool_1',type:'bool_judge',expression:{eq:[0,0]},pins:[{param:'left',type:'integer',value:0},{param:'right',type:'integer',value:0}]});
+  assert.equal(byClass(bool,'port-in').length,0,'布尔判断卡没有顶部执行入口');
+  assert.equal(byClass(bool,'bool-judge-operand-value').map((item)=>item.textContent).join(','),'0,0','新建卡默认显示两个 0 输入值');
+  assert.equal(byClass(bool,'bool-judge-output-label')[0].textContent,'bool');
+  assert.equal(byClass(bool,'bool-judge-operand-field').length,2,'两个操作数都必须有可见输入框');
+  // 拆分卡同理：它不是执行流的一环，值靠输出引用口交给别的节点。
+  const brk=render({id:'break_1',type:'break',ref:{ref:'nodes.wait.output.0'},pins:[]});
+  assert.equal(byClass(brk,'port-in').length,0,'拆分卡没有顶部执行入口');
+  // 普通节点（执行流卡片）仍然保留顶部入口：入口箭头与它的连线行为都不变。
+  const seq=render({id:'seq',type:'sequence',children:[]});
+  assert.equal(byClass(seq,'port-in').length,1,'普通节点保留顶部执行入口');
+  assert.equal(byClass(seq,'port-glyph-exec').length>=1,true,'入口箭头仍然画出来');
+});
+test('值卡片不显示用户自定义名称：Break / 运算符标题保持 UE 风格',()=>{
+  const {ctx,Element}=harness();
+  ctx.nodeHeight=()=>112;
+  ctx.referenceTitleOf=(ref)=>(ref==='nodes.classify.output'?'识别结果':String(ref||''));
+  const render=(node)=>{const layer=new Element('g');ctx.renderNode(layer,node);return layer.children[0];};
+  const tip=(card)=>card.children.find((child)=>child.tag==='title').textContent;
+
+  // 拆分卡：UE 的 `Break <Struct>`，来源用中文短名，不再把 break_1 当标题。
+  const brk=render({id:'break_1',type:'break',ref:{ref:'nodes.classify.output'},pins:[]});
+  assert.equal(byClass(brk,'card-title')[0].textContent,'Break');
+  assert.match(tip(brk),/^Break\nID: break_1/, '稳定 ID 仍在悬停提示里，写引用时照得到');
+  // 没绑来源时只说类型，同样不裸露 ID。
+  const unbound=render({id:'break_2',type:'break',pins:[]});
+  assert.equal(byClass(unbound,'card-title')[0].textContent,'Break');
+
+  // 布尔判断卡：UE 的比较节点标题就是运算符名。
+  const bool=render({id:'bool_1',type:'bool_judge',expression:{eq:[{ref:'nodes.classify.output.state'},'settlement']},pins:[
+    {param:'left',type:'string',value:{ref:'nodes.classify.output.state'}},
+    {param:'right',type:'string',value:'settlement'},
+  ]});
+  assert.equal(byClass(bool,'card-title')[0].textContent,'等于');
+  assert.equal(byClass(bool,'bool-judge-operator')[0].textContent,'==','卡面中间仍是 UE 紧凑节点那样的运算符符号');
+  assert.match(tip(bool),/\nID: bool_1/);
+
+  // 纯数据节点忽略用户自定义 name，标题保持 UE 运算符语义。
+  const named=render({id:'bool_2',type:'bool_judge',name:'结界未结算',expression:{eq:[1,1]},pins:[]});
+  assert.equal(byClass(named,'card-title')[0].textContent,'等于');
+});
+test('布尔判断卡：嵌套 / 整卡绑定形态不画幽灵操作数，只回读并可点开进阶浮层',()=>{
+  const {ctx,Element}=harness();
+  ctx.nodeHeight=()=>112;
+  ctx.conditionToText=(expression)=>(expression&&expression.and?'（识别结果 › 状态 等于 “结算” 并且 计数 大于 3）':(expression&&expression.ref?'运行中 为真':''));
+  const opened=[];
+  ctx.openValueCardEditor=(nodeId)=>opened.push(nodeId);
+  ctx.referenceDisplayNameOf=(ref)=>String(ref||'').replace(/^inputs\./,'');
+  const render=(node)=>{const layer=new Element('g');ctx.renderNode(layer,node);return layer.children[0];};
+
+  // 嵌套条件（and/or/not）：卡面只回读整句，没有操作数格、没有输入引脚、没有运算符符号。
+  const nested=render({id:'bool_and',type:'bool_judge',expression:{and:[{eq:[{ref:'nodes.classify.output.state'},'结算']},{gt:[{ref:'inputs.计数'},3]}]},pins:[]});
+  assert.equal(byClass(nested,'bool-judge-operand-field').length,0,'嵌套卡不画操作数格');
+  assert.equal(byClass(nested,'bool-judge-operand-hit').length,0,'嵌套卡没有可编辑热区（点开行内编辑器就是那个悬空输入框）');
+  assert.equal(byClass(nested,'bool-judge-input').length,0,'嵌套形态没有输入引脚');
+  assert.equal(byClass(nested,'bool-judge-operator').length,0,'卡面不画运算符符号');
+  assert.equal(byClass(nested,'bool-judge-output-label')[0].textContent,'bool');
+  // 卡面一行放不下整句：行内截断（并让出 `bool` 标签的位置），完整回读留在悬停提示里。
+  assert.equal(byClass(nested,'value-card-readback')[0].textContent.startsWith('（识别结果 › 状态 等于'),true);
+  const tips=(card)=>card.children.filter((child)=>child.tag==='title').map((child)=>child.textContent);
+  assert.equal(tips(nested).some((text)=>text.includes('（识别结果 › 状态 等于 “结算” 并且 计数 大于 3）')),true);
+  assert.equal(byClass(nested,'value-card-hint')[0].textContent,'点这一行改嵌套条件');
+  byClass(nested,'value-card-readback-hit')[0].events.click[0]({preventDefault(){},stopPropagation(){}});
+  assert.deepEqual(opened,['bool_and'],'点回读行打开「嵌套条件（进阶）」浮层');
+  // 回读不出来（例如 {and:[0,0]} 这种 Python 校验直接拒绝的形状）时给出去处，而不是空行。
+  ctx.conditionToText=()=>'';
+  const broken=render({id:'bool_bad',type:'bool_judge',expression:{and:[0,0]},pins:[]});
+  assert.equal(byClass(broken,'value-card-readback')[0].textContent,'等待左侧输入');
+  assert.equal(byClass(broken,'bool-judge-operand-field').length,0);
+
+  // 整卡绑定 bool 来源：一个布尔输入口 + 「← 来源」回读。
+  const bound=render({id:'bool_ref',type:'bool_judge',expression:{ref:'inputs.运行中'},pins:[
+    {param:'condition',variable:'运行中',scope:'inputs',type:'boolean',configured:true,value:{ref:'inputs.运行中'},definition:{type:'boolean'},label:'布尔值'},
+  ]});
+  const inputs=byClass(bound,'bool-judge-input');
+  assert.equal(inputs.length,1,'整卡绑定只有一个布尔口');
+  assert.equal(inputs[0].attrs['data-param'],'condition');
+  assert.equal(inputs[0].attrs.cy,'64','与判断节点的布尔条件口同高');
+  assert.equal(byClass(bound,'bool-judge-operand-field').length,0);
+  assert.equal(byClass(bound,'value-card-readback')[0].textContent,'← 运行中');
+  assert.equal(byClass(bound,'value-card-hint').length,0,'绑定形态有引脚，不用再提示去浮层');
+
+  // 比较形态照旧：两个操作数格 + 运算符符号，能就地编辑。
+  const compared=render({id:'bool_eq',type:'bool_judge',expression:{eq:[1,2]},pins:[
+    {param:'left',type:'integer',value:1},{param:'right',type:'integer',value:2},
+  ]});
+  assert.equal(byClass(compared,'bool-judge-operand-field').length,2);
+  assert.equal(byClass(compared,'bool-judge-input').length,2);
+  assert.equal(byClass(compared,'bool-judge-operator')[0].textContent,'==');
+  assert.equal(byClass(compared,'value-card-readback').length,0);
+});
+test('拆分卡：来源是一行普通参数行 + 右侧输出引用口，没有执行输出口',()=>{
+  const {ctx,Element}=harness();
+  const layer=new Element('g');
+  const node={id:'break_1',type:'break',name:'拆分战斗结果',ref:{ref:'nodes.wait.output.0'},pins:[
+    {param:'ref', variable:'', scope:'inputs', type:'any', configured:true, required:true, value:{ref:'nodes.wait.output.0'}, definition:null, label:'拆分来源'},
+  ]};
+  ctx.nodeHeight=()=>112;
+  const references=[];
+  ctx.startReferenceConnection=(...args)=>references.push(args);
+  ctx.openPortContextMenu=()=>({x:1,y:2});
+  ctx.renderNode(layer,node);
+  const card=layer.children[0];
+
+  // 来源行是普通参数行：左侧数据端点 + 行标签（不是 condition/bool_judge 的固定说明区端点）。
+  const rowPorts=byClass(card,'port-variable');
+  assert.equal(rowPorts.length,1,'拆分卡只有一个来源端点');
+  assert.equal(byClass(card,'condition-input').length + byClass(card,'bool-judge-input').length,0,'拆分来源不占用说明区固定端点');
+  const labels=byClass(card,'param-row-label');
+  assert.equal(labels.some((label)=>label.textContent==='拆分来源'),true,'来源行显示「拆分来源」');
+
+  // 右侧输出引用口：拆分结果靠它绑定 `nodes.<id>.output.<字段>`。
+  const outputs=byClass(card,'port-out');
+  assert.equal(outputs.length,1,'拆分卡只有右侧一个输出口');
+  assert.equal(outputs[0].attrs.class.includes('port-out-reference'),true);
+  outputs[0].events.pointerdown[0]({button:0,preventDefault(){},stopPropagation(){}});
+  assert.deepEqual(references[0].slice(1),['break_1']);
+  assert.equal(byClass(card,'node-type')[0].textContent,'break');
+});
+test('拆分卡绑定来源后：右缘按字段排出一列输出引脚，拖字段引脚带字段名',()=>{
+  const {ctx,Element}=harness();
+  const layer=new Element('g');
+  const node={id:'break_1',type:'break',name:'拆分战斗结果',ref:{ref:'nodes.wait.output'},pins:[
+    {param:'ref', variable:'', scope:'inputs', type:'any', configured:true, required:true, value:{ref:'nodes.wait.output'}, definition:null, label:'拆分来源'},
+  ]};
+  ctx.nodeHeight=()=>134;
+  const fields=[
+    {field:'matched', label:'已匹配', ref:'nodes.break_1.output.matched'},
+    {field:'top_score', label:'最高分', ref:'nodes.break_1.output.top_score'},
+  ];
+  ctx.breakFieldPins=(target)=>target.type==='break'?fields:[];
+  // 与 editor 的公式一致：字段引脚排在行网格上（BASE_H + i*行高 + 行高/2）。
+  ctx.breakFieldPinOffset=(_target,field)=>{const index=fields.findIndex((item)=>item.field===field);return index<0?null:{x:248,y:96+index*24+12};};
+  ctx.outputFieldReferenced=(_nodeId,field)=>field==='top_score';
+  const started=[];
+  ctx.startReferenceConnection=(...args)=>started.push(args);
+  ctx.openPortContextMenu=()=>({x:1,y:2});
+  ctx.renderNode(layer,node);
+  const card=layer.children[0];
+
+  // 每个顶层字段一个输出引脚，排在行网格上（第一行与「拆分来源」输入引脚同行）。
+  const pins=byClass(card,'port-out-field');
+  assert.equal(pins.length,2,'两个字段应该各有一个输出引脚');
+  assert.deepEqual(pins.map((pin)=>pin.attrs['data-field']),['matched','top_score']);
+  assert.deepEqual(pins.map((pin)=>[pin.attrs.cx,pin.attrs.cy]),[['248','108'],['248','132']]);
+  assert.equal(byClass(card,'port-variable')[0].attrs.cy,'108','输入引脚与第一个字段引脚同一行');
+  // 已引用的字段画实心，没引用的画空心环。
+  assert.equal(pins[1].attrs.class.includes('connected'),true);
+  assert.equal(pins[0].attrs.class.includes('connected'),false);
+  // 字段标签贴在引脚左侧。
+  assert.deepEqual(byClass(card,'port-label-field').map((label)=>label.textContent),['已匹配','最高分']);
+  // UE 排法：这一行没有参数值列（右半行留给字段引脚），也没有通用输出口。
+  assert.equal(byClass(card,'param-row-value').length,0,'拆分卡的行不画参数值');
+  assert.equal(byClass(card,'port-out-reference').length,2,'只有字段引脚，没有额外的通用输出口');
+  // 从字段引脚起拖：带上字段名，落点直接绑这一个引用。
+  pins[0].events.pointerdown[0]({button:0,preventDefault(){},stopPropagation(){}});
+  assert.equal(started[0][1],'break_1');
+  assert.equal(started[0][3],'matched');
+});
+test('判断卡底部画真 / 假两个执行输出口：左真右假，未接的口中空',()=>{
+  const {ctx,Element}=harness();
+  const layer=new Element('g');
+  const node={id:'judge',type:'condition',name:'判断结算页',expression:{eq:[1,1]},children:['a'],ports:['true']};
+  ctx.nodeHeight=()=>112;
+  const started=[];
+  const menus=[];
+  ctx.startConnection=(event,nodeId,at,port)=>started.push([nodeId,port]);
+  ctx.nodeOutputPortMenuItems=(nodeId,point,port)=>{menus.push([nodeId,port]);return [];};
+  ctx.openPortContextMenu=()=>({x:1,y:2});
+  ctx.renderNode(layer,node);
+
+  const card=layer.children[0];
+  const ports=byClass(card,'port-out');
+  assert.equal(ports.length,2,'判断卡有两个执行输出口');
+  assert.deepEqual(ports.map((port)=>port.attrs.cx),['78','182'],'左真右假');
+  assert.equal(ports[0].attrs.class.includes('connected'),true,'真口接了分支');
+  assert.equal(ports[1].attrs.class.includes('connected'),false,'假口空着');
+  assert.deepEqual(ports.map((port)=>port.attrs['data-port']),['true','false']);
+  const labels=byClass(card,'port-label');
+  assert.deepEqual(labels.map((label)=>label.textContent),['真','假']);
+  assert.deepEqual(labels.map((label)=>label.attrs.y),['105','105'],'口位标签写在卡片底边上方');
+
+  ports[1].events.pointerdown[0]({button:0,preventDefault(){},stopPropagation(){}});
+  assert.deepEqual(started,[['judge','false']],'从假口起线带口位');
+  ports[0].events.contextmenu[0]({clientX:1,clientY:2,preventDefault(){},stopPropagation(){}});
+  assert.deepEqual(menus,[['judge','true']],'右键真口给出真口菜单');
+});
 test('折叠组卡显示成员运行进度，并能在主状态不变时就地刷新',()=>{
   const {ctx,Element}=harness();
   let completed=1;
@@ -232,12 +508,12 @@ test('运行态组卡右键提供直接定位真实成员的入口',()=>{
 test('折叠组存在跨组输出引用时显示右侧代理输出口',()=>{
   const {ctx,Element}=harness();
   const layer=new Element('g');
-  ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:2,_groupPins:[],_hasReferenceOutput:true});
+  ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:2,_groupPins:[],_hasReferenceOutput:true,_referenceOutputs:[{nodeId:'member',field:'',ref:'nodes.member.output'}]});
   const card=layer.children[0];
   const outputs=byClass(card,'port-out-reference');
   assert.equal(outputs.length,1);
   assert.equal(outputs[0].attrs.cx,'248');
-  assert.equal(outputs[0].attrs.cy,'16');
+  assert.equal(outputs[0].attrs.cy,'108');
 });
 
 // —— 阶段 6：折叠组汇总内部问题（点徽标进组并定位）、节点提醒点 ——
@@ -965,8 +1241,7 @@ test('task categories have distinct, stable identities and reach the rendered SV
     const layer=new Element('g');ctx.renderNode(layer,node);
     assert(layer.children[0].attrs.class.includes('category-'+category));
   }
-  assert.equal(nodeCardCategory({type:'sequence'}),'control');
-  const css=require('postcss').parse(fs.readFileSync(path.join(root,'node-cards.css'),'utf8'));
+  assert.equal(nodeCardCategory({type:'sequence'}),'control');  const css=require('postcss').parse(fs.readFileSync(path.join(root,'node-cards.css'),'utf8'));
   const local=new Map();
   css.walkRules(rule=>{if(rule.selector==='.studio-card')rule.walkDecls(d=>local.set(d.prop,d.value));});
   for(const token of ['--card-bg','--card-head','--card-text','--card-muted','--success','--danger','--warning']) assert(local.has(token),token+' must be owned by cards, not inherited from the theme');
@@ -1008,4 +1283,30 @@ test('task categories have distinct, stable identities and reach the rendered SV
     tinted+=1;
   });
   assert(tinted>=10,'分类色规则应覆盖各节点类型与类别');
+});
+test('值卡片有自己的一档分类色：不再落到通用兜底色，也不和流程卡片撞色',()=>{
+  const css=require('postcss').parse(fs.readFileSync(path.join(root,'node-cards.css'),'utf8'));
+  const tintOf=(pattern)=>{
+    let value=null;
+    css.walkRules(rule=>{
+      if(!new RegExp(`\\.studio-card[^{]*${pattern}`).test(rule.selector))return;
+      rule.walkDecls('--card-tint',(decl)=>{value=decl.value;});
+    });
+    return value;
+  };
+  const defaults=[];
+  css.walkRules(rule=>{if(rule.selector==='.studio-card')rule.walkDecls('--card-tint',(decl)=>defaults.push(decl.value));});
+  const bool=tintOf('\\.type-bool_judge\\b');
+  const brk=tintOf('\\.type-break\\b');
+  const condition=tintOf('\\.type-condition\\b');
+  const vision=tintOf('\\.category-vision\\b');
+  for(const [name,value] of [['bool_judge',bool],['break',brk],['condition',condition]]) {
+    assert.ok(value,`${name} 必须有分类色`);
+    assert.equal(defaults.includes(value),false,`${name} 不能落回 .studio-card 的通用兜底色`);
+  }
+  assert.notEqual(bool,brk,'两类值卡片彼此要区分');
+  assert.notEqual(bool,vision,'值卡片不能和视觉任务卡撞色');
+  assert.notEqual(bool,condition,'布尔判断卡与判断节点要区分（冷蓝 vs 青绿）');
+  // 值卡片另有样式钩子：类型行/符号/回读行按分类色提亮，卡身底色仍不动。
+  assert.match(fs.readFileSync(path.join(root,'node-cards.css'),'utf8'),/\.studio-card\.value-card \.value-card-readback/);
 });

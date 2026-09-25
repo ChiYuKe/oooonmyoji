@@ -192,4 +192,14 @@ test('节点输出引用渲染成「节点名 › 字段名」，不再是裸路
   // 变量与输入沿用原有译名。
   assert.equal(references.referenceLabel('variables.时长'), '变量 · variables.时长');
   assert.equal(references.referenceLabel(''), '无可用引用');
+
+  // 标题用的短名：裸整体输出去掉「› 输出」尾缀（UE 的 `Break <Struct>` 要的就是来源名），
+  // 字段引用与译名规则和回读完全一致。
+  assert.equal(references.referenceTitle('nodes.classify.output'), '识别页面状态');
+  assert.equal(references.referenceTitle('nodes.wait.output'), '等待模板');
+  assert.equal(references.referenceTitle('nodes.classify.output.state'), '识别页面状态 › 状态');
+  assert.equal(references.referenceTitle('nodes.wait.output.0.confidence'), '等待模板 › 第 1 项 › 置信度');
+  assert.equal(references.referenceTitle('nodes.ghost.output'), 'ghost');
+  assert.equal(references.referenceTitle('variables.时长'), '变量 · variables.时长');
+  assert.equal(references.referenceTitle(''), '无可用引用');
 });

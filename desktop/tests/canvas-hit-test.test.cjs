@@ -63,6 +63,28 @@ test('connectionTargetAt 按拖拽方向选择输入/输出侧并跳过 root/自
   assert.equal(task.hit.connectionTargetAt(null), null);
 });
 
+test('判断节点底部两个口分别吸附：左真右假，execPortAt 给出落点口位', () => {
+  const raw = {nodes: [
+    {id: 'root', type: 'root', children: ['judge']},
+    {id: 'judge', type: 'condition', expression: true, children: ['a'], ports: ['true']},
+    {id: 'a', type: 'task'},
+    {id: 'b', type: 'task'},
+  ], _layout: {root: {x: 0, y: 0}, judge: {x: 0, y: 200}, a: {x: -200, y: 400}, b: {x: 400, y: 400}}};
+  const h = harness({raw: JSON.parse(JSON.stringify(raw))});
+  h.state.connect = {direction: 'from-input', child: 'b'};
+
+  // 卡片底边 y = 200 + 96；真口 x = 78、假口 x = 182。
+  assert.equal(h.hit.connectionTargetAt({clientX: 78, clientY: 296}), 'judge');
+  assert.equal(h.hit.connectionTargetAt({clientX: 182, clientY: 296}), 'judge');
+  assert.equal(h.hit.execPortAt({x: 78, y: 296}, 'judge'), 'true');
+  assert.equal(h.hit.execPortAt({x: 182, y: 296}, 'judge'), 'false');
+  assert.equal(h.hit.execPortAt({x: 129, y: 296}, 'judge'), 'true', '中点偏左算真口');
+  assert.equal(h.hit.execPortAt({x: 130, y: 296}, 'judge'), 'false');
+  // 普通节点没有口位；任务节点不能被当成父节点命中。
+  assert.equal(h.hit.execPortAt({x: 80, y: 296}, 'a'), null);
+  assert.equal(h.hit.connectionTargetAt({clientX: 530, clientY: 496}), null);
+});
+
 test('variablePinTargetAt 就近命中引脚，落在卡片本体内回退到首个兼容引脚', () => {
   const node = {id: 'a', type: 'task', pins: [{param: 'template'}, {param: 'threshold'}]};
   const h = harness({raw: {nodes: [node], inputs: {}, _layout: {a: {x: 0, y: 0}}}});
@@ -74,6 +96,43 @@ test('variablePinTargetAt 就近命中引脚，落在卡片本体内回退到首
 
   const incompatible = harness({raw: {nodes: [node], _layout: {a: {x: 0, y: 0}}}, compatiblePin: false});
   assert.equal(incompatible.hit.variablePinTargetAt({x: 10, y: 108}, 'inputs', '模板'), null);
+});
+
+test('判断节点 bool 输入端点固定在左侧说明区并支持类型命中', () => {
+  const judge = {
+    id: 'judge', type: 'condition', expression: {eq: [1, 1]},
+    pins: [{param: 'condition', type: 'boolean'}],
+  };
+  const h = harness({raw: {nodes: [judge], inputs: {enabled: {type: 'boolean'}}, _layout: {judge: {x: 100, y: 200}}}});
+  // 布尔输入口与其他数据口统一：x 左缘内缩 10（variablePinX），y 固定在说明区。
+  assert.deepEqual(
+    h.hit.variablePinTargetAt({x: 110, y: 264}, 'inputs', 'enabled'),
+    {nodeId: 'judge', param: 'condition', x: 110, y: 264},
+  );
+  assert.equal(h.hit.variablePinTargetAt({x: 1000, y: 1000}, 'inputs', 'enabled'), null);
+});
+
+test('bool_judge 左侧两个输入端点分别命中 left / right', () => {
+  const boolJudge = {
+    id: 'bool_1', type: 'bool_judge', expression: {eq: [1, 'settlement']},
+    pins: [
+      {param: 'left', type: 'any'},
+      {param: 'right', type: 'any'},
+    ],
+  };
+  const h = harness({raw: {
+    nodes: [boolJudge],
+    inputs: {current: {type: 'string'}},
+    _layout: {bool_1: {x: 100, y: 200}},
+  }});
+  assert.deepEqual(
+    h.hit.variablePinTargetAt({x: 110, y: 264}, 'inputs', 'current'),
+    {nodeId: 'bool_1', param: 'left', x: 110, y: 264},
+  );
+  assert.deepEqual(
+    h.hit.variablePinTargetAt({x: 110, y: 288}, 'inputs', 'current'),
+    {nodeId: 'bool_1', param: 'right', x: 110, y: 288},
+  );
 });
 
 test('instanceRunInputTargetAt 命中端点或输入行，不兼容返回 null', () => {

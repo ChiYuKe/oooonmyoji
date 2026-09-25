@@ -10,11 +10,13 @@ class FakeNode {
   constructor(tag) {
     this.tag = tag;
     this.children = [];
-    this.style = {};
+    this.style = { setProperty: () => {} };
     this.events = {};
     this.attrs = {};
     this.className = '';
     this.value = '';
+    this.focused = false;
+    this.selected = false;
   }
   appendChild(child) { this.children.push(child); child.parent = this; return child; }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter((item) => item !== this); }
@@ -541,6 +543,19 @@ test('固定长度数组用并排输入格，回车提交整行', () => {
   const loose = harness();
   loose.editor.openParamEditor(request({ id: 'tap', params: {} }, { param: 'states', definition: { type: 'array', items: { type: 'object' } }, configured: false }));
   assert.deepEqual(loose.calls.inspectors, [{ kind: 'node', nodeId: 'tap' }]);
+});
+
+test('固定长度数组点击第二个值框时聚焦第二个输入框', () => {
+  const { editor, body } = harness();
+  const node = { id: 'tap', params: {} };
+  const definition = { type: 'array', items: { type: 'duration', min: 0 }, min_items: 2, max_items: 2, default: [0, 0] };
+  const pin = { param: 'random_interval', definition, configured: true, value: [0.2, 0.6] };
+  editor.openParamEditor(request(node, pin, { valueAlign: 'left', inputIndex: 1 }));
+  const inputs = body.children[0].children.filter((child) => child.tag === 'input');
+  assert.equal(inputs[0].focused, false);
+  assert.equal(inputs[0].selected, false);
+  assert.equal(inputs[1].focused, true);
+  assert.equal(inputs[1].selected, true);
 });
 
 test('布尔行的状态文案跟卡片声明走', () => {

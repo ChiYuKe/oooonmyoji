@@ -139,7 +139,7 @@ test('toolbar menus support initial up/down, wrapping, escape and outside dismis
 test('toolbar keeps existing commands and shared compositions parse', () => {
   const html = read('src/renderer/index.html');
   const strip = html.slice(html.indexOf('<div class="tool-strip"'), html.indexOf('<div class="dock-workspace-shell"'));
-  for (const command of ['addTask','addSequence','addSelector','addParallel','addGenericParallel','addRepeatUntil','addBranch','addSwitch','addInstanceParallel','autoLayout','fitView','exportImage','workflowSettings']) {
+  for (const command of ['addTask','addSequence','addSelector','addParallel','addGenericParallel','addRepeatUntil','addBranch','addSwitch','addInstanceParallel','previewArrange','fitView','exportImage','workflowSettings']) {
     assert.equal(strip.split(`data-editor-command="${command}"`).length - 1, 1, command);
   }
   for (const id of ['run-button','stop-button','save-button','more-button','instance-select']) assert(strip.includes(`id="${id}"`));

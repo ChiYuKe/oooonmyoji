@@ -21,7 +21,7 @@ class FakeNode {
   select() { this.selected = true; }
 }
 
-function harness() {
+function harness(extra = {}) {
   const body = new FakeNode('body');
   const documentListeners = {};
   const windowListeners = {};
@@ -50,6 +50,7 @@ function harness() {
     renameGroup: (id, name) => { renamed.push([id, name]); return true; },
     renameNode: (id, name) => { nodesRenamed.push([id, name]); return true; },
     nodeWidth: 260,
+    ...extra,
   });
   return {editor, state, positions, renamed, nodesRenamed, body, timers};
 }
@@ -119,11 +120,34 @@ test('普通节点同样在卡片标题上编辑显示名，空名称回退到�
   key(input, 'Enter');
   assert.deepEqual(h.nodesRenamed, [['task_1', '点击准备按钮']]);
 
+  // 没设过显示名的节点：输入框是空的，标题由卡片按「名称 || 稳定 ID」回退，占位提示给出它。
   const unnamed = {id: 'sequence_1', type: 'sequence'};
   assert.equal(h.editor.open(unnamed), true);
   input = h.body.children[0].children[0];
-  assert.equal(input.value, 'sequence_1');
+  assert.equal(input.value, '', '输入框只放手动设过的显示名');
+  assert.equal(input.placeholder, 'sequence_1');
   input.value = '';
   key(input, 'Enter');
-  assert.deepEqual(h.nodesRenamed.at(-1), ['sequence_1', '']);
+  assert.deepEqual(h.nodesRenamed, [['task_1', '点击准备按钮']], '空提交没改变显示名就不发命令');
+});
+
+test('值卡片：输入框只放覆盖名，占位提示给出 UE 风格派生标题，清空即回到派生标题', () => {
+  const h = harness({derivedTitle: (node) => (node.type === 'break' ? 'Break 识别结果' : node.id)});
+  const card = {id: 'break_1', type: 'break'};
+  assert.equal(h.editor.open(card), true);
+  const input = h.body.children[0].children[0];
+  assert.equal(input.value, '', '没设过 name 的值卡片不把派生标题塞进输入框');
+  assert.equal(input.placeholder, 'Break 识别结果');
+  input.value = '拆战斗结果';
+  key(input, 'Enter');
+  assert.deepEqual(h.nodesRenamed, [['break_1', '拆战斗结果']]);
+
+  // 手动设过名字后，输入框里就是那个名字；清空提交 = 删掉覆盖层，卡片回到派生标题。
+  const named = {id: 'break_2', type: 'break', name: '拆战斗结果'};
+  assert.equal(h.editor.open(named), true);
+  const second = h.body.children[0].children[0];
+  assert.equal(second.value, '拆战斗结果');
+  second.value = '';
+  key(second, 'Enter');
+  assert.deepEqual(h.nodesRenamed.at(-1), ['break_2', '']);
 });

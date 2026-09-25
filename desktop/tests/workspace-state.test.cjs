@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createDocumentStore } = require('../dist-electron/shared/workspace/documents.js');
 const { createAutoSaveQueue } = require('../dist-electron/shared/workspace/autosave.js');
+const { emitRuntimeDocument } = require('../dist-electron/shared/workflow/index.js');
 const { createWorkspace } = require('../dist-test-renderer/renderer/workspace.js');
 
 function deferred() {
@@ -177,10 +178,10 @@ test('编辑子工作流公开输入后立即同步所有画布的工作流摘�
     clearTimeout: () => {},
     onmyoji: {readLayout: () => undefined, writeLayout: () => {}},
   };
-  const uri = 'file:///project/workflows/child.json';
+  const uri = 'file:///project/workflows/child.owf';
   const bootstrap = {
     projectRoot: '/project', instances: [], catalog: [],
-    workflows: [{uri, name: 'child.json', rel: 'workflows/child.json', id: 'child', inputs: [{name: '运行轮数', definition: {type: 'integer'}}]}],
+    workflows: [{uri, name: 'child.owf', rel: 'workflows/child.owf', id: 'child', inputs: [{name: '运行轮数', definition: {type: 'integer'}}]}],
   };
   const detailsFrame = {contentWindow: {postMessage: envelope => messages.push(envelope.payload)}};
   const workspace = createWorkspace({
@@ -190,7 +191,18 @@ test('编辑子工作流公开输入后立即同步所有画布的工作流摘�
     showToast: () => {}, errorMessage: String, setStatus: () => {}, syncDocumentTabs: () => {},
   });
 
-  workspace.syncWorkflowDescriptor(uri, JSON.stringify({id: 'child', description: '', inputs: {}, variables: {运行轮数: {type: 'integer'}}}));
+  // 画布/工作区拿到的是 `.owf` 文本（`parseDocument` 解析），不再是 JSON。
+  workspace.syncWorkflowDescriptor(uri, emitRuntimeDocument({
+    schema_version: 4,
+    version: '4.4.0',
+    id: 'child',
+    description: '',
+    resolution: [1920, 1080],
+    root: 'root',
+    inputs: {},
+    variables: {运行轮数: {type: 'integer'}},
+    nodes: [{id: 'root', type: 'root', name: '入口'}],
+  }));
 
   assert.equal(bootstrap.workflows[0].inputs, undefined);
   assert.equal(messages.at(-1).type, 'workflows');

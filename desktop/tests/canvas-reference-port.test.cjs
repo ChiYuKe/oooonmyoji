@@ -71,7 +71,8 @@ function harness() {
       if (left === 'number' || left === 'integer' || left === 'duration') return right === 'number' || right === 'integer' || right === 'duration';
       return left === right;
     },
-    definitionSchema: (definition) => definition || {},
+    // 用真实的画布 schema 工具：rect 这类复合定义的展开（prefixItems / 分量名）就是它负责的。
+    definitionSchema: (definition) => require('../dist-test-renderer/canvas/model/schema.js').createEditorSchema().definitionSchema(definition),
     nodeHeight: () => 0, baseHeight: 96, nodeWidth: 260, decoHeight: 22,
     variableCardWidth: 168, variableCardHeight: 58, variableCardPortY: 29, variablePinX: 10,
     runCardWidth: 250, runCardBaseHeight: 78, runVariableHeight: 24, runCardGapX: 48, runCardGapY: 92,
@@ -200,6 +201,114 @@ test('命中测试只认能接受该输出的参数端点', () => {
   assert.equal(hitTest.referenceMissAt({ x: 500, y: 108 }, 'n1').param, 'message');
   assert.equal(hitTest.referenceMissAt({ x: 400, y: 40 }, 'n1'), null, '表头不算落点');
   assert.equal(hitTest.referenceMissAt({ x: 10, y: 108 }, 'n1'), null, '源节点自己不算落点');
+});
+
+test('拆分卡片的来源行是引用落点：整行吸附，落点解释也认这一行', () => {
+  const { model, state } = harness();
+  state.raw.nodes = [
+    { id: 'n1', type: 'task', name: '识别当前页面状态', action: 'vision.detect_state', params: {} },
+    { id: 'b1', type: 'break', name: '拆分页面状态', pins: [
+      { param: 'ref', label: '拆分来源', type: 'any', configured: false, required: true, definition: null },
+    ] },
+  ];
+  const hitTest = require('../dist-test-renderer/canvas/interactions/hit-test.js').createCanvasHitTest({
+    state,
+    worldPoint: (event) => ({ x: event.clientX, y: event.clientY }),
+    nodes: () => state.raw.nodes,
+    nodeById: (id) => state.raw.nodes.find((node) => node.id === id) || null,
+    position: () => ({ x: 0, y: 0 }),
+    nodeHeight: () => 120,
+    nodeRowHeight: () => 24,
+    nodeVariablePins: (node) => node.pins || [],
+    variableCompatibleWithPin: () => true,
+    variableCompatibleWithInstanceInput: () => true,
+    referenceFieldsForPin: (source, target, param) => model.referenceFieldsForPin(source, target, param),
+    instanceRunCards: () => [],
+    instanceRunInputPosition: () => ({ x: 0, y: 0 }),
+    variableCardList: () => [],
+    portRadius: 7, nodeWidth: 260, baseHeight: 96, runVariableHeight: 24, variablePinX: 10,
+    runCardWidth: 250, runCardBaseHeight: 78, variableCardWidth: 168, variableCardHeight: 58, variableCardPortY: 29,
+  });
+  // 行带 y 96..120：落在行上（不只捏住引脚小圆）也吸附到「拆分来源」这一行。
+  const rowHit = hitTest.referenceTargetAt({ x: 150, y: 108 }, 'n1');
+  assert.ok(rowHit, '拆分来源行应该能被命中');
+  assert.equal(rowHit.nodeId, 'b1');
+  assert.equal(rowHit.param, 'ref');
+  // 拆分来源不挑输出类型：来源输出的全部候选都兼容。
+  assert.ok(rowHit.fields.length, '应该带回兼容字段');
+  // 落点解释（拖线落空时的提示）同样认这一行。
+  assert.equal(hitTest.referenceMissAt({ x: 150, y: 108 }, 'n1').param, 'ref');
+});
+
+test('拆分来源落点候选只给 object / array：整体输出 + 复合字段，标量字段与标量来源挡掉', () => {
+  const { model, state } = harness();
+  const detect = { id: 'n1', type: 'task', name: '识别当前页面状态', action: 'vision.detect_state' };
+  const matches = { id: 'm1', type: 'task', name: '等待匹配', action: 'vision.wait_matches' };
+  const breakNode = { id: 'b1', type: 'break', name: '拆分', ref: { ref: 'nodes.n1.output' } };
+  const scalarBreak = { id: 'b2', type: 'break', name: '拆标量', ref: { ref: 'nodes.n1.output.state' } };
+  state.raw.nodes = [detect, matches, breakNode, scalarBreak];
+
+  // object 输出：给「整体输出」（拆 struct 的常见用法），标量字段 state / confidence 不给。
+  const detectFields = model.referenceFieldsForPin(detect, breakNode, 'ref');
+  assert.deepEqual(detectFields.map((item) => item.field), ['']);
+  assert.equal(detectFields[0].ref, 'nodes.n1.output');
+  assert.equal(model.referenceCompatibleWithPin(detect, 'state', breakNode, 'ref'), false, '标量字段不能当拆分来源');
+
+  // array 输出：同样只给整体（拆开后卡片自己会露出「第 1 项」等引脚）。
+  assert.deepEqual(model.referenceFieldsForPin(matches, breakNode, 'ref').map((item) => item.field), ['']);
+
+  // 拆分卡片的输出也能再拆：拆的是 object 时给整体输出……
+  assert.deepEqual(model.referenceFieldsForPin(breakNode, scalarBreak, 'ref').map((item) => item.field), ['']);
+  // ……而拆出来是标量（.state）的拆分卡不能再当来源。
+  assert.deepEqual(model.referenceFieldsForPin(scalarBreak, breakNode, 'ref'), []);
+});
+
+test('breakFieldPins 只给 object / array 输出的顶层字段（UE Break 的引脚列）', () => {
+  const { model, state } = harness();
+  const detect = { id: 'n1', type: 'task', name: '识别当前页面状态', action: 'vision.detect_state' };
+  const matches = { id: 'm1', type: 'task', name: '等待匹配', action: 'vision.wait_matches' };
+  const objectBreak = { id: 'b1', type: 'break', name: '拆整体', ref: { ref: 'nodes.n1.output' } };
+  const arrayBreak = { id: 'b3', type: 'break', name: '拆数组', ref: { ref: 'nodes.m1.output' } };
+  const scalarBreak = { id: 'b2', type: 'break', name: '拆标量', ref: { ref: 'nodes.n1.output.state' } };
+  state.raw.nodes = [detect, matches, objectBreak, arrayBreak, scalarBreak];
+
+  // object 输出：每个顶层字段一个引脚（嵌套的 state.x 之类不铺成引脚）。
+  assert.deepEqual(model.breakFieldPins(objectBreak).map((item) => item.field), ['state', 'confidence']);
+  assert.equal(model.breakFieldPins(objectBreak)[0].ref, 'nodes.b1.output.state');
+  // array 输出：整体 + 第 1 项。
+  assert.deepEqual(model.breakFieldPins(arrayBreak).map((item) => item.field), ['', '0']);
+  // 拆出来是标量的拆分卡没有引脚（卡片退回一个通用输出口）。
+  assert.deepEqual(model.breakFieldPins(scalarBreak), []);
+  // 未绑定来源的拆分卡没有输出 schema → 没有引脚。
+  assert.deepEqual(model.breakFieldPins({ id: 'b4', type: 'break' }), []);
+  // 任务卡/布尔判断卡本来就没有字段引脚。
+  assert.deepEqual(model.breakFieldPins(detect), []);
+  assert.deepEqual(model.breakFieldPins({ id: 'y', type: 'bool_judge' }), []);
+});
+
+test('拆分来源可以是工作流输入/变量：区域 rect 自动拆成 X / Y / W / H 四个引脚', () => {
+  const { model, state } = harness();
+  state.raw.inputs = { 识别区域: { type: 'rect', default: [720, 973, 486, 107] } };
+  state.raw.variables = { 目标点: { type: 'point', default: { x: 1, y: 2 } } };
+  const areaBreak = { id: 'b1', type: 'break', name: '拆分区域', ref: { ref: 'inputs.识别区域' } };
+  const pointBreak = { id: 'b2', type: 'break', name: '拆分坐标', ref: { ref: 'variables.目标点' } };
+  state.raw.nodes = [areaBreak, pointBreak];
+
+  // rect 是定长元组：四个分量各一个引脚（不带「整体」），ref 走下标。
+  const pins = model.breakFieldPins(areaBreak);
+  assert.deepEqual(pins.map((item) => item.field), ['0', '1', '2', '3']);
+  assert.deepEqual(pins.map((item) => item.label), ['X', 'Y', 'W', 'H']);
+  assert.deepEqual(pins.map((item) => item.ref), [
+    'nodes.b1.output.0', 'nodes.b1.output.1', 'nodes.b1.output.2', 'nodes.b1.output.3',
+  ]);
+  // point 是对象：按属性拆。
+  assert.deepEqual(model.breakFieldPins(pointBreak).map((item) => item.field), ['x', 'y']);
+  // 输入/变量按路径取子 schema：拆分来源的候选也认得 rect。
+  assert.deepEqual(model.resolveReferenceSchema('inputs.识别区域.2'), { type: 'integer', title: 'W' });
+  assert.equal(model.resolveReferenceSchema('inputs.识别区域.9'), undefined, '定长元组越界没有 schema');
+  assert.equal(model.resolveReferenceSchema('inputs.不存在'), undefined);
+  // 拆出来的分量还能继续作为别的节点的引用候选。
+  assert.deepEqual(model.nodeOutputFields(areaBreak).map((item) => item.field), ['0', '1', '2', '3']);
 });
 
 test('引用值在卡片上显示成「已绑定」样式和节点名', () => {

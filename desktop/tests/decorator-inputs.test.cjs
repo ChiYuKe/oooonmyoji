@@ -6,7 +6,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {harness}=require('./helpers/composite-harness.cjs');
 
-for(const [type,key,value] of [['condition','expression',false],['condition','expression',{eq:[1,1]}],['cooldown','seconds',2],['timeout','seconds',10],['retry','attempts',3],['retry','delay_seconds',0],['do_once','reset_on_failure',false]]){
+for(const [type,key,value] of [['cooldown','seconds',2],['timeout','seconds',10],['retry','attempts',3],['retry','delay_seconds',0],['do_once','reset_on_failure',false]]){
   test(`${type}.${key} exposes and restores its default`,()=>{
     const h=harness(),node={id:'task_1'},decorator={type,[key]:value};
     h.inspector.exposeDecoratorParameter(node,decorator,key);
@@ -81,4 +81,47 @@ test('group public action preserves existing references and publishes only the l
   h.inspector.retryPublicActions(node,decorator).children[0].onClick();
   assert.equal(decorator.attempts,ref);assert.equal(Object.keys(h.state.raw.inputs).length,1);
   assert.equal(h.state.raw.inputs.n_retry_delay_seconds.default,.5);
+});
+
+test('judgement node renders its condition editor and true/false slots',()=>{
+  const h=harness(),node={id:'judge',type:'condition',expression:{eq:[1,1]},children:['act'],ports:['true'],
+    };
+  h.inspector.renderCompositeInspector(h.body,node);
+  assert.equal(h.body.children[0].className.split(' ')[0],'description');
+  assert.equal(h.body.children[1].label,'布尔输入');
+  assert.equal(h.body.children[1].children[0].className,'condition-input-readonly','条件只能由左侧布尔端口连线写入，面板不再维护第二份表达式');
+  assert.equal(h.body.children[2].className,'condition-readback','条件回读整句');
+  assert.equal(h.body.children[3].textContent,'分支');
+  const slots=h.body.children.slice(4);
+  assert.equal(slots.length,2,'真 / 假两个槽位');
+  assert.equal(slots[0].children[0].className,'condition-slot-title condition-slot-true');
+  assert.equal(slots[1].children[0].className,'condition-slot-title condition-slot-false');
+  assert.equal(slots[0].children[1].textContent,'节点 act','真口显示接上的子节点');
+  assert.equal(slots[1].children[1].className,'condition-slot-empty','假口空着时说明这条路径失败');
+  // 断开真口：使用统一的断开图标按钮，并走注入的 disconnect。
+  assert.equal(slots[0].children[2].className,'icon-button danger condition-slot-remove');
+  assert.equal(slots[0].children[2].tip,'断开真口上的分支');
+  assert.equal(slots[0].children[2].textContent,'trash');
+  slots[0].children[2].fire('click');
+  assert.deepEqual(h.deps.disconnected,['judge','act']);
+
+  // 没有 expression 的旧文档：面板同样只给只读入口（条件由左侧布尔端口接线写入），
+  // 也不替用户往文档里塞一个默认表达式。
+  const legacy={id:'judge2',type:'condition'};
+  const legacyBody=h.el('div');
+  h.inspector.renderCompositeInspector(legacyBody,legacy);
+  assert.equal(legacyBody.children[1].children[0].className,'condition-input-readonly');
+  assert.equal(legacy.expression,undefined);
+});
+
+test('decorator list no longer offers the removed condition decorator',()=>{
+  const h=harness(),node={id:'n',type:'sequence',children:[],decorators:[]};
+  h.inspector.renderDecorators(h.body,node);
+  const add=h.body.children.find(item=>item.className.includes('decorator-add'));
+  assert.deepEqual(add.options.map(option=>option.value),['','cooldown','timeout','retry','repeat','do_once']);
+  // 老文档里的 condition 装饰器不会再被"添加"出来：未知类型直接忽略。
+  add.onChange('condition');
+  assert.deepEqual(node.decorators,[]);
+  add.onChange('retry');
+  assert.deepEqual(node.decorators,[{type:'retry',attempts:2,delay_seconds:0}]);
 });

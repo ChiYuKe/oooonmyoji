@@ -64,6 +64,39 @@ function harness(nodes, options = {}) {
   return {state, edges, calls, layer: fakeNode('g')};
 }
 
+test('判断节点的连线从各自的口出线，徽标写「真 / 假」而不是序号', () => {
+  const h = harness([
+    {id: 'root', type: 'root', children: ['judge']},
+    {id: 'judge', type: 'condition', expression: true, children: ['on_true', 'on_false'], ports: ['true', 'false']},
+    {id: 'on_true', type: 'task'},
+    {id: 'on_false', type: 'task'},
+  ], {positions: {root: {x: 0, y: 0}, judge: {x: 0, y: 200}, on_true: {x: -180, y: 400}, on_false: {x: 180, y: 400}}});
+  const judge = h.state.raw.nodes.find((node) => node.id === 'judge');
+
+  h.edges.renderEdge(h.layer, judge, 'on_true', 0);
+  const trueEdge = h.layer.children[0];
+  // 真口 x = 0 + 78；卡片底边 y = 200 + 96（nodeHeight 由宿主给出）；子节点连线落到它的顶边中点。
+  assert.equal(trueEdge.children.find((child) => child.attrs.class === 'edge-hit').attrs.d, 'M 78 296 C -50 400');
+  assert.equal(trueEdge.children.find((child) => child.attrs.class === 'edge-order').textContent, '真');
+
+  h.edges.renderEdge(h.layer, judge, 'on_false', 1);
+  const falseEdge = h.layer.children[1];
+  assert.equal(falseEdge.children.find((child) => child.attrs.class === 'edge-hit').attrs.d, 'M 182 296 C 310 400');
+  assert.equal(falseEdge.children.find((child) => child.attrs.class === 'edge-order').textContent, '假');
+  // 普通节点仍然是居中的单口 + 数字序号。
+  h.edges.renderEdge(h.layer, h.state.raw.nodes[0], 'judge', 0);
+  const plainEdge = h.layer.children[2];
+  assert.equal(plainEdge.children.find((child) => child.attrs.class === 'edge-order').textContent, '1');
+  assert.equal(plainEdge.children.find((child) => child.attrs.class === 'edge-hit').attrs.d, 'M 130 96 C 130 200');
+
+  // 拖拽重连带上口位：落到假口上的线，重连时仍回假口。
+  h.edges.renderEdge(h.layer, judge, 'on_false', 1);
+  const rewire = h.layer.children[3].children.find((child) => child.attrs.class === 'edge-rewire');
+  rewire.fire('pointerdown', {clientX: 10, clientY: 20, pointerId: 3});
+  assert.equal(h.state.connect.slot, 'false');
+  assert.equal(h.state.connect.oldChild, 'on_false');
+});
+
 test('renderEdge 绘制选中状态、运行状态与顺序号并支持重连和断开', () => {  const h = harness([
     {id: 'root', type: 'root', children: ['a']},
     {id: 'a', type: 'task'},
@@ -224,21 +257,53 @@ test('renderInstanceRunEdge 标注运行序号与卡片连线', () => {
   assert.equal(group.children.find((child) => child.attrs.class === 'edge-order').textContent, '2');
 });
 
-test('renderConnection 覆盖 from-output 与 from-input 预览', () => {
+test('renderConnection 覆盖 from-output 与 from-input 预览与吸附', () => {
   const h = harness([
     {id: 'root', type: 'root', children: ['a']},
     {id: 'a', type: 'task'},
   ], {positions: {root: {x: 0, y: 0}, a: {x: 0, y: 300}}});
-  h.state.connect = {direction: 'from-output', parent: 'root', x: 5, y: 6, hover: {x: 1, y: 2}};
+
+  // 正向拖：命中子节点时自由端吸附到它的顶部输入口。
+  h.state.connect = {direction: 'from-output', parent: 'root', x: 5, y: 6, hover: 'a'};
   h.edges.renderConnection(h.layer);
   assert.equal(h.layer.children[0].attrs.class, 'connection-preview snapped');
+  assert.equal(h.layer.children[0].attrs.d, 'M 130 96 C 130 300');
+
+  // 正向拖：没有命中目标时自由端仍跟指针走。
+  h.layer.children.length = 0;
+  h.state.connect = {direction: 'from-output', parent: 'root', x: 5, y: 6, hover: null};
+  h.edges.renderConnection(h.layer);
+  assert.equal(h.layer.children[0].attrs.class, 'connection-preview');
   assert.equal(h.layer.children[0].attrs.d, 'M 130 96 C 5 6');
 
+  // 反向拖：命中父节点时自由端吸附到它的底部输出口。
+  h.layer.children.length = 0;
+  h.state.connect = {direction: 'from-input', child: 'a', x: 5, y: 6, hover: 'root'};
+  h.edges.renderConnection(h.layer);
+  assert.equal(h.layer.children[0].attrs.class, 'connection-preview snapped');
+  assert.equal(h.layer.children[0].attrs.d, 'M 130 96 C 130 300');
+
+  // 反向拖：没有命中目标时自由端仍跟指针走。
   h.layer.children.length = 0;
   h.state.connect = {direction: 'from-input', child: 'a', x: 5, y: 6, hover: null};
   h.edges.renderConnection(h.layer);
   assert.equal(h.layer.children[0].attrs.class, 'connection-preview');
   assert.equal(h.layer.children[0].attrs.d, 'M 5 6 C 130 300');
+});
+
+test('反向拖线命中判断节点时按指针吸附到最近的真/假口', () => {
+  const h = harness([
+    {id: 'judge', type: 'condition', children: ['a'], ports: ['true']},
+    {id: 'a', type: 'task'},
+  ], {positions: {judge: {x: 0, y: 200}, a: {x: 0, y: 400}}});
+  // 指针靠近卡片左侧 → 真口（左）；右侧 → 假口（右）。
+  h.state.connect = {direction: 'from-input', child: 'a', x: 90, y: 210, hover: 'judge'};
+  h.edges.renderConnection(h.layer);
+  assert.equal(h.layer.children[0].attrs.d, 'M 78 296 C 130 400');
+  h.layer.children.length = 0;
+  h.state.connect = {direction: 'from-input', child: 'a', x: 160, y: 210, hover: 'judge'};
+  h.edges.renderConnection(h.layer);
+  assert.equal(h.layer.children[0].attrs.d, 'M 182 296 C 130 400');
 });
 
 test('renderVariableEdges 按 _variableLinks 连到卡片并支持 Alt 断开', () => {

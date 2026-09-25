@@ -176,7 +176,7 @@ test('输出端口菜单：连线、断开全部链接（Break All Links），�
   assert.deepEqual(calls.slice(1, 3), [['disconnect', 'parent_1', 'child_a'], ['disconnect', 'parent_1', 'child_b']]);
   assert.equal(items[3], 'separator');
   assert.equal(items[4].label, '创建并连接节点');
-  assert.deepEqual(JSON.parse(JSON.stringify(items[4].children.map((child) => child.label))), ['Task', 'Sequence', 'Selector', 'Simple Parallel', 'Parallel', 'Repeat Until', 'Branch', 'Switch', 'Instance Parallel']);
+  assert.deepEqual(JSON.parse(JSON.stringify(items[4].children.map((child) => child.label))), ['Task', 'Condition（判断）', 'Bool Judge（布尔判断卡片）', 'Sequence', 'Selector', 'Simple Parallel', 'Parallel', 'Repeat Until', 'Branch', 'Switch', 'Instance Parallel']);
   items[4].children[0].run();
   assert.deepEqual(calls[3], ['add-child', 'parent_1', 'task', point]);
 });
@@ -426,6 +426,21 @@ test('提升为变量：把字面量转成输入定义、绑定端口，并创�
   assert.deepEqual(calls, [['toast', '已创建变量「模板」并连接端口']]);
 });
 
+test('bool_judge 端点右键可提升为对应类型的工作流输入并写回操作数', () => {
+  const node = { id:'bool_1', type:'bool_judge', expression:{eq:[0, 'ready']} };
+  const cards = {};
+  const links = {};
+  const context = contextWith({
+    state: { raw: { inputs:{} } }, nodeById: () => node, fieldLabel: (name) => name === 'right' ? '右值' : name,
+    variableCards: () => cards, variableLinks: () => links, nextVariableCardId: () => 'card_bool',
+    variableCardPosition: () => ({x:30,y:40}), nodeVariablePins: () => [{param:'left'},{param:'right'}], toast: () => {},
+  });
+  runFunction('promotePinToVariable', context)('bool_1', 'right', {param:'right',type:'string'});
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.raw.inputs.右值)), {type:'string', default:'ready', display_name:'右值'});
+  assert.deepEqual(JSON.parse(JSON.stringify(node.expression)), {eq:[0,{ref:'inputs.右值'}]});
+  assert.equal(links['bool_1:right'], 'card_bool');
+});
+
 test('变量线松在空白处时，新变量卡的输出端点对齐实际落点', () => {
   const node = { id: 'task_1', type: 'task', params: { retry: 5 } };
   const cards = {};
@@ -628,7 +643,7 @@ test('五类端口都接入了右键菜单，UE 交互（常驻搜索、子菜�
   assert.match(cardsSource, /showMenu\(event\.clientX, event\.clientY, variableCardPortMenuItems\(card, point\)\)/);
   const portMenuSource = fs.readFileSync(path.join(__dirname, '../src/canvas/interactions/port-menu.ts'), 'utf8');
   assert.match(portMenuSource, /function insertNodeAbove\(childId: string, type: string\)/);
-  assert.match(portMenuSource, /function addChildNode\(parentId: string, type: string, point: PortPoint\)/);
+  assert.match(portMenuSource, /function addChildNode\(parentId: string, type: string, point: PortPoint/);
   assert.match(portMenuSource, /function promotePinToVariable\(nodeId: string, param: string, pin: PortPin, point\?: PortPoint\)/);
   assert.match(portMenuSource, /function copyVariableReferenceDefault\(scope: string, name: string\)/);
   // UE 风格：搜索框常驻顶部（菜单浮层已迁到 src/canvas/ui/overlays.ts）

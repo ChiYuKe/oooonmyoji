@@ -136,6 +136,8 @@ export function createRenderEntry(deps: RenderEntryDeps) {
     for (const parent of nodes()) {
       const children = Array.isArray(parent.children) ? parent.children : [];
       for (const childId of children) {
+        const child = nodeById(String(childId));
+        if ((parent.type === 'bool_judge' || parent.type === 'break') || (child && (child.type === 'bool_judge' || child.type === 'break'))) continue;
         list.push({ id: `${parent.id}->${childId}`, kind: 'structural', parentId: parent.id, childId: String(childId) });
       }
     }

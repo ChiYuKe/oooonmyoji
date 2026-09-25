@@ -21,6 +21,8 @@ export interface NodeGroupsDeps {
   nodeWidth: number;
   nodeHeight(node: any): number;
   nodeVariablePins(node: any): any[];
+  /** 节点显示标题（值卡片是类型派生标题）；缺省时退回 `name || id`。 */
+  nodeTitle?(node: any): string;
   /** 卡片基准高度与端点行高：组卡布局、连线锚点与渲染共用同一套尺寸。 */
   baseHeight: number;
   runVariableHeight: number;
@@ -62,6 +64,7 @@ export interface ProjectedGroupCardNode {
   _nodeCount: number;
   _groupPins: GroupBoundaryPin[];
   _hasReferenceOutput: boolean;
+  _referenceOutputs?: Array<{ nodeId: string; field: string; ref: string }>;
 }
 
 /** 组内顶部的执行接口卡：组内成员从它进入。 */
@@ -165,7 +168,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
       result.push({
         ...pin,
         param: `group-pin:${result.length}`,
-        label: `${node.name || node.id} · ${pin.label || pin.param}`,
+        label: `${deps.nodeTitle?.(node) || node.name || node.id} · ${pin.label || pin.param}`,
         targetNodeId: node.id,
         targetParam: pin.param,
         targetIndex,
@@ -200,11 +203,29 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     return result;
   }
 
-  /** 是否有组外节点引用了组内成员输出：有则在组卡右侧显示「节点输出引用」口。 */
-  function hasExternalReferenceOutput(group: NodeGroupRecord): boolean {
+  /** 只为已经存在的组外引用建立代理输出；不凭空给组卡生成悬空端点。 */
+  function externalReferenceOutputs(group: NodeGroupRecord): Array<{ nodeId: string; field: string; ref: string }> {
     const members = new Set(group.nodeIds);
-    return nodes().some((node) => !members.has(node.id)
-      && nodeVariablePins(node).some((pin) => members.has(referenceSourceId(pin))));
+    const result: Array<{ nodeId: string; field: string; ref: string }> = [];
+    const seen = new Set<string>();
+    for (const node of nodes()) {
+      if (members.has(node.id)) continue;
+      for (const pin of nodeVariablePins(node)) {
+        const ref = pin?.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof pin.value.ref === 'string' ? pin.value.ref : '';
+        const match = /^nodes\.([^\.]+)\.output(?:\.(.*))?$/.exec(ref);
+        if (!match || !members.has(match[1])) continue;
+        const field = match[2] ? match[2].split('.')[0] : '';
+        const key = `${match[1]}\u0000${field}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push({ nodeId: match[1], field, ref });
+      }
+    }
+    return result;
+  }
+
+  function hasExternalReferenceOutput(group: NodeGroupRecord): boolean {
+    return externalReferenceOutputs(group).length > 0;
   }
 
   function entryNodeIds(group: NodeGroupRecord): string[] {
@@ -375,6 +396,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
       _nodeCount: group.nodeIds.length,
       _groupPins: boundaryPins(group),
       _hasReferenceOutput: hasExternalReferenceOutput(group),
+      _referenceOutputs: externalReferenceOutputs(group),
     };
   }
 
@@ -680,7 +702,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
         if (!param || existing.has(`${nodeId}\u0000${param}`)) continue;
         result.push({
           nodeId,
-          nodeName: String(node.name || node.id),
+          nodeName: String(deps.nodeTitle?.(node) || node.name || node.id),
           param,
           label: String(pin.label || param),
           type: String(pin.type || pin.definition?.type || 'any'),

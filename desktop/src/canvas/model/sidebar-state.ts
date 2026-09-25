@@ -45,6 +45,11 @@ export interface SidebarStateDeps {
   currentInspectorSelection(): unknown;
   /** 变量引用处数：参数引用 + 初始化输入；`collectNodeCardVariableRefs` 之外的画布连线按引用计数计入。 */
   references(scope: 'inputs' | 'variables', name: string): unknown[];
+  /**
+   * 节点标题（值卡片按类型派生，见 model/node-title）；缺省时退回 `name || id`。
+   * 只影响显示：手动设过的 `name` 另走 `explicitName`，行内改名提交的是它。
+   */
+  nodeTitle?(node: SidebarNodeSource): string;
   vscode: { postMessage(message: unknown): void };
 }
 
@@ -108,9 +113,13 @@ export function createSidebarState(deps: SidebarStateDeps): SidebarStateControll
         : node.type === 'instance_parallel' && Array.isArray(node.runs)
           ? `${node.runs.length} 个实例`
           : String(node.type ?? '');
+      const explicitName = typeof node.name === 'string' ? node.name : '';
       return {
         id: node.id,
-        name: String(node.name || node.id),
+        // 显示用标题：值卡片是类型派生标题（`Break 识别结果` / `等于`），不再裸露节点 ID。
+        name: deps.nodeTitle ? deps.nodeTitle(node) : (explicitName || String(node.id)),
+        // 行内改名编辑的是这一层（手动设过的显示名）；留空提交即删掉它、标题回到派生结果。
+        explicitName,
         type: typeof node.type === 'string' ? node.type : 'task',
         meta,
         children: Array.isArray(node.children) ? node.children.filter((child): child is string => typeof child === 'string') : [],

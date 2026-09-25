@@ -9,6 +9,11 @@ export interface NodeNameEditorDeps {
   position(node: any): { x: number; y: number };
   renameGroup(groupId: string, name: string): boolean;
   renameNode(nodeId: string, name: string): boolean;
+  /**
+   * 值卡片的类型派生标题（`Break 识别结果` / `等于`）：输入框留空时的占位提示。
+   * 清空输入框提交 = 删掉手动设的 `name`，标题回到派生结果。
+   */
+  derivedTitle?(node: any): string;
   nodeWidth: number;
 }
 
@@ -29,7 +34,11 @@ interface ActiveNameEditor {
   closed: boolean;
 }
 
-/** F2 节点标题编辑器：HTML 输入框覆盖 SVG 标题，不修改稳定节点 ID。 */
+/**
+ * F2 节点标题编辑器：HTML 输入框覆盖 SVG 标题。
+ * 只写显示名 `name`（稳定节点 ID 不动），输入框里放的就是手动设过的名字；
+ * 没设过的值卡片留空，占位提示给出类型派生标题（`Break 识别结果` / `等于`）。
+ */
 export function createNodeNameEditor(deps: NodeNameEditorDeps): CanvasNodeNameEditor {
   const { state, wrap, el, position, renameGroup, renameNode, nodeWidth } = deps;
   let active: ActiveNameEditor | null = null;
@@ -112,7 +121,11 @@ export function createNodeNameEditor(deps: NodeNameEditorDeps): CanvasNodeNameEd
     input.type = 'text';
     input.value = group
       ? String(node.name || '').replace(/\s+(?:接口|变量)$/, '')
-      : String(node.name || node.id || '');
+      : String(node.name || '');
+    if (!group) {
+      // 值卡片没设过名字时，占位提示就是卡片现在显示的派生标题（清空=回到它）。
+      input.placeholder = String(deps.derivedTitle?.(node) || node.id || '');
+    }
     input.spellcheck = false;
     input.setAttribute('aria-label', '节点组名称');
     shell.appendChild(input);

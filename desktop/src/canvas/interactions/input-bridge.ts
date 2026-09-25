@@ -98,6 +98,12 @@ export function createInputBridge(deps: InputBridgeDeps) {
     window.addEventListener('keydown', (event: any) => {
       const tag = event.target && event.target.tagName;
       const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      // 排列预览还挂着的时候，键盘就是确认条的快捷键：Enter 应用、Esc 取消（同一条命令）。
+      // 先处理再交给下面的通用 Esc 清理，避免「Esc 只关了菜单、预览还挂着」。
+      if (!editing && state.arrangePreview) {
+        if (matchesShortcut(event, 'editor.arrangeApply')) { event.preventDefault(); executeEditorCommand('confirmArrangePreview'); return; }
+        if (matchesShortcut(event, 'editor.arrangeCancel')) { event.preventDefault(); executeEditorCommand('cancelArrangePreview'); return; }
+      }
       if (event.key === 'Escape') { if (state.connect) cancelConnection(); if (state.variableConnect) cancelVariableConnection(); if (state.referenceConnect) cancelReferenceConnection(); state.drag = null; state.marquee = null; hideMenus(); const lightbox = $('lightbox'); if (lightbox) lightbox.classList.add('hidden'); closeAssetBrowser(); closeTemplateCheck(); render(); }
       if (!editing && matchesShortcut(event, 'editor.delete')) {
         event.preventDefault();

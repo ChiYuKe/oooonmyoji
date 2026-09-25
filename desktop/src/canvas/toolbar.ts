@@ -3,6 +3,7 @@
  * 原 `editor-toolbar.js`；主编辑器通过工厂注入状态与 DOM 依赖，
  * 选择器钩子（setWorkflow/setInstance）随工厂返回，由入口交给桥接转发。
  */
+import { documentText } from './state/document-text';
 
 export interface ToolbarInstance {
   id: string;
@@ -86,6 +87,8 @@ export interface ToolbarDeps {
   setDirty(value: boolean): void;
   toast(message: string, error?: boolean): void;
   nodes(): ToolbarNode[];
+  /** 节点显示标题（值卡片是类型派生标题）；缺省时退回 `node.name`。搜索与提示都说这一层。 */
+  nodeTitle?(node: ToolbarNode): string;
   focusNode(id: string): void;
   currentNodeGroup?(): { id: string; name: string } | null;
   leaveNodeGroup?(): boolean;
@@ -180,7 +183,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
         if (state.dirty) {
           const rect = slot.querySelector<HTMLElement>('.ui-dropdown-button')?.getBoundingClientRect();
           showMenu(rect ? rect.left : 8, (rect ? rect.bottom : 40) + 4, [
-            { label: '保存并切换', run: () => switchTo(JSON.stringify(state.raw, null, 2) + '\n') },
+            { label: '保存并切换', run: () => switchTo(documentText(state)) },
             { label: '放弃修改并切换', run: () => switchTo(undefined) },
             'separator',
             { label: '取消', run: () => slot.querySelector<ToolbarDropdown>('.ui-dropdown')?.set?.(state.docUri || '') },
@@ -200,7 +203,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     if (!state.dirty) { send(undefined); return; }
     const rect = $('workflow-breadcrumb').getBoundingClientRect();
     showMenu(rect.left, rect.bottom + 4, [
-      { label: '保存并跳转', run: () => send(JSON.stringify(state.raw, null, 2) + '\n') },
+      { label: '保存并跳转', run: () => send(documentText(state)) },
       { label: '放弃修改并跳转', run: () => send(undefined) },
       'separator',
       { label: '取消', run: () => {} },
@@ -256,7 +259,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
       if (state.dirty) {
         const rect = $('btn-back').getBoundingClientRect();
         showMenu(rect.left, rect.bottom + 4, [
-          { label: '保存并返回', run: () => goBack(JSON.stringify(state.raw, null, 2) + '\n') },
+          { label: '保存并返回', run: () => goBack(documentText(state)) },
           { label: '放弃修改并返回', run: () => goBack(undefined) },
           'separator',
           { label: '取消', run: () => {} },
@@ -269,13 +272,13 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
       type: 'runWorkflow',
       uri: state.docUri,
       instanceId: state.instanceId,
-      text: JSON.stringify(state.raw, null, 2) + '\n',
+      text: documentText(state),
     }));
     $('btn-stop').addEventListener('click', () => vscode.postMessage({ type: 'stopWorkflow' }));
     $('btn-save').addEventListener('click', () => {
       // 保存把关：只有运行时会拒绝的错误才弹确认；提醒直接放行。
       if (deps.requestSave) { deps.requestSave(); return; }
-      vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' });
+      vscode.postMessage({ type: 'save', text: documentText(state) });
       setDirty(false);
     });
     $('btn-more').addEventListener('click', () => {
@@ -306,14 +309,20 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
   function searchNodeByName(value: string): void {
     const query = String(value || '').trim();
     if (!query) {
-      toast('请输入卡片 name', true);
+      toast('请输入卡片名称', true);
       return;
     }
+    // 搜索匹配卡片上看得见的标题：值卡片显示类型派生标题（`Break 识别结果` / `等于`），
+    // 只按 `name` 找会漏掉它们。
+    const titleOf = (node: ToolbarNode): string => {
+      const title = deps.nodeTitle ? String(deps.nodeTitle(node) || '').trim() : '';
+      return title || String(node && node.name || '').trim();
+    };
     const normalized = query.toLocaleLowerCase();
-    const matches = nodes().filter((node) => String(node && node.name || '').trim().toLocaleLowerCase().includes(normalized));
+    const matches = nodes().filter((node) => titleOf(node).toLocaleLowerCase().includes(normalized));
     if (matches.length === 0) {
       state.nodeSearch = { query: normalized, ids: [], index: -1 };
-      toast(`没有找到 name 包含“${query}”的卡片`, true);
+      toast(`没有找到标题包含“${query}”的卡片`, true);
       return;
     }
     const ids = matches.map((node) => node.id);
@@ -328,7 +337,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     state.selectedRun = null;
     state.inspector = 'node';
     focusNode(target.id);
-    toast(`卡片 ${index + 1}/${matches.length}：${String(target.name).trim()}`);
+    toast(`卡片 ${index + 1}/${matches.length}：${titleOf(target)}`);
   }
 
   function setWorkflow(uri: string): void {

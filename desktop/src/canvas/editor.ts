@@ -14,6 +14,9 @@
  * 验证脚本与旧展示页的调试出口（画布模块自身不再读取）。
  */
 import { createCanvasEdges } from './canvas/edges';
+import { createCanvasComments } from './canvas/comments';
+import { addStructuralWaypoint, clearStructuralWaypoints, moveStructuralWaypoint, removeStructuralWaypoint, structuralWaypoints } from './model/edge-waypoints';
+import { collapseNodeIntoCustomType } from './model/custom-types';
 import { createCanvasMinimap } from './canvas/minimap';
 import { createCanvasViewport } from './canvas/viewport';
 import { groupMemberIdsOf } from './canvas/card-follow-layout';
@@ -24,6 +27,7 @@ import {
   type IssueTarget,
 } from './model/issue-navigation';
 import { createWrapMeasurement } from './canvas/wrap-measurement';
+import { documentText } from './state/document-text';
 import { validateWorkflow } from '../shared/workflow/validate';
 import { createEditorExport } from './export';
 import { createAssetActions } from './interactions/asset-actions';
@@ -33,6 +37,7 @@ import { createCanvasHitTest } from './interactions/hit-test';
 import { createInputBridge } from './interactions/input-bridge';
 import { createCanvasInlineEditor } from './interactions/inline-editor';
 import { createNodeNameEditor } from './interactions/node-name-editor';
+import { createValueCardEditor } from './interactions/value-card-editor';
 import { createCanvasPointer } from './interactions/pointer';
 import { createCanvasPortMenu } from './interactions/port-menu';
 import { createEditorRoiPicker } from './interactions/roi-picker';
@@ -44,11 +49,13 @@ import { createInspectorPanel, type InspectorRenderers } from './inspector/panel
 import { createParameterControls } from './inspector/parameter-controls';
 import { createVariableInspectors } from './inspector/variable-inspectors';
 import { createCanvasWorkflowModel } from './model/canvas-workflow-model';
+import { isBooleanInputNode } from './model/exec-ports';
 import { isNodeLocked, toggleNodeLock } from './model/layout-locks';
 import { createNodeGroups, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from './model/node-groups';
 import { issuesByEdge, issueTitle, issuesByNode, nodeIssues, splitBySeverity, warningsByNode } from './model/card-issues';
 import { editorAdvisories } from './model/advisories';
 import { createCanvasReferences } from './model/references';
+import { derivedNodeTitle, nodeDisplayTitle } from './model/node-title';
 import { createEditorSchema } from './model/schema';
 import { createSidebarState } from './model/sidebar-state';
 import { createSubworkflowHelpers } from './model/subworkflow';
@@ -156,6 +163,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const NODE_W = 260;
   const BASE_H = 96;
   const DECO_H = 22;
+  /** 判断节点底部多一段「真 / 假」口位标签行（口本身画在卡片底边上）。 */
+  const CONDITION_PORT_H = 16;
   const PORT_R = 7;
   const RUN_CARD_W = 250;
   const RUN_CARD_BASE_H = 78;
@@ -178,10 +187,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
    */
   const TASK_OUTPUT_PORT_X = NODE_W - 12;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
-  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'task'];
-  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', task: 'TASK' };
-  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', instance_parallel: '实例并行' };
-  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', task: '▣' };
+  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task'];
+  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', condition: 'CONDITION', bool_judge: 'BOOL JUDGE', break: 'BREAK', task: 'TASK' };
+  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', instance_parallel: '实例并行', condition: '判断', bool_judge: '布尔判断', break: '拆分' };
+  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', condition: '◇', bool_judge: '◈', break: '⋔', task: '▣' };
   const RUN_LABEL = {
     running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
     failed: '失败', cancelled: '已取消', branch_miss: '分支跳过',
@@ -241,7 +250,12 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, clone, nodes, definitionSchema, compatibleRefType, appendNestedRefs,
     variableSystem: VariableSystem, catalogByName,
   });
-  const { defaultValue, allRefs, referenceLabel } = References;
+  const { defaultValue, allRefs, referenceLabel, referenceTitle } = References;
+  /**
+   * 卡片标题（UE 风格：值卡片的标题由类型派生，见 model/node-title）。
+   * 画布卡片、结构树、顶栏搜索共用同一份，避免三处对同一个节点说不同的名字。
+   */
+  const nodeTitleOf = (node: any): string => nodeDisplayTitle(node, { referenceTitle });
 
   /** 子流程 task（workflow.run）的引用解析与摘要，状态/模型层即可构建。 */
   const SubworkflowHelpers = createSubworkflowHelpers({
@@ -249,7 +263,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const {
     resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference, compositeSubtitle,
-    decoratorLabel, conditionSentence,
+    decoratorLabel, conditionSentence, conditionToText,
   } = SubworkflowHelpers;
 
   const History = createEditorHistory({
@@ -288,7 +302,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeVariablePins, collectNodeCardVariableRefs, variableCardPosition, paramRowsExpanded, nodeOutputFields,
     referenceFieldsForPin, referenceDisplayName, syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition,
     variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards, instanceRunInputPosition,
-    outputReferenced, variableInUse,
+    outputReferenced, outputFieldReferenced, breakFieldPins, breakSourceCandidates, variableInUse,
   } = CanvasWorkflowModel;
   workflowInputs = CanvasWorkflowModel.workflowInputs;
 
@@ -302,7 +316,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (fit) fitNodeGroupView();
   };
   const NodeGroups = createNodeGroups({
-    state, nodes, nodeById, layout, mutate, toast, nodeWidth: NODE_W, nodeHeight, nodeVariablePins,
+    state, nodes, nodeById, layout, mutate, toast, nodeWidth: NODE_W, nodeHeight, nodeVariablePins, nodeTitle: nodeTitleOf,
     baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
     markDirty: () => setDirty(true),
     refreshView: refreshNodeGroupView,
@@ -411,6 +425,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   /**
    * 自动排列预览：先算虚影，确认后才写文档（一次 mutate = 一条历史）。
    * 范围没东西可排时（没选卡片 / 不在组里）给出提示而不是静默重排整张图。
+   * UI 只暴露「全部」；确认走顶部「应用排列」按钮或 Enter，取消走「取消」或 Esc。
    */
   const ARRANGE_SCOPE_LABELS: Record<string, string> = { all: '全部', selected: '选中', group: '当前组' };
   const previewAutoLayout = (scope: 'all' | 'selected' | 'group'): boolean => {
@@ -458,7 +473,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
 
   const StudioSidebarState = createSidebarState({
-    state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode,
+    state, collectNodeCardVariableRefs, nodes, currentInspectorSelection, vscode, nodeTitle: nodeTitleOf,
     references: (scope, name) => (state.raw ? VariableSystem.references(state.raw, scope, name) : []),
   });
   const { postSidebarState } = StudioSidebarState;
@@ -496,7 +511,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     onNodesCreated: addToCurrentGroup,
     onNodesRemoved: (ids) => removeMembers(ids),
   });
-  const { parentOf, canConnect, connect, disconnect, buildNode, addNode, deleteSelection, copySelection, cutSelection, pasteClipboard } = Commands;
+  const { parentOf, canConnect, canConnectNodes, connect, disconnect, buildNode, addNode, deleteSelection, copySelection, cutSelection, pasteClipboard } = Commands;
 
   const HitTest = createCanvasHitTest({
     state, worldPoint, nodes: viewNodes, nodeById: viewNodeById, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, nodeVariablePins: viewNodeVariablePins,
@@ -507,7 +522,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H, variableCardPortY: VARIABLE_CARD_PORT_Y,
   });
   const {
-    connectionTargetAt, variableInputTargetAt, variableCardTargetAt, variableCardTargetAtInstanceInput,
+    connectionTargetAt, execPortAt, variableInputTargetAt, variableCardTargetAt, variableCardTargetAtInstanceInput,
     variableConnectionTargetAt, referenceConnectionTargetAt, referenceMissAt,
   } = HitTest;
 
@@ -521,7 +536,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const {
     removeVariableCard, releasePinBinding, removeVariableCards, placeVariableCard, addVariableCardCommand,
-    renameNode, changeNodeType,
+    renameNode, changeNodeType, setBoolJudgeOperator,
   } = EditorCommands;
 
   let handleEmptyVariableDrop: (connection: any, point: { x: number; y: number }) => boolean = () => false;
@@ -530,7 +545,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeById, instanceRunCards, variableCompatibleWithPin, variableCompatibleWithInstanceInput,
     variableLinks, displayNameOfDefinition, variableDisplayNameOf, toast: (message, error) => toast(message, error),
     referenceConnectionTargetAt, referenceMissAt, fieldLabel, showMenu,
+    referenceFieldsForPin, nodeOutputFields,
     referenceDisplayNameOf: (ref) => referenceDisplayName(ref), variableCardList,
+    // 反向拖线落到判断节点时要知道接哪个执行口（真/假）。
+    execPortAt: (point, parentId) => execPortAt(point, parentId),
     onEmptyVariableDrop: (connection, point) => handleEmptyVariableDrop(connection, point),
   });
   const {
@@ -555,10 +573,24 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     pointerCapture: (event) => (Number.isInteger((event as any).pointerId) ? (event as any).pointerId : null),
     // 位置锁定的卡片不参与拖拽。
     isNodeLocked: (id) => isNodeLocked(state.raw, id),
+    // 折点拖拽：只写文档，重绘由渲染层的单边补丁负责（不重建整张画布）。
+    moveStructuralWaypoint: (parentId, childId, pointIndex, point) => {
+      moveStructuralWaypoint(state.raw, parentId, childId, pointIndex, point);
+    },
     toast: (message, error) => toast(message, error),
     nodeWidth: NODE_W, variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
   });
   const { startNodeDrag, onPointerDown, onPointerMove, onPointerUp, contextMenuSuppressedByPan } = Pointer;
+
+  /**
+   * 注释框：独立图层 + 自己的内容签名，完全不参与卡片/连线的增量渲染路径。
+   * 拖拽复用 pointer 模块的生命周期（autoPan、快照、撤销）。
+   */
+  const Comments = createCanvasComments({
+    state, host: graph, svgEl, el, wrap, mutate, worldPoint, toast: (message, error) => toast(message, error),
+    render: (flags) => render(flags),
+    startCommentDrag: (event, comment, mode) => Pointer.startCommentDrag(event, comment, mode),
+  });
 
   const CanvasHelpers = createCanvasHelpers({
     state, $, nodes: viewNodes, worldPoint, render,
@@ -613,6 +645,39 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     edgeRunTargetIds: NodeGroups.viewEdgeRunTargetIds,
     // 连线上标错：children 路径的问题与成环/父节点数量等结构问题都落到边上。
     edgeIssues: (parentId, childId) => edgeIssues(parentId, childId),
+    // 手工折线（UE Knot）：折点存在画布旁表 `_edgeWaypoints` 里，边界转换时挂回边上。
+    structuralWaypoints: (parentId, childId) => structuralWaypoints(state.raw, parentId, childId),
+    edgeMenuItems: (parentId, childId, point) => {
+      const existing = structuralWaypoints(state.raw, parentId, childId);
+      const items: MenuEntry[] = [
+        {
+          label: '添加折点',
+          run: () => {
+            mutate(() => { addStructuralWaypoint(state.raw, parentId, childId, point); });
+            setDirty(true);
+            render({ graph: true });
+          },
+        },
+      ];
+      if (existing.length) {
+        items.push({
+          label: `清除全部折点（${existing.length}）`,
+          run: () => {
+            mutate(() => { clearStructuralWaypoints(state.raw, parentId, childId); });
+            setDirty(true);
+            render({ graph: true });
+          },
+        });
+      }
+      return items;
+    },
+    showMenu: (x, y, items) => showMenu(x, y, items),
+    removeStructuralWaypoint: (parentId, childId, pointIndex) => {
+      mutate(() => { removeStructuralWaypoint(state.raw, parentId, childId, pointIndex); });
+      setDirty(true);
+      render({ graph: true });
+    },
+    startWaypointDrag: (event, parentId, childId, pointIndex) => Pointer.startWaypointDrag(event, parentId, childId, pointIndex),
     position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, instanceRunCards: viewInstanceRunCards, instanceRunInputPosition,
     variableCardList, nodeVariablePins: viewNodeVariablePins, variablePinPosition, disconnect,
     disconnectVariableFromPin, disconnectVariableFromInstanceInput, disconnectReferenceFromPin,
@@ -621,6 +686,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeWidth: NODE_W, runCardWidth: RUN_CARD_W, baseHeight: BASE_H, runVariableHeight: RUN_VARIABLE_H,
     variableCardWidth: VARIABLE_CARD_W, variableCardPortY: VARIABLE_CARD_PORT_Y, variablePinX: VARIABLE_PIN_X,
     taskOutputPortY: TASK_OUTPUT_PORT_Y, taskOutputPortX: TASK_OUTPUT_PORT_X,
+    breakFieldPinOffset,
   });
   const {
     renderVariableEdges, renderEdge, renderInstanceRunEdge, renderConnection,
@@ -631,8 +697,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const PortMenu = createCanvasPortMenu({
     state, startConnectionFromInput, startConnection, startReferenceConnection,
     startVariableConnectionFromPin, startVariableConnectionFromInstanceInput, startVariableConnectionFromCard,
-    parentOf, buildNode, canConnect, connect, disconnect, mutate, nodeById, position, layout, nodes,
+    parentOf, buildNode, canConnect, canConnectNodes, connect, disconnect, mutate, nodeById, position, layout, nodes,
     nodeVariablePins, nodeOutputFields, disconnectReferenceFromPin,
+    connectReferenceToPin, breakSourceCandidates, setBoolJudgeOperator,
+    openValueCardEditor: (nodeId: string) => ValueCardEditor.open(nodeId),
     variableCards, variableLinks, nextVariableCardId, variableCardList, variableCardPosition,
     focusVariableCard, placeVariableCard, disconnectVariableFromPin, disconnectVariableFromInstanceInput,
     removeVariableCard, fieldLabel, toast: (message, error) => toast(message, error),
@@ -642,7 +710,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const {
     nodeInputPortMenuItems, nodeOutputPortMenuItems, nodeReferencePortMenuItems, nodeVariablePinMenuItems,
-    instanceRunPinMenuItems, variableCardPortMenuItems, promotePinToVariable,
+    valueCardMenuItems, instanceRunPinMenuItems, variableCardPortMenuItems, promotePinToVariable,
   } = PortMenu;
   handleEmptyVariableDrop = (connection, point) => {
     if (connection?.direction !== 'from-pin') return false;
@@ -670,7 +738,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   } = InspectorPanel;
 
   const StudioToolbar = createEditorToolbar({
-    state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes: viewNodes, focusNode,
+    state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes: viewNodes, nodeTitle: nodeTitleOf, focusNode,
     currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
     // 保存走把关入口（只拦运行时会拒绝的错误）；问题导航与布局重建给「更多」菜单。
     requestSave: () => requestSave(),
@@ -734,7 +802,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   const StudioCompositeInspector = createCompositeInspector({
     el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton,
-    conditionControl, conditionOperandControl, conditionParseLiteral, conditionSentence, nodeChildrenOptions, nodeById,
+    conditionControl, conditionOperandControl, conditionParseLiteral, conditionSentence, conditionToText, nodeChildrenOptions, nodeById,
     mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state,
     decoratorLabel, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
   });
@@ -769,6 +837,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { openParamEditor, closeInlineEditor, setParamLiteral, refreshInlineEditor } = InlineEditor;
   const NodeNameEditor = createNodeNameEditor({
     state, wrap, el, position: viewPosition, renameGroup,
+    derivedTitle: (node) => derivedNodeTitle(node, { referenceTitle }),
     renameNode: (id, value) => {
       const node = nodeById(id);
       if (!node) return false;
@@ -778,11 +847,26 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     },
     nodeWidth: NODE_W,
   });
+  /**
+   * 值卡片（布尔判断 / 拆分）的浮动编辑器：卡片内容就地编辑，详情面板不再参与。
+   * 卡片上的条件/拆分回读行点击即打开。
+   */
+  const ValueCardEditor = createValueCardEditor({
+    state, wrap, el, mutate, nodeById, position: viewPosition, nodeWidth: NODE_W, displayTitle: nodeTitleOf,
+    fields: { el, field, section, textInput, iconButton, addRowButton, conditionControl, conditionToText, referenceLabel },
+    renderDecorators,
+    renameNode: (id, value) => {
+      const node = nodeById(id);
+      if (!node) return;
+      const name = String(value || '').trim();
+      mutate(() => { if (name) node.name = name; else delete node.name; });
+    },
+  });
 
   const NodeCard = createNodeCardRenderer({
     state, svgEl, nodeCards, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight,
     subWorkflowRef, templatePreview,
-    compositeSubtitle, variableDisplayNameOf, referenceDisplayNameOf: (ref) => referenceDisplayName(ref),
+    compositeSubtitle, conditionToText, variableDisplayNameOf, referenceDisplayNameOf: (ref) => referenceDisplayName(ref), referenceTitleOf: (ref) => referenceTitle(String(ref || '')),
     nodeIssueInfo, issueTitle,
     decoratorLabel, nodeVariablePins: viewNodeVariablePins, openLightbox,
     disconnectVariableFromPin, startVariableConnectionFromPin,
@@ -792,7 +876,26 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeReferencePortMenuItems, nodeGroupVariableMenuItems: candidateMenu,
     startNodeDrag,
     registerCardPress, requestInspector, requestOpenSubWorkflow, render,
+    // 值卡片的内容就地编辑：点卡片上的条件 / 拆分回读行打开贴着卡片的浮动编辑器。
+    openValueCardEditor: (nodeId: string) => ValueCardEditor.open(nodeId),
+    valueCardMenuItems,
     enterNodeGroup: enterGroup, ungroupNodeGroup: ungroup, groupSelection,
+    // 「收成自定义类型」：把选中节点的配置变成可复用的 x- 类型（字面量进预设，引用不进）。
+    collapseIntoCustomType: () => {
+      const target = [...state.selected][0];
+      if (!target) return;
+      let result: { name?: string; error?: string } = {};
+      mutate(() => {
+        result = collapseNodeIntoCustomType(state.raw, target);
+      });
+      if (result.error) {
+        toast(result.error, true);
+        return;
+      }
+      setDirty(true);
+      render({ graph: true, minimap: true, panels: true, selection: true });
+      toast(`已收成自定义类型 ${result.name}：以后建同类型节点会带上这份预设（引用型参数不进预设）`);
+    },
     focusNodeDetail,
     contextMenuSuppressedByPan,
     copySelection, cutSelection, deleteSelection,
@@ -809,6 +912,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     nodeWidth: NODE_W, baseHeight: BASE_H, portRadius: PORT_R, decoratorHeight: DECO_H,
     runVariableHeight: RUN_VARIABLE_H, variablePinX: VARIABLE_PIN_X,
     taskOutputPortY: TASK_OUTPUT_PORT_Y, taskOutputPortX: TASK_OUTPUT_PORT_X, preview: PREVIEW, outputReferenced,
+    breakFieldPins, breakFieldPinOffset, outputFieldReferenced,
   });
   const { renderNode, patchNodeRuntime } = NodeCard;
 
@@ -879,9 +983,16 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
         }
         patchNodeDataEdges(id);
       },
+      // 拖折点：只补这一条边的 `d` 与折点圆心。
+      waypointEdge: (parentId, childId) => {
+        const parent: any = viewNodeById(parentId);
+        if (!parent) return;
+        const order = (Array.isArray(parent.children) ? parent.children : []).indexOf(childId);
+        patchEdge(parent, childId, order < 0 ? 0 : order);
+      },
     },
     beforeEdgeRebuild: () => resetPatchRegistry(),
-    afterRender: () => { refreshInlineEditor(); NodeNameEditor.refresh(); },
+    afterRender: () => { refreshInlineEditor(); NodeNameEditor.refresh(); ValueCardEditor.refresh(); },
     nodeWidth: NODE_W,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
     runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H,
@@ -975,13 +1086,29 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (contextMenuSuppressedByPan()) return;
     const point = worldPoint(event);
     const items: MenuEntry[] = [
-      { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
+      { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Condition（判断）', run: () => addNode('condition', point) },
+      { label: '＋ Bool Judge（布尔判断卡片）', run: () => addNode('bool_judge', point) }, { label: '＋ Break（拆分卡片）', run: () => addNode('break', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
       { label: '＋ Sequence', run: () => addNode('sequence', point) }, { label: '＋ Simple Parallel', run: () => addNode('simple_parallel', point) },
       { label: '＋ Parallel', run: () => addNode('parallel', point) }, { label: '＋ Repeat Until', run: () => addNode('repeat_until', point) },
       { label: '＋ Branch', run: () => addNode('branch', point) }, { label: '＋ Switch', run: () => addNode('switch', point) },
       { label: '＋ Instance Parallel', run: () => addNode('instance_parallel', point) },
       'separator',
+      { label: '＋ 注释框 (Comment)', run: () => { const comment = Comments.create(point.x, point.y); if (comment) Comments.editText(comment.id); } },
+      'separator',
     ];
+    // 文档里声明的自定义类型（`nodeTypes`）：建出来的节点按基类工作，但保留自己的类型名。
+    const customTypes = state.raw && typeof state.raw === 'object' && state.raw.nodeTypes && typeof state.raw.nodeTypes === 'object'
+      ? Object.entries(state.raw.nodeTypes as Record<string, any>)
+      : [];
+    if (customTypes.length) {
+      items.push({ label: `＋ 自定义类型（${customTypes.length}）`, run: () => {} });
+      for (const [name, definition] of customTypes) {
+        const title = definition && typeof definition.title === 'string' && definition.title ? definition.title : name;
+        const base = definition && typeof definition.base === 'string' ? definition.base : '?';
+        items.push({ label: `　　＋ ${title}　(${name} · ${base})`, run: () => addNode(name, point) });
+      }
+      items.push('separator');
+    }
     if (state.selected.size > 0) {
       items.push(
         { label: '复制 (Ctrl+C)', run: () => copySelection() },
@@ -991,9 +1118,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (state.clipboard && state.clipboard.nodes.length > 0) {
       items.push({ label: `粘贴 (Ctrl+V) · ${state.clipboard.nodes.length} 个节点`, run: () => pasteClipboard(point) });
     }
-    items.push('separator', { label: '自动排列（预览）· 全部', run: () => previewAutoLayout('all') });
-    items.push({ label: '自动排列（预览）· 选中', run: () => previewAutoLayout('selected') });
-    items.push({ label: '自动排列（预览）· 当前组', run: () => previewAutoLayout('group') });
+    // 自动排列只保留「全部」一种范围：先出虚影预览，点画布顶部的「应用排列」才写文档。
+    items.push('separator', { label: '自动排列（先预览）', run: () => previewAutoLayout('all') });
     items.push('separator');
     // 锁定位置：单选节点时直接开关；多选时逐个锁定（保持选择不串味）。
     const lockedCount = [...state.selected].filter((id) => isNodeLocked(state.raw, id)).length;
@@ -1061,7 +1187,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     renderWorkflowBrowser, resolveWorkflowRef,
     closeAssetBrowser, renderTemplateCheck, restoreAssetBrowserAfterRoi, openRoiPicker, requestAssetInventory,
     normalizedAssetPath, handleRunEvent, patchRunEdgeStates, setExportBusy,
-    replaceDocument: (text: string, record?: boolean) => { closeInlineEditor(); NodeNameEditor.close(); replaceDocument(text, record); },
+    replaceDocument: (text: string, record?: boolean) => { closeInlineEditor(); NodeNameEditor.close(); ValueCardEditor.close(); replaceDocument(text, record); },
     executeEditorCommand, toast,
   });
   window.addEventListener('message', (event) => CanvasMessages.handleMessage(event.data || {}));
@@ -1162,10 +1288,33 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     return (hasCardLayout(nodeActionSpec(node)) ? CARD_ROW_H : RUN_VARIABLE_H);
   }
 
-  function nodeHeight(node: { id?: string; decorators?: unknown[] }): number {
+  /**
+   * 字段输出引脚在卡片内的偏移：与左侧「拆分来源」行共用同一套行网格
+   * （UE Break 的排法：输入引脚在左、`X / Y / Z` 在同一行的右缘）。
+   */
+  function breakFieldPinOffset(node: any, field: string): { x: number; y: number } | null {
+    const pins = breakFieldPins(node);
+    const index = pins.findIndex((item: any) => item && item.field === field);
+    if (index < 0) return null;
+    const rowHeight = nodeRowHeight(node);
+    return { x: NODE_W - 12, y: BASE_H + index * rowHeight + rowHeight / 2 };
+  }
+
+  /** 卡片要画几行：拆分卡片的字段引脚也占行（与「拆分来源」行同一套网格）。 */
+  function nodeRowCount(node: any, visiblePins: any[]): number {
+    if (node && node.type === 'break') return Math.max(visiblePins.length, breakFieldPins(node).length);
+    return visiblePins.length;
+  }
+
+  function nodeHeight(node: { id?: string; type?: string; decorators?: unknown[] }): number {
+    // condition / bool_judge 的 bool 输入口固定在说明区，不占用参数行高度。
+    const visiblePins = isBooleanInputNode(node)
+      ? []
+      : nodeVariablePins(node);
     return BASE_H
-      + nodeVariablePins(node).length * nodeRowHeight(node)
-      + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0);
+      + nodeRowCount(node, visiblePins) * nodeRowHeight(node)
+      + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0)
+      + (node.type === 'condition' ? CONDITION_PORT_H : 0);
   }
 
   function svgEl(tag: string, attrs: Record<string, unknown>, parent?: Element): SVGElement {
@@ -1365,8 +1514,11 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     if (record) {
       toast(`布局数据异常（${health.summary}），已只重建布局（Ctrl+Z 可撤销）`);
       setDirty(true);
-    } else if (health.needsRebuild || health.needsPrune) {
+    } else if (health.needsRebuild) {
       toast(`布局数据异常（${health.summary}），已自动重建布局`);
+    } else if (health.needsPrune) {
+      // 只清了残留坐标：没必要说「重建布局」，那会让人以为节点位置被动过。
+      toast(`已清理 ${health.orphan.length} 条失效的残留坐标（节点位置没动）`);
     }
     return true;
   }
@@ -1395,7 +1547,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   /** 真正写盘：把文档交给宿主保存，并提示提醒数/强行保存的错误数。 */
   function commitSave(warnings = 0, forcedErrors = 0): void {
-    vscode.postMessage({ type: 'save', text: JSON.stringify(state.raw, null, 2) + '\n' });
+    vscode.postMessage({ type: 'save', text: documentText(state) });
     setDirty(false);
     if (forcedErrors) toast(`已保存，但仍有 ${forcedErrors} 个错误（运行时可能拒绝执行）`, true);
     else if (warnings) toast(`已保存（${warnings} 个提醒不影响运行）`);
@@ -1444,6 +1596,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     // 但平移/缩放等高频路径必须显式传标记，否则会触发多余的连线重建。
     const next: RenderFlags = flags ?? { graph: true, minimap: true, panels: true, selection: true };
     renderPieces?.render(next);
+    Comments.render();
     updateArrangePreviewBar();
     updateViewportHistoryButtons();
   }
@@ -1477,21 +1630,15 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     }
   }
 
-  /** 视口工具条：自动排列（范围菜单）、临时隐藏（状态/类型菜单）、画布前进/后退。 */
+  /** 视口工具条：自动排列（点一下直接进预览）、临时隐藏（状态/类型菜单）、画布前进/后退。 */
   function bindViewportTools(): void {
     const back = $('btn-viewport-back');
     if (back) back.addEventListener('click', () => { if (!viewportBack()) toast('已经是最早的位置'); });
     const forward = $('btn-viewport-forward');
     if (forward) forward.addEventListener('click', () => { if (!viewportForward()) toast('已经是最新的位置'); });
     const arrange = $('btn-arrange');
-    if (arrange) arrange.addEventListener('click', () => {
-      const rect = arrange.getBoundingClientRect();
-      showMenu(rect.left, rect.bottom + 4, [
-        { label: '排列全部（预览）', run: () => previewAutoLayout('all') },
-        { label: '排列选中（预览）', run: () => previewAutoLayout('selected') },
-        { label: '排列当前组（预览）', run: () => previewAutoLayout('group') },
-      ]);
-    });
+    // 只保留「全部」一种范围：点一下直接进预览，应用/取消在画布顶部的确认条上。
+    if (arrange) arrange.addEventListener('click', () => previewAutoLayout('all'));
     const filter = $('btn-filter');
     if (filter) filter.addEventListener('click', () => {
       const rect = filter.getBoundingClientRect();

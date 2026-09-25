@@ -9,6 +9,7 @@
  */
 import type { CanvasState } from '../state/canvas-state';
 import type { Ui } from '../ui/elements';
+import { isValueCardNode } from '../model/exec-ports';
 
 /** 详情面板分派的各内容渲染器；入口按构造顺序填入真实实现。 */
 export interface InspectorRenderers {
@@ -153,11 +154,13 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     queueMicrotask(() => groupSections($('inspector-body')));
     const selected = [...state.selected];
     const selectedNode = selected.length === 1 ? nodeById(selected[0]) : null;
+    // 值卡片（布尔判断 / 拆分）没有详情面板：内容在卡片上就地编辑（浮动编辑器）。
+    const valueCardSelected = Boolean(selectedNode) && isValueCardNode(selectedNode);
     const open = state.inspector === 'workflow'
       || state.inspector === 'variables'
       || Boolean(state.selectedRun)
       || Boolean(state.selectedEdge)
-      || Boolean(selectedNode);
+      || Boolean(selectedNode && !valueCardSelected);
     $('inspector').classList.toggle('hidden', !open);
     $('editor-main').classList.toggle('inspector-open', open);
     if (!open) {

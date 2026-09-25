@@ -12,9 +12,13 @@ import { PARAM_FIELD_GAP, PARAM_FIELD_PADDING, paramColorSwatch, paramRectParts,
 import type { ParamRowLike } from './param-rows';
 import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from '../canvas/data-tones';
 import { dataPinArrow, execPinArrow } from './pin-glyphs';
+import {
+  CONDITION_INPUT_X, CONDITION_INPUT_Y, CONDITION_PORT_LABELS, CONDITION_PORT_ORDER, boolJudgeShape, conditionChildOf, conditionPortOffset, expressionInputOffset, isBooleanInputNode, isBoolJudgeNode, isValueCardNode, type ConditionPort,
+} from '../model/exec-ports';
 import { appendSelectionOutline } from './selection-outline';
 import { FULL_DETAIL_MIN_ZOOM } from './zoom-level';
 import { isGroupBoundaryPin, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from '../model/node-groups';
+import { nodeDisplayTitle } from '../model/node-title';
 
 export interface NodePreviewInfo {
   uri: string;
@@ -57,9 +61,16 @@ export interface NodeRenderDeps {
   subWorkflowRef(node: any): string;
   templatePreview(node: any): NodePreviewInfo | null;
   compositeSubtitle(node: any): string;
+  /** 条件表达式 → 中文回读（不带「当…时执行」包装）；布尔判断卡的嵌套形态用它做卡面回读。 */
+  conditionToText?(expression: any): string;
   variableDisplayNameOf(scope: 'inputs' | 'variables', name: string, fallback?: string): string;
   /** 节点输出引用的显示名（`nodes.<id>.output.<字段>` → `<节点名>.<字段>`）。 */
   referenceDisplayNameOf?(ref: unknown): string;
+  /**
+   * 标题里的引用短名（`nodes.classify.output` → `识别结果`，不带「› 输出」尾缀）。
+   * 拆分卡片的 UE 式标题 `Break <来源名>` 用它；缺省时退回 `referenceDisplayNameOf`。
+   */
+  referenceTitleOf?(ref: unknown): string;
   /** 这个节点上的校验错误（整节点 + 每个参数），用于把出错的行标红。 */
   nodeIssueInfo?(node: any): { node: any[]; params: Map<string, any[]> } | null;
   /** 把错误拼成悬停提示。 */
@@ -73,15 +84,24 @@ export interface NodeRenderDeps {
   showMenu(x: number, y: number, items: any[], options?: Record<string, unknown>): void;
   nodeVariablePinMenuItems(nodeId: string, pin: any, point: { x: number; y: number }): any[];
   nodeInputPortMenuItems(nodeId: string, point: { x: number; y: number }): any[];
-  nodeOutputPortMenuItems(nodeId: string, point: { x: number; y: number }): any[];
+  nodeOutputPortMenuItems(nodeId: string, point: { x: number; y: number }, port?: ConditionPort): any[];
   startConnectionFromInput(event: any, nodeId: string): void;
-  startConnection(event: any, nodeId: string): void;
-  /** 从任务卡右侧输出口开始拖「节点输出引用」。 */
-  startReferenceConnection?(event: any, nodeId: string): void;
+  startConnection(event: any, nodeId: string, at?: { x: number; y: number }, port?: ConditionPort): void;
+  /** 从任务卡右侧输出口开始拖「节点输出引用」；拆分卡片的字段引脚带字段名定向绑定。 */
+  startReferenceConnection?(event: any, nodeId: string, at?: { x: number; y: number }, field?: string): void;
   /** 任务卡输出口的右键菜单（列出输出字段、复制引用、断开全部引用）。 */
   nodeReferencePortMenuItems?(nodeId: string, point: { x: number; y: number }): any[];
   /** 这个节点的输出是否已经被别的节点引用：连了画实心，没连是空心环。 */
   outputReferenced?(nodeId: string): boolean;
+  /** 值卡片（布尔判断 / 拆分）的浮动编辑器：点卡片上的条件 / 拆分回读行打开。 */
+  openValueCardEditor?(nodeId: string): boolean;
+  /** 值卡片的右键菜单（UE 的节点菜单：Break 选结构体、比较节点 Convert Operator）。 */
+  valueCardMenuItems?(nodeId: string): any[];
+  /** 拆分卡片右侧的字段引脚候选与几何（与 editor 的 nodeHeight 共用同一份公式）。 */
+  breakFieldPins?(node: any): Array<{ field: string; label: string; ref: string }>;
+  breakFieldPinOffset?(node: any, field: string): { x: number; y: number } | null;
+  /** 拆分卡片的某个字段是否已被引用（字段引脚的实心/空心状态）。 */
+  outputFieldReferenced?(nodeId: string, field: string): boolean;
   /** 组内左侧变量卡的“新增接口变量”菜单。 */
   nodeGroupVariableMenuItems?(groupId: string): any[];
   startNodeDrag(event: any, nodeId: string): void;
@@ -91,6 +111,8 @@ export interface NodeRenderDeps {
   enterNodeGroup?(groupId: string, focusNodeId?: string): boolean;
   ungroupNodeGroup?(groupId: string): boolean;
   groupSelection?(): boolean;
+  /** 把当前节点收成一个可复用的自定义类型（缺省表示该画布不支持）。 */
+  collapseIntoCustomType?(): void;
   render(): void;
   /** 双击节点：聚焦并把缩放提到完整卡片档（概览 / 紧凑模式下用）。 */
   focusNodeDetail?(nodeId: string): void;
@@ -161,16 +183,24 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     typeIcons, typeNames, runLabels, nodeWidth, baseHeight, portRadius, decoratorHeight, runVariableHeight,
     variablePinX, preview, taskOutputPortY, taskOutputPortX, startReferenceConnection, nodeReferencePortMenuItems, nodeGroupVariableMenuItems, referenceDisplayNameOf,
     nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection, nodeGroupRunSummary,
-    outputReferenced,
+    collapseIntoCustomType,
+    outputReferenced, breakFieldPins, breakFieldPinOffset, outputFieldReferenced, openValueCardEditor, valueCardMenuItems,
   } = deps;
   const isNodeLocked = deps.isNodeLocked ?? (() => false);
   const groupIssueSummary = deps.groupIssueSummary;
   const nodeWarningCount = deps.nodeWarningCount ?? (() => 0);
   const rowHeightOf = nodeRowHeight ?? (() => runVariableHeight);
+  const breakFieldPinsOf = breakFieldPins ?? (() => []);
+  const breakFieldPinOffsetOf = breakFieldPinOffset ?? (() => null);
   const referencePortY = taskOutputPortY ?? 16;
   /** 输出口横向位置：与连线起点（`edges.referencePortPosition`）共用同一个偏移。 */
   const referencePortX = taskOutputPortX ?? nodeWidth;
   const referenceLabel = referenceDisplayNameOf ?? ((ref: unknown) => String(ref || ''));
+  const conditionToText = deps.conditionToText;
+  // 标题里只用「来源名」这一层（`Break 识别结果`），字段引用才带完整路径。
+  const referenceTitle = deps.referenceTitleOf ?? ((ref: unknown) => referenceLabel(ref));
+  /** 卡片标题：name 覆盖 > 值卡片类型派生标题 > 节点 ID（见 model/node-title）。 */
+  const titleOf = (node: any): string => nodeDisplayTitle(node, { referenceTitle: (ref: string) => referenceTitle(ref) });
   const issuesOf = nodeIssueInfo ?? (() => null);
   const issuesText = issueTitle ?? ((items: any[]) => items.map((item) => String(item && item.message || '')).filter(Boolean).join('\n'));
 
@@ -401,19 +431,24 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       svgEl('circle', { class: 'port port-out node-group-port', cx: nodeWidth / 2, cy: height, r: portRadius }, group);
       svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, height, portRadius) }, group);
     }
-    if (node._hasReferenceOutput) {
-      const referenceTone = dataToneColor(`nodes.${node._nodeGroupId || node.id}.output`);
-      const output = svgEl('circle', {
-        // 这个口只在组内确实有输出被引用时才画（`_hasReferenceOutput`），所以画出来就是「已连接」。
-        class: 'port port-out port-out-reference node-group-port connected',
-        style: `--data-tone:${referenceTone}`,
-        cx: referencePortX, cy: referencePortY, r: portRadius - 2.5,
-      }, group);
-      svgEl('path', {
-        class: 'port-glyph port-glyph-data', style: `--data-tone:${referenceTone}`,
-        d: dataPinArrow(referencePortX, referencePortY, portRadius - 2.5),
-      }, group);
-      svgEl('title', {}, output).textContent = '组内节点输出引用';
+    if (node._hasReferenceOutput && Array.isArray(node._referenceOutputs) && node._referenceOutputs.length) {
+      const outputs = node._referenceOutputs;
+      outputs.forEach((item: any, index: number) => {
+        const y = baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2;
+        const ref = String(item.ref || `nodes.${node._nodeGroupId || node.id}.output`);
+        const tone = dataToneColor(ref);
+        const output = svgEl('circle', {
+          class: 'port port-out port-out-reference node-group-port connected',
+          style: `--data-tone:${tone}`,
+          cx: referencePortX, cy: y, r: portRadius - 2.5,
+          'data-field': item.field || '',
+        }, group);
+        svgEl('path', {
+          class: 'port-glyph port-glyph-data', style: `--data-tone:${tone}`,
+          d: dataPinArrow(referencePortX, y, portRadius - 2.5),
+        }, group);
+        svgEl('title', {}, output).textContent = `组内节点输出引用：${ref}`;
+      });
     }
     const press = (event: any): void => {
       if (event.button !== 0) return;
@@ -461,6 +496,9 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     const subRef = subWorkflowRef(node);
     const template = templatePreview(node);
     const classes = ['node', 'studio-card', `type-${node.type}`, `category-${nodeCardCategory(node)}`];
+    // 值卡片（布尔判断 / 拆分）的卡面身份：CSS 用 `.studio-card.value-card` 只改
+    // `--card-tint` 派生的文字与色条，让它们一眼区别于执行流卡片（卡身底色不动）。
+    if (isValueCardNode(node)) classes.push('value-card');
     if (subRef) classes.push('node-subworkflow');
     if (state.selected.has(node.id)) classes.push('selected');
     if (state.connect && state.connect.hover === node.id) classes.push('connect-hover');
@@ -484,7 +522,14 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     svgEl('text', { class: 'node-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = typeIcons[node.type] || '•';
     const hasRunStatus = Boolean(run && run.status);
     const rows = paramRowInfo ? paramRowInfo(node) : null;
-    const pins = nodeVariablePins(node);
+    const allPins = nodeVariablePins(node);
+    // 判断节点与布尔判断卡片：bool 输入口是说明区独立端点，不作为参数行渲染。
+    const booleanInputNode = isBooleanInputNode(node);
+    const pins = booleanInputNode ? [] : allPins;
+    const conditionPin = booleanInputNode
+      ? allPins.find((pin: any) => pin && pin.param === 'condition')
+      : null;
+    // 判断节点的 bool 输入口是说明区独立端点，不作为参数行渲染。
     // 清单声明了固定卡片的节点没有折叠状态：行就是清单里声明的那几个端点。
     const fixedRows = Boolean(rows && rows.fixed);
     const twoLine = Boolean(rows && rows.twoLine);
@@ -494,10 +539,10 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     const contentX = 22;
     const contentRight = nodeWidth - 12;
     const showRowToggle = !fixedRows && node.type === 'task' && Boolean(rows && rows.total > 0 && toggleParamRows);
-    nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: node.name || node.id, width: nodeWidth - (showRowToggle ? 71 : 51), size: 12 });
+    nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: titleOf(node), width: nodeWidth - (showRowToggle ? 71 : 51), size: 12 });
     nodeCards.text(group, { className: 'node-type card-kicker', x: contentX, y: 47, value: subRef ? '子工作流' : typeNames[node.type] || node.type, width: 130, size: 10 });
     const nodeErrorText = issueInfo && issueInfo.node.length ? issuesText(issueInfo.node) : '';
-    svgEl('title', {}, group).textContent = `${node.name || node.id}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[run.status] || run.status}${run.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
+    svgEl('title', {}, group).textContent = `${titleOf(node)}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[run.status] || run.status}${run.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
     if (issueInfo && issueInfo.node.length) {
       const dot = svgEl('circle', { class: 'node-error-dot', cx: nodeWidth - 8, cy: 8, r: 4 }, group);
       dot.style.pointerEvents = 'none';
@@ -538,8 +583,119 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       ? (subRef ? subRef.split(/[\\/]/).pop() : (node.action || '未选择动作'))
       : compositeSubtitle(node);
     const hasPreview = Boolean(template || (run && run.thumbnail));
-    nodeCards.text(group, { className: 'node-subtitle card-description', x: contentX, y: 66, value: subtitle, width: hasPreview ? 148 : contentRight - contentX, size: 11 });
+    if (node.type === 'bool_judge') {
+      nodeCards.text(group, { className: 'node-type card-kicker', x: contentX, y: 47, value: '布尔判断', width: 130, size: 10 });
+      // 卡面按表达式形态排：只有二元比较才画 UE 紧凑节点的操作数格，
+      // 嵌套条件与整卡绑定只回读（它们没有「两个操作数」这回事，画出来就是假的引脚）。
+      const shape = boolJudgeShape(node);
+      const expression = node.expression && typeof node.expression === 'object' && !Array.isArray(node.expression)
+        ? node.expression as Record<string, any>
+        : {};
+      const operator = Object.keys(expression)[0] || 'eq';
+      const operatorText: Record<string, string> = { eq: '==', ne: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=', contains: '∋' };
+      if (shape === 'comparison') {
+        nodeCards.text(group, { className: 'bool-judge-operator', x: 132, y: 76, value: operatorText[operator] || operator, width: 32, size: 12, anchor: 'middle' });
+      }
+      nodeCards.text(group, { className: 'bool-judge-output-label', x: 188, y: 76, value: 'bool', width: 42, size: 10 });
+      if (shape === 'comparison') {
+        const boolJudgePins = allPins.filter((pin: any) => pin && (pin.param === 'left' || pin.param === 'right'));
+        boolJudgePins.forEach((pin: any) => {
+          const offset = expressionInputOffset(node, pin.param);
+          if (!offset) return;
+          const value = pin.value === undefined ? 0 : pin.value;
+          const text = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string'
+            ? `← ${referenceLabel(value.ref)}`
+            : String(value);
+          svgEl('rect', { class: 'bool-judge-operand-field', x: 48, y: offset.y - 9, width: 74, height: 18, rx: 2 }, group);
+          const valueText = nodeCards.text(group, { className: 'bool-judge-operand-value', x: 54, y: offset.y + 4, value: text || '0', width: 62, size: 10 });
+          valueText.style.pointerEvents = 'none';
+          // 操作数值像 UE 的引脚默认值一样就地编辑：点这一格打开行内编辑器
+          // （已绑变量时走端口菜单，字面量写回 expression 的操作数位置）。
+          const fieldHit = svgEl('rect', {
+            class: 'bool-judge-operand-hit',
+            x: 46, y: offset.y - 10, width: 78, height: 20, rx: 3,
+            'data-node': node.id, 'data-param': pin.param,
+          }, group);
+          const fieldTip = svgEl('title', {}, fieldHit);
+          fieldTip.textContent = pin.variable
+            ? `${pin.label || pin.param}：已绑定变量，点击打开端口菜单`
+            : `${pin.label || pin.param}：点击编辑字面量（拖到左侧引脚可绑变量/引用）`;
+          fieldHit.addEventListener('click', (event: any) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const point = position(node);
+            openParamEditor?.({
+              node,
+              pin: {
+                ...pin,
+                param: pin.param,
+                label: pin.label || (pin.param === 'left' ? '左值' : '右值'),
+                definition: { type: pin.variable || value && typeof value === 'object' ? 'any' : typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'boolean' : 'string' },
+              },
+              rect: { x: point.x + 46, y: point.y + offset.y - 10, width: 78, height: 20 },
+              clientX: event.clientX,
+              clientY: event.clientY,
+              world: { x: point.x + 46, y: point.y + offset.y },
+              valueAlign: 'left',
+            });
+          });
+        });
+      } else {
+        // 回读行：绑定形态读「← 来源」，嵌套形态读整句中文；点它打开「嵌套条件（进阶）」浮层
+        // （嵌套逻辑只能在那里编，卡面上没有对应的可编辑字段）。
+        const boundPin = allPins.find((pin: any) => pin && pin.param === 'condition');
+        const boundVariable = boundPin && boundPin.variable ? String(boundPin.variable) : '';
+        const boundScope = boundPin && boundPin.scope === 'variables' ? 'variables' : 'inputs';
+        const reference = typeof expression.ref === 'string' ? expression.ref : '';
+        const source = boundVariable
+          ? variableDisplayNameOf(boundScope, boundVariable)
+          : reference ? referenceLabel(reference) : '';
+        const readback = shape === 'binding'
+          ? (source ? `← ${source}` : typeof node.expression === 'boolean' ? String(node.expression) : '未绑定 bool 来源')
+          : (conditionToText?.(node.expression) || '等待左侧输入');
+        const line = nodeCards.text(group, {
+          className: 'node-subtitle card-description value-card-readback',
+          // 回读行停在 `bool` 输出标签左边，不让长句压到标签上（超长部分截断，完整整句在悬停提示里）。
+          x: contentX, y: 66, value: readback, width: 188 - contentX - 6, size: 11,
+        });
+        const readbackTip = svgEl('title', {}, group);
+        readbackTip.textContent = `${readback}\n条件值由左侧布尔输入端口提供`;
+        const readbackHit = svgEl('rect', { class: 'value-card-readback-hit', x: contentX - 2, y: 52, width: contentRight - contentX + 4, height: 20, rx: 3 }, group);
+        readbackHit.addEventListener('click', (event: any) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openValueCardEditor?.(node.id);
+        });
+        line.style.pointerEvents = 'none';
+        if (shape === 'nested') {
+          nodeCards.text(group, { className: 'node-meta card-meta value-card-hint', x: contentX, y: 84, value: '点这一行改嵌套条件', width: contentRight - contentX, size: 10 });
+        }
+      }
+    } else {
+      nodeCards.text(group, { className: 'node-subtitle card-description', x: contentX, y: 66, value: subtitle, width: hasPreview ? 148 : contentRight - contentX, size: 11 });
+    }
+    if (isValueCardNode(node)) {
+      // 值卡片的设置走**节点右键菜单**（UE：Break 的结构体、比较节点的 Convert Operator），
+      // 值就在引脚上就地编辑，没有详情面板、也没有额外的浮层。
+      const cardMenu = (event: any): void => {
+        const items = valueCardMenuItems?.(node.id) || [];
+        if (!items.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (contextMenuSuppressedByPan()) return;
+        const point = openPortContextMenu(event);
+        if (!point) return;
+        state.selected = new Set([node.id]);
+        state.selectedEdge = null;
+        state.selectedRun = null;
+        render();
+        showMenu(event.clientX, event.clientY, items);
+      };
+      head.addEventListener('contextmenu', cardMenu);
+      body.addEventListener('contextmenu', cardMenu);
+    }
     // 参数已经以内联行呈现，摘要只报数量（折叠时给出“已显示 / 全部”）。
+    // 值卡片不画这一行：它们的身体是引脚/操作数格（UE 的排法），摘要会跟引脚格打架。
     const metaValue = node.type === 'task'
       ? (pins.length
         ? (fixedRows
@@ -547,7 +703,9 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
           : (rows && rows.hidden > 0 ? `${pins.length} / ${rows.total} 项参数 · 点值编辑` : `${pins.length} 项参数 · 点值编辑`))
         : '详情栏编辑参数')
       : nodeCardSummary(node);
-    nodeCards.text(group, { className: 'node-meta card-meta', x: contentX, y: 84, value: metaValue, width: hasPreview ? 148 : run && Number.isFinite(run.duration) ? 160 : contentRight - contentX, size: 10 });
+    if (!isValueCardNode(node)) {
+      nodeCards.text(group, { className: 'node-meta card-meta', x: contentX, y: 84, value: metaValue, width: hasPreview ? 148 : run && Number.isFinite(run.duration) ? 160 : contentRight - contentX, size: 10 });
+    }
     if (run && run.thumbnail) {
       const uri = run.thumbnail.startsWith('data:') ? run.thumbnail : `data:image/png;base64,${run.thumbnail}`;
       renderNodePreview(group, { uri, path: '' }, 'step-thumb', 'xMidYMid slice', run.screenshot || uri);
@@ -555,8 +713,109 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     else if (run && Number.isFinite(run.duration)) {
       nodeCards.text(group, { className: 'node-duration', x: nodeWidth - 14, y: 84, value: run.duration < 1000 ? `${run.duration} ms` : `${(run.duration / 1000).toFixed(1)} s`, width: 66, size: 10, anchor: 'end' });
     }
-    const pinOffset = pins.length * rowHeight;
-    pins.forEach((pin, index) => {
+    const breakFields = node.type === 'break' ? breakFieldPinsOf(node) : [];
+    const rowCount = node.type === 'break' ? Math.max(pins.length, breakFields.length) : pins.length;
+    const pinOffset = rowCount * rowHeight;
+    /**
+     * 拆分卡片的紧凑排法（UE Break 结构体）：左侧「拆分来源」输入引脚，右缘按字段逐行排出
+     * 输出引脚，两边共用同一套行网格；这一行不画参数值——右半行是字段引脚的位置。
+     */
+    const renderBreakRows = (): void => {
+      const sourcePin = pins[0];
+      for (let index = 0; index < rowCount; index += 1) {
+        const row = paramRowGeometry({ nodeWidth, baseHeight, rowHeight, index, pinX: variablePinX, twoLine, boxedInline: fixedRows && !twoLine });
+        svgEl('line', { class: 'param-row-rule', x1: 0, y1: row.y, x2: nodeWidth, y2: row.y }, group);
+        if (index === 0 && sourcePin) {
+          const param = sourcePin.param;
+          const rowErrors = issueInfo ? (issueInfo.params.get(String(param)) || []) : [];
+          const invalid = rowErrors.length > 0;
+          const errorText = invalid ? issuesText(rowErrors) : '';
+          const reference = sourcePin.value && typeof sourcePin.value === 'object' && !Array.isArray(sourcePin.value) && typeof (sourcePin.value as { ref?: unknown }).ref === 'string'
+            ? (sourcePin.value as { ref: string }).ref
+            : '';
+          const dataKey = sourcePin.variable ? variableDataKey(sourcePin.scope, sourcePin.variable) : reference || parameterDataKey(node.id, param);
+          const linked = Boolean(sourcePin.variable || /^nodes\.[^\.]+\.output(?:\.|$)/.test(reference));
+          const port = svgEl('circle', {
+            class: `port port-variable type-${sourcePin.type} data-tone-${dataTone(dataKey)}${linked ? ' bound' : ''}${sourcePin.configured ? ' configured' : ''}${invalid ? ' invalid' : ''}`,
+            style: `--data-tone:${dataToneColor(dataKey)}`,
+            cx: row.portX,
+            cy: row.centerY,
+            r: portRadius - 2,
+          }, group);
+          svgEl('path', {
+            class: `port-glyph port-glyph-data${invalid ? ' invalid' : ''}`,
+            style: `--data-tone:${dataToneColor(dataKey)}`,
+            d: dataPinArrow(row.portX, row.centerY, portRadius - 2),
+          }, group);
+          const label = nodeCards.text(group, {
+            className: `param-row-label${sourcePin.required && !sourcePin.configured ? ' required' : ''}${invalid ? ' error' : ''}`,
+            x: row.labelX,
+            y: row.labelY,
+            value: sourcePin.label || param,
+            width: row.labelWidth,
+            size: 10,
+          });
+          label.style.pointerEvents = 'none';
+          if (errorText) {
+            const caption = svgEl('title', {}, port);
+            caption.textContent = errorText;
+          }
+          const hit = svgEl('circle', { class: 'variable-port-hit', cx: row.portX, cy: row.centerY, r: 10, 'data-node': node.id, 'data-param': param }, group);
+          hit.addEventListener('pointerdown', (event: any) => {
+            event.stopPropagation();
+            if (event.altKey) {
+              disconnectVariableFromPin(node.id, param);
+              return;
+            }
+            startVariableConnectionFromPin(event, node.id, param);
+          });
+          hit.addEventListener('contextmenu', (event: any) => {
+            const point = openPortContextMenu(event);
+            if (!point) return;
+            showMenu(event.clientX, event.clientY, nodeVariablePinMenuItems(node.id, { ...sourcePin, param }, point));
+          });
+        }
+        const candidate = breakFields[index];
+        if (!candidate) continue;
+        const offset = breakFieldPinOffsetOf(node, candidate.field);
+        if (!offset) continue;
+        const tone = `nodes.${node.id}.output${candidate.field ? `.${candidate.field}` : ''}`;
+        const connected = outputFieldReferenced ? outputFieldReferenced(node.id, candidate.field) : outputReferenced?.(node.id);
+        const output = svgEl('circle', {
+          class: `port port-out port-out-reference port-out-field data-tone-${dataTone(tone)}${connected ? ' connected' : ''}${state.referenceConnect && state.referenceConnect.nodeId === node.id ? ' active' : ''}`,
+          style: `--data-tone:${dataToneColor(tone)}`,
+          cx: offset.x,
+          cy: offset.y,
+          r: portRadius - 2.5,
+          'data-node': node.id,
+          'data-field': candidate.field,
+        }, group);
+        svgEl('path', {
+          class: 'port-glyph port-glyph-data',
+          style: `--data-tone:${dataToneColor(tone)}`,
+          d: dataPinArrow(offset.x, offset.y, portRadius - 2.5),
+        }, group);
+        // 字段名贴在引脚左侧（UE 的 `X ○` 排法）。
+        nodeCards.text(group, {
+          className: 'port-label port-label-field',
+          x: offset.x - 11,
+          y: offset.y + 3.5,
+          value: candidate.label,
+          width: Math.max(64, nodeWidth - 64),
+          size: 10,
+          anchor: 'end',
+        });
+        svgEl('title', {}, output).textContent = `拆分输出：拖到别的节点的参数行绑定 ${candidate.ref}`;
+        output.addEventListener('pointerdown', (event: any) => startReferenceConnection?.(event, node.id, undefined, candidate.field));
+        output.addEventListener('contextmenu', (event: any) => {
+          const point = openPortContextMenu(event);
+          if (!point) return;
+          showMenu(event.clientX, event.clientY, nodeReferencePortMenuItems ? nodeReferencePortMenuItems(node.id, point) : []);
+        });
+      }
+    };
+    if (node.type === 'break') renderBreakRows();
+    else pins.forEach((pin, index) => {
       const kind = paramRowKindOf(pin, pin.definition);
       const row = paramRowGeometry({ nodeWidth, baseHeight, rowHeight, index, pinX: variablePinX, twoLine, boxedInline: fixedRows && !twoLine });
       // 拖拽中的落点行：卡片亮起来的同时，这一行的值框也要亮，用户才知道会绑到哪一行。
@@ -836,14 +1095,16 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         });
       }
     });
-    const decorators = Array.isArray(node.decorators) ? node.decorators : [];
-    decorators.forEach((decorator: any, index: number) => {
+    const decorators = Array.isArray(node.decorators) ? node.decorators : [];    decorators.forEach((decorator: any, index: number) => {
       const y = baseHeight + pinOffset + index * decoratorHeight;
       svgEl('line', { class: 'decorator-rule', x1: 0, y1: y, x2: nodeWidth, y2: y }, group);
       svgEl('text', { class: 'decorator-icon', x: 14, y: y + 15 }, group).textContent = '◇';
       nodeCards.text(group, { className: 'decorator-label', x: 32, y: y + 15, value: decoratorLabel(decorator), width: nodeWidth - 46, size: 10 });
     });
-    if (node.type !== 'root') {
+    // 值卡片（布尔判断 / 拆分）只有数据端点：顶部不画执行流入口箭头。
+    // 它们的值通过右侧输出引用口被别的节点取用，一条悬空的入口箭头只会让人
+    // 去找那条并不存在的父连线（父节点的线仍可拖到卡片顶边接上）。
+    if (node.type !== 'root' && !isValueCardNode(node)) {
       const input = svgEl('circle', { class: 'port port-in', cx: nodeWidth / 2, cy: 0, r: portRadius, 'data-node': node.id }, group);
       // 箭头紧跟端口圆点：圆点只做几何与命中，可见形状交给它后面的箭头（CSS 用 `+` 做悬停联动）。
       svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, 0, portRadius) }, group);
@@ -854,29 +1115,114 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         showMenu(event.clientX, event.clientY, nodeInputPortMenuItems(node.id, point));
       });
     }
-    if (node.type === 'task') {
-      // 任务节点是叶子，没有执行流输出；右侧这个口是「节点输出引用」口，
-      // 拖到别的节点的参数行即可绑定 nodes.<id>.output.<字段>。
+    if (booleanInputNode) {
+      // 布尔判断卡：比较形态是两个操作数口，整卡绑定形态只有一个布尔口（见 boolJudgeShape）。
+      const inputPins = isBoolJudgeNode(node)
+        ? allPins.filter((pin: any) => pin && (pin.param === 'condition' || pin.param === 'left' || pin.param === 'right'))
+        : conditionPin ? [conditionPin] : [];
+      for (const pin of inputPins) {
+        const param = pin.param;
+        const offset = expressionInputOffset(node, param);
+        if (!offset) continue;
+        const value = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) ? pin.value as { ref?: unknown } : null;
+        const reference = value && typeof value.ref === 'string' ? value.ref : '';
+        const linked = Boolean(pin.variable || reference);
+        const toneKey = pin.variable ? variableDataKey(pin.scope, pin.variable) : reference || parameterDataKey(node.id, param);
+        const input = svgEl('circle', {
+          class: `port port-variable type-${pin.type || (isBoolJudgeNode(node) ? 'any' : 'boolean')} ${isBoolJudgeNode(node) ? 'bool-judge-input' : 'condition-input'} data-tone-${dataTone(toneKey)}${linked ? ' bound configured' : pin.configured ? ' configured' : ''}`,
+          style: `--data-tone:${dataToneColor(toneKey)}`,
+          cx: offset.x, cy: offset.y, r: portRadius - 2,
+          'data-node': node.id, 'data-param': param,
+        }, group);
+        svgEl('path', {
+          class: `port-glyph port-glyph-data ${isBoolJudgeNode(node) ? 'bool-judge-input-glyph' : 'condition-input-glyph'}`,
+          style: `--data-tone:${dataToneColor(toneKey)}`,
+          d: dataPinArrow(offset.x, offset.y, portRadius - 2),
+        }, group);
+        const scope = pin.scope === 'variables' ? 'variables' : 'inputs';
+        svgEl('title', {}, input).textContent = linked
+          ? `${pin.label || param}：${pin.variable ? `← ${variableDisplayNameOf(scope, pin.variable)}` : `← ${reference}`}`
+          : (isBoolJudgeNode(node)
+            ? (param === 'condition' ? '布尔值输入：整卡取这个 bool 源，未绑定时用卡片自己的表达式' : `${pin.label || param}：比较表达式输入`)
+            : 'bool 条件输入：为真走真口，为假走假口；未连接时使用判断条件表达式');
+        const hit = svgEl('circle', {
+          class: `variable-port-hit ${isBoolJudgeNode(node) ? 'bool-judge-input-hit' : 'condition-input-hit'}`,
+          cx: offset.x, cy: offset.y, r: 10, 'data-node': node.id, 'data-param': param,
+        }, group);
+        hit.addEventListener('pointerdown', (event: any) => {
+          event.stopPropagation();
+          if (event.altKey) disconnectVariableFromPin(node.id, param);
+          else startVariableConnectionFromPin(event, node.id, param);
+        });
+        hit.addEventListener('contextmenu', (event: any) => {
+          const point = openPortContextMenu(event);
+          if (!point) return;
+          showMenu(event.clientX, event.clientY, nodeVariablePinMenuItems(node.id, {
+            ...pin, param, label: pin.label || (param === 'left' ? '左值' : param === 'right' ? '右值' : '布尔条件'),
+          }, point));
+        });
+      }
+    }
+    const renderGenericReferencePort = (title: string): void => {
       const output = svgEl('circle', {
         class: `port port-out port-out-reference data-tone-${dataTone(`nodes.${node.id}.output`)}${outputReferenced?.(node.id) ? ' connected' : ''}${state.referenceConnect && state.referenceConnect.nodeId === node.id ? ' active' : ''}`,
         style: `--data-tone:${dataToneColor(`nodes.${node.id}.output`)}`,
-        cx: referencePortX,
-        cy: referencePortY,
+        cx: isValueCardNode(node) ? nodeWidth : referencePortX,
+        cy: node.type === 'break' ? baseHeight + rowHeightOf(node) / 2 : isValueCardNode(node) ? nodeHeight(node) / 2 : referencePortY,
         r: portRadius - 2.5,
         'data-node': node.id,
       }, group);
       svgEl('path', {
         class: 'port-glyph port-glyph-data',
         style: `--data-tone:${dataToneColor(`nodes.${node.id}.output`)}`,
-        d: dataPinArrow(referencePortX, referencePortY, portRadius - 2.5),
+        d: dataPinArrow(
+          isValueCardNode(node) ? nodeWidth : referencePortX,
+          node.type === 'break' ? baseHeight + rowHeightOf(node) / 2 : isValueCardNode(node) ? nodeHeight(node) / 2 : referencePortY,
+          portRadius - 2.5,
+        ),
       }, group);
-      svgEl('title', {}, output).textContent = '节点输出：拖到别的节点的参数行绑定引用';
+      svgEl('title', {}, output).textContent = title;
       output.addEventListener('pointerdown', (event: any) => startReferenceConnection?.(event, node.id));
       output.addEventListener('contextmenu', (event: any) => {
         const point = openPortContextMenu(event);
         if (!point) return;
         showMenu(event.clientX, event.clientY, nodeReferencePortMenuItems ? nodeReferencePortMenuItems(node.id, point) : []);
       });
+    };
+    if (node.type === 'task' || isValueCardNode(node)) {
+      // 任务节点 / 布尔判断卡片 / 没有字段的拆分卡片：右侧一个通用输出引用口，
+      // 拖到别的节点的参数行即可绑定 `nodes.<id>.output[.<字段>]`。
+      // 拆分卡片的字段引脚排在行网格里（renderBreakRows），有引脚时不再画这个通用口。
+      if (!(node.type === 'break' && breakFieldPinsOf(node).length)) {
+        renderGenericReferencePort(node.type === 'bool_judge'
+          ? '布尔判断输出：拖到别的节点的参数行绑定 nodes.<id>.output.value（boolean）'
+          : node.type === 'break'
+            ? '拆分输出：拖到别的节点的参数行绑定 nodes.<id>.output.<拆分字段>'
+            : '节点输出：拖到别的节点的参数行绑定引用');
+      }
+    } else if (node.type === 'condition') {
+      // 判断节点：底部左真右假两个执行输出口，每个口最多接一个子节点（没接就是空路径）。
+      for (const port of CONDITION_PORT_ORDER) {
+        const x = conditionPortOffset(nodeWidth, port);
+        const connected = Boolean(conditionChildOf(node, port));
+        const output = svgEl('circle', {
+          class: `port port-out port-out-${port}${connected ? ' connected' : ''}`,
+          cx: x, cy: height, r: portRadius, 'data-node': node.id, 'data-port': port,
+        }, group);
+        svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(x, height, portRadius) }, group);
+        nodeCards.text(group, {
+          className: 'port-label port-label-exec',
+          x, y: height - 7, value: CONDITION_PORT_LABELS[port], width: 26, size: 9, anchor: 'middle',
+        });
+        const tip = svgEl('title', {}, output);
+        tip.textContent = `${CONDITION_PORT_LABELS[port]}口：条件为${port === 'true' ? '真' : '假'}时执行这里接的子节点（拖线连接）`;
+        output.addEventListener('pointerdown', (event: any) => startConnection(event, node.id, undefined, port));
+        output.addEventListener('contextmenu', (event: any) => {
+          const point = openPortContextMenu(event);
+          if (!point) return;
+          showMenu(event.clientX, event.clientY, nodeOutputPortMenuItems(node.id, point, port));
+        });
+      }
     } else {
       const output = svgEl('circle', { class: 'port port-out', cx: nodeWidth / 2, cy: height, r: portRadius, 'data-node': node.id }, group);
       svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, height, portRadius) }, group);
@@ -938,6 +1284,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         render();
         showMenu(event.clientX, event.clientY, [
           ...(state.selected.size >= 2 && groupSelection ? [{ label: '将所选节点打组', run: () => groupSelection() }, 'separator'] : []),
+          ...(collapseIntoCustomType ? [{ label: '收成自定义类型', title: '把这一个节点的配置变成可复用的 x- 类型（字面量参数进预设，引用不进）', run: () => collapseIntoCustomType() }] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           'separator',

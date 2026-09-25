@@ -7,6 +7,8 @@
  */
 import type { CanvasState } from '../state/canvas-state';
 import { actionLabel, outputFieldLabel } from '../ui/labels';
+import { BOOL_JUDGE_OUTPUT_SCHEMA } from '../../shared/workflow/types';
+import { nodeOutputSchema } from '../../shared/workflow/graph';
 
 export interface CanvasReferencesDeps {
   state: CanvasState;
@@ -30,6 +32,8 @@ export interface CanvasReferences {
   possiblyAvailableOutputIds(targetNodeId: string): Set<string>;
   allRefs(node: any, definition: any, includePossible?: boolean): string[];
   referenceLabel(ref: string): string;
+  /** 标题用短名：裸整体输出不带「› 输出」尾缀（`nodes.classify.output` → `识别结果`）。 */
+  referenceTitle(ref: string): string;
 }
 
 export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasReferences {
@@ -52,6 +56,8 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
     if (visiting.has(nodeId)) return new Set();
     const node = map.get(nodeId);
     if (!node) return new Set();
+    if (node.type === 'bool_judge') return new Set([node.id]);
+    if (node.type === 'break') return new Set([node.id]);
     if (node.type === 'task') return node.action ? new Set([node.id]) : new Set();
     const nested = new Set(visiting);
     nested.add(nodeId);
@@ -106,6 +112,8 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
     if (visiting.has(nodeId)) return new Set();
     const node = map.get(nodeId);
     if (!node) return new Set();
+    if (node.type === 'bool_judge') return new Set([node.id]);
+    if (node.type === 'break') return new Set([node.id]);
     if (node.type === 'task') return node.action ? new Set([node.id]) : new Set();
     const nested = new Set(visiting);
     nested.add(nodeId);
@@ -170,7 +178,20 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
       ? includePossible ? possiblyAvailableOutputIds(node.id) : availableOutputIds(node.id)
       : null;
     for (const source of nodes()) {
-      if (!source || !source.id || !source.action || (available && !available.has(source.id))) continue;
+      if (!source || !source.id || (available && !available.has(source.id))) continue;
+      // 布尔判断卡片没有 Action：输出固定是 `{ value: boolean }`。
+      if (source.type === 'bool_judge') { appendNestedRefs(`nodes.${source.id}.output`, BOOL_JUDGE_OUTPUT_SCHEMA, candidates); continue; }
+      // 拆分卡片的输出按它的 ref + fields 推导（复用两端共享的推导逻辑）。
+      if (source.type === 'break') {
+        const schema = nodeOutputSchema(
+          source,
+          { byName: (name: string) => catalogByName(name), names: () => [] },
+          (id: string) => nodes().find((item: any) => item && item.id === id),
+        );
+        if (schema) appendNestedRefs(`nodes.${source.id}.output`, schema, candidates);
+        continue;
+      }
+      if (!source.action) continue;
       const spec = catalogByName(source.action);
       if (spec && spec.outputSchema) appendNestedRefs(`nodes.${source.id}.output`, spec.outputSchema, candidates);
     }
@@ -195,18 +216,27 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
   }
 
   /**
-   * 把 `nodes.<节点id>.output.<字段>` 渲染成「节点名 › 字段名」。
-   * 原始路径对新手是天书，但 id 是唯一稳定的锚点，所以节点名缺失时逐级回退到
-   * 动作中文名、再到 id——任何时候都不会返回一个看不懂的裸路径。
+   * 引用里的来源节点显示名：节点名缺失时逐级回退到动作中文名、再到 id。
+   * 原始路径对新手是天书，但 id 是唯一稳定的锚点，所以最后一定有个能看懂的锚。
    */
-  function nodeReferenceLabel(ref: string): string {
-    const [, nodeId, slot, ...tail] = ref.split('.');
+  function nodeSourceName(nodeId: string): string {
     const source = nodeIndex().get(nodeId);
-    const sourceName = (source && source.name)
+    return (source && source.name)
       || (source && source.action ? actionLabel(source.action) : '')
       || nodeId;
+  }
+
+  /** 输出路径的一段：数组下标写「第 N 项」，字段名走字段中文标签。 */
+  function outputSegmentLabel(part: string): string {
+    return /^\d+$/.test(part) ? `第 ${Number(part) + 1} 项` : outputFieldLabel(part);
+  }
+
+  /** 把 `nodes.<节点id>.output.<字段>` 渲染成「节点名 › 字段名」。 */
+  function nodeReferenceLabel(ref: string): string {
+    const [, nodeId, slot, ...tail] = ref.split('.');
+    const sourceName = nodeSourceName(nodeId);
     if (slot !== 'output') return `${sourceName}（${nodeId}）`;
-    const segments = tail.map((part) => (/^\d+$/.test(part) ? `第 ${Number(part) + 1} 项` : outputFieldLabel(part)));
+    const segments = tail.map(outputSegmentLabel);
     return `${sourceName} › ${segments.length ? segments.join(' › ') : '输出'}`;
   }
 
@@ -217,5 +247,20 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
     return ref;
   }
 
-  return { defaultValue, guaranteedOutputIds, availableOutputIds, possibleOutputIdsInSubtree, possiblyAvailableOutputIds, allRefs, referenceLabel };
+  /**
+   * 引用路径 → 卡片标题用的短名：裸整体输出不带「› 输出」尾缀
+   * （`nodes.classify.output` → `识别结果`，UE 的 `Break <Struct>` 要的就是这个来源名），
+   * 字段引用仍给完整路径名，输入/变量走变量显示名。
+   */
+  function referenceTitle(ref: string | null | undefined): string {
+    if (!ref) return '无可用引用';
+    if (ref.startsWith('nodes.')) {
+      const [, nodeId, slot, ...tail] = ref.split('.');
+      if (slot !== 'output') return nodeReferenceLabel(ref);
+      return [nodeSourceName(nodeId), ...tail.map(outputSegmentLabel)].join(' › ');
+    }
+    return referenceLabel(ref);
+  }
+
+  return { defaultValue, guaranteedOutputIds, availableOutputIds, possibleOutputIdsInSubtree, possiblyAvailableOutputIds, allRefs, referenceLabel, referenceTitle };
 }

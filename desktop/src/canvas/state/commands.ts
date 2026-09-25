@@ -8,6 +8,10 @@
 import type { CanvasState } from './canvas-state';
 import type { CanvasClipboardCard, CanvasClipboardPayload, CanvasClipboardVariable } from '../../shared/editor-messages';
 import { reconcileVariableLinks } from '../model/variable-links';
+import {
+  CONDITION_PORT_LABELS, conditionChildOf, conditionPortsOf, isConditionPort, type ConditionPort,
+} from '../model/exec-ports';
+import { NODE_TYPES } from '../../shared/workflow/types';
 
 export interface PointerPoint {
   x: number;
@@ -41,7 +45,9 @@ export interface CanvasCommands {
   parentOf(childId: string): { node: any; index: number } | null;
   descendants(id: string, out?: Set<string>): Set<string>;
   canConnect(parentId: string, childId: string): string | null;
-  connect(parentId: string, childId: string, replaceIndex?: number): boolean;
+  /** 节点对象版 canConnect：用于刚刚 buildNode、还没入图的新节点。 */
+  canConnectNodes(parent: any, child: any, port?: ConditionPort | null): string | null;
+  connect(parentId: string, childId: string, port?: number | ConditionPort): boolean;
   disconnect(parentId: string, childId: string): void;
   buildNode(type: string): any;
   addNode(type: string, at?: PointerPoint): void;
@@ -81,14 +87,34 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return out;
   }
 
-  function canConnect(parentId: string, childId: string): string | null {
-    const parent = nodeById(parentId);
-    const child = nodeById(childId);
+  /**
+   * 节点对象版连接校验：`buildNode` 刚造出来的节点还没有入图，
+   * 按 id 查询会一律命中「节点不存在」，只能拿对象本身判断。
+   *
+   * 判断节点按口校验：真/假各最多一个子节点，占用中的口要先断开。
+   */
+  function canConnectNodes(parent: any, child: any, port?: ConditionPort | null): string | null {
     if (!parent || !child) return '节点不存在';
+    if (child.type === 'bool_judge' || child.type === 'break') return '纯数据节点不接执行流，请通过数据端点引用';
     if (parent.type === 'task') return 'Task 没有子节点输出';
+    if (parent.type === 'bool_judge') return '布尔判断卡片是叶子节点，不能连接子节点';
+    if (parent.type === 'break') return '拆分卡片是叶子节点，不能连接子节点';
     if (parent.type === 'instance_parallel') return 'Instance Parallel 由 runs 配置实例，不能连接子节点';
     if (child.type === 'root') return 'Root 不允许父节点';
+    const parentId = String(parent.id);
+    const childId = String(child.id);
     if (parentId === childId || descendants(childId).has(parentId)) return '连接会形成环';
+    if (parent.type === 'condition') {
+      const children = Array.isArray(parent.children) ? parent.children : [];
+      if (!children.includes(childId) && children.length >= 2) return '判断节点最多两条分支（真口 / 假口）';
+      const slot: ConditionPort = port === 'false' ? 'false' : 'true';
+      const occupant = conditionChildOf(parent, slot);
+      if (occupant && occupant !== childId) {
+        const name = nodeById(occupant)?.name || occupant;
+        return `${CONDITION_PORT_LABELS[slot]}口已经接了「${name}」，先断开再连`;
+      }
+      return null;
+    }
     if (parent.type === 'root' && parent.children && parent.children.length >= 1 && parent.children[0] !== childId) return null;
     if (parent.type === 'simple_parallel') {
       const children = Array.isArray(parent.children) ? parent.children : [];
@@ -98,19 +124,60 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return null;
   }
 
-  function connect(parentId: string, childId: string, replaceIndex?: number): boolean {
-    const error = canConnect(parentId, childId);
+  function canConnect(parentId: string, childId: string): string | null {
+    return canConnectNodes(nodeById(parentId), nodeById(childId));
+  }
+
+  /** 摘掉一个子节点；判断节点同步摘掉对齐的 ports，口位含义不会悄悄漂移。 */
+  function dropChild(parent: any, childId: string): boolean {
+    if (!parent || !Array.isArray(parent.children)) return false;
+    const index = parent.children.indexOf(childId);
+    if (index < 0) return false;
+    // 口位要在摘除之前读：摘完再推导会把剩下的子节点当成真口。
+    const ports = parent.type === 'condition' ? conditionPortsOf(parent) : null;
+    parent.children.splice(index, 1);
+    if (ports) {
+      ports.splice(index, 1);
+      if (ports.length) parent.ports = ports; else delete parent.ports;
+    }
+    return true;
+  }
+
+  /** 判断节点的口位参数：字符串口位直接用；数字按该下标子节点现在的口位折算。 */
+  function conditionPortArg(parent: any, port?: number | ConditionPort | null): ConditionPort {
+    if (isConditionPort(port)) return port;
+    if (typeof port === 'number' && port >= 0) {
+      const children = Array.isArray(parent.children) ? parent.children : [];
+      const index = Math.min(port, children.length - 1);
+      if (index >= 0) return conditionPortsOf(parent)[index] || 'true';
+    }
+    return 'true';
+  }
+
+  function connect(parentId: string, childId: string, port?: number | ConditionPort): boolean {
+    const parent = nodeById(parentId);
+    const isCondition = Boolean(parent) && parent.type === 'condition';
+    const slot = isCondition ? conditionPortArg(parent, port) : null;
+    const error = canConnectNodes(parent, nodeById(childId), slot);
     if (error) {
       toast(error, true);
       return false;
     }
-    const parent = nodeById(parentId);
     if (!Array.isArray(parent.children)) parent.children = [];
     const oldParent = parentOf(childId);
-    if (oldParent && oldParent.node.id === parentId && replaceIndex === undefined) return true;
-    if (oldParent) oldParent.node.children.splice(oldParent.index, 1);
+    if (oldParent && oldParent.node.id === parentId && port === undefined) return true;
+    if (oldParent) dropChild(oldParent.node, childId);
+    if (parent.type === 'condition') {
+      if (conditionChildOf(parent, slot!) === childId) return true;
+      // 先把现有口位规范化再追加，否则新子节点会被当成口位推导的一员。
+      const ports = conditionPortsOf(parent);
+      parent.children.push(childId);
+      ports.push(slot!);
+      parent.ports = ports;
+      return true;
+    }
     if (parent.type === 'root' && parent.children.length) parent.children.splice(0, 1);
-    if (replaceIndex !== undefined && replaceIndex >= 0 && replaceIndex < parent.children.length) parent.children.splice(replaceIndex, 1, childId);
+    if (typeof port === 'number' && port >= 0 && port < parent.children.length) parent.children.splice(port, 1, childId);
     else parent.children.push(childId);
     if (parent.type === 'branch') {
       if (!Array.isArray(parent.conditions)) parent.conditions = [];
@@ -125,20 +192,60 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
 
   function disconnect(parentId: string, childId: string): void {
     const parent = nodeById(parentId);
-    if (!parent || !Array.isArray(parent.children)) return;
-    const index = parent.children.indexOf(childId);
-    if (index >= 0) parent.children.splice(index, 1);
-    if (index >= 0 && parent.type === 'switch' && Array.isArray(parent.cases)) parent.cases = parent.cases.filter((item: any) => item && item.child !== childId);
+    if (!dropChild(parent, childId)) return;
+    if (parent.type === 'switch' && Array.isArray(parent.cases)) parent.cases = parent.cases.filter((item: any) => item && item.child !== childId);
   }
 
   /** 按类型构建一个尚未入图的新节点（addNode / 端口右键插入共用）。 */
+  /** 自定义类型（`x-…`）的定义表：新建节点时把它的预设铺成节点的初始载荷。 */
+  function customTypeDefinitions(): Record<string, any> {
+    const raw = state.raw;
+    if (!raw || typeof raw !== 'object') return {};
+    const definitions = (raw as any).nodeTypes;
+    return definitions && typeof definitions === 'object' && !Array.isArray(definitions) ? definitions : {};
+  }
+
+  function mergePreset(base: any, preset: any): any {
+    const out = { ...base };
+    for (const [key, value] of Object.entries(preset || {})) {
+      if (key === 'base' || key === 'title' || key === 'description' || key === 'tint') continue;
+      const current = out[key];
+      if (value && typeof value === 'object' && !Array.isArray(value) && current && typeof current === 'object' && !Array.isArray(current)) {
+        out[key] = { ...current, ...(value as any) };
+      } else {
+        out[key] = Array.isArray(value) || (value && typeof value === 'object') ? JSON.parse(JSON.stringify(value)) : value;
+      }
+    }
+    return out;
+  }
+
   function buildNode(type: string): any {
-    const prefix = type === 'simple_parallel' ? 'parallel' : type === 'instance_parallel' ? 'instances' : type;
+    // 自定义类型：先按基类建，再把定义里的预设铺上去（预设赢过内置默认值）。
+    const definitions = customTypeDefinitions();
+    if (!(NODE_TYPES as readonly string[]).includes(type) && definitions[type] && typeof definitions[type].base === 'string') {
+      const definition = definitions[type];
+      const node = mergePreset(buildNode(String(definition.base)), definition);
+      if (typeof definition.title === 'string' && definition.title) node.name = definition.title;
+      node._nodeType = type;
+      return node;
+    }
+    const prefix = type === 'simple_parallel' ? 'parallel'
+      : type === 'instance_parallel' ? 'instances'
+        : type === 'bool_judge' ? 'bool'
+          : type === 'break' ? 'break'
+            : type;
     const node: any = { id: nextId(prefix), type, children: [] };
     if (type === 'task') {
       delete node.children;
       node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture';
       node.params = {};
+    } else if (type === 'condition' || type === 'bool_judge') {
+      // 判断节点与布尔判断卡片共用同一套条件表达式；后者是叶子，只产出 bool。
+      delete node.children;
+      node.expression = { eq: type === 'bool_judge' ? [0, 0] : [1, 1] };
+    } else if (type === 'break') {
+      // 拆分卡片：叶子，等用户把某张卡片的输出拖到「拆分来源」行上再绑定。
+      delete node.children;
     } else if (type === 'instance_parallel') {
       delete node.children;
       node.runs = [{ instance: state.instances[0]?.id || '', workflow: '', inputs: {} }];
@@ -174,6 +281,14 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       state.selectedRun = null;
       state.inspector = 'node';
     });
+  }
+
+  /**
+   * 卡片布局坐标（与 Model.position 同一套回退）。
+   */
+  function pointOf(node: any): PointerPoint {
+    const value = layout()[node && node.id];
+    return value && Number.isFinite(value.x) && Number.isFinite(value.y) ? { x: value.x, y: value.y } : { x: 0, y: 0 };
   }
 
   function deleteSelection(): void {
@@ -377,7 +492,16 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       for (const src of payload.nodes) {
         const copy = clone(src);
         copy.id = idMap.get(src.id);
-        if (Array.isArray(copy.children)) copy.children = copy.children.filter((id: string) => idMap.has(id)).map((id: string) => idMap.get(id));
+        if (Array.isArray(copy.children)) {
+          // 判断节点的 ports 与 children 对齐：children 被过滤时口位要一起筛。
+          const ports = copy.type === 'condition' ? conditionPortsOf(src) : null;
+          const kept = copy.children.map((id: string, index: number) => ({ id, port: ports ? ports[index] : undefined })).filter((item: { id: string }) => idMap.has(item.id));
+          copy.children = kept.map((item: { id: string }) => idMap.get(item.id));
+          if (ports) {
+            const nextPorts = kept.map((item: { port?: ConditionPort }) => item.port || 'true');
+            if (nextPorts.length) copy.ports = nextPorts; else delete copy.ports;
+          }
+        }
         remap(copy);
         const base = payload.layout[src.id] || { x: 0, y: 0 };
         layout()[copy.id] = { x: base.x + dx, y: base.y + dy };
@@ -401,6 +525,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     parentOf,
     descendants,
     canConnect,
+    canConnectNodes,
     connect,
     disconnect,
     buildNode,

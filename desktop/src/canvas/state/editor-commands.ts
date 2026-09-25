@@ -5,6 +5,7 @@
  * 命令通过 mutate 提交历史，不直接改视图。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { BOOL_JUDGE_COMPARISON_OPERATORS, boolJudgeShape } from '../model/exec-ports';
 import { parameterLiteralCache, parameterLiteralCacheKey } from './literal-cache';
 
 export interface EditorCommandsDeps {
@@ -252,34 +253,86 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
     });
   }
 
+  /** 类型切换时参与校验的结构字段：不属于目标类型的残留字段两端都会判为非法。 */
+  const STRUCTURAL_FIELDS = [
+    'action', 'params', 'children', 'finish_mode', 'runs', 'wait_for', 'cancel_on_failure',
+    'condition', 'conditions', 'max_iterations', 'expression', 'cases', 'default_child', 'ports',
+    'ref', 'fields',
+  ];
+
+  /** 各节点类型合法的结构字段（与 validator/schema 的 allowed_fields 对齐）。 */
+  const TYPE_FIELDS: Record<string, string[]> = {
+    task: ['action', 'params'],
+    condition: ['expression', 'children', 'ports'],
+    bool_judge: ['expression'],
+    break: ['ref', 'fields'],
+    instance_parallel: ['runs', 'wait_for', 'cancel_on_failure'],
+    repeat_until: ['children', 'condition', 'max_iterations'],
+    branch: ['children', 'conditions'],
+    switch: ['children', 'expression', 'cases', 'default_child'],
+    simple_parallel: ['children', 'finish_mode'],
+    parallel: ['children', 'wait_for', 'cancel_on_failure'],
+    root: ['children'], selector: ['children'], sequence: ['children'],
+  };
+
+  /**
+   * 切换节点类型：先清掉不属于目标类型的结构字段，再补该类型必需的默认值。
+   * 只清结构字段，id/name/decorators 与 `_` 前缀的编辑器私有键原样保留。
+   */
   function changeNodeType(node: any, type: string): void {
     mutate(() => {
       node.type = type;
+      const keep = TYPE_FIELDS[type] || ['children'];
+      for (const key of [...Object.keys(node)]) {
+        if (STRUCTURAL_FIELDS.includes(key) && !keep.includes(key)) delete node[key];
+      }
       if (type === 'task') {
-        delete node.children; delete node.finish_mode;
-        delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
-        node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture'; node.params = {};
+        node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture';
+        node.params = {};
+      } else if (type === 'condition' || type === 'bool_judge') {
+        // 判断节点默认恒真；值卡片则用 0 == 0 的操作数输入初始形态。
+        if (node.expression === undefined) node.expression = { eq: type === 'bool_judge' ? [0, 0] : [1, 1] };
+      } else if (type === 'break') {
+        // 拆分卡片：没有可默认的来源绑定，等用户拖一条输出引用到「拆分来源」行。
+        delete node.children;
       } else if (type === 'instance_parallel') {
-        delete node.action; delete node.params; delete node.children; delete node.finish_mode;
         node.runs = Array.isArray(node.runs) && node.runs.length ? node.runs : [{ instance: state.instances[0]?.id || '', workflow: '', inputs: {} }];
         node.wait_for = node.wait_for === 'any' ? 'any' : 'all';
         node.cancel_on_failure = node.cancel_on_failure !== false;
       } else {
-        delete node.action; delete node.params;
-        node.children = [];
-        delete node.runs; delete node.wait_for; delete node.cancel_on_failure;
-        if (type === 'simple_parallel') node.finish_mode = 'abort_background'; else delete node.finish_mode;
+        node.children = Array.isArray(node.children) ? node.children : [];
+        if (type === 'simple_parallel') node.finish_mode = 'abort_background';
         if (type === 'repeat_until') { node.condition = node.condition || { eq: [1, 1] }; node.max_iterations = node.max_iterations || 100; }
         if (type === 'branch') node.conditions = Array.isArray(node.conditions) ? node.conditions : [];
         if (type === 'switch') { node.expression = node.expression ?? 0; node.cases = Array.isArray(node.cases) ? node.cases : []; }
         if (type === 'parallel') { node.wait_for = 'all'; node.cancel_on_failure = true; }
-        if (type !== 'parallel') { delete node.wait_for; delete node.cancel_on_failure; }
       }
+    });
+  }
+
+  /**
+   * 换布尔判断卡片的运算符（UE 的 `Convert Operator`）：保留两个操作数，只替换表达式里的运算符键。
+   *
+   * 只接受二元比较运算符，且当前表达式必须已经是比较形态：
+   * 与/或/非不是比较运算符，把 `{eq: [a, b]}` 换成 `{and: [a, b]}` 会写出 Python 校验直接
+   * 拒绝的表达式（and/or 的操作数必须是条件对象或 bool），卡面也没有对应的可编辑引脚——
+   * 嵌套条件统一走「嵌套条件（进阶）…」浮层。
+   */
+  function setBoolJudgeOperator(nodeId: string, operator: string): void {
+    const node = nodeById(nodeId);
+    if (!node || node.type !== 'bool_judge' || !operator) return;
+    if (!BOOL_JUDGE_COMPARISON_OPERATORS.includes(operator)) return;
+    if (boolJudgeShape(node) !== 'comparison') return;
+    mutate(() => {
+      const expression = node.expression as Record<string, unknown>;
+      const current = Object.keys(expression)[0] || 'eq';
+      const operands = (expression[current] as unknown[]).slice();
+      node.expression = { [operator]: operands };
     });
   }
 
   return {
     removeVariableCard, releasePinBinding, removeVariableCards, placeVariableCard, addVariableCardCommand,
-    renameNode, changeNodeType,
+    renameNode, changeNodeType, setBoolJudgeOperator,
   };
 }

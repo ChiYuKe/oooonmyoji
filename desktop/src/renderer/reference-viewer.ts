@@ -458,7 +458,7 @@ function openReferenceViewer(path: string, _sourceDocument: Document): void {
     window.setTimeout(() => {
       const ownerDocument = referenceViewerPanel?.ownerDocument;
       if (dockPanel.api.location.type === 'popout' && ownerDocument && ownerDocument !== document) {
-        ownerDocument.title = '引用查看器 - Onmyoji Studio';
+        ownerDocument.title = '引用查看器 - AutoFlow Studio';
         const popoutTitle = ownerDocument.querySelector<HTMLElement>('.popout-title');
         if (popoutTitle) popoutTitle.textContent = '引用查看器';
       }

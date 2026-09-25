@@ -7,6 +7,7 @@
 import type { OnmyojiDesktopApi, WorkflowDescriptor } from '../shared/contracts';
 import type { EditorMessage } from '../shared/editor-messages';
 import { parseCanvasClipboard } from '../shared/editor-messages';
+import { parseDocument } from '../shared/workflow/graph-dsl';
 import type { WorkflowDocumentTab } from '../shared/workspace/session';
 import type { RoiPicker } from './roi-picker';
 import type { Sidebar } from './panels/sidebar';
@@ -285,7 +286,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           const reference = String(message.reference ?? '').trim();
           let resolved = reference ? resolveWorkflow(reference) : undefined;
           if (!resolved && typeof message.nodeId === 'string') {
-            const source = JSON.parse(workspace.tab(targetUri)?.text ?? workspace.activeText()) as { nodes?: Array<{ id?: string; action?: string; params?: { workflow?: string } }> };
+            const source = parseDocument(workspace.tab(targetUri)?.text ?? workspace.activeText()) as { nodes?: Array<{ id?: string; action?: string; params?: { workflow?: string } }> };
             const node = source.nodes?.find((item) => item.id === message.nodeId && item.action === 'workflow.run');
             if (node?.params?.workflow) resolved = resolveWorkflow(node.params.workflow);
           }

@@ -6,6 +6,11 @@
  */
 import type { CanvasState } from '../state/canvas-state';
 import { parseCanvasClipboard } from '../../shared/editor-messages';
+import { WORKFLOW_SUFFIX, parseDocument } from '../../shared/workflow/graph-dsl';
+import { toCanvasDocument } from '../../shared/workflow/graph-document';
+
+/** 工作流文件后缀：`.owf` 是当前格式，`.json` 只在旧引用文本里继续被认。 */
+const WORKFLOW_EXTENSIONS = [WORKFLOW_SUFFIX, '.json'];
 
 export interface CanvasMessagesDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -56,7 +61,9 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
   function workflowDescriptor(reference: string, workflows: any[]): any {
     const normalized = String(reference || '').trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
     if (!normalized) return null;
-    const withExtension = normalized.toLowerCase().endsWith('.json') ? normalized : `${normalized}.json`;
+    const withExtension = WORKFLOW_EXTENSIONS.some((extension) => normalized.toLowerCase().endsWith(extension))
+      ? normalized
+      : `${normalized}${WORKFLOW_SUFFIX}`;
     return workflows.find((item: any) => {
       const relative = String(item?.rel || '').replace(/\\/g, '/').replace(/^workflows\//i, '');
       return item?.id === normalized || relative === normalized || relative === withExtension
@@ -104,12 +111,15 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
 
   if (message.type === 'init') {
     let raw = null;
-    try { raw = JSON.parse(message.document.text); } catch { raw = null; }
+    // 磁盘上是 `.owf` 文本：读入边界解析成图文档，再转成画布编辑形态。
+    try { raw = parseDocument(message.document.text, message.document.name); } catch { raw = null; }
     // 同一文档的重复初始化（如保存后的外部变更同步）保留当前视口；
     // 只有切换/重新打开其他工作流时才重新适配。
     const sameDocument = Boolean(message.document && message.document.uri && message.document.uri === state.docUri);
     if (!sameDocument) { state.variableSnapshots = {}; state.variableValues = null; state.nodeGroupId = ''; }
-    state.raw = normalizeRaw(raw); state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
+    // 画布内部的一切照旧（children/_layout），只有保存时再写回 `.owf`（state/document-text.ts）。
+    state.raw = normalizeRaw(raw ? toCanvasDocument(raw) : raw);
+    state.catalog = Array.isArray(message.catalog) ? message.catalog : [];
     state.assetsBaseUri = typeof message.assetsBaseUri === 'string' ? message.assetsBaseUri.replace(/\/?$/, '/') : '';
     state.refs = message.refs || { inputs: [], variables: [], nodes: [] }; state.issues = message.issues || [];
     state.docVersion = (state.docVersion || 0) + 1;

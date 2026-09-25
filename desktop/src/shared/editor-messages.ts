@@ -7,7 +7,10 @@
 /** 结构树节点（画布投影给壳层展示）。 */
 export interface SidebarNode {
   id: string;
+  /** 显示用标题：值卡片是类型派生标题（`Break 识别结果` / `等于`），其余是 `名称 || id`。 */
   name: string;
+  /** 手动设过的显示名（`node.name`）；值卡片留空时标题由类型派生，改名的就是这一层。 */
+  explicitName?: string;
   type: string;
   meta: string;
   children: string[];

@@ -40,7 +40,7 @@
       <div id="viewport-tools">
         <button id="btn-viewport-back" class="icon-button" title="画布后退（上一个位置）">↩</button>
         <button id="btn-viewport-forward" class="icon-button" title="画布前进（下一个位置）">↪</button>
-        <button id="btn-arrange" class="icon-button" title="自动排列（先预览再应用）">⤢</button>
+        <button id="btn-arrange" class="icon-button" title="自动排列（先预览，再点顶部「应用排列」）">⤢</button>
         <button id="btn-filter" class="icon-button" title="按状态或类型临时隐藏">☰</button>
         <span class="viewport-tools-separator"></span>
         <button id="btn-zoom-out" class="icon-button" title="缩小">−</button>
@@ -49,8 +49,9 @@
       </div>
       <div id="arrange-preview-bar" class="hidden">
         <span id="arrange-preview-text">排列预览</span>
-        <button id="btn-arrange-apply" class="primary">应用</button>
-        <button id="btn-arrange-cancel" class="icon-button">取消</button>
+        <span id="arrange-preview-hint">虚线是虚影，点「应用排列」才写入文档（Ctrl+Z 可撤销）</span>
+        <button id="btn-arrange-apply" class="primary">应用排列 (Enter)</button>
+        <button id="btn-arrange-cancel">取消 (Esc)</button>
       </div>
       <svg id="minimap" xmlns="http://www.w3.org/2000/svg"></svg>
     </section>

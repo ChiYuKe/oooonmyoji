@@ -20,6 +20,7 @@ import type {
 import { loadActionCatalog } from './core/catalog';
 import { buildReferenceGraph } from './core/references';
 import { collectRefSuggestions, parseWorkflow, validateWorkflow } from './core/workflow';
+import { emitDocument, parseDocument } from '../shared/workflow/graph-dsl';
 
 const IMAGE_MIME = new Map([
   ['.png', 'image/png'],
@@ -29,6 +30,13 @@ const IMAGE_MIME = new Map([
   ['.gif', 'image/gif'],
   ['.bmp', 'image/bmp'],
 ]);
+
+/**
+ * 工作流文档的磁盘后缀：`.owf` 文本（语法见 `docs/workflow-dsl-v6.md`），JSON 已退役。
+ *
+ * 与 `shared/workflow/graph-dsl.ts` 的 `WORKFLOW_SUFFIX` 是同一个值；接线时改成从那里导入。
+ */
+const WORKFLOW_EXTENSION = '.owf';
 
 function isPathInside(root: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
@@ -43,19 +51,28 @@ function encodeResourcePath(relativePath: string): string {
     .join('/');
 }
 
+/**
+ * 新建工作流模板：节点图（`at` 坐标 + 显式 `edges`）。
+ *
+ * 图文档要求节点自带坐标，这里直接给两个节点落好位置；`root` 是入口，
+ * `edges` 里 `then.0` 就是它的第一条执行流出口。
+ */
 function workflowTemplate(id: string): Record<string, unknown> {
   return {
-    schema_version: 4,
+    schema_version: 6,
     id,
-    version: '4.0.0',
+    version: '5.0.0',
     description: '',
     resolution: [1920, 1080],
     root: 'root',
     inputs: {},
     variables: {},
     nodes: [
-      { id: 'root', type: 'root', children: ['capture'] },
-      { id: 'capture', type: 'task', action: 'core.capture', params: {} },
+      { id: 'root', type: 'root', name: '入口', at: { x: 480, y: 0 } },
+      { id: 'capture', type: 'task', action: 'core.capture', params: {}, at: { x: 480, y: 208 } },
+    ],
+    edges: [
+      { from: { node: 'root', pin: 'then.0' }, to: { node: 'capture', pin: 'in' } },
     ],
   };
 }
@@ -102,23 +119,46 @@ function preservePathStyle(original: string, target: string): string {
   return original.trim().startsWith('./') ? `./${replacement}` : replacement;
 }
 
+/**
+ * 引用可能写成多种拼法：带 `workflows/` 前缀或不带、带当前后缀 `.owf` 或旧后缀 `.json`、
+ * 甚至只写裸文件名（解析期按 id / 文件名匹配，都认）。改名时要按同一个口径命中它们。
+ */
+function referenceCandidates(oldRelative: string, kind: 'workflow' | 'asset'): Set<string> {
+  const rootless = oldRelative.replace(/^(?:workflows|assets)\//i, '');
+  const candidates = new Set<string>([oldRelative, rootless]);
+  if (kind === 'workflow') {
+    for (const base of [oldRelative, rootless]) {
+      const stem = base.replace(/\.(?:owf|json)$/i, '');
+      candidates.add(stem);
+      candidates.add(`${stem}.owf`);
+      candidates.add(`${stem}.json`);
+    }
+  }
+  return candidates;
+}
+
 function replaceExactReference(value: string, oldRelative: string, newRelative: string, kind: 'workflow' | 'asset'): string {
   const normalized = value.replace(/\\/g, '/').trim();
   const stripped = normalized.replace(/^\.\//, '');
-  const oldPath = oldRelative.toLowerCase();
-  const oldWithoutRoot = oldRelative.replace(/^(?:workflows|assets)\//i, '').toLowerCase();
-  const candidates = new Set([oldPath, oldWithoutRoot]);
-  const matched = candidates.has(stripped.toLowerCase())
-    ? stripped.toLowerCase()
-    : undefined;
-  if (!matched) return value;
-  const target = kind === 'workflow' && matched === oldWithoutRoot
+  const candidates = referenceCandidates(oldRelative, kind);
+  const matched = [...candidates].find((candidate) => candidate.toLowerCase() === stripped.toLowerCase());
+  if (matched === undefined) return value;
+  // 「不带 workflows/ 前缀」的引用在改写后也要保持不带前缀。
+  const rootlessStem = oldRelative.replace(/^(?:workflows|assets)\//i, '').replace(/\.(?:owf|json)$/i, '').toLowerCase();
+  const matchedStem = matched.replace(/\.(?:owf|json)$/i, '').toLowerCase();
+  const target = kind === 'workflow' && matchedStem === rootlessStem
     ? newRelative.replace(/^workflows\//i, '')
     : newRelative;
   return preservePathStyle(value, target);
 }
 
-function rewriteJsonReferences(value: unknown, oldRelative: string, newRelative: string, kind: 'workflow' | 'asset'): { value: unknown; references: number } {
+/**
+ * 结构级引用改写：在**解析后的文档对象**上把旧引用换成新引用。
+ *
+ * 换格式后不能在序列化文本上做正则替换（`.owf` 里引用是裸路径，正则很容易误伤别的内容），
+ * 所以一律「解析 → 改对象 → 重新序列化」。
+ */
+function rewriteDocumentReferences(value: unknown, oldRelative: string, newRelative: string, kind: 'workflow' | 'asset'): { value: unknown; references: number } {
   if (typeof value === 'string') {
     const replaced = replaceExactReference(value, oldRelative, newRelative, kind);
     return { value: replaced, references: replaced === value ? 0 : 1 };
@@ -126,7 +166,7 @@ function rewriteJsonReferences(value: unknown, oldRelative: string, newRelative:
   if (Array.isArray(value)) {
     let references = 0;
     const rewritten = value.map((item) => {
-      const result = rewriteJsonReferences(item, oldRelative, newRelative, kind);
+      const result = rewriteDocumentReferences(item, oldRelative, newRelative, kind);
       references += result.references;
       return result.value;
     });
@@ -136,7 +176,7 @@ function rewriteJsonReferences(value: unknown, oldRelative: string, newRelative:
   let references = 0;
   const rewritten: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    const result = rewriteJsonReferences(item, oldRelative, newRelative, kind);
+    const result = rewriteDocumentReferences(item, oldRelative, newRelative, kind);
     references += result.references;
     rewritten[key] = result.value;
   }
@@ -190,7 +230,7 @@ export class ProjectService {
     } catch {
       throw new Error('工作流路径无效');
     }
-    if (!isPathInside(this.workflowRoot, candidate) || path.extname(candidate).toLowerCase() !== '.json') {
+    if (!isPathInside(this.workflowRoot, candidate) || path.extname(candidate).toLowerCase() !== WORKFLOW_EXTENSION) {
       throw new Error('工作流必须位于项目 workflows 目录内');
     }
     return candidate;
@@ -237,7 +277,7 @@ export class ProjectService {
       for (const entry of entries) {
         const absolutePath = path.join(directory, entry.name);
         if (entry.isDirectory()) await visit(absolutePath);
-        else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) files.push(absolutePath);
+        else if (entry.isFile() && entry.name.toLowerCase().endsWith(WORKFLOW_EXTENSION)) files.push(absolutePath);
       }
     };
     await visit(this.workflowRoot);
@@ -251,7 +291,7 @@ export class ProjectService {
       let updatedAt: number | undefined;
       const relativePath = path.relative(this.projectRoot, file).split(path.sep).join('/');
       try {
-        const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as unknown;
+        const raw = parseDocument(await fs.promises.readFile(file, 'utf8'), relativePath) as unknown;
         const parsed = parseWorkflow(raw);
         id = parsed.id ?? '';
         description = parsed.description?.trim() ?? '';
@@ -263,7 +303,7 @@ export class ProjectService {
           ? 'invalid'
           : 'valid';
       } catch {
-        // Invalid JSON remains visible so the user can repair it in the editor.
+        // 读不懂的工作流仍然列出来，让用户可以在编辑器里修。
         validationStatus = 'invalid';
       }
       try {
@@ -288,7 +328,7 @@ export class ProjectService {
 
   async bootstrap(instances: RuntimeInstance[]): Promise<BootstrapData> {
     const workflows = await this.listWorkflows();
-    const preferred = workflows.find((item) => item.rel.endsWith('/three_mumu_souls_parallel.json'))
+    const preferred = workflows.find((item) => item.rel.endsWith(`/three_mumu_souls_parallel${WORKFLOW_EXTENSION}`))
       ?? workflows.find((item) => item.rel.includes('/entrypoints/'))
       ?? workflows[0];
     return {
@@ -307,9 +347,9 @@ export class ProjectService {
     let raw: unknown = null;
     let parseIssue: WorkflowEditorInit['issues'] = [];
     try {
-      raw = JSON.parse(text) as unknown;
+      raw = parseDocument(text, path.basename(file)) as unknown;
     } catch (error) {
-      parseIssue = [{ path: [], message: `JSON 解析失败：${(error as Error).message}`, severity: 'error', code: 'invalid-json' }];
+      parseIssue = [{ path: [], message: `工作流解析失败：${(error as Error).message}`, severity: 'error', code: 'invalid-document' }];
     }
     const info = parseWorkflow(raw);
     const refs = collectRefSuggestions(info, catalog);
@@ -331,7 +371,8 @@ export class ProjectService {
 
   async saveWorkflow(uri: string, text: string): Promise<void> {
     const file = this.workflowPath(uri);
-    JSON.parse(text) as unknown;
+    // 语法闸门：渲染进程写过来的文本必须是能解析的 `.owf`，否则不落盘。
+    parseDocument(text, path.basename(file));
     await fs.promises.writeFile(file, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
   }
 
@@ -339,15 +380,15 @@ export class ProjectService {
     await fs.promises.mkdir(path.join(this.workflowRoot, 'entrypoints'), { recursive: true });
     const result = await dialog.showSaveDialog(owner, {
       title: '新建工作流',
-      defaultPath: path.join(this.workflowRoot, 'entrypoints', 'new_workflow.json'),
+      defaultPath: path.join(this.workflowRoot, 'entrypoints', `new_workflow${WORKFLOW_EXTENSION}`),
       buttonLabel: '创建',
-      filters: [{ name: '工作流 JSON', extensions: ['json'] }],
+      filters: [{ name: '工作流 .owf', extensions: [WORKFLOW_EXTENSION.slice(1)] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (result.canceled || !result.filePath) return undefined;
     const file = this.workflowPath(result.filePath);
     const id = path.basename(file, path.extname(file)).replace(/[^A-Za-z0-9_-]+/g, '_') || 'new_workflow';
-    await fs.promises.writeFile(file, `${JSON.stringify(workflowTemplate(id), null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+    await fs.promises.writeFile(file, emitDocument(workflowTemplate(id)), { encoding: 'utf8', flag: 'wx' });
     return pathToFileURL(file).toString();
   }
 
@@ -362,7 +403,7 @@ export class ProjectService {
     const extension = path.extname(absolutePath).toLowerCase();
     const isWorkflow = normalized.startsWith('workflows/')
       && isPathInside(this.workflowRoot, absolutePath)
-      && extension === '.json';
+      && extension === WORKFLOW_EXTENSION;
     const isAsset = normalized.startsWith('assets/')
       && isPathInside(this.assetsRoot, absolutePath)
       && IMAGE_MIME.has(extension);
@@ -387,7 +428,7 @@ export class ProjectService {
     if (!stat) throw new Error('内容不存在');
     if (stat.isDirectory()) return { ...location, isDirectory: true };
     const extension = path.extname(location.absolute).toLowerCase();
-    const supported = location.kind === 'workflow' ? extension === '.json' : IMAGE_MIME.has(extension);
+    const supported = location.kind === 'workflow' ? extension === WORKFLOW_EXTENSION : IMAGE_MIME.has(extension);
     if (!supported) throw new Error('内容浏览器只支持工作流和模板图片');
     return { ...location, isDirectory: false };
   }
@@ -395,7 +436,7 @@ export class ProjectService {
   private resolveContentFile(relativePath: string): ContentFileLocation {
     const location = this.resolveContentLocation(relativePath);
     const extension = path.extname(location.absolute).toLowerCase();
-    const supported = location.kind === 'workflow' ? extension === '.json' : IMAGE_MIME.has(extension);
+    const supported = location.kind === 'workflow' ? extension === WORKFLOW_EXTENSION : IMAGE_MIME.has(extension);
     if (!supported) throw new Error('内容浏览器只支持移动工作流和模板图片');
     return location;
   }
@@ -450,7 +491,7 @@ export class ProjectService {
       for (const entry of entries) {
         const absolute = path.join(directory, entry.name);
         if (entry.isDirectory()) await visit(absolute);
-        else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) files.push(absolute);
+        else if (entry.isFile() && entry.name.toLowerCase().endsWith(WORKFLOW_EXTENSION)) files.push(absolute);
       }
     };
     await visit(this.workflowRoot);
@@ -474,7 +515,7 @@ export class ProjectService {
           continue;
         }
         const extension = path.extname(entry.name).toLowerCase();
-        const supported = kind === 'workflow' ? extension === '.json' : IMAGE_MIME.has(extension);
+        const supported = kind === 'workflow' ? extension === WORKFLOW_EXTENSION : IMAGE_MIME.has(extension);
         if (entry.isFile() && supported) {
           files.push({
             relative: path.relative(this.projectRoot, absolute).split(path.sep).join('/'),
@@ -502,21 +543,21 @@ export class ProjectService {
       const original = await fs.promises.readFile(absolute, 'utf8');
       let parsed: unknown;
       try {
-        parsed = JSON.parse(original) as unknown;
+        parsed = parseDocument(original, path.basename(absolute)) as unknown;
       } catch {
         continue;
       }
-      let updated = original;
       let references = 0;
       for (const mapping of mappings) {
-        const result = rewriteJsonReferences(parsed, mapping.oldRelative, mapping.newRelative, mapping.kind);
+        const result = rewriteDocumentReferences(parsed, mapping.oldRelative, mapping.newRelative, mapping.kind);
         if (result.references === 0) continue;
-        const serialized = rewriteSerializedReferences(updated, mapping.oldRelative, mapping.newRelative, mapping.kind);
-        updated = serialized === updated ? `${JSON.stringify(result.value, null, 2)}\n` : serialized;
         parsed = result.value;
         references += result.references;
       }
-      if (references > 0) plans.push({ absolute, original, updated, references });
+      if (references > 0) {
+        // 结构级改写后整体重新序列化（`.owf` 的规范形式）——不再做文本级正则替换。
+        plans.push({ absolute, original, updated: emitDocument(parsed), references });
+      }
     }
     return plans;
   }
@@ -529,14 +570,13 @@ export class ProjectService {
         const original = await fs.promises.readFile(absolute, 'utf8');
         let parsed: unknown;
         try {
-          parsed = JSON.parse(original) as unknown;
+          parsed = parseDocument(original, path.basename(absolute)) as unknown;
         } catch {
           continue;
         }
-        const result = rewriteJsonReferences(parsed, source.relative, targetRelative, 'workflow');
+        const result = rewriteDocumentReferences(parsed, source.relative, targetRelative, 'workflow');
         if (result.references > 0) {
-          const updated = rewriteSerializedReferences(original, source.relative, targetRelative, 'workflow');
-          plans.push({ absolute, original, updated: updated === original ? `${JSON.stringify(result.value, null, 2)}\n` : updated, references: result.references });
+          plans.push({ absolute, original, updated: emitDocument(result.value), references: result.references });
         }
       }
       return plans;
@@ -546,14 +586,13 @@ export class ProjectService {
       const original = await fs.promises.readFile(absolute, 'utf8');
       let parsed: unknown;
       try {
-        parsed = JSON.parse(original) as unknown;
+        parsed = parseDocument(original, path.basename(absolute)) as unknown;
       } catch {
         continue;
       }
-      const result = rewriteJsonReferences(parsed, source.relative, targetRelative, 'asset');
+      const result = rewriteDocumentReferences(parsed, source.relative, targetRelative, 'asset');
       if (result.references > 0) {
-        const updated = rewriteSerializedReferences(original, source.relative, targetRelative, 'asset');
-        plans.push({ absolute, original, updated: updated === original ? `${JSON.stringify(result.value, null, 2)}\n` : updated, references: result.references });
+        plans.push({ absolute, original, updated: emitDocument(result.value), references: result.references });
       }
     }
 

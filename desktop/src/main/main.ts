@@ -429,7 +429,7 @@ function createBenchmarkWindow(): BrowserWindow {
     // 不可见 + 不抢焦点：基准不参与正常使用，也不需要鼠标/键盘输入。
     show: false,
     frame: false,
-    title: 'Onmyoji Studio Canvas Benchmark',
+    title: 'AutoFlow Studio Canvas Benchmark',
     backgroundColor: '#141414',
     autoHideMenuBar: true,
     webPreferences: {
@@ -457,7 +457,7 @@ function createWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     frame: false,
-    title: 'Onmyoji Studio',
+    title: 'AutoFlow Studio',
     backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
     webPreferences: {
@@ -482,7 +482,7 @@ function createWindow(): BrowserWindow {
           minWidth: 320,
           minHeight: 220,
           frame: false,
-          title: 'Onmyoji Studio',
+          title: 'AutoFlow Studio',
           backgroundColor: themeBackground(readTheme()),
           autoHideMenuBar: true,
           webPreferences: {
@@ -529,7 +529,7 @@ function createSetupWindow(): BrowserWindow {
     minHeight: 400,
     show: false,
     frame: false,
-    title: 'Onmyoji Studio 初始化',
+    title: 'AutoFlow Studio 初始化',
     backgroundColor: '#151515',
     autoHideMenuBar: true,
     webPreferences: {

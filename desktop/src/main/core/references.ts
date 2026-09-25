@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parseWorkflow, type WorkflowInfo } from './workflow';
+import { parseDocument } from '../../shared/workflow/graph-dsl';
 import type {
   ReferenceContext,
   ReferenceContextKind,
@@ -41,7 +42,7 @@ function normalizeTemplatePath(value: string): string {
 
 function detectKind(rel: string): ReferenceTargetKind {
   const normalized = normalizeRel(rel).toLowerCase();
-  if (normalized.startsWith('workflows/') && normalized.endsWith('.json')) return 'workflow';
+  if (normalized.startsWith('workflows/') && WORKFLOW_EXTENSIONS.some((extension) => normalized.endsWith(extension))) return 'workflow';
   if (normalized === REWARD_CATALOG_REL) return 'catalog';
   if (normalized.startsWith('assets/')) {
     const extension = normalized.slice(normalized.lastIndexOf('.'));
@@ -73,15 +74,33 @@ interface OutgoingRef {
   assetRel?: string;
 }
 
-/** 一个工作流文件是否被指定引用文本命中（id / 文件名 / 路径，带或不带 .json 与 workflows/ 前缀）。 */
+/** 工作流文档的后缀：`.owf` 是当前格式，`.json` 只在「旧引用文本」里继续被认。 */
+const WORKFLOW_EXTENSIONS = ['.owf', '.json'];
+
+/** 去掉已知的工作流后缀（`.owf` / 遗留的 `.json`）。 */
+function stripWorkflowExtension(value: string): string {
+  const lower = value.toLowerCase();
+  for (const extension of WORKFLOW_EXTENSIONS) {
+    if (lower.endsWith(extension)) return value.slice(0, -extension.length);
+  }
+  return value;
+}
+
+/** 把引用补成带后缀的形式：已经是已知后缀就原样，否则补 `.owf`。 */
+function withWorkflowExtension(value: string): string {
+  const lower = value.toLowerCase();
+  return WORKFLOW_EXTENSIONS.some((extension) => lower.endsWith(extension)) ? value : `${value}.owf`;
+}
+
+/** 一个工作流文件是否被指定引用文本命中（id / 文件名 / 路径，带或不带 `.owf` / `.json` 与 `workflows/` 前缀）。 */
 function workflowMatchesReference(reference: string, doc: WorkflowDoc | { rel: string; name: string; id?: string }): boolean {
   const ref = reference.replace(/\\/g, '/');
   if (!ref) return false;
-  const candidateWithExt = ref.toLowerCase().endsWith('.json') ? ref : `${ref}.json`;
-  const candidateNoExt = ref.toLowerCase().endsWith('.json') ? ref.slice(0, -5) : ref;
+  const candidateWithExt = withWorkflowExtension(ref);
+  const candidateNoExt = stripWorkflowExtension(ref);
   const rel = normalizeRel(doc.rel);
   const relNoPrefix = rel.replace(/^workflows\//i, '');
-  const relNoExt = relNoPrefix.toLowerCase().endsWith('.json') ? relNoPrefix.slice(0, -5) : relNoPrefix;
+  const relNoExt = stripWorkflowExtension(relNoPrefix);
   if (doc.id && ref === doc.id) return true;
   if (relNoPrefix === candidateWithExt || relNoPrefix === ref || relNoPrefix === candidateNoExt) return true;
   if (relNoExt === candidateNoExt || relNoExt === ref) return true;
@@ -196,14 +215,14 @@ async function collectWorkflowDocs(projectRoot: string): Promise<WorkflowDoc[]> 
     for (const entry of entries) {
       const absolutePath = path.join(directory, entry.name);
       if (entry.isDirectory()) await visit(absolutePath);
-      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) files.push(absolutePath);
+      else if (entry.isFile() && WORKFLOW_EXTENSIONS.some((extension) => entry.name.toLowerCase().endsWith(extension))) files.push(absolutePath);
     }
   };
   await visit(workflowRoot);
   const docs: WorkflowDoc[] = [];
   for (const file of files.slice(0, 500)) {
     try {
-      const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as unknown;
+      const raw = parseDocument(await fs.promises.readFile(file, 'utf8'), path.basename(file)) as unknown;
       const info = parseWorkflow(raw);
       docs.push({
         rel: normalizeRel(path.relative(projectRoot, file)),

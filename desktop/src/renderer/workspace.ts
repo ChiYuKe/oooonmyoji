@@ -10,6 +10,7 @@ import type { CanvasClipboardPayload } from '../shared/editor-messages';
 import { createAutoSaveQueue } from '../shared/workspace/autosave';
 import { createDocumentStore } from '../shared/workspace/documents';
 import { parseWorkflowSession, reconcileWorkflowSession, serializeWorkflowSession, type WorkflowDocumentTab, type WorkflowSession } from '../shared/workspace/session';
+import { parseDocument } from '../shared/workflow/graph-dsl';
 
 export type { InspectorSelection, SidebarNode, SidebarVariable } from '../shared/editor-messages';
 
@@ -273,9 +274,9 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
 
   function workflowTabName(uri: string): string {
     const descriptor = getBootstrap()?.workflows.find((item) => item.uri === uri);
-    if (descriptor) return (descriptor.id || descriptor.name).replace(/\.json$/i, '');
+    if (descriptor) return (descriptor.id || descriptor.name).replace(/\.(?:owf|json)$/i, '');
     const file = displayFileUri(uri).split(/[\\/]/).pop() || uri;
-    return file.replace(/\.json$/i, '') || '工作流';
+    return file.replace(/\.(?:owf|json)$/i, '') || '工作流';
   }
 
   function workflowDescriptorForPath(relativePath: string): WorkflowDescriptor | undefined {
@@ -289,7 +290,7 @@ export function createWorkspace(deps: WorkspaceDeps): Workspace {
     if (!bootstrap || index < 0) return;
     let document: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(text) as unknown;
+      const parsed = parseDocument(text) as unknown;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
       document = parsed as Record<string, unknown>;
     } catch {

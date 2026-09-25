@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
-  <title>Onmyoji Studio</title>
+  <title>AutoFlow Studio</title>
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css">
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css">
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Bold.css">
@@ -18,7 +18,7 @@
 <body>
   <div id="app" class="app-shell">
     <div class="custom-titlebar">
-      <img class="titlebar-icon" src="./assets/onmyoji-icon.png" alt="阴阳师" draggable="false" />
+      <img class="titlebar-icon" src="./assets/onmyoji-icon.png" alt="AutoFlow Studio" draggable="false" />
       <nav class="titlebar-menu" aria-label="主菜单">
         <div class="menu-root">
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">编辑</button>
@@ -65,7 +65,7 @@
         <div class="menu-root">
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">工具</button>
           <div class="titlebar-dropdown" role="menu">
-            <button type="button" role="menuitem" data-editor-command="autoLayout"><span>自动排列</span></button>
+            <button type="button" role="menuitem" data-editor-command="previewArrange"><span>自动排列</span></button>
             <button type="button" role="menuitem" data-editor-command="exportImage"><span>导出画布图片</span></button>
             <div class="menu-separator" role="separator"></div>
             <button type="button" role="menuitem" data-editor-command="workflowSettings"><span>工作流设置</span></button>
@@ -147,6 +147,7 @@
           <div class="tool-strip" aria-label="画布工具">
             <div class="tool-group">
               <button class="tool-command" data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i><span class="tool-command-label">任务</span></button>
+              <button class="tool-command" data-editor-command="addCondition" title="添加判断节点"><i data-lucide="diamond"></i><span class="tool-command-label">判断</span></button>
               <details class="tool-overflow"><summary class="tool-menu-trigger">添加节点 <span aria-hidden="true">▾</span></summary><div class="tool-menu" aria-label="添加节点">
               <button class="tool-command" data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i><span class="tool-command-label">顺序</span></button>
               <button class="tool-command" data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i><span class="tool-command-label">选择</span></button>
@@ -160,7 +161,7 @@
             </div>
             <span class="tool-divider"></span>
             <div class="tool-group">
-              <button class="tool-command" data-editor-command="autoLayout" title="自动排列"><i data-lucide="wand-sparkles"></i><span class="tool-command-label">排列</span></button>
+              <button class="tool-command" data-editor-command="previewArrange" title="自动排列（先预览，再点画布顶部「应用排列」）"><i data-lucide="wand-sparkles"></i><span class="tool-command-label">排列</span></button>
               <button class="tool-command" data-editor-command="fitView" title="适应画布"><i data-lucide="maximize"></i><span class="tool-command-label">适应</span></button>
               <details class="tool-overflow"><summary class="tool-menu-trigger">工具 <span aria-hidden="true">▾</span></summary><div class="tool-menu" aria-label="画布工具">
               <button class="tool-command" data-editor-command="exportImage" title="导出画布图片"><i data-lucide="image-down"></i><span class="tool-command-label">导出</span></button>
@@ -256,7 +257,7 @@
               <button id="settings-tab-shortcuts" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-shortcuts" data-settings-page="shortcuts" tabindex="-1">快捷键</button>
               <button id="settings-tab-about" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-about" data-settings-page="about" tabindex="-1">关于</button>
             </div>
-            <div class="settings-nav-footer">Onmyoji Studio</div>
+            <div class="settings-nav-footer">AutoFlow Studio</div>
           </nav>
           <div class="settings-body">
             <section id="settings-page-appearance" class="settings-page" role="tabpanel" aria-labelledby="settings-tab-appearance">
@@ -332,7 +333,7 @@
               </ul>
             </section>
             <section id="settings-page-about" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-about">
-              <h2>关于</h2><p class="settings-intro">Onmyoji Studio · 工作流编辑与运行工具。</p>
+              <h2>关于</h2><p class="settings-intro">AutoFlow Studio · 工作流编辑与运行工具。</p>
               <h3 class="settings-section-title">应用信息</h3>
               <div class="settings-row">
                 <span>项目根目录</span>
@@ -363,8 +364,9 @@
 
         <section id="module-palette" class="dock-module palette-module">
           <div id="palette-view" class="panel-content palette-content">
-            <h3 class="palette-group-heading">基础节点 <span>2</span></h3>
+            <h3 class="palette-group-heading">基础节点 <span>3</span></h3>
             <button data-editor-command="addTask" title="添加任务节点"><i data-lucide="box"></i><span>任务</span><small>Task</small></button>
+            <button data-editor-command="addCondition" title="添加判断节点"><i data-lucide="diamond"></i><span>判断</span><small>Condition</small></button>
             <button data-editor-command="addSequence" title="添加顺序节点"><i data-lucide="list-tree"></i><span>顺序</span><small>Sequence</small></button>
             <h3 class="palette-group-heading">流程控制 <span>4</span></h3>
             <button data-editor-command="addSelector" title="添加选择节点"><i data-lucide="git-branch"></i><span>选择</span><small>Selector</small></button>

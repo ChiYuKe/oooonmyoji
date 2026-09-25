@@ -10,6 +10,7 @@ import {
   CirclePlus,
   Columns3,
   Copy,
+  Diamond,
   Ellipsis,
   ExternalLink,
   Eye,
@@ -101,6 +102,7 @@ import { createEditorHost } from './editor-host';
 import { createInstancePicker, instanceLabel } from './instance-picker';
 import { createTitlebarMenus } from './titlebar-menus';
 import { parseEditorMessage } from '../shared/editor-messages';
+import { WORKFLOW_SUFFIX } from '../shared/workflow/graph-dsl';
 import {
   readRuntimeEdgePreview,
   writeRuntimeEdgePreview,
@@ -137,6 +139,7 @@ const desktopIcons = {
   CirclePlus,
   Columns3,
   Copy,
+  Diamond,
   Ellipsis,
   ExternalLink,
   FilePlus2,
@@ -462,7 +465,8 @@ const roiPicker = createRoiPicker({
 function resolveWorkflow(reference: string): WorkflowDescriptor | undefined {
   if (!bootstrap) return undefined;
   const normalized = reference.trim().replace(/\\/g, '/').replace(/^workflows\//i, '');
-  const withExtension = normalized.toLowerCase().endsWith('.json') ? normalized : `${normalized}.json`;
+  const lower = normalized.toLowerCase();
+  const withExtension = lower.endsWith(WORKFLOW_SUFFIX) || lower.endsWith('.json') ? normalized : `${normalized}${WORKFLOW_SUFFIX}`;
   return bootstrap.workflows.find((file) => {
     const candidate = workspace.workflowReference(file);
     return file.id === normalized || candidate === normalized || candidate === withExtension

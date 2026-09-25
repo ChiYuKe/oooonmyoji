@@ -83,7 +83,7 @@ let getDeleteTarget!: () => QueueDeleteTarget | undefined;
 let setDeleteTarget!: (target: QueueDeleteTarget | undefined) => void;
 
 function overviewWorkflowName(workflow: WorkflowDescriptor): string {
-  return workflow.id || workflow.name.replace(/\.json$/i, '');
+  return workflow.id || workflow.name.replace(/\.(?:owf|json)$/i, '');
 }
 
 function overviewWorkflowKind(workflow: WorkflowDescriptor): string {

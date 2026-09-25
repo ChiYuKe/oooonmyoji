@@ -12,6 +12,7 @@ import {
   Clock,
   Columns3,
   Crosshair,
+  Diamond,
   Eye,
   EyeOff,
   Flag,
@@ -28,6 +29,7 @@ import {
   Palette,
   Scan,
   Sigma,
+  Split,
   ToggleLeft,
   Type,
   Workflow,
@@ -87,6 +89,9 @@ const treeNodeGlyphs: Record<string, { icon: IconComponent; className: string }>
   selector: { icon: GitBranch, className: 'type-selector' },
   simple_parallel: { icon: Columns3, className: 'type-parallel' },
   instance_parallel: { icon: MonitorUp, className: 'type-instance-parallel' },
+  condition: { icon: Diamond, className: 'type-condition' },
+  bool_judge: { icon: ToggleLeft, className: 'type-bool_judge' },
+  break: { icon: Split, className: 'type-break' },
   task: { icon: Workflow, className: 'type-task' },
 };
 const treeNodeFallbackGlyph = { icon: CircleDot, className: 'type-default' };
@@ -273,7 +278,10 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       const row = document.createElement('button');
       row.type = 'button';
       row.className = `tree-row${node.id === selectedNode ? ' selected' : ''}`;
-      row.title = `${node.name}\n${node.meta}\nF2 重命名\nDelete 删除该节点`;
+      // 标题与节点 ID 不同（值卡片显示派生标题、普通节点显示了中文名）时，悬停里补出 ID，
+      // 好让人照着写 `nodes.<id>.output` 引用。
+      const idLine = node.id === node.name ? '' : `${node.id}\n`;
+      row.title = `${node.name}\n${idLine}${node.meta}\nF2 重命名\nDelete 删除该节点`;
       row.dataset.nodeId = node.id;
       if (hasChildren) row.setAttribute('aria-expanded', String(branchOpen));
 
@@ -296,14 +304,17 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       children.className = 'tree-children';
 
       if (node.id === nodeRenameDraft) {
-        // F2：这一行原地改名。提交改的是显示名（node.name），节点 id 保持稳定。
+        // F2：这一行原地改名。编辑的是手动设过的显示名（node.name），节点 id 保持稳定；
+        // 值卡片没设过名字时输入框是空的，占位提示给出类型派生标题，清空提交 = 回到派生标题。
         row.classList.add('renaming');
-        const input = createRowNameInput(node.name, (next) => {
+        const explicitName = node.explicitName ?? (node.name === node.id ? '' : node.name);
+        const input = createRowNameInput(explicitName, (next) => {
           const value = next.trim();
           nodeRenameDraft = '';
-          if (value && value !== node.name) editorCommand('renameNodeName', { nodeId: node.id, name: value });
+          if (value !== explicitName) editorCommand('renameNodeName', { nodeId: node.id, name: value });
           render();
         }, () => { nodeRenameDraft = ''; render(); });
+        input.placeholder = node.name;
         input.setAttribute('aria-label', '节点名称');
         label.appendChild(input);
       } else {
@@ -354,9 +365,9 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       && row.nextElementSibling.childElementCount > 0);
   }
 
-  /** 结构树内容指纹：id、子级、名称、类型、meta 都没变时无需重建 DOM。 */
+  /** 结构树内容指纹：id、子级、名称（含手动设过的显示名）、类型、meta 都没变时无需重建 DOM。 */
   function treeSignature(): string {
-    return nodes.map((node) => `${node.id}\u0001${node.type}\u0001${node.name}\u0001${node.meta}\u0002${node.children.join('\u0003')}`).join('\u0004');
+    return nodes.map((node) => `${node.id}\u0001${node.type}\u0001${node.name}\u0001${node.explicitName ?? ''}\u0001${node.meta}\u0002${node.children.join('\u0003')}`).join('\u0004');
   }
 
   /** 仅更新结构树选中行（含祖先），不重建 DOM，保持滚动位置与展开状态。 */

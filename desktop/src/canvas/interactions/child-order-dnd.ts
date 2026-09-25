@@ -3,6 +3,7 @@
  * 原 `child-order-dnd.js`；以显式安装函数运行，通过桥接发送文档变更。
  * 编辑器句柄经 `getEditor` 惰性取得（安装早于画布启动），不再读 window 全局。
  */
+import { documentText } from '../state/document-text';
 
 export interface ChildOrderEditor {
   state: {
@@ -39,7 +40,7 @@ export function installChildOrderDnd(
     editor.render();
     postMessage({
       type: 'documentStateChanged',
-      text: `${JSON.stringify(state.raw, null, 2)}\n`,
+      text: documentText(state),
       dirty: true,
     });
   }

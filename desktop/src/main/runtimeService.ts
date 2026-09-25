@@ -15,6 +15,8 @@ import type {
   TemplateCheckResult,
 } from '../shared/contracts';
 import { parseRuntimeInstances, pythonUtf8Environment, resolvePythonRuntime } from './core/runtimeInstances';
+import { instanceParallelRuns } from './core/workflow';
+import { parseDocument } from '../shared/workflow/graph-dsl';
 import { createLiveViewEnvironment, LIVE_VIEW_DEFAULT_INTERVAL_MS } from './liveView';
 import type { ProjectService } from './projectService';
 
@@ -159,16 +161,10 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
     let runs: Array<{ instance: string }> = [];
     try {
-      const raw = JSON.parse(request.text) as { root?: string; nodes?: Array<{ id?: string; type?: string; children?: string[]; runs?: unknown }> };
-      const root = raw.nodes?.find((node) => node.id === raw.root && node.type === 'root');
-      const child = raw.nodes?.find((node) => node.id === root?.children?.[0]);
-      if (child?.type === 'instance_parallel' && Array.isArray(child.runs)) {
-        runs = child.runs.flatMap((item) => {
-          if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-          const instance = (item as { instance?: unknown }).instance;
-          return typeof instance === 'string' && instance ? [{ instance }] : [];
-        });
-      }
+      // 磁盘上是 `.owf` 文本：实例并行项的识别统一走共享解析（它会先转成编辑形态）。
+      runs = instanceParallelRuns(parseDocument(request.text, path.basename(workflowPath)))
+        .filter((run) => typeof run.instance === 'string' && run.instance)
+        .map((run) => ({ instance: run.instance }));
     } catch {
       // The engine will provide the detailed parse failure in stderr.
     }

@@ -241,7 +241,7 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
     return uris.map((uri) => {
       const descriptor = getBootstrap()?.workflows.find((item) => item.uri === uri);
       const file = workspace.displayFileUri(uri).split(/[\\/]/).pop() || '';
-      return { uri, name: descriptor?.id || descriptor?.name?.replace(/\.json$/i, '') || file.replace(/\.json$/i, '') || '工作流' };
+      return { uri, name: descriptor?.id || descriptor?.name?.replace(/\.(?:owf|json)$/i, '') || file.replace(/\.(?:owf|json)$/i, '') || '工作流' };
     });
   }
 

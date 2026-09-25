@@ -657,6 +657,9 @@ body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-co
 .node-type-glyph.type-selector .glyph-svg { color: #c98f5f; background: rgba(201, 143, 95, .1); }
 .node-type-glyph.type-parallel .glyph-svg { color: #8fbf8f; background: rgba(143, 191, 143, .09); }
 .node-type-glyph.type-instance-parallel .glyph-svg { color: #a294d2; background: rgba(162, 148, 210, .1); }
+.node-type-glyph.type-condition .glyph-svg { color: #6fbfae; background: rgba(111, 191, 174, .1); }
+.node-type-glyph.type-bool_judge .glyph-svg { color: #6fb3d1; background: rgba(111, 179, 209, .1); }
+.node-type-glyph.type-break .glyph-svg { color: #c993b8; background: rgba(201, 147, 184, .1); }
 .node-type-glyph.type-task .glyph-svg { color: #9aa5b1; background: rgba(154, 165, 177, .08); }
 .node-type-glyph.type-default .glyph-svg { color: #8f98a3; background: rgba(143, 152, 163, .08); }
 .tree-row.selected .node-type-glyph .glyph-svg { color: #eaf3fa; background: rgba(255, 255, 255, .12); }

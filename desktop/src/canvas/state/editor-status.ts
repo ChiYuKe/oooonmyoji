@@ -3,6 +3,7 @@
  * 原 `workflow-editor.js` 的 setDirty 至 requestInspector 区间。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { documentText } from './document-text';
 
 export interface EditorStatusDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -19,7 +20,7 @@ export function createEditorStatus(deps: EditorStatusDeps) {
     if (value && state.raw) {
       vscode.postMessage({
         type: 'documentStateChanged',
-        text: JSON.stringify(state.raw, null, 2) + '\n',
+        text: documentText(state),
         dirty: true,
       });
     }

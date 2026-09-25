@@ -1,5 +1,6 @@
 /** 工作流 JSON 解析：把 unknown 收窄为 WorkflowInfo。 */
 import { isObject } from './guards';
+import { isGraphDocument, toCanvasDocument } from './graph-document';
 import { parseParameterDefinition } from './parameters';
 import { NODE_TYPES, type DecoratorInfo, type InstanceParallelRunInfo, type NodeInfo, type NodeType, type WorkflowInfo } from './types';
 
@@ -15,7 +16,7 @@ function parsedDecorator(raw: unknown): DecoratorInfo | undefined {
   return out;
 }
 
-export function parseWorkflow(raw: unknown): WorkflowInfo {
+export function parseWorkflow(input: unknown): WorkflowInfo {
   const info: WorkflowInfo = {
     raw: null,
     inputs: {},
@@ -26,7 +27,11 @@ export function parseWorkflow(raw: unknown): WorkflowInfo {
     nodeIds: [],
     rawNodes: [],
   };
-  if (!isObject(raw)) return info;
+  if (!isObject(input)) return info;
+  // 节点图 v5：先转成编辑形态，`children` / `ports` / `cases[].child` 才存在。
+  // 主进程的引用建议与引用图都基于这份解析结果，转换必须发生在这里，否则
+  // 「哪些节点排在我前面」会全部算空（见 core/references.ts、suggestions.ts）。
+  const raw: Record<string, any> = isGraphDocument(input) ? toCanvasDocument(input) : input;
   info.raw = raw;
   if (typeof raw.id === 'string') info.id = raw.id;
   if (typeof raw.version === 'string') info.version = raw.version;
@@ -79,9 +84,28 @@ export function parseWorkflow(raw: unknown): WorkflowInfo {
         }) : [],
         waitFor: object.wait_for === 'any' ? 'any' : 'all',
         cancelOnFailure: object.cancel_on_failure !== false,
+        ref: isObject(object.ref) ? object.ref : undefined,
+        fields: isObject(object.fields) ? object.fields : undefined,
       };
     });
   }
   info.nodeIds = info.nodes.filter((node) => node.id).map((node) => node.id);
   return info;
+}
+
+/**
+ * 顶层的 `instance_parallel` 运行项：`root` 的唯一直接子节点是 `instance_parallel` 时返回它的 `runs`。
+ *
+ * 运行宿主靠它决定「这次要投递到哪些实例」并给运行记录写标签；图文档（v5）里没有
+ * `children`，所以必须走 `parseWorkflow`（它会先把图转成编辑形态），不能自己解析 JSON。
+ */
+export function instanceParallelRuns(raw: unknown): InstanceParallelRunInfo[] {
+  const info = parseWorkflow(raw);
+  if (!info.root) return [];
+  const root = info.nodes.find((node) => node.id === info.root && node.type === 'root');
+  const childId = root?.children?.[0];
+  if (!childId) return [];
+  const child = info.nodes.find((node) => node.id === childId);
+  if (!child || child.type !== 'instance_parallel') return [];
+  return child.runs;
 }

@@ -7,10 +7,15 @@ import {
   allowBinding,
   bindingAwareParameterSchema,
   bindingTypesCompatible,
+  breakTargetSchema,
+  isBindingValue,
+  schemaAtPath,
+  schemaTypes,
   validateBindings,
   type RefContext,
 } from './bindings';
 import { availableOutputNodeIds, possiblyAvailableOutputNodeIds } from './graph';
+import { graphDocumentIssues, isGraphDocument, toCanvasDocument } from './graph-document';
 import { isObject } from './guards';
 import { applyParameterDefaults, parseParameterDefinition, parameterToSchema } from './parameters';
 import { parseWorkflow } from './parse';
@@ -56,16 +61,15 @@ function validateDecorator(
     return;
   }
   const allowed: Record<string, string[]> = {
-    condition: ['type', 'expression'], cooldown: ['type', 'seconds'], timeout: ['type', 'seconds'],
+    cooldown: ['type', 'seconds'], timeout: ['type', 'seconds'],
     retry: ['type', 'attempts', 'delay_seconds'], repeat: ['type', 'count'], do_once: ['type', 'reset_on_failure'],
   };
   const required: Record<string, string[]> = {
-    condition: ['expression'], cooldown: ['seconds'], timeout: ['seconds'], retry: ['attempts'], repeat: ['count'], do_once: [],
+    cooldown: ['seconds'], timeout: ['seconds'], retry: ['attempts'], repeat: ['count'], do_once: [],
   };
   const extras = Object.keys(item).filter((key) => !allowed[type].includes(key));
   if (extras.length) issues.push(issue(path, `装饰器包含未知字段：${extras.join(', ')}`, 'invalid-decorator'));
   for (const key of required[type]) if (!(key in item)) issues.push(issue(path, `装饰器缺少 ${key}`, 'invalid-decorator'));
-  if (type === 'condition') validateBindings(item.expression, context, [...path, 'expression'], issues, true, undefined, availableNodeIds, possiblyAvailableNodeIds);
   const schemas: Record<string, Record<string, unknown>> = {seconds:{type:'number',exclusiveMinimum:0},attempts:{type:'integer',minimum:1},delay_seconds:{type:'number',minimum:0},reset_on_failure:{type:'boolean'}};
   for (const [key,schema] of Object.entries(schemas)) {
     if (!(key in item)) continue;
@@ -97,11 +101,16 @@ function validateInstanceParallelInputs(value: unknown, path: (string | number)[
 }
 
 export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): ValidationIssue[] {
+  // 节点图 v5：图结构问题先按图报（未知节点、非法引脚、一父多子、成环、空分支，
+  // 以及目前还不支持的数据边），再转成画布形态交给下面同一份 v4 校验。
+  if (isGraphDocument(raw)) {
+    return [...graphDocumentIssues(raw), ...validateWorkflow(toCanvasDocument(raw), catalog)];
+  }
   const issues: ValidationIssue[] = [];
   const info = parseWorkflow(raw);
   if (!info.raw) return [issue([], '工作流必须是一个 JSON 对象', 'not-object')];
   const root = info.raw;
-  if (root.schema_version !== 4) issues.push(issue(['schema_version'], '仅支持 schema_version 4', 'schema-version'));
+  if (root.schema_version !== 4) issues.push(issue(['schema_version'], '仅支持 schema_version 4 与 6', 'schema-version'));
   if (typeof root.id !== 'string' || !root.id) issues.push(issue(['id'], '缺少 id', 'missing-id'));
   if (typeof root.version !== 'string' || !root.version) issues.push(issue(['version'], '缺少 version', 'missing-version'));
   if (root.description !== undefined && typeof root.description !== 'string') issues.push(issue(['description'], 'description 必须是字符串', 'invalid-description'));
@@ -136,7 +145,8 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
 
   const ids = new Set(info.nodeIds);
   if (ids.size !== info.nodeIds.length) issues.push(issue(['nodes'], '存在重复的节点 ID', 'duplicate-node'));
-  const context: RefContext = { info, catalog, nodeIds: ids };
+  const pureDataNodeIds = new Set(info.nodes.filter((node) => node.type === 'bool_judge' || node.type === 'break').map((node) => node.id));
+  const context: RefContext = { info, catalog, nodeIds: ids, pureDataNodeIds };
   const parents = new Map<string, number>(info.nodeIds.map((id) => [id, 0]));
   const nodeMap = new Map(info.nodes.map((node) => [node.id, node]));
   const descendants = (owner:string):Set<string> => {
@@ -156,7 +166,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
     }
     if(!definition.owner)continue;
     const owner=typeof definition.owner==='string'?nodeMap.get(definition.owner):undefined;
-    if(!owner||['task','instance_parallel'].includes(owner.type)){issues.push(issue(['variables',name,'owner'],'局部作用域必须指向复合节点','variable-scope'));continue;}
+    if(!owner||['task','instance_parallel','bool_judge','break'].includes(owner.type)){issues.push(issue(['variables',name,'owner'],'局部作用域必须指向复合节点','variable-scope'));continue;}
     const allowed=descendants(owner.id);
     for(const node of info.nodes)if(!allowed.has(node.id)&&references(info.rawNodes[node.index],`variables.${name}`))issues.push(issue(['nodes',node.id],'节点越界访问局部变量：'+name,'variable-scope'));
   }
@@ -178,11 +188,17 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
     if (Array.isArray(decoratorsRaw)) decoratorsRaw.forEach((decorator, decoratorIndex) => {
       if (!isObject(decorator)) { issues.push(issue([...path, 'decorators', decoratorIndex], '装饰器必须是对象', 'invalid-decorator')); return; }
       validateDecorator(decorator, [...path, 'decorators', decoratorIndex], context, issues, availableNodeIds, possiblyAvailableNodeIds);
-      if (decorator.type !== 'condition' && typeof decorator.type === 'string') {
+      if (typeof decorator.type === 'string') {
         if (singletons.has(decorator.type)) issues.push(issue([...path, 'decorators', decoratorIndex], `重复的 ${decorator.type} 装饰器`, 'duplicate-decorator'));
         singletons.add(decorator.type);
       }
     });
+    // ports 只属于判断节点（真 / 假分支口位）。
+    if (node.type !== 'condition' && 'ports' in rawNode) issues.push(issue([...path, 'ports'], 'ports 只适用于判断节点', 'invalid-ports'));
+    // ref / fields 只属于拆分卡片。
+    if (node.type !== 'break' && ('ref' in rawNode || 'fields' in rawNode)) {
+      issues.push(issue(path, 'ref / fields 只适用于拆分卡片', 'invalid-break'));
+    }
     if (node.type === 'task') {
       if ('children' in rawNode || 'finish_mode' in rawNode) issues.push(issue(path, 'Task 不能定义 children 或 finish_mode', 'invalid-task'));
       if (typeof rawNode.action !== 'string' || !rawNode.action) issues.push(issue([...path, 'action'], 'Task 必须定义 Action', 'invalid-action'));
@@ -261,8 +277,74 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
       if (rawNode.cancel_on_failure !== undefined && typeof rawNode.cancel_on_failure !== 'boolean') {
         issues.push(issue([...path, 'cancel_on_failure'], 'cancel_on_failure 必须是布尔值', 'invalid-instance-parallel'));
       }
+    } else if (node.type === 'condition') {
+      // 判断节点：一个条件 + 最多两条分支（真口 / 假口，各最多一个子节点）。
+      if (['action', 'params', 'finish_mode'].some((key) => key in rawNode)) {
+        issues.push(issue(path, '判断节点不能定义 action、params 或 finish_mode', 'invalid-condition'));
+      }
+      if (['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) {
+        issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
+      }
+      if (!('expression' in rawNode)) issues.push(issue([...path, 'expression'], '判断节点必须定义判断条件', 'condition-expression-required'));
+      else validateBindings(rawNode.expression, context, [...path, 'expression'], issues, true, undefined, availableNodeIds, possiblyAvailableNodeIds);
+      if (node.children.length > 2) issues.push(issue([...path, 'children'], '判断节点最多两条分支（真口 / 假口）', 'condition-branch-count'));
+      if ('ports' in rawNode) {
+        const ports = rawNode.ports;
+        const valid = Array.isArray(ports)
+          && ports.length === node.children.length
+          && ports.every((port) => port === 'true' || port === 'false')
+          && new Set(ports).size === ports.length;
+        if (!valid) issues.push(issue([...path, 'ports'], '判断节点的 ports 必须与分支一一对应，且只能是 true / false 各一次', 'condition-ports-mismatch'));
+      }
+    } else if (node.type === 'bool_judge') {
+      // 布尔判断卡片：叶子，只带一个条件表达式；结果是 `nodes.<id>.output.value`，
+      // 判断节点 / Branch / Repeat Until 的条件都能直接绑它（可复用）。
+      if (['action', 'params', 'children', 'finish_mode'].some((key) => key in rawNode)) {
+        issues.push(issue(path, '布尔判断卡片不能定义 action、params、children 或 finish_mode', 'invalid-bool-judge'));
+      }
+      if (['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) {
+        issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
+      }
+      if (!('expression' in rawNode)) issues.push(issue([...path, 'expression'], '布尔判断卡片必须定义判断条件', 'bool-judge-expression-required'));
+      else validateBindings(rawNode.expression, context, [...path, 'expression'], issues, true, undefined, undefined, possiblyAvailableNodeIds, true);
+    } else if (node.type === 'break') {
+      // 拆分卡片：叶子，把一张卡片的对象/数组输出按字段拆开，登记成
+      // `nodes.<id>.output.<字段>` 供别的节点引用（类似 UE 蓝图的 Break）。
+      if (['action', 'params', 'children', 'finish_mode'].some((key) => key in rawNode)) {
+        issues.push(issue(path, '拆分卡片不能定义 action、params、children 或 finish_mode', 'invalid-break'));
+      }
+      if (['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) {
+        issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
+      }
+      if (!isBindingValue(rawNode.ref)) {
+        issues.push(issue([...path, 'ref'], '拆分卡片必须绑定一个输出引用：{"ref": "nodes.<id>.output..."}', 'break-ref-required'));
+      } else {
+        const refPath = [...path, 'ref'];
+        const target = breakTargetSchema(rawNode.ref.ref, context, refPath, issues, undefined);
+        const knownTypes = schemaTypes(target);
+        if (knownTypes.size && ![...knownTypes].some((type) => type === 'object' || type === 'array')) {
+          issues.push(issue(refPath, `拆分目标必须是对象或数组输出：${rawNode.ref.ref}`, 'break-target-not-object'));
+        }
+        const fields = rawNode.fields;
+        if (fields !== undefined && !isObject(fields)) {
+          issues.push(issue([...path, 'fields'], '拆分字段 fields 必须是对象（输出名 → 源内路径）', 'break-field-path'));
+        } else if (isObject(fields)) {
+          for (const [fieldName, pathValue] of Object.entries(fields)) {
+            if (!fieldName) {
+              issues.push(issue([...path, 'fields'], '拆分字段名不能为空', 'break-field-path'));
+              continue;
+            }
+            if (typeof pathValue !== 'string' || !pathValue) {
+              issues.push(issue([...path, 'fields', fieldName], '拆分字段的路径必须是非空字符串', 'break-field-path'));
+              continue;
+            }
+            if (target && schemaAtPath(target, pathValue.split('.')) === undefined) {
+              issues.push(issue([...path, 'fields', fieldName], `拆分字段 ${fieldName} 的路径 ${pathValue} 在目标输出中不存在`, 'break-field-path'));
+            }
+          }
+        }
+      }
     } else {
-      if ('action' in rawNode || 'params' in rawNode) issues.push(issue(path, `${node.type} 不能定义 action 或 params`, 'invalid-composite'));
       if (node.type !== 'parallel' && ['runs', 'wait_for', 'cancel_on_failure'].some((key) => key in rawNode)) issues.push(issue(path, '实例并行字段只适用于 Instance Parallel', 'invalid-instance-parallel'));
       if (node.type === 'root' && node.decorators.length) issues.push(issue([...path, 'decorators'], 'Root 不能挂装饰器', 'invalid-root'));
       if (!Array.isArray(rawNode.children)) issues.push(issue([...path, 'children'], `${node.type} 必须定义 children`, 'invalid-children'));
@@ -279,6 +361,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
     }
     for (const [childIndex, child] of node.children.entries()) {
       if (!ids.has(child)) issues.push(issue([...path, 'children', childIndex], `未知子节点：${child}`, 'unknown-child'));
+      else if (pureDataNodeIds.has(child)) issues.push(issue([...path, 'children', childIndex], `纯数据节点 ${child} 不能连接到执行流`, 'data-node-exec-link'));
       else parents.set(child, (parents.get(child) ?? 0) + 1);
     }
   });
@@ -294,7 +377,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
     }
   }
   for (const node of info.nodes) {
-    if (rootNode && node.id !== rootNode.id && (parents.get(node.id) ?? 0) !== 1) issues.push(issue(['nodes', node.index], `节点 ${node.id} 必须恰好有一个父节点`, 'parent-count'));
+    if (rootNode && node.id !== rootNode.id && !pureDataNodeIds.has(node.id) && (parents.get(node.id) ?? 0) !== 1) issues.push(issue(['nodes', node.index], `节点 ${node.id} 必须恰好有一个父节点`, 'parent-count'));
   }
 
   if (rootNode && !issues.some((entry) => ['duplicate-node', 'unknown-child'].includes(entry.code ?? ''))) {
@@ -309,7 +392,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
       visited.add(id);
     };
     visit(rootNode.id);
-    for (const node of info.nodes) if (!visited.has(node.id)) issues.push(issue(['nodes', node.index], `存在不可达节点：${node.id}`, 'unreachable-node'));
+    for (const node of info.nodes) if (!visited.has(node.id) && !pureDataNodeIds.has(node.id)) issues.push(issue(['nodes', node.index], `存在不可达节点：${node.id}`, 'unreachable-node'));
   }
   return issues;
 }
@@ -337,7 +420,7 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalogLi
             id: { type: 'string', minLength: 1 }, type: { enum: [...NODE_TYPES] }, name: { type: 'string', minLength: 1 },
             action: { type: 'string', enum: catalog.names() }, params: { type: 'object' },
             children: { type: 'array', items: { type: 'string', enum: info.nodeIds }, uniqueItems: true },
-            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, expression: {}, seconds: allowBinding({ type: 'number', exclusiveMinimum: 0 }), attempts: allowBinding({ type: 'integer', minimum: 1 }), delay_seconds: allowBinding({ type: 'number', minimum: 0 }), count: allowBinding({ type: 'integer', minimum: 1 }), reset_on_failure: allowBinding({ type: 'boolean' }) }, additionalProperties: false } },
+            decorators: { type: 'array', items: { type: 'object', required: ['type'], properties: { type: { enum: [...DECORATOR_TYPES] }, seconds: allowBinding({ type: 'number', exclusiveMinimum: 0 }), attempts: allowBinding({ type: 'integer', minimum: 1 }), delay_seconds: allowBinding({ type: 'number', minimum: 0 }), count: allowBinding({ type: 'integer', minimum: 1 }), reset_on_failure: allowBinding({ type: 'boolean' }) }, additionalProperties: false } },
             finish_mode: { enum: [...PARALLEL_FINISH_MODES] },
             runs: {
               type: 'array', minItems: 1,
@@ -351,6 +434,8 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalogLi
             cancel_on_failure: { type: 'boolean' },
             condition: {}, conditions: { type: 'array' }, max_iterations: { type: 'integer', minimum: 1 },
             expression: {}, cases: { type: 'array' }, default_child: { type: 'string', minLength: 1 },
+            ref: {}, fields: { type: 'object' },
+            ports: { type: 'array', items: { enum: ['true', 'false'] }, uniqueItems: true },
           },
           additionalProperties: false,
         },

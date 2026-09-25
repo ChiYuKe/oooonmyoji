@@ -51,6 +51,7 @@
     "src/canvas/model/variable-system.ts",
     "src/canvas/model/workflow-model.ts",
     "src/canvas/model/references.ts",
+    "src/canvas/model/node-title.ts",
     "src/canvas/model/canvas-workflow-model.ts",
     "src/canvas/model/subworkflow.ts",
     "src/canvas/render/card-values.ts",

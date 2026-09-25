@@ -3,6 +3,7 @@
  * 纯计算模块，供 validate.ts 与 suggestions.ts 共用。
  */
 import { isObject } from './guards';
+import { nodeOutputSchema } from './graph';
 import { parameterToSchema } from './parameters';
 import {
   CONDITION_OPERATORS,
@@ -10,6 +11,9 @@ import {
   type ValidationIssue,
   type WorkflowInfo,
 } from './types';
+
+export { schemaAtPath } from './schema-path';
+import { schemaAtPath } from './schema-path';
 
 export const BINDING_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -22,6 +26,21 @@ export interface RefContext {
   info: WorkflowInfo;
   catalog: ActionCatalogLike;
   nodeIds: Set<string>;
+  pureDataNodeIds?: Set<string>;
+}
+
+/**
+ * 拆分卡片的来源可能是 `inputs.` / `variables.`：按已声明的定义解析出 schema，
+ * 让「拆一个区域变量」这类来源也能推导出输出（否则会当成空对象，排不出字段引脚）。
+ * 与引用校验走同一套 `parameterToSchema`，两端结论一致。
+ */
+function referenceSchemaResolver(context: RefContext): (ref: string) => Record<string, unknown> | undefined {
+  return (ref: string) => {
+    const parts = ref.split('.');
+    if (parts.length < 2 || (parts[0] !== 'inputs' && parts[0] !== 'variables') || !parts.slice(1).every(Boolean)) return undefined;
+    const parameter = parts[0] === 'inputs' ? context.info.inputs[parts[1]] : context.info.variables[parts[1]];
+    return parameter ? schemaAtPath(parameterToSchema(parameter), parts.slice(2)) : undefined;
+  };
 }
 
 export const RUNTIME_REF_SCHEMAS: Record<string, Record<string, unknown>> = {
@@ -34,37 +53,6 @@ export const RUNTIME_REF_SCHEMAS: Record<string, Record<string, unknown>> = {
 export function isBindingValue(value: unknown): value is { ref: string } {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     && typeof (value as Record<string, unknown>).ref === 'string' && Object.keys(value).length === 1;
-}
-
-export function schemaAtPath(schema: Record<string, unknown>, segments: string[]): Record<string, unknown> | undefined {
-  let current = schema;
-  for (const segment of segments) {
-    if (Object.keys(current).length === 0) return {};
-    if (current.type === 'object') {
-      const properties = isObject(current.properties) ? current.properties : {};
-      if (isObject(properties[segment])) {
-        current = properties[segment] as Record<string, unknown>;
-        continue;
-      }
-      if (current.additionalProperties === false) return undefined;
-      current = isObject(current.additionalProperties) ? current.additionalProperties : {};
-      continue;
-    }
-    if (current.type === 'array') {
-      const index = Number(segment);
-      if (!Number.isInteger(index) || index < 0) return undefined;
-      const prefixItems = Array.isArray(current.prefixItems) ? current.prefixItems : [];
-      if (isObject(prefixItems[index])) {
-        current = prefixItems[index] as Record<string, unknown>;
-        continue;
-      }
-      if (current.items === false) return undefined;
-      current = isObject(current.items) ? current.items : {};
-      continue;
-    }
-    return undefined;
-  }
-  return current;
 }
 
 export function schemaTypes(schema: Record<string, unknown> | undefined): Set<string> {
@@ -100,19 +88,49 @@ export function resolveRefSchema(
     return undefined;
   }
   if (parts.length >= 4 && parts[0] === 'nodes' && parts[2] === 'output' && context.nodeIds.has(parts[1]) && parts.slice(3).every(Boolean)) {
-    if (availableNodeIds && !availableNodeIds.has(parts[1])) {
+    const ownerId = typeof path[1] === 'string' ? path[1] : '';
+    if (availableNodeIds && !availableNodeIds.has(parts[1]) && !context.pureDataNodeIds?.has(parts[1]) && !context.pureDataNodeIds?.has(ownerId)) {
       issues.push({ path, message: `绑定引用了执行到此节点时尚不可用的输出：${ref}`, severity: 'error', code: 'unavailable-ref' });
       return undefined;
     }
     const source = context.info.nodes.find((node) => node.id === parts[1]);
-    const spec = source?.action ? context.catalog.byName(source.action) : undefined;
-    const resolved = spec ? schemaAtPath(spec.outputSchema, parts.slice(3)) : undefined;
+    const outputSchema = nodeOutputSchema(source, context.catalog, (id) => context.info.nodes.find((node) => node.id === id), referenceSchemaResolver(context));
+    const resolved = outputSchema ? schemaAtPath(outputSchema, parts.slice(3)) : undefined;
     if (resolved) return resolved;
     issues.push({ path, message: `绑定引用了不存在的 Action 输出：${ref}`, severity: 'error', code: 'unknown-ref' });
     return undefined;
   }
   issues.push({ path, message: `无效的绑定引用：${ref}`, severity: 'error', code: 'invalid-ref' });
   return undefined;
+}
+
+/**
+ * 拆分卡片（`break`）ref 的目标 schema。
+ * 拆分允许引用整张卡片的输出 `nodes.<id>.output`（普通引用要求至少带一个字段，
+ * 而拆分正是要把它拆开），也允许引用输出里的嵌套对象/数组路径。
+ */
+export function breakTargetSchema(
+  ref: string,
+  context: RefContext,
+  path: (string | number)[],
+  issues: ValidationIssue[],
+  availableNodeIds?: Set<string>,
+): Record<string, unknown> | undefined {
+  const parts = ref.split('.');
+  if (parts.length >= 3 && parts[0] === 'nodes' && parts[2] === 'output' && context.nodeIds.has(parts[1]) && parts.slice(1).every(Boolean)) {
+    const ownerId = typeof path[1] === 'string' ? path[1] : '';
+    if (availableNodeIds && !availableNodeIds.has(parts[1]) && !context.pureDataNodeIds?.has(parts[1]) && !context.pureDataNodeIds?.has(ownerId)) {
+      issues.push({ path, message: `绑定引用了执行到此节点时尚不可用的输出：${ref}`, severity: 'error', code: 'unavailable-ref' });
+      return undefined;
+    }
+    const source = context.info.nodes.find((node) => node.id === parts[1]);
+    const outputSchema = nodeOutputSchema(source, context.catalog, (id) => context.info.nodes.find((node) => node.id === id), referenceSchemaResolver(context));
+    const resolved = outputSchema ? schemaAtPath(outputSchema, parts.slice(3)) : undefined;
+    if (resolved) return resolved;
+    issues.push({ path, message: `绑定引用了不存在的 Action 输出：${ref}`, severity: 'error', code: 'unknown-ref' });
+    return undefined;
+  }
+  return resolveRefSchema(ref, context, path, issues, availableNodeIds);
 }
 
 export function schemaChild(schema: Record<string, unknown> | undefined, key: string | number): Record<string, unknown> | undefined {
@@ -137,6 +155,7 @@ export function validateBindings(
   expectedSchema?: Record<string, unknown>,
   availableNodeIds?: Set<string>,
   possiblyAvailableNodeIds?: Set<string>,
+  skipAvailability = false,
 ): void {
   if (Array.isArray(value)) {
     value.forEach((child, index) => validateBindings(child, context, [...path, index], issues, condition, schemaChild(expectedSchema, index), availableNodeIds, possiblyAvailableNodeIds));
@@ -151,9 +170,17 @@ export function validateBindings(
       issues.push({ path, message: '绑定对象必须只含字符串 ref', severity: 'error', code: 'invalid-binding' });
       return;
     }
-    const actual = resolveRefSchema(value.ref, context, [...path, 'ref'], issues, availableNodeIds);
-    if (actual && !bindingTypesCompatible(expectedSchema, actual)) {
-      issues.push({ path, message: `绑定类型与 Action 参数不兼容：${value.ref}`, severity: 'error', code: 'binding-type' });
+    const actual = resolveRefSchema(value.ref, context, [...path, 'ref'], issues, skipAvailability ? undefined : availableNodeIds);
+    const requiredSchema = condition && !expectedSchema ? { type: 'boolean' } : expectedSchema;
+    if (actual && !bindingTypesCompatible(requiredSchema, actual)) {
+      issues.push({
+        path,
+        message: condition && !expectedSchema
+          ? `条件引用必须是布尔值：${value.ref}`
+          : `绑定类型与 Action 参数不兼容：${value.ref}`,
+        severity: 'error',
+        code: 'binding-type',
+      });
     }
     return;
   }

@@ -1,6 +1,6 @@
 /** 绑定引用建议：按目标节点可用输出与期望类型过滤 inputs / variables / nodes 引用。 */
 import { bindingTypesCompatible } from './bindings';
-import { availableOutputNodeIds } from './graph';
+import { availableOutputNodeIds, nodeOutputSchema } from './graph';
 import { parameterToSchema } from './parameters';
 import { isObject } from './guards';
 import type { ActionCatalogLike, WorkflowInfo } from './types';
@@ -58,10 +58,11 @@ export function collectRefSuggestions(
   }
   const nodeCandidates: RefCandidate[] = [];
   const available = targetNodeId ? availableOutputNodeIds(info, targetNodeId) : undefined;
+  const lookup = (id: string) => info.nodes.find((node) => node.id === id);
   for (const node of info.nodes) {
-    if (!node.id || !node.action || (available && !available.has(node.id))) continue;
-    const spec = catalog.byName(node.action);
-    if (spec) nestedRefCandidates(`nodes.${node.id}.output`, spec.outputSchema, nodeCandidates);
+    if (!node.id || (available && !available.has(node.id))) continue;
+    const schema = nodeOutputSchema(node, catalog, lookup);
+    if (schema) nestedRefCandidates(`nodes.${node.id}.output`, schema, nodeCandidates);
   }
   const compatible = (candidate: RefCandidate): boolean => bindingTypesCompatible(expectedSchema, candidate.schema);
   return {

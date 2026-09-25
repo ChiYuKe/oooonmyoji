@@ -1,0 +1,190 @@
+workflow activity_loop
+  version: 4.4.0
+  description: 活动副本循环：按页面状态处理挑战页和结算页，点击后确认返回挑战页；运行轮数由输入参数控制。
+  resolution: [1920, 1080]
+  root: root
+  inputs:
+    v_3a3d58354dbf4aeb8a85bf05bc703c2c:
+      type: integer
+      default: 760
+      min: 1
+      description: 循环执行次数。
+      display_name: 运行轮数
+      _autoPublished: true
+    v_d6d7ea0c8a134da684e6b392be2825a6:
+      type: boolean
+      description: "点击前重新截图验证匹配是否仍在，默认 true"
+      display_name: 重新校验
+      default: true
+      _autoPublished: true
+  variables:
+    v_10a5b9e6f0724cae9fddae2b177a86af:
+      type: integer
+      default: 760
+      min: 1
+      description: 循环执行次数。
+      display_name: 运行轮数
+      initial_from: v_3a3d58354dbf4aeb8a85bf05bc703c2c
+    v_b8337c03141146eda766b65ef80e0243:
+      type: boolean
+      description: "点击前重新截图验证匹配是否仍在，默认 true"
+      display_name: 重新校验
+      default: true
+      initial_from: v_d6d7ea0c8a134da684e6b392be2825a6
+  _inputParams: {}
+  node root root 活动副本循环入口
+    at: [498, 0]
+  node repeat_rounds sequence 按运行轮数循环
+    at: [498, 208]
+    decorator repeat
+  node round sequence 单轮活动副本
+    at: [498, 438]
+  node wait_round_state task 识别当前页面状态
+    at: [0, 646]
+    action: vision.detect_state
+    params:
+      states:
+        - name: challenge
+          template: assets/templates/souls/souls-challenge.png
+          roi: [1621, 791, 299, 289]
+          threshold: 0.88
+        - name: settlement
+          template: assets/templates/task_3-template.png
+          roi: [700, 950, 520, 130]
+          threshold: 0.88
+      allow_ocr: false
+    decorator retry
+      attempts: 180
+      delay_seconds: 0.5
+  node round_state_selector selector 按当前页面选择动作
+    at: [996, 646]
+  node start_round_cond condition "处理挑战页 · 判断"
+    at: [664, 936]
+    expression: nodes.wait_round_state.output.state == challenge
+  node start_round sequence 处理挑战页
+    at: [664, 1160]
+  node tap_challenge task 点击挑战按钮
+    at: [332, 1392]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 25
+      disappeared_states:
+        - name: settlement
+          template: assets/templates/task_3-template.png
+          roi: [700, 950, 520, 130]
+          threshold: 0.88
+      disappeared_state_timeout_seconds: 3
+      random_interval: [0.2, 0.5]
+  node wait_battle_end task 等待挑战结束
+    at: [664, 1392]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_3-template.png
+      present: true
+      timeout_seconds: 60
+      roi: [700, 950, 520, 130]
+      threshold: 0.88
+  node finish_started_round sequence 退出结算页并确认返回
+    at: [166, 560]
+    decorator retry
+      attempts: 5
+      delay_seconds: 0.8
+  node tap_exit_after_battle task 点击结算页继续
+    at: [0, 768]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 25
+      disappeared_states:
+        - name: challenge
+          template: assets/templates/souls/souls-challenge.png
+          roi: [1621, 791, 299, 289]
+          threshold: 0.88
+      disappeared_state_timeout_seconds: 3
+      random_interval: [0.2, 0.7]
+  node wait_challenge_after_battle task 确认已返回挑战页
+    at: [332, 768]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-challenge.png
+      present: true
+      timeout_seconds: 15
+      roi: [1621, 791, 299, 289]
+      threshold: 0.88
+  node continue_round_cond condition "处理已停留的结算页 · 判断"
+    at: [1328, 936]
+    expression: nodes.wait_round_state.output.state == settlement
+  node continue_round sequence 处理已停留的结算页
+    at: [1328, 872]
+    decorator retry
+      attempts: 5
+      delay_seconds: 0.8
+  node tap_exit_from_settlement task 点击停留的结算页继续
+    at: [1168, 1080]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 25
+      random_interval: [0.2, 0.7]
+      disappeared_states:
+        - name: challenge
+          template: assets/templates/souls/souls-challenge.png
+          roi: [1621, 791, 299, 289]
+          threshold: 0.88
+      disappeared_state_timeout_seconds: 3
+  node wait_challenge_after_settlement task 确认结算页已退出
+    at: [1496, 1080]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-challenge.png
+      present: true
+      timeout_seconds: 15
+      roi: [1621, 791, 299, 289]
+      threshold: 0.88
+  var variables.v_10a5b9e6f0724cae9fddae2b177a86af
+  var variables.v_b8337c03141146eda766b65ef80e0243
+    at: [-224, 880]
+  edges:
+    var__variables__v_10a5b9e6f0724cae9fddae2b177a86af:out -> repeat_rounds:decorators.0.count
+    wait_round_state:out.match -> tap_challenge:match
+    wait_battle_end:out.0 -> tap_exit_after_battle:match
+    var__variables__v_b8337c03141146eda766b65ef80e0243:out -> tap_exit_after_battle:revalidate
+    wait_round_state:out.match -> tap_exit_from_settlement:match
+    root -> repeat_rounds
+    repeat_rounds -> round
+    round -> wait_round_state
+    round:then.1 -> round_state_selector
+    round_state_selector -> start_round_cond
+    round_state_selector:then.1 -> continue_round_cond
+    start_round_cond:true -> start_round
+    start_round -> tap_challenge
+    start_round:then.1 -> wait_battle_end
+    start_round:then.2 -> finish_started_round
+    finish_started_round -> tap_exit_after_battle
+    finish_started_round:then.1 -> wait_challenge_after_battle
+    continue_round_cond:true -> continue_round
+    continue_round -> tap_exit_from_settlement
+    continue_round:then.1 -> wait_challenge_after_settlement
+  group node_group_1 "节点组 1"
+    nodeIds: [continue_round, tap_exit_from_settlement, wait_challenge_after_settlement]
+    pins:
+      - nodeId: tap_exit_from_settlement
+        param: match
+    pinPolicy: explicit-v1
+    at: [1328, 1160]
+  group node_group_2 "节点组 2"
+    nodeIds: [finish_started_round, tap_exit_after_battle, wait_challenge_after_battle]
+    pins:
+      - nodeId: tap_exit_after_battle
+        param: match
+      - nodeId: tap_exit_after_battle
+        param: revalidate
+    pinPolicy: explicit-v1
+    at: [996, 1392]
+    variablesAt: [-448, 376]

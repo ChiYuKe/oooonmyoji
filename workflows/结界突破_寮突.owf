@@ -1,0 +1,328 @@
+workflow realm_raid_loop
+  version: 5.0.0
+  description: "结界突破循环：先识别当前页面（结算页 / 可突破的结界），按页面状态分支；每轮结束后回到突破页继续。页面上没有可突破的结界时正常结束；识别不到预期页面时失败退出。"
+  resolution: [1920, 1080]
+  root: root
+  inputs:
+    运行轮数:
+      type: integer
+      default: 99
+      min: 1
+      description: 最多突破轮数（安全上限）；页面上没有可突破的结界时会提前正常结束。
+    模板:
+      type: asset
+      description: 模板图路径
+      editor: asset
+      display_name: 模板
+      default: assets/templates/jxxx-templates.png
+    识别区域:
+      type: rect
+      description: "裁剪区域 [x, y, w, h]，默认整屏（按工作流参考分辨率 1920×1080）"
+      display_name: 识别区域
+      default: [720, 973, 486, 107]
+    超时_秒:
+      type: duration
+      min: 0
+      description: "等待超时秒数，超时则失败。默认 10 秒"
+      display_name: 超时（秒）
+      default: 10
+    存在性:
+      type: boolean
+      description: "true 等待出现；false 等待消失。默认 true"
+      display_name: 存在性
+      default: true
+    匹配阈值:
+      type: number
+      min: 0
+      max: 1
+      description: "匹配置信度阈值，默认 0.85"
+      display_name: 匹配阈值
+      default: 0.85
+    ref:
+      type: any
+  variables: {}
+  nodeTypes:
+    x-是否在结算页:
+      base: bool_judge
+      title: 是否在结算页
+  _inputParams: {}
+  node root root 结界突破入口
+    at: [3818, 0]
+  node entry selector "突破循环 / 无目标收尾"
+    at: [3818, 208]
+  node raid_loop sequence 正常突破循环
+    at: [2324, 416]
+  node rounds sequence 按运行轮数循环
+    at: [2324, 640]
+    decorator repeat
+  node round selector 单轮：按页面处理，否则判定打完
+    at: [2324, 870]
+  node act_on_page sequence 按当前页面执行
+    at: [581, 1138]
+  node classify task 识别当前页面
+    at: [0, 1346]
+    action: vision.detect_state
+    params:
+      allow_ocr: false
+      states:
+        - name: settlement
+          template: assets/templates/jxxx-templates.png
+          roi: [720, 973, 486, 107]
+          threshold: 0.85
+        - name: target_lit
+          template: assets/templates/task_2-template.png
+          roi: [606, 195, 516, 196]
+          threshold: 0.85
+        - name: target_dim
+          template: assets/templates/task_2-templates.png
+          roi: [606, 195, 516, 196]
+          threshold: 0.85
+    decorator retry
+      attempts: 40
+      delay_seconds: 0.5
+  node route selector 按页面状态分支
+    at: [1162, 1346]
+  node dismiss_settlement sequence 点掉停留在结算页
+    at: [498, 2122]
+    decorators: []
+  node wait_settlement task 等待结算页继续文字
+    at: [332, 2330]
+    action: vision.wait_template
+    params:
+      scale_search: false
+  node tap_continue task 点击继续
+    at: [664, 2330]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 10
+      random_interval: [0.2, 0.5]
+      disappeared_states:
+        - name: target_lit
+          template: assets/templates/task_2-template.png
+          roi: [606, 195, 516, 196]
+          threshold: 0.85
+        - name: target_dim
+          template: assets/templates/task_2-templates.png
+          roi: [606, 195, 516, 196]
+          threshold: 0.85
+      disappeared_state_timeout_seconds: 5
+      hold_ms: 0
+      random_offset: 15
+  node raid_once sequence 打一轮突破
+    at: [1826, 2122]
+  node find_target task 寻找可突破的结界
+    at: [996, 2330]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/task_2-template.png, assets/templates/task_2-templates.png]
+      timeout_seconds: 2
+      roi: [606, 195, 516, 196]
+      threshold: 0.85
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.5
+  node tap_target task 点击结界
+    at: [1328, 2330]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: false
+      random_offset: 15
+      random_interval: [0.2, 0.5]
+      hold_ms: 0
+      disappeared_state_timeout_seconds: 0
+  node wait_attack task 等待进攻按钮
+    at: [1660, 2330]
+    action: vision.wait_template
+    params:
+      template: assets/templates/jg-template.png
+      present: true
+      timeout_seconds: 8
+      roi: [576, 178, 1082, 552]
+      threshold: 0.85
+    decorator retry
+      attempts: 3
+      delay_seconds: 1
+  node tap_attack task 点击进攻
+    at: [1992, 2330]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 25
+      random_offset: 15
+      random_interval: [0.2, 0.5]
+  node wait_result task 等待战斗结算
+    at: [2324, 2330]
+    action: vision.wait_template
+    params:
+      template: assets/templates/jxxx-templates.png
+      present: true
+      timeout_seconds: 240
+      roi: [720, 973, 486, 107]
+      threshold: 0.85
+  node tap_result task 点击结算继续
+    at: [2656, 2330]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 10
+      random_offset: 25
+      random_interval: [0.2, 0.5]
+      disappeared_states:
+        - name: target_lit
+          template: assets/templates/task_2-template.png
+          roi: [606, 195, 516, 196]
+          threshold: 0.85
+        - name: target_dim
+          template: assets/templates/task_2-templates.png
+          roi: [606, 195, 516, 196]
+          threshold: 0.85
+      disappeared_state_timeout_seconds: 5
+    decorator retry
+      attempts: 5
+      delay_seconds: 0.5
+  node conclude_done sequence 确认已无可突破的结界
+    at: [4067, 1138]
+  node assert_realm_page selector 确认仍在结界突破页
+    at: [3154, 1346]
+  node realm_title_template task 按页面标题模板确认
+    at: [2988, 1734]
+    action: vision.wait_template
+    params:
+      template: assets/templates/realm/realm-title.png
+      present: true
+      timeout_seconds: 3
+      threshold: 0.85
+  node realm_title_text task 按页面标题文字确认
+    at: [3320, 1734]
+    action: vision.wait_any_text
+    params:
+      texts: [结界突破]
+      present: true
+      timeout_seconds: 2
+      min_confidence: 0.6
+      roi: [0, 0, 1920, 260]
+  node assert_not_settlement task 确认没卡在结算页
+    at: [3652, 1346]
+    action: vision.wait_any_text
+    params:
+      texts: [点击屏幕继续]
+      present: false
+      timeout_seconds: 1
+      roi: [720, 973, 486, 107]
+  node assert_targets_absent sequence 确认结界标记都不在
+    at: [4150, 1346]
+  node target_lit_absent task 确认星标结界不存在
+    at: [3984, 1734]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_2-template.png
+      present: false
+      timeout_seconds: 1
+      roi: [606, 195, 516, 196]
+      threshold: 0.85
+  node target_dim_absent task 确认灰标结界不存在
+    at: [4316, 1734]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_2-templates.png
+      present: false
+      timeout_seconds: 1
+      roi: [606, 195, 516, 196]
+      threshold: 0.85
+  node log_no_target task 记录无目标
+    at: [4648, 1346]
+    action: core.log
+    params:
+      message: 结界突破：页面上已无可突破的结界，结束本次运行
+  node break_loop task "终止循环（以失败跳出 repeat）"
+    at: [4980, 1346]
+    action: core.assert
+    params:
+      value: false
+      message: 结界突破：没有可突破的结界
+  node finish_no_target_cond condition "无目标时正常结束 · 判断"
+    at: [5312, 416]
+    expression: exists nodes.log_no_target.output.message
+  node finish_no_target sequence 无目标时正常结束
+    at: [5312, 640]
+  node log_finished task 记录正常结束
+    at: [5312, 870]
+    action: core.log
+    params:
+      message: "结界突破：正常结束（已达到运行轮数 / 已无剩余目标）"
+  node condition_1 condition 判断是否在结算页
+    at: [1162, 1734]
+  node bool_1 x-是否在结算页 是否在结算页
+    at: [862, 1734]
+    expression: null == settlement
+  node break_1 break
+    at: [562, 1734]
+  var inputs.运行轮数
+  var inputs.模板
+    at: [112, 2416]
+  var inputs.存在性
+    at: [112, 2544]
+  var inputs.超时_秒
+    at: [112, 2296]
+  var inputs.识别区域
+    at: [112, 2648]
+  var inputs.匹配阈值
+    at: [112, 2712]
+  edges:
+    var__inputs__运行轮数:out -> rounds:decorators.0.count
+    var__inputs__模板:out -> wait_settlement:template
+    var__inputs__存在性:out -> wait_settlement:present
+    var__inputs__超时_秒:out -> wait_settlement:timeout_seconds
+    var__inputs__识别区域:out -> wait_settlement:roi
+    var__inputs__匹配阈值:out -> wait_settlement:threshold
+    wait_settlement:out.0 -> tap_continue:match
+    find_target:out.match -> tap_target:match
+    wait_attack:out.0 -> tap_attack:match
+    wait_result:out.0 -> tap_result:match
+    bool_1:out.value -> condition_1:condition
+    break_1:out.state -> bool_1:left
+    classify:out -> break_1:ref
+    root -> entry
+    entry -> raid_loop
+    entry:then.1 -> finish_no_target_cond
+    raid_loop -> rounds
+    rounds -> round
+    round -> act_on_page
+    round:then.1 -> conclude_done
+    act_on_page -> classify
+    act_on_page:then.1 -> route
+    route -> condition_1
+    dismiss_settlement -> wait_settlement
+    dismiss_settlement:then.1 -> tap_continue
+    raid_once -> find_target
+    raid_once:then.1 -> tap_target
+    raid_once:then.2 -> wait_attack
+    raid_once:then.3 -> tap_attack
+    raid_once:then.4 -> wait_result
+    raid_once:then.5 -> tap_result
+    conclude_done -> assert_realm_page
+    conclude_done:then.1 -> assert_not_settlement
+    conclude_done:then.2 -> assert_targets_absent
+    conclude_done:then.3 -> log_no_target
+    conclude_done:then.4 -> break_loop
+    assert_realm_page -> realm_title_template
+    assert_realm_page:then.1 -> realm_title_text
+    assert_targets_absent -> target_lit_absent
+    assert_targets_absent:then.1 -> target_dim_absent
+    finish_no_target_cond:true -> finish_no_target
+    finish_no_target -> log_finished
+    condition_1:true -> dismiss_settlement
+    condition_1:false -> raid_once
+  group node_group_1 "节点组 1"
+    nodeIds: [condition_1, bool_1, break_1]
+    pins:
+      - nodeId: break_1
+        param: ref
+    pinPolicy: explicit-v1
+    at: [864, 1792]
+    interfaceAt: [1168, 1520]

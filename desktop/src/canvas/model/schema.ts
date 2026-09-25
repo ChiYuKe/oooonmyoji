@@ -31,7 +31,21 @@ function definitionSchema(definition: unknown): SchemaLike {
   if (!object) return {};
   const type = object.type;
   if (type === 'asset' || type === 'path' || type === 'workflow' || type === 'key' || type === 'color' || type === 'enum') return { type: 'string' };
-  if (type === 'rect') return { type: 'array', items: { type: 'integer' } };
+  // 区域 rect 是定长四元组 [x, y, w, h]：带 title 的 prefixItems 让拆分卡片能排出 X / Y / W / H
+  // 四个字段引脚（与 Python `ParameterDefinition.to_schema` 的结构一致）。
+  if (type === 'rect') {
+    return {
+      type: 'array',
+      prefixItems: [
+        { type: 'integer', title: 'X' },
+        { type: 'integer', title: 'Y' },
+        { type: 'integer', title: 'W' },
+        { type: 'integer', title: 'H' },
+      ],
+      minItems: 4,
+      maxItems: 4,
+    };
+  }
   if (type === 'point') return { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' } } };
   if (type === 'duration') return { type: 'number' };
   if (type === 'any') return {};

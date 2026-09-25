@@ -42,6 +42,8 @@ export interface GraphLayerPatchers {
   nodeTransform(id: string, x: number, y: number): boolean;
   /** 只更新与被拖节点相邻的连线路径。 */
   nodeEdges(id: string): void;
+  /** 拖动折点时只更新这一条边的路径与折点位置。 */
+  waypointEdge?(parentId: string, childId: string): void;
 }
 
 export interface GraphLayerContext {
@@ -930,6 +932,11 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
         dragPatchedAt.set(id, { x: pos.x, y: pos.y });
         if (!last || last.x !== pos.x || last.y !== pos.y) patchers.nodeEdges(id);
       }
+      return;
+    }
+    if (state.drag && state.drag.kind === 'waypoint') {
+      // 折点只影响它自己那条边：只补这一条线的 `d`，不重建整张画布。
+      patchers.waypointEdge?.(state.drag.parentId, state.drag.childId);
       return;
     }
     if (state.drag && state.drag.kind === 'variable-card') {

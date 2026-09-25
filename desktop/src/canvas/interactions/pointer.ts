@@ -67,10 +67,16 @@ export interface PointerDeps {
   nodeWidth: number;
   variableCardWidth: number;
   variableCardHeight: number;
+  /** 折点拖拽时把新坐标写进文档（缺省表示不支持手工折线）。 */
+  moveStructuralWaypoint?(parentId: string, childId: string, pointIndex: number, point: PointerPoint): void;
 }
 
 export interface CanvasPointer {
   startNodeDrag(event: PointerEventLike, id: string): void;
+  /** 注释框拖拽（移动 / 改尺寸）：与卡片拖拽共用同一套 pointer 生命周期。 */
+  startCommentDrag(event: PointerEventLike, comment: any, mode: 'move' | 'resize'): void;
+  /** 折点拖拽（手工折线）：只补它自己那条边。 */
+  startWaypointDrag(event: PointerEventLike, parentId: string, childId: string, pointIndex: number): void;
   onPointerDown(event: PointerEventLike): void;
   autoPan(event: PointerEventLike): boolean;
   onPointerMove(event: PointerEventLike): void;
@@ -88,6 +94,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     variableConnectionTargetAt, finishConnection, cancelConnection, finishVariableConnection, setDirty,
     referenceConnectionTargetAt, finishReferenceConnection,
     nodeWidth, variableCardWidth, variableCardHeight,
+    moveStructuralWaypoint,
   } = deps;
   const isNodeLocked = deps.isNodeLocked ?? (() => false);
 
@@ -126,6 +133,52 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     }
     if (lockedSkipped) deps.toast?.('已跳过位置锁定的卡片', false);
     state.drag = { kind: 'nodes', start: point, origins, before: snapshot(), moved: false };
+    render();
+  }
+
+  /**
+   * 注释框拖拽（移动 / 改尺寸）。
+   *
+   * 与卡片拖拽共用同一套 `state.drag` + `onPointerMove/Up`：这样 autoPan、历史快照与
+   * 「位置改了才记一条撤销」的行为完全一致，注释框模块自己不用再管指针捕获。
+   */
+  function startCommentDrag(event: PointerEventLike, comment: any, mode: 'move' | 'resize'): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const size = comment.size && typeof comment.size === 'object' ? comment.size : { w: 360, h: 200 };
+    state.drag = {
+      kind: 'comment',
+      mode,
+      comment,
+      start: worldPoint(event),
+      origin: { ...(comment.at || { x: 0, y: 0 }) },
+      size: { w: Number(size.w) || 360, h: Number(size.h) || 200 },
+      before: snapshot(),
+      moved: false,
+    };
+    render();
+  }
+
+  /**
+   * 折点拖拽（手工折线 / UE Knot）。
+   *
+   * 折点只影响它自己那条连线，所以拖动时走 `drag.kind = 'waypoint'`：由渲染层只补这一条边
+   * 的 `d`（见 `render-controller.applyPatches`），不重建整张画布。
+   */
+  function startWaypointDrag(event: PointerEventLike, parentId: string, childId: string, pointIndex: number): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.drag = {
+      kind: 'waypoint',
+      parentId,
+      childId,
+      pointIndex,
+      start: worldPoint(event),
+      before: snapshot(),
+      moved: false,
+    };
     render();
   }
 
@@ -231,6 +284,32 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
         card.x = Math.round((origin.x + dx) / 8) * 8;
         card.y = Math.round((origin.y + dy) / 8) * 8;
       }
+    } else if (state.drag.kind === 'comment') {
+      autoPan(event);
+      const point = worldPoint(event);
+      const dx = point.x - state.drag.start.x;
+      const dy = point.y - state.drag.start.y;
+      state.drag.moved = state.drag.moved || Math.abs(dx) + Math.abs(dy) > 2;
+      const comment = state.drag.comment;
+      if (comment) {
+        if (state.drag.mode === 'resize') {
+          // 改尺寸：宽高各自至少留一个最小值，贴 8 像素网格。
+          comment.size = {
+            w: Math.max(120, Math.round((state.drag.size.w + dx) / 8) * 8),
+            h: Math.max(80, Math.round((state.drag.size.h + dy) / 8) * 8),
+          };
+        } else {
+          comment.at = {
+            x: Math.round((state.drag.origin.x + dx) / 8) * 8,
+            y: Math.round((state.drag.origin.y + dy) / 8) * 8,
+          };
+        }
+      }
+    } else if (state.drag.kind === 'waypoint') {
+      autoPan(event);
+      const point = worldPoint(event);
+      state.drag.moved = state.drag.moved || Math.abs(point.x - state.drag.start.x) + Math.abs(point.y - state.drag.start.y) > 2;
+      deps.moveStructuralWaypoint?.(state.drag.parentId, state.drag.childId, state.drag.pointIndex, point);
     } else if (state.drag.kind === 'marquee' && state.marquee) {
       const point = worldPoint(event);
       state.marquee.x2 = point.x;
@@ -303,6 +382,16 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       state.redo = [];
       setDirty();
     }
+    if (state.drag.kind === 'comment' && state.drag.moved && snapshot() !== state.drag.before) {
+      state.undo.push(state.drag.before);
+      state.redo = [];
+      setDirty();
+    }
+    if (state.drag.kind === 'waypoint' && state.drag.moved && snapshot() !== state.drag.before) {
+      state.undo.push(state.drag.before);
+      state.redo = [];
+      setDirty();
+    }
     if (state.drag.kind === 'pan' && state.drag.moved) suppressPanContextMenu = true;
     state.drag = null;
     state.marquee = null;
@@ -322,7 +411,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
   }
 
   return {
-    startNodeDrag, onPointerDown, autoPan, onPointerMove, onPointerUp,
+    startNodeDrag, startCommentDrag, startWaypointDrag, onPointerDown, autoPan, onPointerMove, onPointerUp,
     contextMenuSuppressedByPan, captureConnectionPointer,
   };
 }

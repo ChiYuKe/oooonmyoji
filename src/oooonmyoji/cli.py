@@ -431,7 +431,7 @@ def command_serve(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     """构建命令行解析器，注册全部子命令。"""
 
-    parser = argparse.ArgumentParser(prog="oooonmyoji", description=__doc__)
+    parser = argparse.ArgumentParser(prog="autoflow-studio", description=__doc__)
     parser.add_argument("--config", default=None, help=f"JSON configuration path (default: {DEFAULT_CONFIG.name}, then config.example.json)")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("serve").set_defaults(function=command_serve)

@@ -282,7 +282,7 @@ class RoiEditor:
         if tk is None:
             raise RuntimeError("Tkinter is not available in this Python installation")
         self.root = tk.Tk()
-        self.root.title("阴阳师 ROI 选择器" if select_only else "阴阳师 ROI 标注工具")
+        self.root.title("AutoFlow ROI 选择器" if select_only else "AutoFlow ROI 标注工具")
         self.root.geometry("1400x900")
         self.root.minsize(900, 600)
         self.output_dir = output_dir.resolve()

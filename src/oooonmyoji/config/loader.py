@@ -186,11 +186,15 @@ def _path(value: object, path: str, base: Path, *, must_exist: bool = False, dir
 
 
 def _workflow_path(workflow_dir: Path, reference: str, *, require_file: bool) -> Path:
+    # 延迟导入：`workflows` 包在导入时会反向依赖本模块（loader 用这里的 schema 校验），
+    # 顶层导入会形成环。
+    from ..workflows.dsl import WORKFLOW_SUFFIX, read_document_id
+
     candidate = Path(reference)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise ConfigError(f"workflow reference escapes workflow_dir: {reference}")
-    if candidate.suffix.lower() != ".json":
-        candidate = candidate.with_suffix(".json")
+    if candidate.suffix.lower() != WORKFLOW_SUFFIX:
+        candidate = candidate.with_suffix(WORKFLOW_SUFFIX)
     path = (workflow_dir / candidate).resolve()
     try:
         path.relative_to(workflow_dir.resolve())
@@ -199,16 +203,16 @@ def _workflow_path(workflow_dir: Path, reference: str, *, require_file: bool) ->
     if require_file and not path.is_file():
         # Workflows are organized in nested folders. Keep bare IDs and file
         # names convenient by resolving a unique recursive match as a fallback.
-        matches = [item for item in workflow_dir.rglob("*.json") if item.name == candidate.name]
+        matches = [item for item in workflow_dir.rglob(f"*{WORKFLOW_SUFFIX}") if item.name == candidate.name]
         if len(matches) == 1:
             path = matches[0].resolve()
         elif not matches:
-            for item in workflow_dir.rglob("*.json"):
+            for item in workflow_dir.rglob(f"*{WORKFLOW_SUFFIX}"):
                 try:
-                    value = json.loads(item.read_text(encoding="utf-8"))
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    text = item.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
                     continue
-                if isinstance(value, dict) and value.get("id") == candidate.stem:
+                if read_document_id(text) == candidate.stem:
                     matches.append(item)
             if len(matches) == 1:
                 path = matches[0].resolve()

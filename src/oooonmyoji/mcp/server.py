@@ -13,7 +13,7 @@ from mcp_types import CallToolResult, ImageContent, TextContent
 from .service import PROJECT_GUIDE, ProjectContextService
 
 
-SERVER_NAME = "oooonmyoji-template-factory"
+SERVER_NAME = "autoflow-template-factory"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _project_root = PROJECT_ROOT
 _config_path: Path | None = None

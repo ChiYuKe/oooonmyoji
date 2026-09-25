@@ -22,11 +22,12 @@ from ..devices.factory import connect_at_task_boundary
 from ..exceptions import ConfigError
 from ..runtime.instances import ensure_runtime_instance, expand_runtime_instances
 from ..vision.image import frame_to_bgr
+from ..workflows.dsl import WORKFLOW_SUFFIX, emit_runtime_document
 from ..workflows.loader import WorkflowLoader
 from ..workflows.validator import WORKFLOW_SCHEMA, validate_workflow
 
 
-PROJECT_GUIDE = """# oooonmyoji MCP 模板工厂
+PROJECT_GUIDE = """# AutoFlow Studio MCP 模板工厂
 
 当前阶段提供项目上下文、只读设备截图、ROI 图片模板生成、工作流校验和受控保存。
 截图只读取当前画面，不执行点击、滑动、输入或工作流运行。
@@ -631,7 +632,7 @@ class ProjectContextService:
                 "referenced_assets": referenced_assets,
             }
 
-        validation_path = self.config.workflow_dir / "__mcp_validation__.json"
+        validation_path = self.config.workflow_dir / f"__mcp_validation__{WORKFLOW_SUFFIX}"
         try:
             spec = validate_workflow(
                 raw,
@@ -723,7 +724,7 @@ class ProjectContextService:
             validation["saved"] = False
             return validation
 
-        payload = json.dumps(candidate, ensure_ascii=False, indent=2) + "\n"
+        payload = emit_runtime_document(candidate)
         payload_bytes = payload.encode("utf-8")
         if len(payload_bytes) > MAX_WORKFLOW_BYTES:
             return {
@@ -732,7 +733,7 @@ class ProjectContextService:
                 "errors": [{
                     "path": "workflow",
                     "code": "workflow_too_large",
-                    "message": f"workflow JSON exceeds {MAX_WORKFLOW_BYTES} bytes",
+                    "message": f"workflow document exceeds {MAX_WORKFLOW_BYTES} bytes",
                 }],
                 "warnings": [],
                 "workflow": validation.get("workflow", {}),
@@ -753,7 +754,7 @@ class ProjectContextService:
                 "warnings": [],
             }
 
-        target = generated_dir / f"{name}.json"
+        target = generated_dir / f"{name}{WORKFLOW_SUFFIX}"
         if target.exists() and not overwrite:
             return {
                 "ok": False,

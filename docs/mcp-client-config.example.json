@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "oooonmyoji": {
+    "autoflow": {
       "command": "C:\\path\\to\\oooonmyoji\\.venv\\Scripts\\python.exe",
       "args": [
         "-m",

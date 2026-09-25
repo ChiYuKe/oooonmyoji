@@ -1,0 +1,87 @@
+workflow kitchen
+  version: 2.1.0
+  description: |
+    多行说明：
+    第二行
+  resolution: [1280, 720]
+  root: root
+  retry_safe: true
+  limits:
+    timeout_seconds: 600
+    max_steps: 500
+  inputs:
+    运行轮数:
+      type: integer
+      default: 3
+      display_name: 运行轮数
+  variables: {}
+  nodeTypes:
+    x-点掉结算页:
+      base: task
+      action: input.tap
+      params:
+        x: 1
+      title: 点掉结算页
+  _inputParams: {}
+  node root root
+    at: [0, 0]
+  node rounds sequence 循环
+    at: [0, 100]
+    decorator repeat
+      count: 3
+  node judge bool_judge
+    at: [0, 300]
+    expression: null == settlement
+  node branch_1 branch
+    at: [0, 500]
+    conditions: [nodes.judge.output.value == true and not exists inputs.运行轮数]
+  node pick switch
+    at: [0, 700]
+    expression: nodes.judge.output.value
+    cases:
+      - value: settlement
+      - value: 2
+  node fleet instance_parallel
+    at: [0, 900]
+    locked: true
+    comment: 实例并行
+    runs:
+      - instance: mumu-0
+        workflow: demo
+        inputs:
+          运行轮数: 2
+    wait_for: any
+    cancel_on_failure: false
+    finish_mode: wait_for_background
+    max_iterations: 5
+    fields:
+      state: 状态
+  node last sequence
+    at: [0, 1100]
+  var inputs.运行轮数
+    at: [-200, 100]
+  edges:
+    root -> rounds
+    rounds -> branch_1
+    rounds:then.1 -> pick
+    rounds:then.2 -> judge
+    judge:true -> fleet
+    judge:false -> last
+    pick:case.1 -> last
+    pick:default -> fleet
+    branch_1:conditions.0 -> fleet
+    var__inputs__运行轮数:out -> rounds:decorators.0.count
+    judge:out.value -> branch_1:conditions.0
+      waypoints: [[100, 80], [120, 180]]
+  group node_group_1 收尾
+    nodeIds: [last, fleet]
+    pins:
+      - nodeId: last
+        param: value
+    pinPolicy: explicit-v1
+    at: [996, 1040]
+    variablesAt: [-448, 376]
+  comment comment_1 结算页分支
+    at: [1040, 640]
+    size: [420, 260]
+    tint: warning

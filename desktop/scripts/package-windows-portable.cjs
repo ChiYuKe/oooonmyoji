@@ -8,7 +8,7 @@ const projectRoot = path.resolve(desktopRoot, '..');
 const releaseRoot = path.join(desktopRoot, 'release');
 const cpuOnly = process.argv.includes('--cpu-only');
 const thin = process.argv.includes('--thin');
-const outputName = thin ? 'OnmyojiStudio-initial-stage' : cpuOnly ? 'OnmyojiStudio-installer-stage' : 'OnmyojiStudio-win-x64';
+const outputName = thin ? 'AutoFlowStudio-initial-stage' : cpuOnly ? 'AutoFlowStudio-installer-stage' : 'AutoFlowStudio-win-x64';
 const outputRoot = path.join(releaseRoot, outputName);
 const resourcesRoot = path.join(outputRoot, 'resources');
 
@@ -84,7 +84,7 @@ fs.rmSync(outputRoot, { recursive: true, force: true });
 copyContents(path.join(desktopRoot, 'node_modules', 'electron', 'dist'), outputRoot);
 fs.mkdirSync(resourcesRoot, { recursive: true });
 const electronExe = path.join(outputRoot, 'electron.exe');
-const productExe = path.join(outputRoot, 'Onmyoji Studio.exe');
+const productExe = path.join(outputRoot, 'AutoFlow Studio.exe');
 requirePath(electronExe, 'Electron 可执行文件');
 fs.renameSync(electronExe, productExe);
 fs.rmSync(path.join(resourcesRoot, 'default_app.asar'), { force: true });
@@ -95,7 +95,7 @@ copy(path.join(desktopRoot, 'dist-electron'), path.join(appRoot, 'dist-electron'
 copy(path.join(desktopRoot, 'dist', 'renderer'), path.join(appRoot, 'dist', 'renderer'));
 fs.writeFileSync(path.join(appRoot, 'package.json'), `${JSON.stringify({
   name: 'onmyoji-studio',
-  productName: 'Onmyoji Studio',
+  productName: 'AutoFlow Studio',
   version: require(path.join(desktopRoot, 'package.json')).version,
   main: 'dist-electron/main/main.js',
   dependencies: { ajv: require(path.join(desktopRoot, 'node_modules', 'ajv', 'package.json')).version },
@@ -142,9 +142,9 @@ if (!thin && modelCache && fs.existsSync(modelCache)) {
 }
 
 const guide = [
-  'Onmyoji Studio Windows 解压即用版',
+  'AutoFlow Studio Windows 解压即用版',
   '',
-  '1. 保持本目录结构不变，双击“Onmyoji Studio.exe”。',
+  '1. 保持本目录结构不变，双击“AutoFlow Studio.exe”。',
   '2. 先启动 MuMu 模拟器；默认会自动发现实例。',
   '3. 如自动发现失败，编辑 resources\\config\\config.json，填写 mumu_path/adb_path。',
   '4. 工作流与素材在 resources\\workflows 和 resources\\assets，请整体备份后再升级。',

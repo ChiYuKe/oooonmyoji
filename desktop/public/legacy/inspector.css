@@ -238,3 +238,48 @@
   #inspector-body .structured-field > .rect-control > .rect-pick { grid-column: 3; grid-row: 1 / 3; align-self: start; margin-top: 2px; }
   #inspector-body .structured-field > .rect-control:not(:has(.rect-pick)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* 判断节点分支：复用详情栏的中性表面、细分隔线和轻量状态标签。 */
+#inspector-body .condition-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 3px 6px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  margin-bottom: 4px;
+  background: var(--ui-bg);
+}
+#inspector-body .condition-slot-title {
+  flex: 0 0 auto;
+  min-width: 22px;
+  padding: 0 5px;
+  text-align: center;
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 18px;
+  background: var(--ui-surface);
+  color: var(--ui-muted);
+}
+#inspector-body .condition-slot-true { color: #8fc9ad; }
+#inspector-body .condition-slot-false { color: var(--ui-muted); }
+#inspector-body .condition-slot-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-text); font-size: 11px; }
+#inspector-body .condition-slot-empty { flex: 1 1 auto; min-width: 0; color: var(--ui-muted); font-size: 10px; }
+#inspector-body .condition-slot-remove {
+  flex: 0 0 22px;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius);
+  background: transparent;
+  color: var(--ui-muted);
+}
+#inspector-body .condition-slot-remove:hover:not(:disabled) {
+  background: var(--ui-hover);
+  color: var(--ui-danger);
+}

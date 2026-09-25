@@ -34,6 +34,9 @@
     { id: 'editor.previousIssue', group: 'editor', label: '跳到上一个校验问题', defaultBinding: 'shift+f8' },
     { id: 'editor.viewportBack', group: 'editor', label: '画布位置后退', defaultBinding: 'alt+arrowleft' },
     { id: 'editor.viewportForward', group: 'editor', label: '画布位置前进', defaultBinding: 'alt+arrowright' },
+    // 排列预览的确认条可能离光标很远：Enter 应用、Esc 取消，与条上的按钮同一条命令。
+    { id: 'editor.arrangeApply', group: 'editor', label: '应用排列预览', defaultBinding: 'enter' },
+    { id: 'editor.arrangeCancel', group: 'editor', label: '取消排列预览', defaultBinding: 'escape' },
   ];
 
   const byId = new Map(DEFINITIONS.map((definition) => [definition.id, definition]));

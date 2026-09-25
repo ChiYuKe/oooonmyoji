@@ -40,7 +40,11 @@
       {id:'tap',type:'task',name:'点击挑战按钮',action:'input.tap_match',params:{match:{ref:'nodes.wait.output.0'},revalidate:true,random_offset:11,random_interval:[.2,.6],verify_gone:true,verify_timeout_seconds:8}},
       {id:'types',type:'task',name:'新类型参数',action:'studio.preview_types',params:{realm_popup_close_point:{x:960,y:540},tint:'#ff8c3a',wait_for:'any',stable_seconds:1.5,keycode:{ref:'variables.关闭按键'}}},
       {id:'parallel',type:'instance_parallel',name:'多实例协作',wait_for:'all',runs:[{instance:'mumu-1',workflow:'party.json',inputs:{运行轮数:{ref:'inputs.运行轮数'}}}]},
-    ],_layout:{root:{x:390,y:20},sequence:{x:390,y:165},wait:{x:70,y:330},tap:{x:390,y:330},parallel:{x:710,y:330},types:{x:70,y:520}},_variableCards:{rounds:{name:'运行轮数',scope:'inputs',x:70,y:790},theme:{name:'主题色',scope:'variables',x:70,y:880},point:{name:'目标点',scope:'variables',x:250,y:880},mode:{name:'挑战模式',scope:'variables',x:430,y:880},settle:{name:'稳定等待',scope:'variables',x:610,y:880},key:{name:'关闭按键',scope:'variables',x:790,y:880}}};
+      {id:'bool',type:'bool_judge',name:'结界未结算',expression:{eq:[{ref:'variables.挑战模式'},'快速']}},
+      // 拆分卡片：把来源输出的 object 拆成可单独引用的字段（UE 的 Break 结构体）。
+      // 绑整体输出 → 右缘按来源 schema 排字段引脚；写了 fields 就按声明的字段名排。
+      {id:'break',type:'break',name:'拆分匹配结果',ref:{ref:'nodes.wait.output'},fields:{中心点:'0.center',置信度:'0.confidence'}},
+    ],_layout:{root:{x:390,y:20},sequence:{x:390,y:165},wait:{x:70,y:330},tap:{x:390,y:330},parallel:{x:710,y:330},types:{x:70,y:520},bool:{x:390,y:520},break:{x:710,y:520}},_variableCards:{rounds:{name:'运行轮数',scope:'inputs',x:70,y:790},theme:{name:'主题色',scope:'variables',x:70,y:880},point:{name:'目标点',scope:'variables',x:250,y:880},mode:{name:'挑战模式',scope:'variables',x:430,y:880},settle:{name:'稳定等待',scope:'variables',x:610,y:880},key:{name:'关闭按键',scope:'variables',x:790,y:880}}};
     editor.state.workflows=[{id:'party',name:'party.json',uri:'party.json',inputs:[{name:'运行轮数',definition:{type:'integer',default:100}},{name:'启用结界突破',definition:{type:'boolean',default:true}}]}];
     editor.state.selected=new Set(['wait']); editor.state.run=new Map([['wait',{status:'succeeded',duration:9980}],['tap',{status:'failed',duration:430,error:'点击前重新校验未匹配'}]]);
     // tap 与新类型节点展开全部参数行（UE 的显示隐藏引脚）；wait 保持默认的「必填 + 已配置」并显示折叠箭头。

@@ -86,8 +86,8 @@ async function clickAt(client, point) {
 
 async function main() {
   const targets = await fetch(`${DEBUG_URL}/json`).then((response) => response.json());
-  const target = targets.find((item) => item.type === 'page' && item.title === 'Onmyoji Studio');
-  assert.ok(target?.webSocketDebuggerUrl, '未找到 Onmyoji Studio 调试页面');
+  const target = targets.find((item) => item.type === 'page' && item.title === 'AutoFlow Studio');
+  assert.ok(target?.webSocketDebuggerUrl, '未找到 AutoFlow Studio 调试页面');
 
   const client = new CdpClient(target.webSocketDebuggerUrl);
   await client.open();

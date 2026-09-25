@@ -249,6 +249,9 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .mini-node.type-instance_parallel { fill: #6943ad; }
 .mini-node.type-repeat_until { fill: #b95f20; }
 .mini-node.type-branch, .mini-node.type-switch { fill: #9c3d70; }
+.mini-node.type-condition { fill: #268e7f; }
+.mini-node.type-bool_judge { fill: #2a7f97; }
+.mini-node.type-break { fill: #9c4d6e; }
 .mini-node.type-node_group { fill: #52637a; stroke: #9db6d6; }
 .mini-node.type-instance-run { fill: #355f72; stroke: #79b8cf; }
 /* 运行状态标记：运行中与失败在小地图上也要一眼看到（比类型色优先）。 */
@@ -340,6 +343,11 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.type-instance_parallel .node-accent { fill: #aa8fda; }
 .node.type-repeat_until .node-accent { fill: #d39460; }
 .node.type-branch .node-accent, .node.type-switch .node-accent { fill: #c977a1; }
+.node.type-condition .node-accent { fill: #66bfae; }
+/* 布尔判断卡片与判断节点同属「布尔」家族：蓝色偏冷，和判断节点的青绿区分开。 */
+.node.type-bool_judge .node-accent { fill: #63b3d1; }
+/* 拆分卡片是值卡片家族（bool_judge / break）：用低饱和的玫瑰色，与蓝/青绿区分。 */
+.node.type-break .node-accent { fill: #c989a8; }
 .node.type-node_group .node-accent { fill: #8ea9cc; }
 .node.type-root .node-icon-plate { fill: #413137; stroke: #704953; }
 .node.type-selector .node-icon-plate { fill: #2d4038; stroke: #456c59; }
@@ -348,6 +356,9 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.type-instance_parallel .node-icon-plate { fill: #393346; stroke: #5c4d75; }
 .node.type-repeat_until .node-icon-plate { fill: #40352c; stroke: #70513a; }
 .node.type-branch .node-icon-plate, .node.type-switch .node-icon-plate { fill: #40303a; stroke: #70475c; }
+.node.type-condition .node-icon-plate { fill: #26403d; stroke: #3f6f68; }
+.node.type-bool_judge .node-icon-plate { fill: #263a46; stroke: #41697a; }
+.node.type-break .node-icon-plate { fill: #403038; stroke: #6f4757; }
 .node.type-node_group .node-icon-plate { fill: #303c4b; stroke: #526b89; }
 .node.type-node_group .node-box { fill: #232a33; stroke: #596b82; stroke-dasharray: 5 3; }
 .node.type-node_group .node-head { fill: #2d3846; }
@@ -398,8 +409,13 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node-group-issue { cursor: pointer; }
 .node-group-issue:hover .node-group-issue-bg { filter: brightness(1.25); }
 
-/* 自动排列预览：虚线虚影 + 底部确认条（确认前不写文档）。 */
+/* 自动排列预览：虚线虚影 + 顶部确认条（确认前不写文档）。 */
 .arrange-preview-box { fill: color-mix(in srgb, var(--accent, #3694d4) 10%, transparent); stroke: var(--accent, #3694d4); stroke-width: 2; stroke-dasharray: 8 5; pointer-events: none; }
+/*
+ * 确认条是「排列预览」唯一出口：以前这里是个和背景同色的灰条 + 小灰按钮，
+ * 用户点完自动排列只看见一层层空虚线框、找不到「应用」，所以整条改成高对比的
+ * 反色实心按钮 + 呼吸光晕，并把「点它才写入」写进提示文案。
+ */
 #arrange-preview-bar {
   position: absolute;
   left: 50%;
@@ -407,19 +423,43 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--panel) 96%, transparent);
-  font-size: 11px;
-  color: var(--muted);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--ui-text, #dedede) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  font-size: 12px;
+  color: var(--ui-text, #dedede);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .55), 0 0 0 3px color-mix(in srgb, var(--ui-text, #dedede) 12%, transparent);
+  /* 画布窄的时候整条不许溢出，提示文案先让位（按钮永远保持一行）。 */
+  max-width: calc(100% - 24px);
   z-index: 5;
 }
 #arrange-preview-bar.hidden { display: none; }
-#arrange-preview-text { white-space: nowrap; }
-#arrange-preview-bar button { height: 22px; padding: 0 10px; font-size: 11px; }
+#arrange-preview-text { white-space: nowrap; font-weight: 650; flex: 0 0 auto; }
+#arrange-preview-hint { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+/*
+ * 按钮一律单行：`取消` 以前挂着 `.icon-button`（width/min-width: 28px、padding: 0），
+ * 文字被压成竖排的「取 / 消 / (Esc)」。这里显式给宽度与不换行，谁也压不扁。
+ */
+#arrange-preview-bar button { flex: 0 0 auto; white-space: nowrap; width: auto; min-width: 0; height: 30px; padding: 0 14px; font-size: 12px; border-radius: 4px; }
+/* 反色实心「应用排列」：深色主题是近白底深字、浅色主题是近黑底浅字，两边都跳出来。 */
+#btn-arrange-apply {
+  border-color: var(--ui-text, #dedede);
+  background: var(--ui-text, #dedede);
+  color: var(--ui-panel, #232323);
+  font-weight: 700;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--ui-text, #dedede) 32%, transparent);
+  animation: arrange-apply-pulse 1.8s ease-in-out infinite;
+}
+#btn-arrange-apply:hover:not(:disabled) { border-color: var(--ui-text, #dedede); background: var(--ui-text, #dedede); filter: brightness(1.12); }
+#btn-arrange-apply:focus-visible { outline: 2px solid var(--ui-text, #dedede); outline-offset: 2px; }
+@keyframes arrange-apply-pulse {
+  0%, 100% { box-shadow: 0 4px 16px color-mix(in srgb, var(--ui-text, #dedede) 30%, transparent); }
+  50% { box-shadow: 0 4px 22px color-mix(in srgb, var(--ui-text, #dedede) 62%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { #btn-arrange-apply { animation: none; } }
+#btn-arrange-cancel { min-height: 30px; color: var(--ui-text, #dedede); }
 .viewport-tools-separator { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
 .icon-button.is-disabled, .icon-button:disabled { opacity: .45; cursor: default; }
 .node-icon { fill: #edf1f3; font-size: 12px; font-weight: 700; pointer-events: none; }
@@ -427,6 +467,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node-type { fill: #929ca5; font-size: 8px; font-weight: 650; letter-spacing: 0; pointer-events: none; }
 .node-field-label { fill: #717b84; font-size: 8px; font-weight: 700; letter-spacing: 0; pointer-events: none; }
 .node-subtitle { fill: #c6ccd1; font-size: 10px; pointer-events: none; }
+.bool-judge-operand-field { fill: #252a30; stroke: #4b535b; stroke-width: 1; }
+.bool-judge-operand-value, .bool-judge-operator, .bool-judge-output-label { fill: #e4e8eb; font-weight: 600; pointer-events: none; }
 .node-meta { fill: #747e87; font: 8px/1 Consolas, monospace; pointer-events: none; }
 .node-subworkflow .node-subtitle { fill: #8fc3e6; font-weight: 650; }
 .node-duration { fill: #929ca5; font: 8px/1 Consolas, monospace; pointer-events: none; }
@@ -447,6 +489,13 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .port { stroke: #dce2e6; stroke-width: 1.5; cursor: crosshair; }
 .port-in { fill: #65717b; }
 .port-out { fill: #c8a654; }
+/* 判断节点：底部左真右假两个执行输出口（可见形状仍是紧跟其后的箭头，见 node-cards.css）。 */
+.port-out-true { fill: #6fbf9a; }
+.port-out-false { fill: #9aa5b1; }
+.port-label { fill: #9aa5b1; font-size: 9px; pointer-events: none; }
+/* 拆分卡片右侧的字段引脚：字段名贴在引脚左边（UE 的 `X ○` 排法），比普通端点标签亮一点。 */
+.port-label-field { fill: #c3cbd4; }
+.port-out-field { stroke-width: 1.6; }
 .port:hover { stroke: #fff; stroke-width: 3; filter: brightness(1.25); }
 .marquee { fill: rgba(75, 163, 211, .1); stroke: #58b7e4; stroke-width: 1; stroke-dasharray: 5 3; }
 /* 浮层（框选矩形、交互预览）盖在卡片之上；本身不吃指针事件，避免挡住卡片点击。 */
@@ -456,6 +505,84 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
  * 不吃指针事件，避免用户在内容补齐前点到一张还没有端口的卡片。 */
 .node-placeholder { pointer-events: none; }
 .node-placeholder .node-box { fill: #212427; stroke: #3f464c; filter: none; }
+
+/* ---------------------------------------------------------------------------
+ * 手工折线（UE Knot）：连线上可以拖的小圆点。
+ * 与端点同一套语言：中性填充 + 细边框，悬停只提亮，不加发光。
+ * ------------------------------------------------------------------------- */
+.edge-knot {
+  fill: var(--card-bg, #2c2c2c);
+  stroke: var(--card-rule, #6b7785);
+  stroke-width: 1.5;
+  cursor: move;
+}
+.edge-knot:hover {
+  fill: var(--select, #4a90d9);
+  stroke: var(--select, #4a90d9);
+}
+
+/* ---------------------------------------------------------------------------
+ * 注释框（UE Comment）：画在 `.comments` 图层里，位于连线与卡片之下。
+ * 只用来圈住一片区域并写一句话，所以用低对比度填充 + 细边框，不做亮边与发光
+ * （见 DESIGN_RULES「禁止卡片亮边」）。
+ * ------------------------------------------------------------------------- */
+.comment-box { pointer-events: auto; }
+.comment-box .comment-frame {
+  fill: color-mix(in srgb, var(--card-tint, #6b7785) 10%, transparent);
+  stroke: color-mix(in srgb, var(--card-tint, #6b7785) 55%, transparent);
+  stroke-width: 1;
+}
+.comment-box .comment-title-fill {
+  fill: color-mix(in srgb, var(--card-tint, #6b7785) 24%, transparent);
+}
+.comment-box .comment-title {
+  fill: var(--card-head-text, #dfe3e8);
+  font-size: 12px;
+  font-weight: 600;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+.comment-box .comment-remove {
+  fill: var(--card-muted, #9aa4ae);
+  font-size: 14px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  cursor: pointer;
+}
+.comment-box .comment-remove:hover { fill: var(--danger, #d9737a); }
+.comment-box .comment-resize {
+  stroke: var(--card-muted, #9aa4ae);
+  stroke-width: 1.5;
+  fill: none;
+  cursor: nwse-resize;
+}
+.comment-box.selected .comment-frame {
+  stroke: var(--select, #4a90d9);
+  stroke-width: 1.5;
+}
+/* 注释框的分类色：与卡片同一套 tint 变量，缺省走灰蓝。 */
+.comment-box.tint-warning { --card-tint: #c9a227; }
+.comment-box.tint-danger { --card-tint: #c0564f; }
+.comment-box.tint-success { --card-tint: #5a9e6f; }
+.comment-box.tint-info { --card-tint: #4a90d9; }
+
+/* 就地改注释文字：与节点改名同一套「HTML 输入框盖在 SVG 上」的做法。 */
+.comment-text-editor {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+}
+.comment-text-input {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--select, #4a90d9);
+  border-radius: 3px;
+  background: var(--panel, #202020);
+  color: var(--text, #e6e8ea);
+  font: inherit;
+}
 
 /* ---------------------------------------------------------------------------
  * 缩放分级：由画布在 `.graph-world` 上切换 `zoom-full` / `zoom-compact` /
@@ -507,6 +634,7 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .graph-world.zoom-overview .param-row-rect-axis,
 .graph-world.zoom-overview .param-row-rect-value,
 .graph-world.zoom-overview .port,
+.graph-world.zoom-overview .port-label,
 .graph-world.zoom-overview .instance-variable-pin,
 .graph-world.zoom-overview .port-glyph,
 .graph-world.zoom-overview .variable-port-hit,
@@ -996,7 +1124,6 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
    刻意只用主题变量：明暗两套主题自动跟随，无需在生成的 editor-light.css 里加规则。
    正文用 --ui-text 而不是 --warning：浅色主题下 #806323 配 12% 底色的对比度只有约 4.4:1，
    11px 小字不够读；告警感交给左侧色条和底色就够了。 */
-.decorator-condition { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .condition-readback {
   padding: 5px 7px;
   border-left: 2px solid var(--warning);

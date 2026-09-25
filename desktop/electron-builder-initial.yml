@@ -1,6 +1,6 @@
 appId: com.oooonmyoji.studio
-productName: Onmyoji Studio
-artifactName: Onmyoji-Studio-Initial-Setup-${version}.${ext}
+productName: AutoFlow Studio
+artifactName: AutoFlow-Studio-Initial-Setup-${version}.${ext}
 directories:
   output: release/initial-installer
 publish: null
@@ -11,7 +11,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Onmyoji Studio
-  uninstallDisplayName: Onmyoji Studio
+  shortcutName: AutoFlow Studio
+  uninstallDisplayName: AutoFlow Studio
   deleteAppDataOnUninstall: false
   runAfterFinish: true

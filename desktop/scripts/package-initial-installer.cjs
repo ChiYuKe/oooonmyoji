@@ -6,14 +6,14 @@ const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
 const releaseRoot = path.join(desktopRoot, 'release');
-const cpuStage = path.join(releaseRoot, 'OnmyojiStudio-installer-stage', 'resources');
-const gpuStage = path.join(releaseRoot, 'OnmyojiStudio-win-x64', 'resources');
-const initialStage = path.join(releaseRoot, 'OnmyojiStudio-initial-stage');
+const cpuStage = path.join(releaseRoot, 'AutoFlowStudio-installer-stage', 'resources');
+const gpuStage = path.join(releaseRoot, 'AutoFlowStudio-win-x64', 'resources');
+const initialStage = path.join(releaseRoot, 'AutoFlowStudio-initial-stage');
 const assetRoot = path.join(releaseRoot, 'runtime-assets');
 const version = require(path.join(desktopRoot, 'package.json')).version;
-const cpuAssetName = `Onmyoji-Studio-Runtime-win-x64-cpu-${version}.zip`;
-const gpuCoreAssetName = `Onmyoji-Studio-Runtime-win-x64-gpu-cu12-core-${version}.zip`;
-const gpuMathAssetName = `Onmyoji-Studio-Runtime-win-x64-gpu-cu12-math-${version}.zip`;
+const cpuAssetName = `AutoFlow-Studio-Runtime-win-x64-cpu-${version}.zip`;
+const gpuCoreAssetName = `AutoFlow-Studio-Runtime-win-x64-gpu-cu12-core-${version}.zip`;
+const gpuMathAssetName = `AutoFlow-Studio-Runtime-win-x64-gpu-cu12-math-${version}.zip`;
 const manifestPath = path.join(assetRoot, 'runtime-manifest.json');
 
 function run(command, args, cwd = desktopRoot) {

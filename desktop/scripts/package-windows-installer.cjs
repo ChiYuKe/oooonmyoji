@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const desktopRoot = path.resolve(__dirname, '..');
-const stageRoot = path.join(desktopRoot, 'release', 'OnmyojiStudio-installer-stage');
+const stageRoot = path.join(desktopRoot, 'release', 'AutoFlowStudio-installer-stage');
 const builderCli = path.join(desktopRoot, 'node_modules', 'electron-builder', 'out', 'cli', 'cli.js');
 const builderConfig = path.join(desktopRoot, 'electron-builder.yml');
 

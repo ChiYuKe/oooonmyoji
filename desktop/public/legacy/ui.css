@@ -209,6 +209,28 @@
   border-color: color-mix(in srgb, var(--inline-focus-line, #8b98a5) 72%, var(--card-line, #424a51));
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28), inset 0 0 0 1px rgba(255, 255, 255, .055);
 }
+/* 值卡片（布尔判断 / 拆分）的操作数格：像 UE 的引脚默认值一样点它就地编辑。 */
+.bool-judge-operand-hit { fill: transparent; cursor: text; }
+.bool-judge-operand-hit:hover { fill: color-mix(in srgb, var(--inline-focus-line, #8b98a5) 14%, transparent); }
+/* 值卡片的进阶编辑器（卡片右键菜单打开：嵌套条件 / 拆分字段映射）。 */
+.value-card-editor {
+  position: fixed; z-index: 250; box-sizing: border-box; max-height: 70vh; overflow: auto;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px;
+  border: 1px solid var(--card-line, #424a51); border-radius: 6px;
+  background: color-mix(in srgb, var(--card-bg, #222629) 94%, #000 6%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .34);
+  font: 11px/1.4 var(--ui-font);
+  color: var(--card-text, #dedede);
+}
+.value-card-editor-head { display: flex; align-items: baseline; gap: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--card-line, #424a51); }
+.value-card-editor-title { flex: 1 1 auto; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.value-card-editor-kind { flex: 0 0 auto; color: var(--card-muted, #8b95a1); font-size: 10px; }
+.value-card-editor-body { display: flex; flex-direction: column; gap: 6px; }
+.value-card-editor-body .field { display: flex; flex-direction: column; gap: 3px; }
+.value-card-editor-body .field-label { color: var(--card-muted, #a8a8a8); font-size: 10px; }
+.value-card-editor-body .field-hint { color: var(--card-muted, #8b95a1); font-size: 10px; line-height: 1.45; }
+.value-card-editor-body .condition-readback { color: var(--card-text, #dedede); font-size: 11px; }
+.value-card-editor-body .ui-input { width: 100%; }
 .inline-node-name-input {
   box-sizing: border-box; appearance: none;
   width: 100%; height: 100%; min-width: 0; min-height: 0;

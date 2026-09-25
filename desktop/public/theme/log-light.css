@@ -63,6 +63,29 @@
 :root[data-theme="light"] .inline-node-name-editor:focus-within {
     border-color: color-mix(in srgb, var(--inline-focus-line, #bbbbbb) 72%, var(--card-line, #d7d7d7))
 }
+:root[data-theme="light"] .bool-judge-operand-hit:hover {
+    fill: color-mix(in srgb, var(--inline-focus-line, #696969) 14%, transparent)
+}
+:root[data-theme="light"] .value-card-editor {
+    border: 1px solid var(--card-line, #d7d7d7);
+    background: color-mix(in srgb, var(--card-bg, #ececec) 94%, #ffffff 6%);
+    color: var(--card-text, #252525)
+}
+:root[data-theme="light"] .value-card-editor-head {
+    border-bottom: 1px solid var(--card-line, #d7d7d7)
+}
+:root[data-theme="light"] .value-card-editor-kind {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .value-card-editor-body .field-label {
+    color: var(--card-muted, #5a5a5a)
+}
+:root[data-theme="light"] .value-card-editor-body .field-hint {
+    color: var(--card-muted, #696969)
+}
+:root[data-theme="light"] .value-card-editor-body .condition-readback {
+    color: var(--card-text, #252525)
+}
 :root[data-theme="light"] .inline-node-name-input {
     color: var(--card-text, #232323);
     caret-color: var(--inline-focus-line, #696969)

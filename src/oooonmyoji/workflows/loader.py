@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -11,8 +10,11 @@ import threading
 from typing import Any
 
 from ..actions import ActionRegistry
-from ..config.loader import resolve_workflow_path
+from ..config.loader import _validate_json_schema, resolve_workflow_path
 from ..exceptions import ConfigError, WorkflowError
+from .dsl import WORKFLOW_SUFFIX, DslError, parse_document
+from .graph_compile import compile_graph
+from .graph_schema import GRAPH_SCHEMA
 from .model import WorkflowSpec
 from .resolver import ReferenceResolver, is_binding
 from .validator import validate_workflow
@@ -37,16 +39,21 @@ class WorkflowLoader:
                 cached = self._cache.get(path)
             if cached is not None and cached[0] == signature:
                 # Path validation remains dynamic because a referenced asset
-                # may be removed while the workflow JSON itself is unchanged.
+                # may be removed while the workflow document itself is unchanged.
                 self.validate_paths(cached[1])
                 return deepcopy(cached[1])
         try:
             payload = path.read_bytes()
-            raw = json.loads(payload.decode("utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raw = parse_document(payload.decode("utf-8"), path=path.name)
+        except DslError as exc:
+            raise WorkflowError(f"unable to read workflow {path}: {exc.render()}", cause=exc) from exc
+        except (OSError, UnicodeDecodeError) as exc:
             raise WorkflowError(f"unable to read workflow {path}: {exc}", cause=exc) from exc
-        if not isinstance(raw, dict):
-            raise ConfigError(f"workflow {path} must be a JSON object")
+        # `.owf` 解析出来就是图文档（v6）：先按结构 schema 校验，再编译成 v4 交给运行时校验。
+        # 运行时（validator / engine / supervisor）只认 v4，所以这里编译完之后的一切都与
+        # 「手写的 v4 文档」没有区别。
+        _validate_json_schema(raw, GRAPH_SCHEMA, f"workflow graph {path}")
+        raw = compile_graph(raw)
         spec = validate_workflow(
             raw,
             path,
@@ -160,7 +167,7 @@ class WorkflowLoader:
         if not self.workflow_dir.is_dir():
             raise WorkflowError(f"workflow directory does not exist: {self.workflow_dir}")
         result: dict[str, WorkflowSpec] = {}
-        for path in sorted(self.workflow_dir.rglob("*.json")):
+        for path in sorted(self.workflow_dir.rglob(f"*{WORKFLOW_SUFFIX}")):
             spec = self.load(path.relative_to(self.workflow_dir).as_posix())
             if spec.workflow_id in result:
                 raise ConfigError(f"duplicate workflow id: {spec.workflow_id}")
@@ -168,4 +175,4 @@ class WorkflowLoader:
         return result
 
 
-__all__ = ["WorkflowLoader"]
+__all__ = ["WORKFLOW_SUFFIX", "WorkflowLoader"]

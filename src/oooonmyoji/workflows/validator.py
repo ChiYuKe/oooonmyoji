@@ -20,11 +20,13 @@ from ..actions import ActionRegistry
 from ..actions.manifest import apply_parameter_defaults
 from ..config.loader import _validate_json_schema
 from ..exceptions import ConfigError
-from .bindings import CONDITION_OPERATORS, binding_aware_parameter_schema, validate_value
+from .bindings import CONDITION_OPERATORS, binding_aware_parameter_schema, break_target_schema, schema_at_path, schema_types, validate_value
 from .graph import (
+    PURE_DATA_NODE_TYPES,
     available_output_node_ids,
     possible_output_node_ids_in_subtree,
     possibly_available_output_node_ids,
+    pure_data_guard,
 )
 from .model import INSTANCE_PARALLEL_WAIT_MODES, InstanceParallelRun, WorkflowNode, WorkflowSpec
 from .node_rules import (
@@ -63,16 +65,26 @@ def validate_workflow(
     if raw["root"] not in node_id_set:
         raise ConfigError(f"workflow {path} root does not name a node: {raw['root']}")
 
-    action_specs, output_schemas = build_output_schemas(nodes_raw, registry)
+    action_specs, output_schemas = build_output_schemas(nodes_raw, registry, reference_schema)
 
     parsed: list[WorkflowNode] = []
     for index, item in enumerate(nodes_raw):
         node_type = str(item["type"])
-        available_node_ids = available_output_node_ids(nodes_raw, str(item["id"]))
-        possibly_available_node_ids = possibly_available_output_node_ids(nodes_raw, str(item["id"]))
+        node_identifier = str(item["id"])
+        if node_type in PURE_DATA_NODE_TYPES:
+            # 纯数据节点没有执行位置：它自己的依赖按「使用者的执行点」判定，
+            # 没人引用时不做位置判定（见 graph.pure_data_guard）。
+            guard = pure_data_guard(nodes_raw, node_identifier)
+            available_node_ids = set(node_ids) if guard is None else guard
+            possibly_available_node_ids = available_node_ids
+        else:
+            available_node_ids = available_output_node_ids(nodes_raw, node_identifier)
+            possibly_available_node_ids = possibly_available_output_node_ids(nodes_raw, node_identifier)
         children_raw = item.get("children", [])
         decorators_raw = item.get("decorators", [])
         assert isinstance(children_raw, list) and isinstance(decorators_raw, list)
+        # 判断节点的分支口位：与 `children` 对齐，缺省按顺序（0=真、1=假）。
+        node_ports: tuple[str, ...] = ()
         if node_type == "task":
             forbidden = set(item) & {"children", "finish_mode"}
             if forbidden:
@@ -127,6 +139,64 @@ def validate_workflow(
                 raise ConfigError(f"{node_label(index, item)}.cancel_on_failure must be a boolean")
             params = {}
             action = None
+        elif node_type == "condition":
+            forbidden = set(item) & {"action", "params", "finish_mode"}
+            if forbidden:
+                raise ConfigError(f"{node_label(index, item)} condition cannot define {sorted(forbidden)}")
+            if "expression" not in item:
+                raise ConfigError(f"{node_label(index, item)} condition requires expression")
+            validate_value(item["expression"], node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{node_label(index, item)}.expression", condition=True)
+            # 判断节点最多两条分支：真口 / 假口，各自最多一个子节点。
+            if len(children_raw) > 2:
+                raise ConfigError(f"{node_label(index, item)} condition accepts at most two branches")
+            ports_raw = item.get("ports")
+            if ports_raw is None:
+                node_ports = tuple("true" if position == 0 else "false" for position in range(len(children_raw)))
+            else:
+                if not isinstance(ports_raw, list) or len(ports_raw) != len(children_raw):
+                    raise ConfigError(f"{node_label(index, item)}.ports must match condition branches")
+                if any(port not in ("true", "false") for port in ports_raw) or len(set(ports_raw)) != len(ports_raw):
+                    raise ConfigError(f"{node_label(index, item)}.ports must be unique true/false values")
+                node_ports = tuple(str(port) for port in ports_raw)
+            params = {}
+            action = None
+        elif node_type == "bool_judge":
+            # 布尔判断卡片：叶子，只带一个条件表达式；求值结果作为 `nodes.<id>.output.value`
+            # 供别的节点引用（判断节点/Branch/Repeat Until 的条件都能直接绑它）。
+            forbidden = set(item) & {"action", "params", "children", "finish_mode"}
+            if forbidden:
+                raise ConfigError(f"{node_label(index, item)} bool_judge cannot define {sorted(forbidden)}")
+            if "expression" not in item:
+                raise ConfigError(f"{node_label(index, item)} bool_judge requires expression")
+            validate_value(item["expression"], node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, possibly_available_node_ids=possibly_available_node_ids, path=f"{node_label(index, item)}.expression", condition=True)
+            params = {}
+            action = None
+        elif node_type == "break":
+            # 拆分卡片：叶子，把一张卡片的对象/数组输出按字段拆开，登记成
+            # `nodes.<id>.output.<字段>` 供别的节点引用（类似 UE 蓝图的 Break）。
+            forbidden = set(item) & {"action", "params", "children", "finish_mode"}
+            if forbidden:
+                raise ConfigError(f"{node_label(index, item)} break cannot define {sorted(forbidden)}")
+            ref_value = item.get("ref")
+            if not is_binding(ref_value):
+                raise ConfigError(f"{node_label(index, item)} break requires a ref binding like {{\"ref\": \"nodes.<id>.output...\"}}")
+            ref_path = f"{node_label(index, item)}.ref"
+            target_schema = break_target_schema(str(ref_value["ref"]), node_ids=node_id_set, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, path=ref_path)
+            known_types = schema_types(target_schema)
+            if known_types and not (known_types & {"object", "array"}):
+                raise ConfigError(f"{ref_path} must reference an object or array output, got {sorted(known_types)}")
+            fields = item.get("fields", {})
+            if not isinstance(fields, dict):
+                raise ConfigError(f"{node_label(index, item)}.fields must be an object")
+            for field_name, field_path in fields.items():
+                if not isinstance(field_name, str) or not field_name:
+                    raise ConfigError(f"{node_label(index, item)}.fields keys must be non-empty strings")
+                if not isinstance(field_path, str) or not field_path:
+                    raise ConfigError(f"{node_label(index, item)}.fields.{field_name} must be a non-empty path string")
+                if target_schema and schema_at_path(target_schema, str(field_path).split(".")) is None:
+                    raise ConfigError(f"{node_label(index, item)}.fields.{field_name}: path '{field_path}' does not exist in the target output schema")
+            params = {}
+            action = None
         else:
             forbidden = set(item) & {"action", "params"}
             if forbidden:
@@ -178,11 +248,14 @@ def validate_workflow(
         if node_type != "instance_parallel" and any(field in item for field in ("runs", "wait_for", "cancel_on_failure")):
             if node_type != "parallel":
                 raise ConfigError(f"{node_label(index, item)} instance_parallel fields are only valid for instance_parallel")
-        node_fields = {"condition", "max_iterations", "conditions", "expression", "cases", "default_child"}
+        node_fields = {"condition", "max_iterations", "conditions", "expression", "cases", "default_child", "ports", "ref", "fields"}
         allowed_fields = {
             "repeat_until": {"condition", "max_iterations"},
             "branch": {"conditions"},
             "switch": {"expression", "cases", "default_child"},
+            "condition": {"expression", "ports"},
+            "bool_judge": {"expression"},
+            "break": {"ref", "fields"},
         }.get(node_type, set())
         invalid_fields = (set(item) & node_fields) - allowed_fields
         if invalid_fields:
@@ -217,8 +290,11 @@ def validate_workflow(
             conditions=tuple(deepcopy(item.get("conditions", []))),
             max_iterations=int(item.get("max_iterations", 100)),
             expression=deepcopy(item.get("expression")),
+            ref=deepcopy(item.get("ref")),
+            fields=dict(deepcopy(item["fields"])) if isinstance(item.get("fields"), dict) else {},
             cases=tuple((deepcopy(case.get("value")), str(case["child"])) for case in item.get("cases", []) if isinstance(case, dict) and "child" in case),
             default_child=str(item["default_child"]) if isinstance(item.get("default_child"), str) else None,
+            ports=node_ports,
         ))
 
     root = validate_graph_structure(parsed, raw, node_id_set)

@@ -41,6 +41,13 @@ def schema_at_path(schema: dict[str, Any], segments: list[str]) -> dict[str, Any
             if isinstance(prefix, list) and index < len(prefix) and isinstance(prefix[index], dict):
                 current = prefix[index]
                 continue
+            # 定长元组（prefixItems + maxItems 封顶）越界就是无效路径：区域 rect 只有 0..3，
+            # 写 .4 运行时也取不到值，早点报错比运行时炸掉好。
+            if isinstance(prefix, list) and prefix and not isinstance(current.get("items"), dict) and current.get("items") is not True:
+                declared_max = current.get("maxItems")
+                max_items = declared_max if isinstance(declared_max, int) else len(prefix)
+                if index >= max_items:
+                    return None
             items = current.get("items")
             if items is False:
                 return None
@@ -102,6 +109,36 @@ def ref_schema(
     raise ConfigError(f"{path} has invalid structured reference: {value}")
 
 
+def break_target_schema(
+    ref: str,
+    *,
+    node_ids: set[str],
+    reference_schema: dict[str, Any],
+    output_schemas: dict[str, dict[str, Any] | None],
+    available_node_ids: set[str],
+    path: str,
+) -> dict[str, Any]:
+    """拆分节点（`break`）的 ref 目标 schema。
+
+    拆分允许引用整张卡片的输出 `nodes.<id>.output`（普通引用要求至少带上一个字段，
+    而拆分正是要把它拆开），也允许引用输出里的嵌套对象/数组路径。统一在这里解析并做
+    可用性与产出检查，再返回目标 schema。
+    """
+
+    parts = ref.split(".")
+    if len(parts) >= 3 and parts[0] == "nodes" and parts[2] == "output" and parts[1] in node_ids and all(parts[1:]):
+        if parts[1] not in available_node_ids:
+            raise ConfigError(f"{path} references a node output unavailable at this execution point: {ref}")
+        output_schema = output_schemas.get(parts[1])
+        if output_schema is None:
+            raise ConfigError(f"{path} references a node without output: {ref}")
+        resolved = schema_at_path(output_schema, parts[3:])
+        if resolved is not None:
+            return resolved
+        raise ConfigError(f"{path} references an unknown Action output: {ref}")
+    return ref_schema(ref, node_ids=node_ids, reference_schema=reference_schema, output_schemas=output_schemas, available_node_ids=available_node_ids, path=path)
+
+
 def schema_child(schema: dict[str, Any] | None, key: str | int) -> dict[str, Any] | None:
     if not schema:
         return None
@@ -142,8 +179,14 @@ def validate_value(
                 available_node_ids=available_node_ids,
                 path=path,
             )
-            if not binding_types_compatible(expected_schema, actual):
-                raise ConfigError(f"{path} binding type is incompatible with its Action parameter: {value['ref']}")
+            required_schema = {"type": "boolean"} if condition and expected_schema is None else expected_schema
+            if not binding_types_compatible(required_schema, actual):
+                message = (
+                    f"{path} condition reference must be boolean: {value['ref']}"
+                    if condition and expected_schema is None
+                    else f"{path} binding type is incompatible with its Action parameter: {value['ref']}"
+                )
+                raise ConfigError(message)
             return
         if condition:
             if len(value) != 1 or next(iter(value)) not in CONDITION_OPERATORS:
@@ -203,6 +246,7 @@ __all__ = [
     "allow_binding",
     "binding_aware_parameter_schema",
     "binding_types_compatible",
+    "break_target_schema",
     "ref_schema",
     "schema_at_path",
     "schema_child",

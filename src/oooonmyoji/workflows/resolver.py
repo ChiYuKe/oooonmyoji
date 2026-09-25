@@ -22,11 +22,17 @@ class ReferenceResolver:
         runtime: dict[str, Any] | None = None,
         *,
         variables: dict[str, Any] | None = None,
+        resolve_output: Any = None,
+        is_data_node: Any = None,
     ) -> None:
         self.inputs = inputs
         self.variables = variables or {}
         self.outputs = outputs
         self.runtime = runtime or {}
+        self.resolve_output = resolve_output
+        #: 判断某个节点是不是「按需求值的纯数据节点」（布尔判断 / 拆分）：
+        #: 它们的输出不缓存，每次引用都重算。
+        self.is_data_node = is_data_node or (lambda _node_id: False)
 
     def reference(self, value: str, *, default: Any = _NO_DEFAULT) -> Any:
         parts = value.split(".")
@@ -39,9 +45,18 @@ class ReferenceResolver:
         elif len(parts) >= 2 and parts[0] == "runtime" and all(parts[1:]):
             current = self.runtime
             path = parts[1:]
-        elif len(parts) >= 4 and parts[0] == "nodes" and parts[2] == "output" and all(parts[1:]):
+        elif len(parts) >= 3 and parts[0] == "nodes" and parts[2] == "output" and all(parts[1:]):
+            # `nodes.<id>.output`（不带字段）也是合法引用：拆分卡片（`break`）就是靠它
+            # 拿整张卡片的输出再拆字段，校验层同样允许这种写法。
+            #
+            # 纯数据节点（布尔判断 / 拆分）**每次引用都重新求值**：它们算的是「这一刻」的值，
+            # 树里的任务每轮都会刷新输出，缓存住第一轮的结论会让循环用旧值走错分支。
+            # 普通节点仍然只在缺输出时补算。
+            node_id = parts[1]
+            if self.resolve_output is not None and (self.is_data_node(node_id) or node_id not in self.outputs):
+                self.resolve_output(node_id)
             current = self.outputs
-            path = [parts[1], *parts[3:]]
+            path = [node_id, *parts[3:]]
         else:
             if default is not _NO_DEFAULT:
                 return default

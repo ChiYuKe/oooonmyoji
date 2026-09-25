@@ -71,7 +71,7 @@ def validate_variable_scopes(nodes_raw: list[Any], variables_raw: dict[str, Any]
     node_map = {item["id"]: item for item in nodes_raw}
     owners = {name: definition.get("owner") for name, definition in variables_raw.items() if definition.get("owner")}
     for name, owner in owners.items():
-        if not isinstance(owner, str) or owner not in node_map or node_map[owner]["type"] in {"task", "instance_parallel"}:
+        if not isinstance(owner, str) or owner not in node_map or node_map[owner]["type"] in {"task", "instance_parallel", "bool_judge", "break"}:
             raise ConfigError(f"variables.{name}.owner must name a composite node")
         descendants: set[str] = set()
         pending = [owner]

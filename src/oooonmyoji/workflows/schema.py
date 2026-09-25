@@ -68,7 +68,6 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                             "required": ["type"],
                             "properties": {
                                 "type": {"enum": list(DECORATOR_TYPES)},
-                                "expression": {},
                                 "seconds": {"anyOf": [{"type": "number", "exclusiveMinimum": 0}, deepcopy(BINDING_SCHEMA)]},
                                 "attempts": {"anyOf": [{"type": "integer", "minimum": 1}, deepcopy(BINDING_SCHEMA)]},
                                 "delay_seconds": {"anyOf": [{"type": "number", "minimum": 0}, deepcopy(BINDING_SCHEMA)]},
@@ -104,6 +103,8 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                     "conditions": {"type": "array"},
                     "max_iterations": {"type": "integer", "minimum": 1},
                     "expression": {},
+                    "ref": {},
+                    "fields": {},
                     "cases": {
                         "type": "array",
                         "items": {
@@ -114,6 +115,7 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                         },
                     },
                     "default_child": {"type": "string", "minLength": 1},
+                    "ports": {"type": "array", "items": {"enum": ["true", "false"]}, "uniqueItems": True},
                 },
                 "additionalProperties": False,
             },

@@ -31,11 +31,16 @@ def compile_workflow(spec: WorkflowSpec, registry: ActionRegistry) -> CompiledWo
     ordered: list[str] = []
 
     def visit(node_id: str) -> None:
+        if node_id in ordered:
+            return
         ordered.append(node_id)
         for child_id in node_map[node_id].children:
             visit(child_id)
 
     visit(spec.root)
+    for node in compiled_nodes:
+        if node.type in {"bool_judge", "break"} and node.id not in ordered:
+            ordered.append(node.id)
     return CompiledWorkflow(
         nodes=tuple(compiled_nodes),
         root=spec.root,

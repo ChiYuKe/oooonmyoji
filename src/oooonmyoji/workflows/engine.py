@@ -14,6 +14,7 @@ from typing import Any, Callable
 from ..actions import ActionRegistry, ActionResult, ActionStatus
 from ..exceptions import AutomationError, CancelledError, WorkflowError, WorkflowTimeoutError
 from .compiler import CompiledWorkflow, compile_workflow
+from .graph import PURE_DATA_NODE_TYPES
 from .model import BehaviorDecorator, WorkflowNode, WorkflowSpec
 from .resolver import ReferenceResolver
 
@@ -60,6 +61,21 @@ def _summary(value: Any) -> Any:
     return value
 
 
+def _condition_branch(node: WorkflowNode, port: str) -> str | None:
+    """判断节点上挂在某个口（true/false）的子节点 id；该口空着就返回 None。
+
+    `ports` 与 `children` 对齐；老文档没写 `ports` 时按位置推导（0=真、1=假）。
+    """
+
+    ports = node.ports if len(node.ports) == len(node.children) else tuple(
+        "true" if index == 0 else "false" for index in range(len(node.children))
+    )
+    for index, child_id in enumerate(node.children):
+        if ports[index] == port:
+            return child_id
+    return None
+
+
 class WorkflowEngine:
     def __init__(
         self,
@@ -92,6 +108,7 @@ class WorkflowEngine:
         self._steps = 0
         self._cooldowns: dict[str, float] = {}
         self._done_once: set[str] = set()
+        self._data_node_last_event: dict[str, tuple[str, Any]] = {}
         self._runtime_local = threading.local()
         self._workflow_deadline = 0.0
         self._current_step: str | None = None
@@ -105,6 +122,7 @@ class WorkflowEngine:
             self._steps = 0
             self._cooldowns = {}
             self._done_once = set()
+            self._data_node_last_event = {}
             self._current_step = None
         self._workflow_deadline = (
             time.monotonic() + self.workflow.timeout_seconds
@@ -155,7 +173,89 @@ class WorkflowEngine:
         stack = self._repeat_stack()
         runtime = {"repeat": dict(stack[-1])} if stack else {}
         with self._lock:
-            return ReferenceResolver(self.inputs, dict(self.outputs), runtime, variables=dict(self.variables))
+            return ReferenceResolver(
+                self.inputs,
+                self.outputs,
+                runtime,
+                variables=dict(self.variables),
+                resolve_output=self._evaluate_data_node,
+                is_data_node=self._is_data_node,
+            )
+
+    def _is_data_node(self, node_id: str) -> bool:
+        node = self.compiled.node_map.get(node_id)
+        return node is not None and node.type in PURE_DATA_NODE_TYPES
+
+    def _evaluate_data_node(self, node_id: str) -> None:
+        """纯数据节点（布尔判断 / 拆分）的按需求值。
+
+        它们不在执行树里，所以在这里按需求值——**每次被拉取都重算**：卡片算的是
+        「这一刻的值」，循环里 `classify` 每轮都刷新输出，卡片也必须跟着刷新，
+        否则第二轮会拿着第一轮的旧结论做分支。步骤事件只在值真的变了（或第一次算）时
+        记一条，循环里不会把日志刷满。
+        """
+
+        node = self.compiled.node_map.get(node_id)
+        if node is None or node.type not in PURE_DATA_NODE_TYPES:
+            return
+        existing_evaluating = getattr(self._runtime_local, "evaluating_data_nodes", None)
+        if isinstance(existing_evaluating, set):
+            evaluating: set[str] = existing_evaluating
+        else:
+            evaluating = set()
+            self._runtime_local.evaluating_data_nodes = evaluating
+        if node_id in evaluating:
+            raise WorkflowError(f"cyclic pure data reference: {node_id}")
+        evaluating.add(node_id)
+        started_perf = time.perf_counter()
+        started_at = time.time()
+        try:
+            with self._lock:
+                allowed = self._resolver().condition(node.expression) if node.type == "bool_judge" else None
+                if node.type == "bool_judge":
+                    output: Any = {"value": bool(allowed)}
+                else:
+                    ref = str(node.ref["ref"]) if isinstance(node.ref, dict) and isinstance(node.ref.get("ref"), str) else ""
+                    value = self._resolver().reference(ref)
+                    if node.fields:
+                        output = {}
+                        for field_name, field_path in node.fields.items():
+                            current = value
+                            for segment in field_path.split("."):
+                                if isinstance(current, dict) and segment in current:
+                                    current = current[segment]
+                                elif isinstance(current, list) and segment.isdigit() and int(segment) < len(current):
+                                    current = current[int(segment)]
+                                else:
+                                    raise WorkflowError(f"break node failed: field {field_name} path '{field_path}' is unavailable")
+                            output[field_name] = current
+                    else:
+                        output = value
+                self.outputs[node_id] = output
+        except Exception as exc:
+            error = str(exc)
+            if self._data_node_last_event.get(node_id) != ("failed", error):
+                self._data_node_last_event[node_id] = ("failed", error)
+                self._notify_start(node)
+                self._record_node(
+                    node,
+                    _Outcome(
+                        ActionStatus.FAILED,
+                        error=error,
+                        category="condition" if node.type == "bool_judge" else "break",
+                    ),
+                    started_perf,
+                    started_at,
+                )
+            raise
+        finally:
+            evaluating.remove(node_id)
+            if not evaluating:
+                del self._runtime_local.evaluating_data_nodes
+        if self._data_node_last_event.get(node_id) != ("succeeded", output):
+            self._data_node_last_event[node_id] = ("succeeded", output)
+            self._notify_start(node)
+            self._record_node(node, _Outcome(ActionStatus.SUCCEEDED, output=output), started_perf, started_at)
 
     def _run_node(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         local = {name: definition for name, definition in self.workflow.raw.get("variables", {}).items() if definition.get("owner") == node_id}
@@ -177,25 +277,23 @@ class WorkflowEngine:
             self._steps += 1
             self._current_step = node_id
         node = self.compiled.node_map[node_id]
+        if node.type in PURE_DATA_NODE_TYPES:
+            # 老文档仍可能把值卡片挂进执行树：走到这里就当成「按需求值」，
+            # 失败记成这条路径上的失败结果，而不是把异常抛穿整棵树。
+            try:
+                self._evaluate_data_node(node.id)
+            except Exception as exc:
+                return _Outcome(
+                    ActionStatus.FAILED,
+                    error=str(exc),
+                    category="condition" if node.type == "bool_judge" else "break",
+                )
+            with self._lock:
+                output = self.outputs.get(node.id)
+            return _Outcome(ActionStatus.SUCCEEDED, output=output)
         started_perf = time.perf_counter()
         started_at = time.time()
         self._notify_start(node)
-
-        for decorator in node.decorators:
-            if decorator.type != "condition":
-                continue
-            try:
-                with self._lock:
-                    resolver = self._resolver()
-                allowed = resolver.condition(decorator.expression)
-            except Exception as exc:
-                outcome = _Outcome(ActionStatus.FAILED, error=f"condition decorator failed: {exc}", category="condition")
-                self._record_node(node, outcome, started_perf, started_at, decorator="condition")
-                return outcome
-            if not allowed:
-                outcome = _Outcome(ActionStatus.FAILED, error="condition decorator rejected branch", category="condition")
-                self._record_node(node, outcome, started_perf, started_at, decorator="condition")
-                return outcome
 
         cooldown = self._decorator(node, "cooldown")
         if cooldown is not None:
@@ -307,6 +405,30 @@ class WorkflowEngine:
         return outcome
 
     def _run_core(self, node: WorkflowNode, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
+        if node.type == "condition":
+            # 判断节点：求值一次，然后走「真口」或「假口」的那条分支（每口最多一个子节点）。
+            # - 一个分支都没接 = 纯判断：成立成功、不成立失败（可当作叶子放进 Selector）；
+            # - 接了分支但该口空着 = 这条路径没有内容，按失败返回，交给父节点决定
+            #   （放在 Selector 里就是「这一支不命中」）。
+            try:
+                with self._lock:
+                    allowed = self._resolver().condition(node.expression)
+            except Exception as exc:
+                return _Outcome(ActionStatus.FAILED, error=f"condition node failed: {exc}", category="condition")
+            port = "true" if allowed else "false"
+            branch = _condition_branch(node, port)
+            if branch is not None:
+                return self._run_node(branch, deadline, branch_cancel)
+            if not node.children:
+                if allowed:
+                    return _Outcome(ActionStatus.SUCCEEDED)
+                return _Outcome(ActionStatus.FAILED, error="condition node evaluated to false", category="condition")
+            return _Outcome(ActionStatus.FAILED, error=f"condition node has no {'true' if allowed else 'false'} branch", category="condition")
+        if node.type == "bool_judge" or node.type == "break":
+            # 值卡片不会走到这里：`_run_node_scoped` 在进 `_run_core` 之前就把它们交给
+            # `_evaluate_data_node`（按需求值、带环检测、记步骤事件）。这里再写一份
+            # 就会变成两套语义，所以取值逻辑只有那一份。
+            raise WorkflowError(f"pure data node {node.id} must be evaluated on demand")
         if node.type == "task":
             return self._run_task(node, deadline, branch_cancel)
         if node.type == "root":
@@ -619,7 +741,7 @@ class WorkflowEngine:
             event["decorator"] = decorator
         if node.is_task:
             event["params"] = self._event_params(node)
-        if outcome.output is not None and node.is_task:
+        if outcome.output is not None and node.produces_output:
             event["output"] = _summary(outcome.output)
         if outcome.error:
             event["error"] = outcome.error

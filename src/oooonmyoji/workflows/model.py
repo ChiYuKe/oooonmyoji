@@ -7,16 +7,23 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "task")
-DECORATOR_TYPES = ("condition", "cooldown", "timeout", "retry", "repeat", "do_once")
+NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "condition", "bool_judge", "break", "task")
+DECORATOR_TYPES = ("cooldown", "timeout", "retry", "repeat", "do_once")
 PARALLEL_FINISH_MODES = ("abort_background", "wait_for_background")
 INSTANCE_PARALLEL_WAIT_MODES = ("all", "any")
+
+#: 布尔判断卡片（`bool_judge`）执行成功后的输出形状：引用写作 `nodes.<id>.output.value`。
+BOOL_JUDGE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"value": {"type": "boolean"}},
+    "required": ["value"],
+    "additionalProperties": False,
+}
 
 
 @dataclass(frozen=True)
 class BehaviorDecorator:
     type: str
-    expression: Any = None
     seconds: Any = None
     attempts: Any = 1
     delay_seconds: Any = 0.0
@@ -50,12 +57,21 @@ class WorkflowNode:
     conditions: tuple[Any, ...] = ()
     max_iterations: int = 100
     expression: Any = None
+    ref: Any = None
+    fields: dict[str, str] = field(default_factory=dict)
     cases: tuple[tuple[Any, str], ...] = ()
     default_child: str | None = None
+    ports: tuple[str, ...] = ()
 
     @property
     def is_task(self) -> bool:
         return self.type == "task"
+
+    @property
+    def produces_output(self) -> bool:
+        """执行成功后会登记 ``nodes.<id>.output`` 的节点：Task、布尔判断卡片与拆分卡片。"""
+
+        return self.type in {"task", "bool_judge", "break"}
 
 
 @dataclass(frozen=True)
@@ -105,6 +121,7 @@ class WorkflowSpec:
 
 
 __all__ = [
+    "BOOL_JUDGE_OUTPUT_SCHEMA",
     "DECORATOR_TYPES",
     "INSTANCE_PARALLEL_WAIT_MODES",
     "InstanceParallelRun",

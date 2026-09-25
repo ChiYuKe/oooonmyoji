@@ -15,12 +15,11 @@ from src.oooonmyoji.runtime.supervisor import Supervisor, _Group
 from src.oooonmyoji.devices.lock import InstanceLock
 from src.oooonmyoji.workflows.model import InstanceParallelRun, WorkflowNode, WorkflowSpec
 
+from .workflow_files import write_workflow
 
-def _write_config(path: Path, *, serial: str = "not-connected") -> Path:
-    (path / "config").mkdir()
-    (path / "workflows").mkdir()
-    (path / "plugins" / "actions").mkdir(parents=True)
-    (path / "workflows" / "simple.json").write_text(json.dumps({
+
+def _simple_document() -> dict[str, object]:
+    return {
         "schema_version": 4,
         "id": "simple",
         "version": "3.0.0",
@@ -32,7 +31,14 @@ def _write_config(path: Path, *, serial: str = "not-connected") -> Path:
             {"id": "root", "type": "root", "children": ["capture"]},
             {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
         ],
-    }), encoding="utf-8")
+    }
+
+
+def _write_config(path: Path, *, serial: str = "not-connected") -> Path:
+    (path / "config").mkdir()
+    (path / "workflows").mkdir()
+    (path / "plugins" / "actions").mkdir(parents=True)
+    write_workflow(path / "workflows" / "simple.owf", _simple_document())
     config_path = path / "config" / "config.json"
     config_path.write_text(json.dumps({
         "schema_version": 2,
@@ -334,19 +340,7 @@ def test_supervisor_runs_two_real_adb_instances(tmp_path: Path) -> None:
     (tmp_path / "config").mkdir()
     (tmp_path / "workflows").mkdir()
     (tmp_path / "plugins" / "actions").mkdir(parents=True)
-    (tmp_path / "workflows" / "simple.json").write_text(json.dumps({
-        "schema_version": 4,
-        "id": "simple",
-        "version": "3.0.0",
-        "resolution": [1920, 1080],
-        "root": "root",
-        "inputs": {},
-        "variables": {},
-        "nodes": [
-            {"id": "root", "type": "root", "children": ["capture"]},
-            {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
-        ],
-    }), encoding="utf-8")
+    write_workflow(tmp_path / "workflows" / "simple.owf", _simple_document())
     config_path = tmp_path / "config" / "config.json"
     config_path.write_text(json.dumps({
         "schema_version": 2,

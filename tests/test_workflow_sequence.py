@@ -11,6 +11,8 @@ from src.oooonmyoji.devices.protocol import DeviceFrame
 from src.oooonmyoji.runtime import runner as runner_module
 from src.oooonmyoji.runtime.runner import TaskRunner
 
+from .workflow_files import write_workflow
+
 
 class StubDevice:
     width = 1920
@@ -52,7 +54,7 @@ def _write(path: Path, workflow_id: str, children: list[str]) -> None:
             *[definitions[child] for child in children],
         ],
     }
-    (path / "workflows" / f"{workflow_id}.json").write_text(json.dumps(payload), encoding="utf-8")
+    write_workflow(path / "workflows" / f"{workflow_id}.owf", payload)
 
 
 def _run(config: object, workflow_id: str) -> object:

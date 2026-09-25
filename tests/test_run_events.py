@@ -11,6 +11,7 @@ from src.oooonmyoji.config.model import JobConfig
 from src.oooonmyoji.devices.protocol import DeviceFrame
 from src.oooonmyoji.runtime import runner as runner_module
 from src.oooonmyoji.runtime.runner import TaskRunner
+from tests.workflow_files import write_workflow
 
 TINY_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -40,7 +41,7 @@ def _write_config(
     (path / "config").mkdir()
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
-    (path / "workflows" / "wf.json").write_text(json.dumps({
+    write_workflow(path / "workflows" / "wf.owf", {
         "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
@@ -52,7 +53,7 @@ def _write_config(
             {"id": "root", "type": "root", "children": ["cap"]},
             {"id": "cap", "type": "task", "action": "core.capture", "params": {}},
         ],
-    }), encoding="utf-8")
+    })
     config_path = path / "config" / "config.json"
     config = {
         "schema_version": 2,
@@ -208,9 +209,8 @@ def test_run_uses_run_specific_events_file_by_default(tmp_path: Path, monkeypatc
 
 def test_run_record_checkpoints_are_batched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = _write_config(tmp_path)
-    workflow_path = tmp_path / "workflows" / "wf.json"
     task_ids = [f"log-{index}" for index in range(30)]
-    workflow_path.write_text(json.dumps({
+    write_workflow(tmp_path / "workflows" / "wf.owf", {
         "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
@@ -226,7 +226,7 @@ def test_run_record_checkpoints_are_batched(tmp_path: Path, monkeypatch: pytest.
                 for task_id in task_ids
             ],
         ],
-    }), encoding="utf-8")
+    })
     config = load_config(config_path)
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     original_write = runner_module.AtomicJsonStore.write
@@ -261,7 +261,7 @@ def test_recovered_selector_branch_does_not_save_failure_frames(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _write_config(tmp_path)
-    (tmp_path / "workflows" / "wf.json").write_text(json.dumps({
+    write_workflow(tmp_path / "workflows" / "wf.owf", {
         "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
@@ -277,7 +277,7 @@ def test_recovered_selector_branch_does_not_save_failure_frames(
             {"id": "reject", "type": "task", "action": "core.assert", "params": {"value": False}},
             {"id": "fallback", "type": "task", "action": "core.log", "params": {"message": "recovered"}},
         ],
-    }), encoding="utf-8")
+    })
     config = load_config(config_path)
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     job = JobConfig(
@@ -301,7 +301,7 @@ def test_failed_run_saves_one_final_failure_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _write_config(tmp_path)
-    (tmp_path / "workflows" / "wf.json").write_text(json.dumps({
+    write_workflow(tmp_path / "workflows" / "wf.owf", {
         "schema_version": 4,
         "id": "wf",
         "version": "3.0.0",
@@ -315,7 +315,7 @@ def test_failed_run_saves_one_final_failure_frame(
             {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
             {"id": "reject", "type": "task", "action": "core.assert", "params": {"value": False}},
         ],
-    }), encoding="utf-8")
+    })
     config = load_config(config_path)
     monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
     job = JobConfig(

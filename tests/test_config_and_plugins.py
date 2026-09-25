@@ -20,6 +20,7 @@ from src.oooonmyoji.actions.manifest import (
 from src.oooonmyoji.config import load_config
 from src.oooonmyoji.exceptions import ConfigError
 from src.oooonmyoji.workflows.loader import WorkflowLoader
+from tests.workflow_files import write_workflow
 
 
 def _write_config(path: Path, *, tasks: list[dict] | None = None) -> Path:
@@ -27,7 +28,7 @@ def _write_config(path: Path, *, tasks: list[dict] | None = None) -> Path:
     config_dir.mkdir()
     (path / "workflows").mkdir()
     (path / "plugins" / "actions").mkdir(parents=True)
-    (path / "workflows" / "simple.json").write_text(json.dumps({
+    write_workflow(path / "workflows" / "simple.owf", {
         "schema_version": 4,
         "id": "simple",
         "version": "3.0.0",
@@ -39,7 +40,7 @@ def _write_config(path: Path, *, tasks: list[dict] | None = None) -> Path:
             {"id": "root", "type": "root", "children": ["capture"]},
             {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
         ],
-    }), encoding="utf-8")
+    })
     config_path = config_dir / "config.json"
     config_path.write_text(json.dumps({
         "schema_version": 2,
@@ -75,7 +76,7 @@ def test_workflow_loader_reuses_snapshot_until_file_changes(tmp_path: Path, monk
     config = load_config(_write_config(tmp_path))
     registry = build_action_registry(config.action_dir)
     loader = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir)
-    workflow_path = config.workflow_dir / "simple.json"
+    workflow_path = config.workflow_dir / "simple.owf"
 
     first = loader.load("simple")
     second = loader.load("simple")
@@ -376,7 +377,7 @@ def test_promoted_input_definitions_pass_python_validation(tmp_path: Path) -> No
     """桌面「提升为变量」写出的定义（结构字段 + 字面量默认值）必须能被 Python 侧编译并绑定。"""
     config = load_config(_write_config(tmp_path))
     registry = build_action_registry(config.action_dir)
-    workflow_path = config.workflow_dir / "simple.json"
+    workflow_path = config.workflow_dir / "simple.owf"
     body: dict[str, object] = {
         "schema_version": 4,
         "id": "simple",
@@ -401,7 +402,7 @@ def test_promoted_input_definitions_pass_python_validation(tmp_path: Path) -> No
             }},
         ],
     }
-    workflow_path.write_text(json.dumps(body), encoding="utf-8")
+    write_workflow(workflow_path, body)
     workflow = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")
     properties = workflow.input_schema["properties"]
     assert properties["随机间隔_秒"]["items"] == {"type": "number", "minimum": 0}
@@ -424,7 +425,7 @@ def test_workflow_variables_accept_new_parameter_types(tmp_path: Path) -> None:
     """变量定义与动作参数走同一套规则：新类型能编译进变量 schema 并被任务引用。"""
     config = load_config(_write_config(tmp_path))
     registry = build_action_registry(config.action_dir)
-    workflow_path = config.workflow_dir / "simple.json"
+    workflow_path = config.workflow_dir / "simple.owf"
     body: dict[str, object] = {
         "schema_version": 4,
         "id": "simple",
@@ -446,7 +447,7 @@ def test_workflow_variables_accept_new_parameter_types(tmp_path: Path) -> None:
             {"id": "sleep", "type": "task", "action": "core.sleep", "params": {"seconds": 1.5}},
         ],
     }
-    workflow_path.write_text(json.dumps(body), encoding="utf-8")
+    write_workflow(workflow_path, body)
     workflow = WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")
     assert workflow.variable_defaults == {
         "目标点": {"x": 960, "y": 540},
@@ -466,6 +467,6 @@ def test_workflow_variables_accept_new_parameter_types(tmp_path: Path) -> None:
     variables = body["variables"]
     assert isinstance(variables, dict)
     variables["挑战模式"] = {"type": "enum", "default": "安全"}
-    workflow_path.write_text(json.dumps(body), encoding="utf-8")
+    write_workflow(workflow_path, body)
     with pytest.raises(ConfigError, match="enum type requires a non-empty enum list"):
         WorkflowLoader(config.workflow_dir, registry, project_root=config.root_dir).load("simple")

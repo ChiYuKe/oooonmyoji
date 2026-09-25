@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -13,10 +14,13 @@ from src.oooonmyoji.actions import Action, ActionRegistry, ActionResult, ActionS
 from src.oooonmyoji.actions.manifest import ActionDefinition, ParameterDefinition
 from src.oooonmyoji.exceptions import CancelledError, ConfigError
 from src.oooonmyoji.workflows.compiler import compile_workflow
+from src.oooonmyoji.workflows.dsl import WORKFLOW_SUFFIX, DslError, parse_document
 from src.oooonmyoji.workflows.engine import WorkflowEngine
 from src.oooonmyoji.workflows.loader import WorkflowLoader
 from src.oooonmyoji.workflows.resolver import ReferenceResolver
 from src.oooonmyoji.workflows.validator import validate_workflow
+
+from .workflow_files import write_workflow
 
 
 class Context:
@@ -49,6 +53,13 @@ class EchoAction(Action):
 
     def execute(self, context: Context, arguments: dict[str, Any]) -> ActionResult:
         return ActionResult.succeeded({"value": arguments.get("value")})
+
+
+class PassThroughAction(Action):
+    name = "test.passthrough"
+
+    def execute(self, context: Context, arguments: dict[str, Any]) -> ActionResult:
+        return ActionResult.succeeded(arguments)
 
 
 class RetryAction(Action):
@@ -235,11 +246,11 @@ def test_validator_and_compiler_enforce_tree_invariants() -> None:
 
 def test_all_workflow_scripts_have_catalog_descriptions() -> None:
     project_root = Path(__file__).resolve().parents[1]
-    workflow_files = sorted((project_root / "workflows").rglob("*.json"))
+    workflow_files = sorted((project_root / "workflows").rglob(f"*{WORKFLOW_SUFFIX}"))
 
     missing = []
     for workflow_path in workflow_files:
-        raw = json.loads(workflow_path.read_text(encoding="utf-8"))
+        raw = parse_document(workflow_path.read_text(encoding="utf-8"), path=workflow_path.name)
         if not isinstance(raw.get("description"), str) or not raw["description"].strip():
             missing.append(workflow_path.relative_to(project_root).as_posix())
 
@@ -255,17 +266,17 @@ def _resolve_workflow_reference(project_root: Path, reference: str) -> Path | No
     ref = str(reference or "").replace("\\", "/").strip()
     if not ref:
         return None
-    with_ext = ref if ref.lower().endswith(".json") else f"{ref}.json"
-    without_ext = ref[:-5] if ref.lower().endswith(".json") else ref
-    for path in sorted((project_root / "workflows").rglob("*.json")):
+    with_ext = ref if ref.lower().endswith(WORKFLOW_SUFFIX) else f"{ref}{WORKFLOW_SUFFIX}"
+    without_ext = ref[: -len(WORKFLOW_SUFFIX)] if ref.lower().endswith(WORKFLOW_SUFFIX) else ref
+    for path in sorted((project_root / "workflows").rglob(f"*{WORKFLOW_SUFFIX}")):
         rel = path.relative_to(project_root).as_posix()
         rootless = re.sub(r"^workflows/", "", rel, flags=re.IGNORECASE)
         for name in (rel, rootless, path.name):
             if ref in (name, without_ext) or with_ext == name:
                 return path
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            raw = parse_document(path.read_text(encoding="utf-8"), path=path.name)
+        except (OSError, UnicodeDecodeError, DslError):
             continue
         if isinstance(raw, dict) and raw.get("id") == ref:
             return path
@@ -280,8 +291,8 @@ def test_all_workflow_references_resolve_to_existing_files() -> None:
     """
     project_root = Path(__file__).resolve().parents[1]
     dangling: list[str] = []
-    for workflow_path in sorted((project_root / "workflows").rglob("*.json")):
-        raw = json.loads(workflow_path.read_text(encoding="utf-8"))
+    for workflow_path in sorted((project_root / "workflows").rglob(f"*{WORKFLOW_SUFFIX}")):
+        raw = parse_document(workflow_path.read_text(encoding="utf-8"), path=workflow_path.name)
         nodes = raw.get("nodes") if isinstance(raw, dict) else None
         if not isinstance(nodes, list):
             continue
@@ -334,8 +345,8 @@ def test_validator_enforces_simple_parallel_shape_and_decorators() -> None:
 def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindings() -> None:
     actions = registry(action_spec(EchoAction()))
     # 子工作流的输入键由编辑器生成（例如 v_<hash>），按实际声明取，避免改一次数据就红。
-    child_workflow = Path(__file__).resolve().parents[1] / "workflows" / "活动副本.json"
-    child_inputs = list(json.loads(child_workflow.read_text(encoding="utf-8")).get("inputs", {}))
+    child_workflow = Path(__file__).resolve().parents[1] / "workflows" / f"活动副本{WORKFLOW_SUFFIX}"
+    child_inputs = list(parse_document(child_workflow.read_text(encoding="utf-8"), path=child_workflow.name).get("inputs", {}))
     assert child_inputs, "活动副本应当至少声明一个输入"
     child_input = child_inputs[0]
     valid = tree([
@@ -471,10 +482,14 @@ def test_bindings_are_typed_and_use_inputs_and_nodes_namespaces() -> None:
         {"id": "choice", "type": "selector", "children": ["producer", "fallback"]},
         task("producer", "test.echo", {"value": 1}),
         task("fallback", "test.echo", {"value": 2}),
-        task("check", "test.echo", decorators=[{
+        {
+            "id": "check",
             "type": "condition",
             "expression": {"exists": {"ref": "nodes.producer.output.value"}},
-        }]),
+            "children": ["act"],
+            "ports": ["true"],
+        },
+        task("act", "test.echo"),
     ], "outer")
     validate(optional_selector_output, actions)
 
@@ -504,8 +519,15 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     raw = tree([
         {"id": "seq", "type": "sequence", "children": ["first", "selector"]},
         task("first", "test.echo", {"value": {"ref": "inputs.value"}}),
-        {"id": "selector", "type": "selector", "children": ["blocked", "retry"]},
-        task("blocked", "test.echo", decorators=[{"type": "condition", "expression": {"eq": [{"ref": "inputs.enabled"}, True]}}]),
+        {"id": "selector", "type": "selector", "children": ["judge", "retry"]},
+        {
+            "id": "judge",
+            "type": "condition",
+            "expression": {"eq": [{"ref": "inputs.enabled"}, True]},
+            "children": ["blocked"],
+            "ports": ["true"],
+        },
+        task("blocked", "test.echo"),
         task("retry", "test.retry", decorators=[{"type": "retry", "attempts": 2}]),
     ], "seq", inputs={"value": {"type": "any"}, "enabled": {"type": "boolean"}})
     started: list[dict[str, Any]] = []
@@ -521,7 +543,9 @@ def test_engine_sequence_selector_condition_retry_and_references() -> None:
     assert next(item for item in started if item["step_id"] == "first")["params"] == {"value": "ok"}
     assert next(item for item in result.step_history if item["step_id"] == "first")["params"] == {"value": "ok"}
     assert retry_action.calls == 2
-    assert next(item for item in result.step_history if item["step_id"] == "blocked")["decorator"] == "condition"
+    # 判断节点不成立 → 由 Selector 回收成 branch_miss，blocked 一步都没跑。
+    assert next(item for item in result.step_history if item["step_id"] == "judge")["status"] == "branch_miss"
+    assert not any(item["step_id"] == "blocked" for item in result.step_history)
     assert next(item for item in result.step_history if item["step_id"] == "retry")["attempts"] == 2
     assert not ReferenceResolver({}, {}).condition({"exists": {"ref": "inputs.missing"}})
 
@@ -593,8 +617,6 @@ def test_engine_do_once_runs_action_only_once_across_repeat_iterations() -> None
     ("retry", "attempts", 2, "integer"),
     ("retry", "delay_seconds", 0, "number"),
     ("do_once", "reset_on_failure", False, "boolean"),
-    ("condition", "expression", True, "boolean"),
-    ("condition", "expression", {"eq": [1, 1]}, "object"),
 ])
 def test_all_decorator_parameters_accept_public_inputs(kind, key, value, input_type):
     actions = registry(action_spec(EchoAction()))
@@ -664,14 +686,16 @@ def test_engine_repeat_runtime_context_selects_the_final_iteration() -> None:
             "id": "loop",
             "type": "selector",
             "decorators": [{"type": "repeat", "count": {"ref": "inputs.rounds"}}],
-            "children": ["final", "ordinary"],
+            "children": ["judge", "ordinary"],
         },
-        task(
-            "final",
-            "test.record",
-            params={"value": "finish"},
-            decorators=[{"type": "condition", "expression": {"eq": [{"ref": "runtime.repeat.final"}, True]}}],
-        ),
+        {
+            "id": "judge",
+            "type": "condition",
+            "expression": {"eq": [{"ref": "runtime.repeat.final"}, True]},
+            "children": ["final"],
+            "ports": ["true"],
+        },
+        task("final", "test.record", params={"value": "finish"}),
         task("ordinary", "test.record", params={"value": {"ref": "runtime.repeat.index"}}),
     ], "loop")
     raw["inputs"] = {"rounds": {"type": "integer", "default": 1, "min": 1}}
@@ -779,6 +803,508 @@ def test_engine_sequence_stops_and_selector_falls_back() -> None:
     assert "never" not in [event["step_id"] for event in result.step_history]
 
 
+def guarded_route() -> dict[str, Any]:
+    """用户图里最常见的写法：Selector 的每一支以判断节点(condition)开头。"""
+
+    raw = tree([
+        {"id": "route", "type": "selector", "children": ["guarded", "fallback"]},
+        {"id": "guarded", "type": "sequence", "children": ["judge", "act"]},
+        {"id": "judge", "type": "condition", "expression": {"eq": [{"ref": "variables.state"}, "settlement"]}},
+        task("act", "test.count"),
+        task("fallback", "test.echo"),
+    ], "route")
+    raw["variables"] = {"state": {"type": "string", "default": "settlement"}}
+    return raw
+
+
+def test_condition_node_is_a_leaf_judgement() -> None:
+    guarded = CountingAction()
+    guarded.name = "test.count"
+    fallback = CountingAction()
+    fallback.name = "test.echo"
+    actions = registry(action_spec(guarded), action_spec(fallback))
+    raw = guarded_route()
+
+    raw["variables"] = {"state": {"type": "string", "default": "settlement"}}
+    matched = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert matched.status == ActionStatus.SUCCEEDED
+    assert guarded.calls == 1
+    assert fallback.calls == 0
+    assert next(event for event in matched.step_history if event["step_id"] == "judge")["status"] == ActionStatus.SUCCEEDED.value
+
+    raw["variables"] = {"state": {"type": "string", "default": "raid"}}
+    missed = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert missed.status == ActionStatus.SUCCEEDED
+    assert guarded.calls == 1
+    assert fallback.calls == 1
+    # 判断不成立时由 Selector 回收成 branch_miss（没有假口分支就按失败返回）。
+    judge_events = [event for event in missed.step_history if event["step_id"] == "judge"]
+    assert judge_events[0]["status"] == "branch_miss"
+    assert judge_events[0]["original_status"] == ActionStatus.FAILED.value
+
+
+def test_condition_node_branch_ports() -> None:
+    """判断节点的真/假口：各接一支就走对应那条，另一条不执行。"""
+
+    on_true = CountingAction()
+    on_true.name = "test.count"
+    on_false = CountingAction()
+    on_false.name = "test.echo"
+    actions = registry(action_spec(on_true), action_spec(on_false))
+    raw = tree([
+        {"id": "judge", "type": "condition", "expression": {"eq": [{"ref": "variables.state"}, "settlement"]},
+         "children": ["on_true", "on_false"], "ports": ["true", "false"]},
+        task("on_true", "test.count"),
+        task("on_false", "test.echo"),
+    ], "judge")
+    raw["variables"] = {"state": {"type": "string", "default": "settlement"}}
+
+    matched = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert matched.status == ActionStatus.SUCCEEDED
+    assert on_true.calls == 1
+    assert on_false.calls == 0
+
+    raw["variables"] = {"state": {"type": "string", "default": "raid"}}
+    missed = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert missed.status == ActionStatus.SUCCEEDED
+    assert on_true.calls == 1
+    assert on_false.calls == 1
+
+
+def test_condition_node_missing_branch_falls_through_selector() -> None:
+    """该口空着 = 这条路径没有内容，按失败返回，交给父 Selector 继续试下一支。"""
+
+    guarded = CountingAction()
+    guarded.name = "test.count"
+    fallback = CountingAction()
+    fallback.name = "test.echo"
+    actions = registry(action_spec(guarded), action_spec(fallback))
+    raw = tree([
+        {"id": "route", "type": "selector", "children": ["judge", "fallback"]},
+        {"id": "judge", "type": "condition", "expression": {"eq": [{"ref": "variables.state"}, "settlement"]},
+         "children": ["act"]},
+        task("act", "test.count"),
+        task("fallback", "test.echo"),
+    ], "route")
+    # 没写 ports 时按位置推导：唯一的分支挂在真口。
+    raw["variables"] = {"state": {"type": "string", "default": "settlement"}}
+    matched = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert matched.status == ActionStatus.SUCCEEDED
+    assert guarded.calls == 1
+    assert fallback.calls == 0
+
+    raw["variables"] = {"state": {"type": "string", "default": "raid"}}
+    missed = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert missed.status == ActionStatus.SUCCEEDED
+    assert guarded.calls == 1
+    assert fallback.calls == 1
+    judge_events = [event for event in missed.step_history if event["step_id"] == "judge"]
+    assert judge_events[0]["status"] == "branch_miss"
+    assert "no false branch" in str(judge_events[0]["error"])
+
+    # 显式把分支挂在假口：条件成立时没有真分支，同样按失败返回。
+    only_false = tree([
+        {"id": "route", "type": "selector", "children": ["judge", "fallback"]},
+        {"id": "judge", "type": "condition", "expression": {"eq": [{"ref": "variables.state"}, "settlement"]},
+         "children": ["act"], "ports": ["false"]},
+        task("act", "test.count"),
+        task("fallback", "test.echo"),
+    ], "route")
+    only_false["variables"] = {"state": {"type": "string", "default": "settlement"}}
+    true_side = WorkflowEngine(validate(only_false, actions), actions, Context(), {}).run()
+    assert true_side.status == ActionStatus.SUCCEEDED
+    assert guarded.calls == 1
+    assert fallback.calls == 2
+
+    only_false["variables"] = {"state": {"type": "string", "default": "raid"}}
+    false_side = WorkflowEngine(validate(only_false, actions), actions, Context(), {}).run()
+    assert false_side.status == ActionStatus.SUCCEEDED
+    assert guarded.calls == 2
+    assert fallback.calls == 2
+
+
+def test_condition_node_validation_rules() -> None:
+    actions = registry(action_spec(EchoAction()))
+
+    with pytest.raises(ConfigError, match="requires expression"):
+        validate(tree([{"id": "judge", "type": "condition"}], "judge"), actions)
+
+    with_action = tree([{"id": "judge", "type": "condition", "expression": True, "action": "test.echo"}], "judge")
+    with pytest.raises(ConfigError, match="condition cannot define"):
+        validate(with_action, actions)
+
+    with_params = tree([{"id": "judge", "type": "condition", "expression": True, "params": {}}], "judge")
+    with pytest.raises(ConfigError, match="condition cannot define"):
+        validate(with_params, actions)
+
+    over_two = tree([
+        {"id": "judge", "type": "condition", "expression": True, "children": ["a", "b", "c"]},
+        task("a", "test.echo"),
+        task("b", "test.echo"),
+        task("c", "test.echo"),
+    ], "judge")
+    with pytest.raises(ConfigError, match="at most two branches"):
+        validate(over_two, actions)
+
+    mismatch = tree([
+        {"id": "judge", "type": "condition", "expression": True, "children": ["a"], "ports": ["true", "false"]},
+        task("a", "test.echo"),
+    ], "judge")
+    with pytest.raises(ConfigError, match="ports must match"):
+        validate(mismatch, actions)
+
+    duplicated = tree([
+        {"id": "judge", "type": "condition", "expression": True, "children": ["a", "b"], "ports": ["true", "true"]},
+        task("a", "test.echo"),
+        task("b", "test.echo"),
+    ], "judge")
+    # 重复口位由 JSON Schema 的 uniqueItems 拦下（validator 里还有一道防御性检查）。
+    with pytest.raises(ConfigError, match="non-unique elements"):
+        validate(duplicated, actions)
+
+    # 分支里可以用前面兄弟节点的输出（判断节点自己排在被引用节点之后）。
+    output_actions = registry(action_spec(EchoAction(), output_schema={"type": "object", "properties": {"value": {"type": "integer"}}}))
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce", "judge"]},
+        task("produce", "test.echo", params={"value": 1}),
+        {"id": "judge", "type": "condition", "expression": {"gt": [{"ref": "nodes.produce.output.value"}, 0]},
+         "children": ["act"], "ports": ["true"]},
+        task("act", "test.echo", params={"value": 2}),
+    ], "seq")
+    parsed = validate(raw, output_actions)
+    judge = next(node for node in parsed.nodes if node.id == "judge")
+    assert judge.ports == ("true",)
+    assert judge.children == ("act",)
+
+
+def bool_judge_route() -> dict[str, Any]:
+    """布尔判断卡片的典型用法：卡片算出一个 bool，判断节点引用它分支。"""
+
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["route"]},
+        {"id": "on_settlement", "type": "bool_judge", "name": "是否在结算页",
+         "expression": {"eq": [{"ref": "variables.state"}, "settlement"]}},
+        {"id": "route", "type": "condition", "expression": {"ref": "nodes.on_settlement.output.value"},
+         "children": ["act", "skip"], "ports": ["true", "false"]},
+        task("act", "test.count"),
+        task("skip", "test.echo"),
+    ], "seq")
+    raw["variables"] = {"state": {"type": "string", "default": "settlement"}}
+    return raw
+
+
+def test_bool_judge_card_is_a_reusable_boolean_value() -> None:
+    """布尔判断卡片：求值一次、总是成功，并把结果登记成 `nodes.<id>.output.value`。"""
+
+    on_true = CountingAction()
+    on_true.name = "test.count"
+    on_false = CountingAction()
+    on_false.name = "test.echo"
+    actions = registry(action_spec(on_true), action_spec(on_false))
+
+    matched = WorkflowEngine(validate(bool_judge_route(), actions), actions, Context(), {}).run()
+    assert matched.status == ActionStatus.SUCCEEDED
+    assert on_true.calls == 1
+    assert on_false.calls == 0
+    card_event = next(event for event in matched.step_history if event["step_id"] == "on_settlement")
+    assert card_event["status"] == ActionStatus.SUCCEEDED.value
+    assert card_event["node_kind"] == "bool_judge"
+    assert card_event["output"] == {"value": True}
+    assert matched.output["on_settlement"] == {"value": True}
+
+    raw = bool_judge_route()
+    raw["variables"] = {"state": {"type": "string", "default": "raid"}}
+    missed = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert missed.status == ActionStatus.SUCCEEDED
+    assert on_true.calls == 1
+    assert on_false.calls == 1
+    card_event = next(event for event in missed.step_history if event["step_id"] == "on_settlement")
+    assert card_event["output"] == {"value": False}
+
+
+def test_bool_judge_card_validation_rules() -> None:
+    actions = registry(action_spec(EchoAction()))
+
+    with pytest.raises(ConfigError, match="bool_judge requires expression"):
+        validate(tree([{"id": "card", "type": "bool_judge"}], "card"), actions)
+
+    with_children = tree([
+        {"id": "card", "type": "bool_judge", "expression": True, "children": ["a"]},
+        task("a", "test.echo"),
+    ], "card")
+    with pytest.raises(ConfigError, match="bool_judge cannot define"):
+        validate(with_children, actions)
+
+    with_action = tree([{"id": "card", "type": "bool_judge", "expression": True, "action": "test.echo"}], "card")
+    with pytest.raises(ConfigError, match="bool_judge cannot define"):
+        validate(with_action, actions)
+
+    with_ports = tree([{"id": "card", "type": "bool_judge", "expression": True, "ports": ["true"]}], "card")
+    with pytest.raises(ConfigError, match="not valid for bool_judge"):
+        validate(with_ports, actions)
+
+    # 卡片是叶子，不能当局部作用域的 owner。
+    owner = tree([{"id": "card", "type": "bool_judge", "expression": True}], "card")
+    owner["variables"] = {"local": {"type": "integer", "default": 1, "owner": "card"}}
+    with pytest.raises(ConfigError, match="must name a composite node"):
+        validate(owner, actions)
+
+    # 引用必须带上输出字段。值卡片不在执行树里：它自己的依赖在「使用它的执行点」上判定。
+    typed = registry(action_spec(EchoAction(), output_schema={"type": "object", "properties": {"value": {"type": "boolean"}}}))
+    good = tree([
+        {"id": "seq", "type": "sequence", "children": ["consume"]},
+        {"id": "card", "type": "bool_judge", "expression": True},
+        task("consume", "test.echo", params={"value": {"ref": "nodes.card.output.value"}}),
+    ], "seq")
+    assert validate(good, typed).root == "root"
+
+    # 卡片依赖的是排在使用者后面的任务输出 → 使用点拿不到，仍然要报错。
+    too_early = tree([
+        {"id": "seq", "type": "sequence", "children": ["consume", "produce"]},
+        {"id": "card", "type": "bool_judge", "expression": {"eq": [{"ref": "nodes.produce.output.value"}, True]}},
+        task("produce", "test.echo", params={"value": True}),
+        task("consume", "test.echo", params={"value": {"ref": "nodes.card.output.value"}}),
+    ], "seq")
+    with pytest.raises(ConfigError, match="unavailable at this execution point"):
+        validate(too_early, typed)
+
+    missing_field = tree([
+        {"id": "seq", "type": "sequence", "children": ["consume"]},
+        {"id": "card", "type": "bool_judge", "expression": True},
+        task("consume", "test.echo", params={"value": {"ref": "nodes.card.output"}}),
+    ], "seq")
+    with pytest.raises(ConfigError, match="invalid structured reference"):
+        validate(missing_field, typed)
+
+
+def _break_source_actions() -> ActionRegistry:
+    """拆分测试用的动作：`test.passthrough` 原样返回参数（带对象/数组属性）；`test.consume` 只是消费参数。"""
+
+    consume = EchoAction()
+    consume.name = "test.consume"
+    return registry(
+        action_spec(
+            PassThroughAction(),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "properties": {
+                            "matched": {"type": "boolean"},
+                            "x": {"type": "integer"},
+                            "y": {"type": "integer"},
+                        },
+                        "additionalProperties": False,
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"name": {"type": "string"}, "score": {"type": "integer"}},
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "additionalProperties": False,
+            },
+        ),
+        action_spec(consume),
+    )
+
+
+def test_break_card_unpacks_object_and_array_outputs() -> None:
+    """拆分卡片：把一张卡片的对象/数组输出按字段拆开，登记成 `nodes.<id>.output.<字段>`。"""
+
+    actions = _break_source_actions()
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce", "consume"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}, "items": [{"name": "a", "score": 1}, {"name": "b", "score": 2}]}),
+        {"id": "unpack", "type": "break", "name": "拆开匹配结果",
+         "ref": {"ref": "nodes.produce.output.value"},
+         "fields": {"x": "x", "matched": "matched"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.unpack.output.x"}}),
+    ], "seq")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    unpack_event = next(event for event in result.step_history if event["step_id"] == "unpack")
+    assert unpack_event["node_kind"] == "break"
+    assert unpack_event["status"] == ActionStatus.SUCCEEDED.value
+    assert unpack_event["output"] == {"x": 3, "matched": True}
+    assert result.output["unpack"] == {"x": 3, "matched": True}
+    consume_event = next(event for event in result.step_history if event["step_id"] == "consume")
+    assert consume_event["output"] == {"value": 3}
+
+    # 数组按下标拆：`1.score` → 2。
+    array_raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce", "consume2"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}, "items": [{"name": "a", "score": 1}, {"name": "b", "score": 2}]}),
+        {"id": "split_items", "type": "break", "ref": {"ref": "nodes.produce.output.items"}, "fields": {"top_score": "1.score"}},
+        task("consume2", "test.consume", params={"value": {"ref": "nodes.split_items.output.top_score"}}),
+    ], "seq")
+    result2 = WorkflowEngine(validate(array_raw, actions), actions, Context(), {}).run()
+    assert result2.status == ActionStatus.SUCCEEDED
+    assert result2.output["split_items"] == {"top_score": 2}
+
+
+def test_break_card_mirrors_source_schema_without_fields() -> None:
+    """未声明 fields 时，拆分卡片整体镜像原输出，字段同名可直接引用。"""
+
+    actions = _break_source_actions()
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce", "consume"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}}),
+        {"id": "mirror", "type": "break", "ref": {"ref": "nodes.produce.output.value"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.mirror.output.y"}}),
+    ], "seq")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert result.output["mirror"] == {"matched": True, "x": 3, "y": 7}
+    consume_event = next(event for event in result.step_history if event["step_id"] == "consume")
+    assert consume_event["output"] == {"value": 7}
+
+
+def test_break_card_accepts_a_whole_node_output_ref() -> None:
+    """`nodes.<id>.output`（不带字段）运行时也要能解析：拆分卡片就是这么拿整张卡片的输出的。"""
+
+    actions = _break_source_actions()
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce", "consume"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}}),
+        {"id": "mirror", "type": "break", "ref": {"ref": "nodes.produce.output"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.mirror.output.value.y"}}),
+    ], "seq")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED, result.error
+    assert result.output["mirror"] == {"value": {"matched": True, "x": 3, "y": 7}}
+    consume_event = next(event for event in result.step_history if event["step_id"] == "consume")
+    assert consume_event["output"] == {"value": 7}
+
+
+def test_break_card_unpacks_workflow_input_tuple() -> None:
+    """拆分来源可以是工作流输入：区域 rect 是定长四元组，按下标拆成可引用的分量。"""
+
+    actions = _break_source_actions()
+    raw = tree([
+        {"id": "seq", "type": "sequence", "children": ["consume"]},
+        {"id": "split", "type": "break", "name": "拆区域",
+         "ref": {"ref": "inputs.识别区域"}, "fields": {"left": "0", "width": "2"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.split.output.width"}}),
+    ], "seq", inputs={"识别区域": {"type": "rect", "default": [720, 973, 486, 107]}})
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {"识别区域": [720, 973, 486, 107]}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert result.output["split"] == {"left": 720, "width": 486}
+    consume_event = next(event for event in result.step_history if event["step_id"] == "consume")
+    assert consume_event["output"] == {"value": 486}
+
+    # 定长元组只有 0..3：越界下标的字段路径在保存期就被拒。
+    bad = tree([
+        {"id": "seq", "type": "sequence", "children": ["consume"]},
+        {"id": "split", "type": "break", "ref": {"ref": "inputs.识别区域"}, "fields": {"left": "4"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.split.output.left"}}),
+    ], "seq", inputs={"识别区域": {"type": "rect", "default": [720, 973, 486, 107]}})
+    with pytest.raises(ConfigError, match="does not exist in the target output schema"):
+        validate(bad, actions)
+
+
+def test_break_card_validation_rules() -> None:
+    actions = _break_source_actions()
+
+    with pytest.raises(ConfigError, match="break requires a ref binding"):
+        validate(tree([{"id": "card", "type": "break"}], "card"), actions)
+
+    bad_ref = tree([{"id": "card", "type": "break", "ref": "nodes.a.output.value"}], "card")
+    with pytest.raises(ConfigError, match="break requires a ref binding"):
+        validate(bad_ref, actions)
+
+    with_children = tree([
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "children": ["a"]},
+        task("a", "test.passthrough"),
+    ], "card")
+    with pytest.raises(ConfigError, match="break cannot define"):
+        validate(with_children, actions)
+
+    with_action = tree([{"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "action": "test.passthrough"}], "card")
+    with pytest.raises(ConfigError, match="break cannot define"):
+        validate(with_action, actions)
+
+    with_params = tree([{"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "params": {"a": 1}}], "card")
+    with pytest.raises(ConfigError, match="break cannot define"):
+        validate(with_params, actions)
+
+    bad_fields_shape = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}}),
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "fields": []},
+    ], "seq")
+    with pytest.raises(ConfigError, match=r"\.fields must be an object"):
+        validate(bad_fields_shape, actions)
+
+    bad_field_name = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}}),
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "fields": {"": "x"}},
+    ], "seq")
+    with pytest.raises(ConfigError, match="fields keys must be non-empty"):
+        validate(bad_field_name, actions)
+
+    bad_field_path = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}}),
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "fields": {"nope": "nope"}},
+    ], "seq")
+    with pytest.raises(ConfigError, match="does not exist in the target output schema"):
+        validate(bad_field_path, actions)
+
+    # 目标是标量输出时拒绝：拆分只能拆对象/数组。
+    scalar_actions = registry(
+        action_spec(EchoAction(), output_schema={"type": "object", "properties": {"value": {"type": "boolean"}}, "additionalProperties": False})
+    )
+    scalar_target = tree([
+        {"id": "seq", "type": "sequence", "children": ["flag"]},
+        task("flag", "test.echo", params={"value": True}),
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.flag.output.value"}},
+    ], "seq")
+    with pytest.raises(ConfigError, match="must reference an object or array output"):
+        validate(scalar_target, scalar_actions)
+
+    # 卡片依赖的是排在使用者后面的任务输出 → 使用点拿不到，仍然要报错。
+    too_early = tree([
+        {"id": "seq", "type": "sequence", "children": ["consume", "flag"]},
+        task("flag", "test.echo", params={"value": True}),
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.flag.output.value"}},
+        task("consume", "test.echo", params={"value": {"ref": "nodes.card.output.value"}}),
+    ], "seq")
+    with pytest.raises(ConfigError, match="unavailable at this execution point"):
+        validate(too_early, scalar_actions)
+
+    # 来源是不产生输出的节点（判断节点）→ 不可用报错。
+    no_output = tree([
+        {"id": "seq", "type": "sequence", "children": ["judge", "consume"]},
+        {"id": "judge", "type": "condition", "expression": True},
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.judge.output.value"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.card.output.value"}}),
+    ], "seq")
+    with pytest.raises(ConfigError, match="unavailable at this execution point"):
+        validate(no_output, actions)
+
+    # 卡片是叶子，不能当局部作用域的 owner。
+    owner = tree([{"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}}], "card")
+    owner["variables"] = {"local": {"type": "integer", "default": 1, "owner": "card"}}
+    with pytest.raises(ConfigError, match="must name a composite node"):
+        validate(owner, actions)
+
+    # 消费端引用拆分输出里的未知字段 → 报错。
+    unknown_field = tree([
+        {"id": "seq", "type": "sequence", "children": ["produce", "consume"]},
+        task("produce", "test.passthrough", params={"value": {"matched": True, "x": 3, "y": 7}}),
+        {"id": "card", "type": "break", "ref": {"ref": "nodes.produce.output.value"}, "fields": {"x": "x"}},
+        task("consume", "test.consume", params={"value": {"ref": "nodes.card.output.nope"}}),
+    ], "seq")
+    with pytest.raises(ConfigError, match="references an unknown"):
+        validate(unknown_field, actions)
+
+
 def test_engine_timeout_limit_cancel_and_bad_output() -> None:
     actions = registry(
         action_spec(EchoAction()),
@@ -810,7 +1336,7 @@ def test_engine_timeout_limit_cancel_and_bad_output() -> None:
     assert unlimited.max_steps is None
 
     many_children = [
-        task(f"step_{index}", "test.echo", decorators=[{"type": "condition", "expression": False}])
+        {"id": f"step_{index}", "type": "condition", "expression": False}
         for index in range(1001)
     ]
     many = tree(
@@ -864,12 +1390,13 @@ def test_workflow_loader_hash_paths_and_inputs_defaults(tmp_path: Path) -> None:
         "template": {"type": "asset", "required": True},
         "options": {"type": "object", "default": {}, "properties": {"enabled": {"type": "boolean", "default": True}}},
     })
-    path = workflow_dir / "one.json"; path.write_text(json.dumps(raw), encoding="utf-8")
+    path = write_workflow(workflow_dir / "one.owf", raw)
     loader = WorkflowLoader(workflow_dir, actions, project_root=tmp_path)
     first = loader.load("one")
     normalized = loader.normalize_inputs(first, {"template": "assets/inside.png"})
     assert normalized["options"] == {"enabled": True}
-    path.write_text(json.dumps({**raw, "version": "3.0.1"}), encoding="utf-8")
+    assert first.file_hash == hashlib.sha256(path.read_bytes()).hexdigest()
+    write_workflow(path, {**raw, "version": "3.0.1"})
     assert first.file_hash != loader.load("one").file_hash
     with pytest.raises(ConfigError, match="escapes project root"):
         loader.validate_input_paths(first, {"template": "../outside.png", "options": {"enabled": True}})
@@ -886,7 +1413,7 @@ def test_workflow_loader_applies_required_top_level_default_before_validation(tm
         "echo",
         inputs={"rounds": {"type": "integer", "required": True, "default": 30}},
     )
-    (workflow_dir / "defaults.json").write_text(json.dumps(raw), encoding="utf-8")
+    write_workflow(workflow_dir / "defaults.owf", raw)
     actions = registry(action_spec(EchoAction()))
     loader = WorkflowLoader(workflow_dir, actions, project_root=tmp_path)
 
@@ -907,7 +1434,7 @@ def test_workflow_loader_only_accepts_declared_child_inputs(tmp_path: Path) -> N
         },
         variables={"private_value": {"type": "string", "default": "internal"}},
     )
-    (workflow_dir / "child.json").write_text(json.dumps(raw), encoding="utf-8")
+    write_workflow(workflow_dir / "child.owf", raw)
     loader = WorkflowLoader(workflow_dir, registry(action_spec(EchoAction())), project_root=tmp_path)
     child = loader.load("child")
 
@@ -939,7 +1466,7 @@ def test_instance_parallel_rejects_runtime_variables_as_child_inputs(tmp_path: P
         },
         variables={"secret": {"type": "string", "default": "internal"}},
     )
-    (workflow_dir / "child.json").write_text(json.dumps(child), encoding="utf-8")
+    write_workflow(workflow_dir / "child.owf", child)
     parent = tree([
         {
             "id": "parallel",
@@ -963,8 +1490,7 @@ def test_workflow_loader_discovers_nested_workflows_and_resolves_ids(tmp_path: P
     nested = workflow_dir / "entrypoints"
     nested.mkdir(parents=True)
     raw = tree([task("echo", "test.echo", {"value": "nested"})], "echo")
-    path = nested / "nested_entry.json"
-    path.write_text(json.dumps(raw), encoding="utf-8")
+    path = write_workflow(nested / "nested_entry.owf", raw)
     actions = registry(action_spec(EchoAction()))
     loader = WorkflowLoader(workflow_dir, actions, project_root=tmp_path)
 

@@ -3,19 +3,31 @@
   "actions": {
     "test.echo": {
       "retry_safe": true,
-      "input_schema": { "type": "object" },
-      "output_schema": { "type": "object" }
+      "input_schema": {
+        "type": "object"
+      },
+      "output_schema": {
+        "type": "object"
+      }
     },
     "test.produce": {
       "retry_safe": true,
       "input_schema": {
         "type": "object",
-        "properties": { "value": { "type": "integer" } },
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
         "additionalProperties": false
       },
       "output_schema": {
         "type": "object",
-        "properties": { "value": { "type": "integer" } },
+        "properties": {
+          "value": {
+            "type": "integer"
+          }
+        },
         "additionalProperties": false
       }
     },
@@ -23,10 +35,26 @@
       "retry_safe": false,
       "input_schema": {
         "type": "object",
-        "properties": { "count": { "type": "integer" } },
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
         "additionalProperties": false
       },
-      "output_schema": { "type": "object", "additionalProperties": false }
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    "test.bool_flag": {
+      "retry_safe": true,
+      "input_schema": {
+        "type": "object"
+      },
+      "output_schema": {
+        "type": "boolean"
+      }
     }
   },
   "cases": [
@@ -37,13 +65,27 @@
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["work"] },
-          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "work"
+            ]
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
         ]
       }
     },
@@ -54,15 +96,47 @@
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["seq"] },
-          { "id": "seq", "type": "sequence", "children": ["producer", "consumer"] },
-          { "id": "producer", "type": "task", "action": "test.produce", "params": { "value": 1 } },
-          { "id": "consumer", "type": "task", "action": "test.consume", "params": { "count": { "ref": "nodes.producer.output.value" } } }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "producer",
+              "consumer"
+            ]
+          },
+          {
+            "id": "producer",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "consumer",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "nodes.producer.output.value"
+              }
+            }
+          }
         ]
       }
     },
@@ -73,22 +147,71 @@
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["seq"] },
-          { "id": "seq", "type": "sequence", "children": ["choice", "check"] },
-          { "id": "choice", "type": "selector", "children": ["producer", "fallback"] },
-          { "id": "producer", "type": "task", "action": "test.produce", "params": { "value": 1 } },
-          { "id": "fallback", "type": "task", "action": "test.echo", "params": {} },
           {
-            "id": "check",
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "choice",
+              "check"
+            ]
+          },
+          {
+            "id": "choice",
+            "type": "selector",
+            "children": [
+              "producer",
+              "fallback"
+            ]
+          },
+          {
+            "id": "producer",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "fallback",
             "type": "task",
             "action": "test.echo",
-            "params": {},
-            "decorators": [{ "type": "condition", "expression": { "exists": { "ref": "nodes.producer.output.value" } } }]
+            "params": {}
+          },
+          {
+            "id": "check",
+            "type": "condition",
+            "expression": {
+              "exists": {
+                "ref": "nodes.producer.output.value"
+              }
+            },
+            "children": [
+              "checked"
+            ],
+            "ports": [
+              "true"
+            ]
+          },
+          {
+            "id": "checked",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
           }
         ]
       }
@@ -100,37 +223,75 @@
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["loop"] },
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "loop"
+            ]
+          },
           {
             "id": "loop",
             "type": "repeat_until",
-            "condition": { "exists": { "ref": "nodes.body.output.value" } },
-            "children": ["body"]
+            "condition": {
+              "exists": {
+                "ref": "nodes.body.output.value"
+              }
+            },
+            "children": [
+              "body"
+            ]
           },
-          { "id": "body", "type": "task", "action": "test.produce", "params": { "value": 1 } }
+          {
+            "id": "body",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          }
         ]
       }
     },
     {
       "name": "invalid-schema-version",
       "valid": false,
-      "desktop_codes": ["schema-version"],
+      "desktop_codes": [
+        "schema-version"
+      ],
       "workflow": {
         "schema_version": 3,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["work"] },
-          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "work"
+            ]
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
         ]
       }
     },
@@ -138,18 +299,34 @@
       "name": "invalid-unknown-action",
       "valid": false,
       "python_error": "unknown Action",
-      "desktop_codes": ["unknown-action"],
+      "desktop_codes": [
+        "unknown-action"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["work"] },
-          { "id": "work", "type": "task", "action": "missing.action", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "work"
+            ]
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "missing.action",
+            "params": {}
+          }
         ]
       }
     },
@@ -157,19 +334,42 @@
       "name": "invalid-duplicate-node-ids",
       "valid": false,
       "python_error": "duplicate node IDs",
-      "desktop_codes": ["duplicate-node"],
+      "desktop_codes": [
+        "duplicate-node"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["work"] },
-          { "id": "work", "type": "task", "action": "test.echo", "params": {} },
-          { "id": "work", "type": "task", "action": "test.produce", "params": { "value": 1 } }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "work"
+            ]
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          }
         ]
       }
     },
@@ -177,18 +377,35 @@
       "name": "invalid-unknown-child",
       "valid": false,
       "python_error": "unknown child",
-      "desktop_codes": ["unknown-child"],
+      "desktop_codes": [
+        "unknown-child"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["seq"] },
-          { "id": "seq", "type": "sequence", "children": ["missing"] }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "missing"
+            ]
+          }
         ]
       }
     },
@@ -196,19 +413,41 @@
       "name": "invalid-root-child-count",
       "valid": false,
       "python_error": "exactly one child",
-      "desktop_codes": ["root-child-count"],
+      "desktop_codes": [
+        "root-child-count"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["a", "b"] },
-          { "id": "a", "type": "task", "action": "test.echo", "params": {} },
-          { "id": "b", "type": "task", "action": "test.echo", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "a",
+              "b"
+            ]
+          },
+          {
+            "id": "a",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          },
+          {
+            "id": "b",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
         ]
       }
     },
@@ -216,20 +455,54 @@
       "name": "invalid-unavailable-output",
       "valid": false,
       "python_error": "unavailable at this execution point",
-      "desktop_codes": ["unavailable-ref"],
+      "desktop_codes": [
+        "unavailable-ref"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["seq"] },
-          { "id": "seq", "type": "sequence", "children": ["consumer", "producer"] },
-          { "id": "consumer", "type": "task", "action": "test.consume", "params": { "count": { "ref": "nodes.producer.output.value" } } },
-          { "id": "producer", "type": "task", "action": "test.produce", "params": { "value": 1 } }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "consumer",
+              "producer"
+            ]
+          },
+          {
+            "id": "consumer",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "nodes.producer.output.value"
+              }
+            }
+          },
+          {
+            "id": "producer",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          }
         ]
       }
     },
@@ -237,18 +510,42 @@
       "name": "invalid-binding-type",
       "valid": false,
       "python_error": "incompatible",
-      "desktop_codes": ["binding-type"],
+      "desktop_codes": [
+        "binding-type"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
-        "inputs": { "name": { "type": "string" } },
+        "inputs": {
+          "name": {
+            "type": "string"
+          }
+        },
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["consumer"] },
-          { "id": "consumer", "type": "task", "action": "test.consume", "params": { "count": { "ref": "inputs.name" } } }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "consumer"
+            ]
+          },
+          {
+            "id": "consumer",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "inputs.name"
+              }
+            }
+          }
         ]
       }
     },
@@ -256,18 +553,38 @@
       "name": "invalid-missing-variable-default",
       "valid": false,
       "python_error": "require defaults",
-      "desktop_codes": ["missing-variable-default"],
+      "desktop_codes": [
+        "missing-variable-default"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
-        "variables": { "v": { "type": "integer" } },
+        "variables": {
+          "v": {
+            "type": "integer"
+          }
+        },
         "nodes": [
-          { "id": "root", "type": "root", "children": ["work"] },
-          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "work"
+            ]
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
         ]
       }
     },
@@ -275,18 +592,39 @@
       "name": "invalid-removed-public-field",
       "valid": false,
       "python_error": "public was removed",
-      "desktop_codes": ["removed-public-field"],
+      "desktop_codes": [
+        "removed-public-field"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
-        "inputs": { "x": { "type": "integer", "public": true } },
+        "inputs": {
+          "x": {
+            "type": "integer",
+            "public": true
+          }
+        },
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["work"] },
-          { "id": "work", "type": "task", "action": "test.echo", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "work"
+            ]
+          },
+          {
+            "id": "work",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
         ]
       }
     },
@@ -294,23 +632,39 @@
       "name": "invalid-unsafe-retry",
       "valid": false,
       "python_error": "not declared retry-safe",
-      "desktop_codes": ["unsafe-retry"],
+      "desktop_codes": [
+        "unsafe-retry"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["consumer"] },
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "consumer"
+            ]
+          },
           {
             "id": "consumer",
             "type": "task",
             "action": "test.consume",
             "params": {},
-            "decorators": [{ "type": "retry", "attempts": 2 }]
+            "decorators": [
+              {
+                "type": "retry",
+                "attempts": 2
+              }
+            ]
           }
         ]
       }
@@ -319,20 +673,978 @@
       "name": "invalid-unreachable-nodes",
       "valid": false,
       "python_error": "exactly one parent",
-      "desktop_codes": ["parent-count", "unreachable-node"],
+      "desktop_codes": [
+        "parent-count",
+        "unreachable-node"
+      ],
       "workflow": {
         "schema_version": 4,
         "id": "rules",
         "version": "4.0.0",
-        "resolution": [1920, 1080],
+        "resolution": [
+          1920,
+          1080
+        ],
         "root": "root",
         "inputs": {},
         "variables": {},
         "nodes": [
-          { "id": "root", "type": "root", "children": ["a"] },
-          { "id": "a", "type": "task", "action": "test.echo", "params": {} },
-          { "id": "seq", "type": "sequence", "children": ["c"] },
-          { "id": "c", "type": "task", "action": "test.echo", "params": {} }
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "a"
+            ]
+          },
+          {
+            "id": "a",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "c"
+            ]
+          },
+          {
+            "id": "c",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-condition-node-guard",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "route"
+            ]
+          },
+          {
+            "id": "route",
+            "type": "selector",
+            "children": [
+              "guarded",
+              "fallback"
+            ]
+          },
+          {
+            "id": "guarded",
+            "type": "sequence",
+            "children": [
+              "produce",
+              "judge",
+              "act"
+            ]
+          },
+          {
+            "id": "produce",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "judge",
+            "type": "condition",
+            "expression": {
+              "eq": [
+                {
+                  "ref": "nodes.produce.output.value"
+                },
+                1
+              ]
+            }
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          },
+          {
+            "id": "fallback",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-condition-node-branches",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "judge"
+            ]
+          },
+          {
+            "id": "judge",
+            "type": "condition",
+            "expression": true,
+            "children": [
+              "produce",
+              "act"
+            ],
+            "ports": [
+              "true",
+              "false"
+            ]
+          },
+          {
+            "id": "produce",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-condition-node-branch-count",
+      "valid": false,
+      "python_error": "at most two branches",
+      "desktop_codes": [
+        "condition-branch-count"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "judge"
+            ]
+          },
+          {
+            "id": "judge",
+            "type": "condition",
+            "expression": true,
+            "children": [
+              "a",
+              "b",
+              "c"
+            ]
+          },
+          {
+            "id": "a",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          },
+          {
+            "id": "b",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          },
+          {
+            "id": "c",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-condition-node-ports-mismatch",
+      "valid": false,
+      "python_error": "ports must match",
+      "desktop_codes": [
+        "condition-ports-mismatch"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "judge"
+            ]
+          },
+          {
+            "id": "judge",
+            "type": "condition",
+            "expression": true,
+            "children": [
+              "act"
+            ],
+            "ports": [
+              "true",
+              "false"
+            ]
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-ports-outside-condition",
+      "valid": false,
+      "python_error": "not valid for sequence",
+      "desktop_codes": [
+        "invalid-ports"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "act"
+            ],
+            "ports": [
+              "true"
+            ]
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-condition-node-missing-expression",
+      "valid": false,
+      "python_error": "condition requires expression",
+      "desktop_codes": [
+        "condition-expression-required"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "judge"
+            ]
+          },
+          {
+            "id": "judge",
+            "type": "condition"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-removed-condition-decorator",
+      "valid": false,
+      "python_error": "not valid under any of the given schemas|is not one of",
+      "desktop_codes": [
+        "invalid-decorator"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "act"
+            ]
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "decorators": [
+              {
+                "type": "condition",
+                "expression": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-bool-judge-card",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "produce",
+              "judge"
+            ]
+          },
+          {
+            "id": "produce",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "card",
+            "type": "bool_judge",
+            "name": "产出是否为 1",
+            "expression": {
+              "eq": [
+                {
+                  "ref": "nodes.produce.output.value"
+                },
+                1
+              ]
+            }
+          },
+          {
+            "id": "judge",
+            "type": "condition",
+            "expression": {
+              "ref": "nodes.card.output.value"
+            },
+            "children": [
+              "act"
+            ],
+            "ports": [
+              "true"
+            ]
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-bool-judge-children",
+      "valid": false,
+      "python_error": "bool_judge cannot define",
+      "desktop_codes": [
+        "invalid-bool-judge"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "card"
+            ]
+          },
+          {
+            "id": "card",
+            "type": "bool_judge",
+            "expression": true,
+            "children": [
+              "act"
+            ]
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-bool-judge-missing-expression",
+      "valid": false,
+      "python_error": "bool_judge requires expression",
+      "desktop_codes": [
+        "bool-judge-expression-required"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "card"
+            ]
+          },
+          {
+            "id": "card",
+            "type": "bool_judge"
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-break-card",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "produce",
+              "consume"
+            ]
+          },
+          {
+            "id": "produce",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "break_card",
+            "type": "break",
+            "name": "拆开产出",
+            "ref": {
+              "ref": "nodes.produce.output"
+            },
+            "fields": {
+              "amount": "value"
+            }
+          },
+          {
+            "id": "consume",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "nodes.break_card.output.amount"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-break-card-mirror",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "produce",
+              "consume"
+            ]
+          },
+          {
+            "id": "produce",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "break_card",
+            "type": "break",
+            "ref": {
+              "ref": "nodes.produce.output"
+            }
+          },
+          {
+            "id": "consume",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "nodes.break_card.output.value"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "valid-break-input-rect",
+      "valid": true,
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {
+          "识别区域": {
+            "type": "rect",
+            "default": [
+              720,
+              973,
+              486,
+              107
+            ]
+          }
+        },
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "consume"
+            ]
+          },
+          {
+            "id": "split",
+            "type": "break",
+            "ref": {
+              "ref": "inputs.识别区域"
+            },
+            "fields": {
+              "left": "0",
+              "width": "2"
+            }
+          },
+          {
+            "id": "consume",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "nodes.split.output.width"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-break-children",
+      "valid": false,
+      "python_error": "break cannot define",
+      "desktop_codes": [
+        "invalid-break"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "card"
+            ]
+          },
+          {
+            "id": "card",
+            "type": "break",
+            "ref": {
+              "ref": "nodes.produce.output"
+            },
+            "children": [
+              "act"
+            ]
+          },
+          {
+            "id": "act",
+            "type": "task",
+            "action": "test.echo",
+            "params": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-break-missing-ref",
+      "valid": false,
+      "python_error": "break requires a ref binding",
+      "desktop_codes": [
+        "break-ref-required"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "card"
+            ]
+          },
+          {
+            "id": "card",
+            "type": "break"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-break-scalar-target",
+      "valid": false,
+      "python_error": "must reference an object or array output",
+      "desktop_codes": [
+        "break-target-not-object"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "flag",
+              "card"
+            ]
+          },
+          {
+            "id": "flag",
+            "type": "task",
+            "action": "test.bool_flag",
+            "params": {}
+          },
+          {
+            "id": "card",
+            "type": "break",
+            "ref": {
+              "ref": "nodes.flag.output"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-break-bad-field-path",
+      "valid": false,
+      "python_error": "does not exist in the target output schema",
+      "desktop_codes": [
+        "break-field-path"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "produce",
+              "card"
+            ]
+          },
+          {
+            "id": "produce",
+            "type": "task",
+            "action": "test.produce",
+            "params": {
+              "value": 1
+            }
+          },
+          {
+            "id": "card",
+            "type": "break",
+            "ref": {
+              "ref": "nodes.produce.output"
+            },
+            "fields": {
+              "nope": "nope"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-break-tuple-index",
+      "valid": false,
+      "python_error": "does not exist in the target output schema",
+      "desktop_codes": [
+        "break-field-path"
+      ],
+      "workflow": {
+        "schema_version": 4,
+        "id": "rules",
+        "version": "4.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {
+          "识别区域": {
+            "type": "rect",
+            "default": [
+              720,
+              973,
+              486,
+              107
+            ]
+          }
+        },
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "children": [
+              "seq"
+            ]
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "children": [
+              "consume"
+            ]
+          },
+          {
+            "id": "split",
+            "type": "break",
+            "ref": {
+              "ref": "inputs.识别区域"
+            },
+            "fields": {
+              "left": "4"
+            }
+          },
+          {
+            "id": "consume",
+            "type": "task",
+            "action": "test.consume",
+            "params": {
+              "count": {
+                "ref": "nodes.split.output.left"
+              }
+            }
+          }
         ]
       }
     }

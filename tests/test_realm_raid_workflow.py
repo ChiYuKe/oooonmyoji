@@ -200,7 +200,10 @@ def run_workflow(world: World, rounds: int) -> tuple[Any, Context]:
     loader = WorkflowLoader(PROJECT_ROOT / "workflows", registry, project_root=PROJECT_ROOT)
     spec = loader.load(WORKFLOW_FILE)
     context = Context()
-    engine = WorkflowEngine(spec, registry, context, {"运行轮数": rounds})
+    # 真正跑工作流的入口（runner / supervisor / cli）都会先补齐输入默认值，
+    # 测试也照做：否则没显式传进来的 `模板` / `识别区域` 等引用会解析失败。
+    inputs = loader.normalize_inputs(spec, {"运行轮数": rounds})
+    engine = WorkflowEngine(spec, registry, context, inputs)
     return engine.run(), context
 
 

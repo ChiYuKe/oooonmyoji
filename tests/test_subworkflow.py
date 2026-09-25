@@ -14,6 +14,8 @@ from src.oooonmyoji.devices.protocol import DeviceFrame
 from src.oooonmyoji.runtime import runner as runner_module
 from src.oooonmyoji.runtime.runner import TaskRunner
 
+from .workflow_files import write_workflow
+
 TINY_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
@@ -73,9 +75,7 @@ def _write_workflow(
     }
     if limits is not None:
         payload["limits"] = limits
-    (path / "workflows" / f"{workflow_id}.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-    )
+    write_workflow(path / "workflows" / f"{workflow_id}.owf", payload)
 
 
 def _write_config(path: Path) -> Path:
@@ -242,10 +242,7 @@ def test_selector_recovery_reclassifies_failed_subworkflow_descendants(
             {"id": "fallback", "type": "task", "action": "core.log", "params": {"message": "fallback"}},
         ],
     }
-    (tmp_path / "workflows" / "parent_fallback.json").write_text(
-        json.dumps(parent, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    write_workflow(tmp_path / "workflows" / "parent_fallback.owf", parent)
 
     record = _run(config, "parent_fallback")
 

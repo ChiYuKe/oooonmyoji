@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from src.oooonmyoji.actions import build_action_registry
 from src.oooonmyoji.cli import build_parser
 from src.oooonmyoji.workflows.loader import WorkflowLoader
+from tests.workflow_files import write_workflow
 
 
 def test_cli_accepts_direct_workflow_without_a_task_id() -> None:
@@ -28,23 +28,21 @@ def test_direct_workflow_loads_without_a_config_task(tmp_path: Path) -> None:
     workflow_dir = tmp_path / "workflows"
     workflow_dir.mkdir()
     (tmp_path / "plugins" / "actions").mkdir(parents=True)
-    (workflow_dir / "direct.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 4,
-                "id": "direct",
-                "version": "3.0.0",
-                "resolution": [1920, 1080],
-                "root": "root",
-                "inputs": {},
-                "variables": {},
-                "nodes": [
-                    {"id": "root", "type": "root", "children": ["capture"]},
-                    {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
-                ],
-            }
-        ),
-        encoding="utf-8",
+    write_workflow(
+        workflow_dir / "direct.owf",
+        {
+            "schema_version": 4,
+            "id": "direct",
+            "version": "3.0.0",
+            "resolution": [1920, 1080],
+            "root": "root",
+            "inputs": {},
+            "variables": {},
+            "nodes": [
+                {"id": "root", "type": "root", "children": ["capture"]},
+                {"id": "capture", "type": "task", "action": "core.capture", "params": {}},
+            ],
+        },
     )
     loader = WorkflowLoader(
         workflow_dir,

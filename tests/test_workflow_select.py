@@ -12,6 +12,8 @@ from src.oooonmyoji.devices.protocol import DeviceFrame
 from src.oooonmyoji.runtime import runner as runner_module
 from src.oooonmyoji.runtime.runner import TaskRunner
 
+from .workflow_files import write_workflow
+
 TINY_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 
 
@@ -48,7 +50,7 @@ def _write_tree(path: Path, workflow_id: str, selector_children: list[str]) -> N
         "variables": {},
         "nodes": [node for node in nodes if node["id"] in used],
     }
-    (path / "workflows" / f"{workflow_id}.json").write_text(json.dumps(payload), encoding="utf-8")
+    write_workflow(path / "workflows" / f"{workflow_id}.owf", payload)
 
 
 def _config(path: Path) -> object:

@@ -11,6 +11,7 @@ import numpy as np
 
 from src.oooonmyoji.devices.protocol import DeviceFrame
 from src.oooonmyoji.mcp.service import ProjectContextService
+from src.oooonmyoji.workflows.dsl import parse_document
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -111,11 +112,12 @@ def test_save_validates_before_writing_and_rejects_duplicate(tmp_path: Path) -> 
     first = service.save_workflow(minimal_workflow(), "mcp-test")
     second = service.save_workflow(minimal_workflow(), "mcp-test")
 
-    target = tmp_path / "workflows" / "generated" / "mcp-test.json"
+    target = tmp_path / "workflows" / "generated" / "mcp-test.owf"
     assert first["ok"] is True
     assert first["saved"] is True
+    assert first["path"] == "workflows/generated/mcp-test.owf"
     assert target.is_file()
-    assert json.loads(target.read_text(encoding="utf-8"))["id"] == "mcp-test"
+    assert parse_document(target.read_text(encoding="utf-8"))["id"] == "mcp-test"
     assert second["ok"] is False
     assert second["errors"][0]["code"] == "file_exists"
 
@@ -132,7 +134,7 @@ def test_invalid_workflow_is_not_saved(tmp_path: Path) -> None:
 
     assert result["ok"] is False
     assert result["saved"] is False
-    assert not (tmp_path / "workflows" / "generated" / "invalid.json").exists()
+    assert not (tmp_path / "workflows" / "generated" / "invalid.owf").exists()
 
 
 def test_capture_screen_is_read_only_and_returns_mcp_ready_png(monkeypatch) -> None:

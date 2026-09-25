@@ -7,6 +7,7 @@
 import type { CanvasState } from '../state/canvas-state';
 import { createWrapMeasurement, type CanvasWrapMeasurement } from './wrap-measurement';
 import { followCardsAfterLayout, groupMemberIdsOf, variableCardOwners } from './card-follow-layout';
+import { iterNodeRefs } from '../../shared/workflow/graph-document';
 
 export interface CanvasBounds {
   minX: number;
@@ -33,6 +34,15 @@ export interface ViewportDeps {
   currentNodeGroupId?(): string;
   /** 真实节点的变量端点：自动排列后变量卡片按显式连线找归属，缺省时不看端口。 */
   nodeVariablePins?(node: any): any[];
+  /**
+   * 这个节点是不是「纯数据卡片」（布尔判断 / 拆分）。
+   *
+   * 它们不在执行树里，自动排列要把它们贴在**使用它的那张卡片**左边，而不是当成独立的树
+   * 排到整张图右边去（那样数据线会横跨半个画布）。缺省时按类型名自行判断。
+   */
+  isDataOnlyNode?(node: any): boolean;
+  /** 这个节点引用了哪些节点的输出（`nodes.<id>.output…`）：用来反过来找数据卡片的使用者。 */
+  referenceSourceIds?(node: any): string[];
   /** 节点参数行的行高：绑定卡片纵向对齐到所属的那一行。 */
   nodeRowHeight?(node: any): number;
   /** 变量卡输出口在卡片内的纵向位置。 */
@@ -162,6 +172,46 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
       return x;
     };
 
+    // 纯数据卡片（布尔判断 / 拆分）不参与执行树：它们是「被引用」的，按 UE 的排法贴在
+    // **使用它的那张卡片**左边（数据从左侧流入），而不是当成一棵独立的树排到整张图右边去
+    // ——那会让数据线横跨半个画布。
+    const isDataOnly = deps.isDataOnlyNode
+      ?? ((node: any) => node?.type === 'bool_judge' || node?.type === 'break');
+    const dataOnly = new Set(
+      candidates
+        .filter((node) => isDataOnly(node))
+        .map((node) => String(node.id)),
+    );
+    // 谁引用了谁：把「本节点引用的来源」反过来，得到「谁在使用这个数据卡片」。
+    // 走**整份节点载荷**而不只是引脚：引用可能藏在 `expression` / `condition` / `ref`
+    // 这些字段里（判断卡的条件、布尔判断的操作数），只看引脚会漏掉它们。
+    const referenceSources = deps.referenceSourceIds ?? ((node: any) => {
+      const ids = new Set<string>();
+      for (const [, ref] of iterNodeRefs(node)) {
+        const match = /^nodes\.([^.]+)\.output/.exec(String(ref || ''));
+        if (match) ids.add(match[1]);
+      }
+      for (const pin of deps.nodeVariablePins?.(node) || []) {
+        const value = pin?.value;
+        const ref = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' ? value.ref : '';
+        const match = /^nodes\.([^.]+)\.output/.exec(ref);
+        if (match) ids.add(match[1]);
+      }
+      return [...ids];
+    });
+    const consumers = new Map<string, string[]>();
+    if (dataOnly.size) {
+      for (const node of candidates) {
+        for (const sourceId of referenceSources(node) || []) {
+          const key = String(sourceId);
+          if (!dataOnly.has(key)) continue;
+          const list = consumers.get(key) || [];
+          list.push(String(node.id));
+          consumers.set(key, list);
+        }
+      }
+    }
+
     // 从**当前视图的根**开始排树：外层是文档 root（外加没连上的孤立节点），
     // 组内视图里则是那张「组接口」卡——它的 children 就是组的入口节点。
     // 以前只认 `state.raw.root`：进组后文档 root 不在投影里，递归一次都没跑起来，
@@ -177,18 +227,18 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
     if (!scopeIds && state.raw?.root && map.has(state.raw.root)) roots.push(String(state.raw.root));
     for (const node of candidates) {
       const id = String(node.id);
-      if (roots.includes(id) || hasParent.has(id)) continue;
+      if (roots.includes(id) || hasParent.has(id) || dataOnly.has(id)) continue;
       roots.push(id);
     }
     for (const id of roots) place(id, 0);
     // 孤立节点只有整份视图排列时才补到第一行；局部排列不碰范围外的卡片。
     if (!scopeIds) {
       for (const node of list) {
-        if (!placed.has(String(node.id))) {
-          depthOf.set(String(node.id), 0);
-          xOf.set(String(node.id), leaf * (nodeWidth + xGap));
-          leaf += 1;
-        }
+        const id = String(node.id);
+        if (placed.has(id) || dataOnly.has(id)) continue;
+        depthOf.set(id, 0);
+        xOf.set(id, leaf * (nodeWidth + xGap));
+        leaf += 1;
       }
     }
 
@@ -208,6 +258,42 @@ export function createCanvasViewport(deps: ViewportDeps): CanvasViewport {
     }
     for (const [id, depth] of depthOf) {
       out[id] = { x: Math.round((xOf.get(id) ?? 0) + baseX), y: rowY.get(depth) ?? Math.round(baseY) };
+    }
+
+    // 纯数据卡片：贴在使用它的那张卡片左边（同一行），链式的（break → bool_judge → 判断）
+    // 自然读成「左 → 右」。一个节点只有一个坐标，所以被多处引用时按**第一个**使用者贴。
+    //
+    // 必须按依赖顺序定位：数据卡片可以引用另一张数据卡片（break → bool_judge），
+    // 而文档顺序不保证使用者排在前面，所以循环到没有进展为止。
+    if (dataOnly.size) {
+      const feeders = new Map<string, string[]>();
+      for (const [dataId, users] of consumers) {
+        for (const user of users) {
+          const list = feeders.get(user) || [];
+          if (!list.includes(dataId)) list.push(dataId);
+          feeders.set(user, list);
+        }
+      }
+      const pending = [...dataOnly].filter((id) => map.has(id));
+      let progress = true;
+      while (pending.length && progress) {
+        progress = false;
+        for (let index = pending.length - 1; index >= 0; index -= 1) {
+          const id = pending[index];
+          const users = (consumers.get(id) || []).filter((user) => out[user]);
+          if (!users.length) continue;
+          const owner = out[users[0]];
+          const slot = (feeders.get(users[0]) || []).indexOf(id);
+          out[id] = { x: Math.round(owner.x - (slot + 1) * (nodeWidth + 40)), y: owner.y };
+          pending.splice(index, 1);
+          progress = true;
+        }
+      }
+      // 没人引用它（或引用链断开）：退回「孤立卡片」的排法，放在第一行最后，别叠在一起。
+      for (const id of pending) {
+        out[id] = { x: Math.round(leaf * (nodeWidth + xGap) + baseX), y: rowY.get(0) ?? Math.round(baseY) };
+        leaf += 1;
+      }
     }
     return out;
   }

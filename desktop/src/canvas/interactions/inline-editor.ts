@@ -9,6 +9,7 @@ import type { CanvasState } from '../state/canvas-state';
 import type { MenuEntry } from '../ui/overlays';
 import type { NodeParamEditorRequest } from '../render/node-card';
 import { KEY_NAMES, keyOptionLabel } from '../../shared/parameter-types';
+import { isBoolJudgeOperandPin } from '../model/exec-ports';
 import {
   paramColorSwatch, paramEditorAction, paramEditorCurrentValue, paramEnumOptions, paramKeyText,
   paramLiteralText, paramPointParts, paramRectParts, paramRowKindOf, paramTupleCells, paramTupleElementText,
@@ -91,6 +92,20 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
    * 素材浏览器与 ROI 拾取弹层自己会包一层 mutate，所以它们用这个裸写入。
    */
   function writeParamLiteral(node: any, param: string, value: unknown): void {
+    // 布尔判断卡片的左/右操作数就是引脚的默认值（UE 的比较节点）：字面量写在
+    // expression 对应操作数的位置上，`undefined` 表示清空这一侧。
+    if (isBoolJudgeOperandPin(node, param)) {
+      const expression = node.expression && typeof node.expression === 'object' && !Array.isArray(node.expression)
+        ? node.expression as Record<string, unknown>
+        : {};
+      const operator = Object.keys(expression)[0] || 'eq';
+      const operands = Array.isArray(expression[operator]) ? (expression[operator] as unknown[]).slice(0, 2) : ['', ''];
+      while (operands.length < 2) operands.push('');
+      operands[param === 'left' ? 0 : 1] = value === undefined ? '' : value;
+      node.expression = { [operator]: operands };
+      delete variableLinks()[`${node.id}:${param}`];
+      return;
+    }
     if (!node.params || typeof node.params !== 'object' || Array.isArray(node.params)) node.params = {};
     if (param.startsWith('inputs.')) {
       const name = param.slice('inputs.'.length);
@@ -252,7 +267,8 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
         shell.appendChild(input);
         return input;
       });
-      primary = fields[0];
+      // 从卡片第二个数组值框打开时，首个焦点应落在对应元素，而不是永远回到第一个。
+      primary = fields[Math.max(0, Math.min(fields.length - 1, initialInputIndex))];
       read = () => parseParamTuple(definition, fields.map((input) => input.value));
     } else if (kind === 'color') {
       // 颜色：色块点开原生取色器，文本仍可手写 #rrggbb。
@@ -418,6 +434,12 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     const { node, pin, rect, clientX, clientY, world, valueAlign, inputIndex } = request;
     const param = String(pin && pin.param ? pin.param : '');
     if (!node || !param) return;
+    if (node.type === 'break' && param === 'ref') {
+      // 拆分来源是绑定值（nodes.<id>.output...），不是字面量：点击给端口菜单，不进行行内编辑。
+      closeInlineEditor();
+      showMenu(clientX, clientY, nodeVariablePinMenuItems(node.id, pin, world));
+      return;
+    }
     const align = valueAlign === 'left' ? 'left' : 'right';
     switch (paramEditorAction(pin)) {
       case 'binding-menu':
@@ -458,7 +480,7 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
           openKeyMenu(node, pin, clientX, clientY, () => rect, align);
           return;
         }
-        openLiteralInput(node, pin, () => rect, kind, align);
+        openLiteralInput(node, pin, () => rect, kind, align, inputIndex);
         return;
       }
       default:

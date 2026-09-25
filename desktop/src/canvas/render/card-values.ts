@@ -33,7 +33,7 @@ export function nodeCardSummary(node: CardValueNode): string {
   if (parts.length) return parts.join(' · ');
   if (node.type === 'task') return Object.keys(params).length ? `${Object.keys(params).length} 项参数 · 详情栏编辑` : '详情栏编辑参数';
   if (node.type === 'root') return '工作流入口';
-  const labels: Record<string, string> = { instance_parallel: '各实例独立执行', parallel: '并行执行分支', simple_parallel: '主任务与后台并行', selector: '按顺序尝试可用分支', branch: '按条件选择分支', switch: '按条件选择分支', repeat_until: '重复执行直到满足条件', sequence: '按顺序执行子节点' };
+  const labels: Record<string, string> = { instance_parallel: '各实例独立执行', parallel: '并行执行分支', simple_parallel: '主任务与后台并行', selector: '按顺序尝试可用分支', branch: '按条件选择分支', switch: '按条件选择分支', repeat_until: '重复执行直到满足条件', sequence: '按顺序执行子节点', condition: '成立走真口，否则走假口', bool_judge: 'bool 输出 · 可被多处引用', break: '拆分来源输出 · 字段可引用' };
   return labels[node.type ?? ''] || '详情栏查看配置';
 }
 

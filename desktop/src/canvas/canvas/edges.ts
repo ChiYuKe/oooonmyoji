@@ -6,6 +6,10 @@
  * 渲染函数不修改文档；选择与断开都通过注入的命令/回调完成。
  */
 import type { CanvasState } from '../state/canvas-state';
+import {
+  CONDITION_INPUT_X, CONDITION_INPUT_Y, CONDITION_PORT_LABELS,
+  conditionPortOfChild, conditionPortOffset, expressionInputOffset, isBooleanInputNode, isBooleanInputPin, nearestConditionPort,
+} from '../model/exec-ports';
 import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from './data-tones';
 import { isGroupBoundaryPin, isGroupCardNode, isGroupInterfaceNode, isGroupMemberNode, isGroupVariablesNode } from '../model/node-groups';
 import { aggregateNodeRunStatus } from '../model/node-group-runtime';
@@ -53,6 +57,15 @@ export interface EdgesDeps {
   edgeRunTargetIds?(parentId: string, childId: string): string[];
   /** 这条连线上的校验问题（空/缺省表示没问题）：连线涂红并给出悬停说明。 */
   edgeIssues?(parentId: string, childId: string): any[];
+  /** 这条执行边上的手工折点（UE Knot）；缺省表示不支持手工走线。 */
+  structuralWaypoints?(parentId: string, childId: string): Array<{ x: number; y: number }>;
+  /** 连线右键菜单项（手工走线）。 */
+  edgeMenuItems?(parentId: string, childId: string, point: EdgePoint): any[];
+  showMenu?(x: number, y: number, items: any[]): void;
+  /** 删掉一个折点（写文档 + 重绘由调用方负责）。 */
+  removeStructuralWaypoint?(parentId: string, childId: string, pointIndex: number): void;
+  /** 开始拖动折点：复用 pointer 模块的生命周期。 */
+  startWaypointDrag?(event: PointerEvent, parentId: string, childId: string, pointIndex: number): void;
   position(node: EdgeNode): EdgePoint;
   nodeHeight(node: EdgeNode): number;
   /** 每个节点自己的参数行高（固定卡片用双行行样式）。 */
@@ -83,6 +96,11 @@ export interface EdgesDeps {
   taskOutputPortY: number;
   /** 任务卡右侧输出口在节点内的 X 偏移（收在卡片右缘以内）。默认贴右缘。 */
   taskOutputPortX?: number;
+  /**
+   * 拆分卡片字段引脚在节点内的偏移（`field` → `{x,y}`）。引用边从被引用的那个
+   * 字段引脚出线；返回 null（未绑定/镜像标量/不是拆分卡）时回落到通用输出口。
+   */
+  breakFieldPinOffset?(node: any, field: string): { x: number; y: number } | null;
 }
 
 export interface CanvasEdges {
@@ -131,12 +149,13 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   const rowHeightOf = deps.nodeRowHeight ?? (() => runVariableHeight);
   /** 输出口横向位置：与卡片渲染共用同一份「节点内偏移」，两边永远同一个点。 */
   const referencePortX = deps.taskOutputPortX ?? nodeWidth;
+  const breakFieldPinOffset = deps.breakFieldPinOffset;
 
   /**
    * 已挂载连线的元素索引：`patchEdge` 用它做局部更新，不必查询 DOM。
    * key 为 `parentId\0childId`，图层整体重建时清空。
    */
-  const edgeRegistry = new Map<string, { group: any; parentId: string; childId: string; runTargetIds: string[]; paths: any[]; order: any; orderBg: any; rewire: any }>();
+  const edgeRegistry = new Map<string, { group: any; parentId: string; childId: string; runTargetIds: string[]; paths: any[]; order: any; orderBg: any; rewire: any; knots?: any[] }>();
   const runEdgeRegistry = new Map<string, { paths: any[]; order: any; orderBg: any }>();
   const edgeBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
   type DataEdgeEntry = { paths: any[]; path(): string };
@@ -165,6 +184,18 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
       patched += 1;
     }
     return patched;
+  }
+
+  /** 执行连线的出线口 X：判断节点分左右两个口（真/假），其余节点居中。 */
+  function execPinX(parent: EdgeNode, childId: string): number {
+    if (!parent || parent.type !== 'condition') return nodeWidth / 2;
+    return conditionPortOffset(nodeWidth, conditionPortOfChild(parent, childId) || 'true');
+  }
+
+  /** 连线中点徽标：判断节点写「真/假」（口位），其余写 1/2/3… 的优先级序号。 */
+  function edgeOrderText(parent: EdgeNode, childId: string, order: number): string {
+    const port = parent && parent.type === 'condition' ? conditionPortOfChild(parent, childId) : null;
+    return port ? CONDITION_PORT_LABELS[port] : String(order + 1);
   }
 
   function structuralEdgeClass(parentId: string, childId: string, runTargetIds = [childId]): string {
@@ -315,8 +346,13 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
               // 出线口在哪一侧决定了头段控制点往哪推：变量卡的端口在右边缘（线向右走），
               // 接口卡的端口在左边缘。两个控制点都往左推时，长距离的映射线几乎退化成直斜线。
               const fromRight = isGroupVariablesNode(node);
-              const x1 = origin.x + (fromRight ? nodeWidth - variablePinX : variablePinX);
-              const y1 = origin.y + baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2;
+              const inputOffset = expressionInputOffset(node, pin.param);
+              const x1 = origin.x + (inputOffset
+                ? inputOffset.x
+                : (fromRight ? nodeWidth - variablePinX : variablePinX));
+              const y1 = origin.y + (inputOffset
+                ? inputOffset.y
+                : baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2);
               const x2 = target.x + variablePinX;
               const y2 = target.y + baseHeight + targetIndex * rowHeightOf(targetNode) + rowHeightOf(targetNode) / 2;
               const bend = Math.max(32, Math.abs(x2 - x1) * 0.42);
@@ -346,8 +382,13 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
         const y1 = card.y + variableCardPortY;
         const path = (): string => {
           const current = position(node);
-          const targetX = current.x + (isGroupVariablesNode(node) ? nodeWidth - variablePinX : variablePinX);
-          const targetY = current.y + baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2;
+          const inputOffset = expressionInputOffset(node, pin.param);
+          const targetX = current.x + (inputOffset
+            ? inputOffset.x
+            : (isGroupVariablesNode(node) ? nodeWidth - variablePinX : variablePinX));
+          const targetY = current.y + (inputOffset
+            ? inputOffset.y
+            : baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2);
           const curve = Math.max(32, Math.abs(targetX - x1) * 0.42);
           return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
         };
@@ -387,7 +428,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     const collapsed = Boolean((parent as any)._nodeGroup || (child as any)._nodeGroup);
     const from = position(parent);
     const to = position(child);
-    const x1 = from.x + nodeWidth / 2;
+    const x1 = from.x + execPinX(parent, childId);
     const y1 = from.y + nodeHeight(parent);
     const x2 = to.x + nodeWidth / 2;
     const y2 = to.y;
@@ -403,24 +444,38 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
       const title = svgEl('title', {}, group);
       title.textContent = edgeIssues.map((issue: any) => String(issue && issue.message || '')).filter(Boolean).join('\n');
     }
-    const path = svgEl('path', { class: 'edge-hit', d: bezier(x1, y1, x2, y2) }, group);
-    const edgePath = bezier(x1, y1, x2, y2);
+    // 没有折点时仍走注入的 `bezier`（老路径，逐字不变）；有折点时才用按折点走线的几何。
+    const waypoints = deps.structuralWaypoints?.(parent.id, childId) ?? [];
+    const routed = waypoints.length ? structuralPath(parent, childId) : null;
+    const edgePath = routed ? routed.d : bezier(x1, y1, x2, y2);
+    const path = svgEl('path', { class: 'edge-hit', d: edgePath }, group);
     const line = svgEl('path', { class: 'edge-line', d: edgePath }, group);
     const flow = svgEl('path', { class: 'edge-flow', d: edgePath }, group);
+    // 手工折点画在连线上（可拖可删）；没有折点时不会有任何多余元素。
+    const knots = waypoints.length ? renderKnots(group, parent, childId, waypoints) : [];
     const midY = (y1 + y2) / 2;
     const orderBg = svgEl('circle', { class: 'edge-order-bg', cx: (x1 + x2) / 2, cy: midY, r: 10 }, group);
     const orderText = svgEl('text', { class: 'edge-order', x: (x1 + x2) / 2, y: midY + 4, 'text-anchor': 'middle' }, group);
-    orderText.textContent = String(order + 1);
+    orderText.textContent = edgeOrderText(parent, childId, order);
     const rewire = svgEl('circle', { class: 'edge-rewire', cx: x2, cy: y2 - 18, r: 6, title: '拖动以重新连接' }, group);
     // 局部更新用的元素索引：拖拽时只改这些属性的 `d` / 位置。
     edgeRegistry.set(`${parent.id}\u0000${childId}`, {
-      group, parentId: parent.id, childId, runTargetIds, paths: [path, line, flow], order: orderText, orderBg, rewire,
+      group, parentId: parent.id, childId, runTargetIds, paths: [path, line, flow], order: orderText, orderBg, rewire, knots,
     });
-    edgeBounds.set(`${parent.id}\u0000${childId}`, {
-      x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1),
-    });
+    edgeBounds.set(`${parent.id}\u0000${childId}`, routed
+      ? routed.box
+      : { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) });
     // 折叠后的边可能代表多条真实边，不能在外层直接断开或重连；进入组后再编辑真实连线。
     if (collapsed) return;
+    group.addEventListener('contextmenu', (event: MouseEvent) => {
+      // 连线右键：手工走线（UE 的 Knot）。
+      if (!deps.edgeMenuItems) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const point = worldPoint(event);
+      const items = deps.edgeMenuItems(parent.id, childId, point);
+      if (items.length) deps.showMenu?.(event.clientX, event.clientY, items);
+    });
     path.addEventListener('mousedown', (event: MouseEvent) => {
       if (event.button !== 0 || event.altKey) return; // Alt 交给下边的快速断开，不当成选中
       event.stopPropagation();
@@ -449,7 +504,12 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
       event.preventDefault();
       event.stopPropagation();
       const point = worldPoint(event);
-      state.connect = { direction: 'from-output', parent: parent.id, x: point.x, y: point.y, oldChild: childId, oldIndex: order, hover: null, pointerId: captureConnectionPointer(event) };
+      state.connect = {
+        direction: 'from-output', parent: parent.id, x: point.x, y: point.y,
+        oldChild: childId, oldIndex: order, hover: null, pointerId: captureConnectionPointer(event),
+        // 判断节点：重连落回原来那个口（真/假），不会被当成普通子节点追加。
+        ...(parent.type === 'condition' ? { slot: conditionPortOfChild(parent, childId) || 'true' } : {}),
+      };
       render();
     });
   }
@@ -478,13 +538,41 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
       const child = nodeById(connect.child);
       if (!child) return;
       const pos = position(child);
-      svgEl('path', { class: classes, d: bezier(connect.x, connect.y, pos.x + nodeWidth / 2, pos.y) }, layer);
+      // 反向拖线（子输入口 → 父输出口）：命中目标时自由端吸附到父节点底部执行口；
+      // 判断节点按指针相对卡片的偏移吸附到最近的真/假口。
+      let endX = connect.x;
+      let endY = connect.y;
+      if (connect.hover) {
+        const hover = nodeById(connect.hover);
+        if (hover) {
+          const hoverPos = position(hover);
+          const portX = hover.type === 'condition'
+            ? conditionPortOffset(nodeWidth, nearestConditionPort(nodeWidth, connect.x - hoverPos.x))
+            : nodeWidth / 2;
+          endX = hoverPos.x + portX;
+          endY = hoverPos.y + nodeHeight(hover);
+        }
+      }
+      svgEl('path', { class: classes, d: bezier(endX, endY, pos.x + nodeWidth / 2, pos.y) }, layer);
       return;
     }
     const parent = nodeById(connect.parent);
     if (!parent) return;
     const pos = position(parent);
-    svgEl('path', { class: classes, d: bezier(pos.x + nodeWidth / 2, pos.y + nodeHeight(parent), connect.x, connect.y) }, layer);
+    // 判断节点从被拖的那个口出线（真口在左、假口在右），普通节点只有一个居中口。
+    const portX = parent.type === 'condition' && connect.slot ? conditionPortOffset(nodeWidth, connect.slot) : nodeWidth / 2;
+    // 正向拖线（父输出口 → 子输入口）：命中目标时自由端吸附到子节点顶部输入口。
+    let endX = connect.x;
+    let endY = connect.y;
+    if (connect.hover) {
+      const hover = nodeById(connect.hover);
+      if (hover) {
+        const hoverPos = position(hover);
+        endX = hoverPos.x + nodeWidth / 2;
+        endY = hoverPos.y;
+      }
+    }
+    svgEl('path', { class: classes, d: bezier(pos.x + portX, pos.y + nodeHeight(parent), endX, endY) }, layer);
   }
 
   function renderVariableConnection(layer: any): void {
@@ -532,11 +620,13 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     if (!connection) return;
     const source = nodeById(connection.nodeId);
     if (!source) return;
-    const origin = referencePortPosition(source);
+    const field = connection.field ? String(connection.field) : '';
+    const origin = referenceOriginFor(source, field);
     const hover = connection.hover;
+    const tone = `nodes.${source.id}.output${field ? `.${field}` : ''}`;
     svgEl('path', {
-      class: `reference-connection-preview data-tone-${dataTone(`nodes.${source.id}.output`) }${hover ? ' snapped' : ''}`,
-      style: `--data-tone:${dataToneColor(`nodes.${source.id}.output`)}`,
+      class: `reference-connection-preview data-tone-${dataTone(tone)}${hover ? ' snapped' : ''}`,
+      style: `--data-tone:${dataToneColor(tone)}`,
       d: bezier(origin.x, origin.y, hover ? hover.x : connection.x, hover ? hover.y : connection.y),
     }, layer);
   }
@@ -548,27 +638,99 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   }
 
   /**
-   * 结构边的几何：父节点输出口 → 子节点输入口。
+   * 一条节点输出引用的起点：拆分卡片被引用的字段有自己的引脚就从那个引脚出线，
+   * 否则回落到通用输出口（任务卡、布尔判断卡、以及镜像整个输出的拆分卡）。
+   */
+  function referenceOriginFor(source: any, field: string): EdgePoint {
+    if (field && breakFieldPinOffset) {
+      const offset = breakFieldPinOffset(source, field);
+      if (offset) {
+        const pos = position(source);
+        return { x: pos.x + offset.x, y: pos.y + offset.y };
+      }
+    }
+    if (source && source._nodeGroup) {
+      const outputs = Array.isArray(source._referenceOutputs) ? source._referenceOutputs : [];
+      const index = outputs.findIndex((item: any) => item && item.field === field);
+      const pos = position(source);
+      const y = baseHeight + (index >= 0 ? index : 0) * rowHeightOf(source) + rowHeightOf(source) / 2;
+      return { x: pos.x + referencePortX, y: pos.y + y };
+    }
+    if (source && source.type === 'break') {
+      const pos = position(source);
+      // Break 的整体输出口与“拆分来源/输出”首行共用行中心；不能用普通节点的顶部口。
+      return { x: pos.x + nodeWidth, y: pos.y + baseHeight + rowHeightOf(source) / 2 };
+    }
+    if (source && source.type === 'bool_judge') {
+      const pos = position(source);
+      return { x: pos.x + nodeWidth, y: pos.y + nodeHeight(source) / 2 };
+    }
+    return referencePortPosition(source);
+  }
+
+  /**
+   * 结构边的几何：父节点输出口 → 子节点输入口，中间按手工折点（UE Knot）走线。
    * patchEdge 与 renderEdge 共用同一份公式，避免局部更新和整体重建画出两条不同的线。
+   *
+   * 没有折点时**逐字返回**原来的单段三次贝塞尔（老文档的观感与几何完全不变）；
+   * 有折点时按 `起点 → 折点… → 终点` 串成多段，每段保持竖直切线（往下流的执行流语言）。
    */
   function structuralPath(parent: EdgeNode, childId: string): { d: string; box: { x: number; y: number; width: number; height: number } } | null {
     const child = nodeById(childId);
     if (!child) return null;
     const from = position(parent);
     const to = position(child);
-    const x1 = from.x + nodeWidth / 2;
+    const x1 = from.x + execPinX(parent, childId);
     const y1 = from.y + nodeHeight(parent);
     const x2 = to.x + nodeWidth / 2;
     const y2 = to.y;
     const bend = Math.max(48, Math.abs(y2 - y1) * 0.48);
-    const d = `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
+    const waypoints = deps.structuralWaypoints?.(parent.id, childId) ?? [];
+    if (!waypoints.length) {
+      return {
+        d: `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`,
+        box: {
+          x: Math.min(x1, x2), y: Math.min(y1, y2),
+          width: Math.abs(x2 - x1), height: Math.abs(y2 - y1),
+        },
+      };
+    }
+    const points = [{ x: x1, y: y1 }, ...waypoints.map((point) => ({ x: point.x, y: point.y })), { x: x2, y: y2 }];
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let index = 1; index < points.length; index += 1) {
+      const previous = points[index - 1];
+      const current = points[index];
+      const segmentBend = Math.max(32, Math.abs(current.y - previous.y) * 0.48);
+      d += ` C ${previous.x} ${previous.y + segmentBend}, ${current.x} ${current.y - segmentBend}, ${current.x} ${current.y}`;
+    }
     return {
       d,
       box: {
-        x: Math.min(x1, x2), y: Math.min(y1, y2),
-        width: Math.abs(x2 - x1), height: Math.abs(y2 - y1),
+        x: Math.min(...points.map((point) => point.x)),
+        y: Math.min(...points.map((point) => point.y)),
+        width: Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+        height: Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
       },
     };
+  }
+
+  /** 折点的小圆点：点/右键都在它上面（拖动与删除）。返回元素供局部补丁复用。 */
+  function renderKnots(group: any, parent: EdgeNode, childId: string, waypoints: Array<{ x: number; y: number }>): any[] {
+    return waypoints.map((point, index) => {
+      const knot = svgEl('circle', { class: 'edge-knot', cx: point.x, cy: point.y, r: 5, title: '折点：拖动改走线，右键删除' }, group);
+      knot.addEventListener('contextmenu', (event: MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deps.removeStructuralWaypoint?.(parent.id, childId, index);
+      });
+      knot.addEventListener('pointerdown', (event: PointerEvent) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        deps.startWaypointDrag?.(event, parent.id, childId, index);
+      });
+      return knot;
+    });
   }
 
   /**
@@ -587,9 +749,19 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     entry.orderBg?.setAttribute('cy', String(midY));
     entry.order?.setAttribute('x', String(midX));
     entry.order?.setAttribute('y', String(midY + 4));
-    if (entry.order) entry.order.textContent = String(order + 1);
+    if (entry.order) entry.order.textContent = edgeOrderText(parent, childId, order);
     entry.rewire?.setAttribute('cx', String(geometry.box.x + geometry.box.width));
     entry.rewire?.setAttribute('cy', String(geometry.box.y + geometry.box.height - 18));
+    // 折点圆心跟着新坐标走：拖动折点时线条与圆点必须一起动。
+    const waypoints = deps.structuralWaypoints?.(parent.id, childId) ?? [];
+    if (entry.knots) {
+      entry.knots.forEach((knot: any, index: number) => {
+        const point = waypoints[index];
+        if (!point) return;
+        knot.setAttribute('cx', String(point.x));
+        knot.setAttribute('cy', String(point.y));
+      });
+    }
     edgeBounds.set(`${parent.id}\u0000${childId}`, geometry.box);
     return true;
   }
@@ -623,23 +795,29 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   function renderReferenceEdges(layer: any): void {
     referenceEdgeRegistry.clear();
     for (const node of nodes()) {
-      if (!node || (node.type !== 'task' && !isGroupCardNode(node))) continue;
+      // 拆分卡片也消费引用（「拆分来源」行）：它的引用线同样要画出来。
+      if (!node || (node.type !== 'task' && node.type !== 'break' && !isBooleanInputNode(node) && !isGroupCardNode(node))) continue;
       nodeVariablePins(node).forEach((pin, index) => {
         const ref = pin.value && typeof pin.value === 'object' && !Array.isArray(pin.value) && typeof (pin.value as { ref?: unknown }).ref === 'string'
           ? (pin.value as { ref: string }).ref
           : '';
-        const match = /^nodes\.([^\.]+)\.output/.exec(ref);
+        const match = /^nodes\.([^\.]+)\.output(?:\.(.+))?$/.exec(ref);
         if (!match) return;
+        // 引用指向拆分卡片的某个字段时，线从那个字段引脚出。
+        const field = match[2] ? match[2].split('.')[0] : '';
         const source = referenceSourceById ? referenceSourceById(match[1]) : nodeById(match[1]);
         if (!source || source.id === node.id) return;
         const targetNodeId = isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id;
         const targetParam = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
         const path = (): string => {
-          const currentOrigin = referencePortPosition(source);
+          const currentOrigin = referenceOriginFor(source, field);
           const currentTargetPos = position(node);
+          const inputOffset = expressionInputOffset(node, pin.param);
           const currentTarget = {
-            x: currentTargetPos.x + variablePinX,
-            y: currentTargetPos.y + baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2,
+            x: currentTargetPos.x + (inputOffset ? inputOffset.x : variablePinX),
+            y: currentTargetPos.y + (inputOffset
+              ? inputOffset.y
+              : baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2),
           };
           const curve = Math.max(36, Math.abs(currentTarget.x - currentOrigin.x) * 0.42);
           return `M ${currentOrigin.x} ${currentOrigin.y} C ${currentOrigin.x + curve} ${currentOrigin.y}, ${currentTarget.x - curve} ${currentTarget.y}, ${currentTarget.x} ${currentTarget.y}`;

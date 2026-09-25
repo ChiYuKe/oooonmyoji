@@ -7,6 +7,9 @@
  */
 import type { CanvasState } from '../state/canvas-state';
 import { isGroupBoundaryPin } from '../model/node-groups';
+import {
+  CONDITION_INPUT_X, CONDITION_INPUT_Y, CONDITION_PORT_ORDER, conditionPortOffset, expressionInputOffset, isBooleanInputNode, isBooleanInputPin, isValueCardNode, nearestConditionPort, type ConditionPort,
+} from '../model/exec-ports';
 
 export interface HitPoint {
   x: number;
@@ -44,6 +47,8 @@ export interface HitTestDeps {
 
 export interface CanvasHitTest {
   connectionTargetAt(event: { clientX: number; clientY: number } | null | undefined): string | null;
+  /** 反向连线落到判断节点时，指针离哪个执行口更近（普通节点返回 null）。 */
+  execPortAt(point: HitPoint | null | undefined, parentId: string): ConditionPort | null;
   variablePinTargetAt(point: HitPoint | null | undefined, scope: string, variableName: string): any;
   instanceRunInputTargetAt(point: HitPoint | null | undefined, scope: string, variableName: string): any;
   variableInputTargetAt(point: HitPoint | null | undefined, scope: string, variableName: string): any;
@@ -80,18 +85,33 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
     let bestDistance = maxDistance;
     for (const node of nodes()) {
       const wantsOutput = state.connect.direction === 'from-input';
-      if ((wantsOutput && node.type === 'task') || (!wantsOutput && node.type === 'root')) continue;
+      // Task / 值卡片（布尔判断、拆分）都是叶子：没有执行流输出口，不能作为别人的父节点被命中。
+      if (wantsOutput && (node.type === 'task' || isValueCardNode(node))) continue;
+      if (!wantsOutput && node.type === 'root') continue;
       if ((wantsOutput && node.id === state.connect.child) || (!wantsOutput && node.id === state.connect.parent)) continue;
       const pos = position(node);
-      const x = pos.x + nodeWidth / 2;
       const y = wantsOutput ? pos.y + nodeHeight(node) : pos.y;
-      const distance = Math.hypot(point.x - x, point.y - y);
-      if (distance <= bestDistance) {
-        best = node.id;
-        bestDistance = distance;
+      // 判断节点底部有两个执行输出口（左真右假）：按最近的那个口吸附，
+      // 落点才能确定接的是哪一支（口位由 execPortAt 再读一次）。
+      const offsets = wantsOutput && node.type === 'condition'
+        ? CONDITION_PORT_ORDER.map((port) => conditionPortOffset(nodeWidth, port))
+        : [nodeWidth / 2];
+      for (const offset of offsets) {
+        const distance = Math.hypot(point.x - (pos.x + offset), point.y - y);
+        if (distance <= bestDistance) {
+          best = node.id;
+          bestDistance = distance;
+        }
       }
     }
     return best;
+  }
+
+  /** 反向连线（从子节点输入口往上拖）落到判断节点时，指针离哪个口更近。 */
+  function execPortAt(point: HitPoint | null | undefined, parentId: string): ConditionPort | null {
+    const node = nodeById(parentId);
+    if (!node || node.type !== 'condition' || !point || !Number.isFinite(point.x)) return null;
+    return nearestConditionPort(nodeWidth, point.x - position(node).x);
   }
 
   /** 变量连线拖拽中，光标附近类型兼容的节点端点（变量卡片 → 节点）。 */
@@ -108,8 +128,9 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
         const targetNode = isGroupBoundaryPin(pin) ? pin._targetNode : (pin.targetNodeId ? nodeById(pin.targetNodeId) : node);
         const targetParam = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
         if (!targetNode || !variableCompatibleWithPin(scope, variableName, targetNode, targetParam)) return;
-        const x = pos.x + variablePinX;
-        const y = rowCenterY(node, index);
+        const inputOffset = expressionInputOffset(node, pins[index]?.param);
+        const x = inputOffset ? pos.x + inputOffset.x : pos.x + variablePinX;
+        const y = inputOffset ? pos.y + inputOffset.y : rowCenterY(node, index);
         const distance = Math.hypot(point.x - x, point.y - y);
         if (distance <= bestDistance) {
           best = { nodeId: targetNode.id, param: targetParam, x, y };
@@ -129,11 +150,12 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       });
       if (index < 0) continue;
       const pin = pins[index];
+      const inputOffset = expressionInputOffset(node, pin.param);
       return {
         nodeId: isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id,
         param: isGroupBoundaryPin(pin) ? pin.targetParam : pin.param,
-        x: pos.x + variablePinX,
-        y: rowCenterY(node, index),
+        x: inputOffset ? pos.x + inputOffset.x : pos.x + variablePinX,
+        y: inputOffset ? pos.y + inputOffset.y : rowCenterY(node, index),
       };
     }
     return null;
@@ -217,13 +239,15 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
     let rowBest: any = null;
     let rowDistance = Infinity;
     for (const node of nodes()) {
-      if (!node || node.type !== 'task' || node.id === sourceNodeId) continue;
+      // Task / 拆分卡片是普通参数行，判断家族是固定 bool 口：都可能是引用落点。
+      if (!node || (node.type !== 'task' && node.type !== 'break' && !isBooleanInputNode(node)) || node.id === sourceNodeId) continue;
       const pins = nodeVariablePins(node);
       if (!pins.length) continue;
       const pos = position(node);
       const rowHeight = rowHeightOf(node);
       const rowsTop = pos.y + baseHeight;
-      const insideRows = point.x >= pos.x && point.x <= pos.x + nodeWidth
+      const insideRows = (node.type === 'task' || node.type === 'break')
+        && point.x >= pos.x && point.x <= pos.x + nodeWidth
         && point.y >= rowsTop && point.y <= rowsTop + pins.length * rowHeight;
       const rowIndex = insideRows
         ? Math.min(pins.length - 1, Math.max(0, Math.floor((point.y - rowsTop) / rowHeight)))
@@ -231,14 +255,16 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       pins.forEach((pin, index) => {
         const fields = referenceFieldsForPin(source, node, pin.param);
         if (!fields.length) return;
-        const x = pos.x + variablePinX;
-        const y = rowCenterY(node, index);
+        const inputOffset = expressionInputOffset(node, pin.param);
+        const x = pos.x + (inputOffset ? inputOffset.x : variablePinX);
+        const y = pos.y + (inputOffset ? inputOffset.y : baseHeight + index * rowHeight + rowHeight / 2);
         const distance = Math.hypot(point.x - x, point.y - y);
         if (distance < pinDistance) {
           pinBest = { nodeId: node.id, param: pin.param, x, y, fields };
           pinDistance = distance;
         }
-        if (index !== rowIndex) return;
+        // 布尔条件口不在参数行上，不参与「按行吸附」。
+        if (isBooleanInputNode(node) || index !== rowIndex) return;
         const centerDistance = Math.abs(point.y - y);
         if (centerDistance < rowDistance) {
           rowBest = { nodeId: node.id, param: pin.param, x, y, fields };
@@ -264,10 +290,24 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
     let best: any = null;
     let bestDistance = Infinity;
     for (const node of nodes()) {
-      if (!node || node.type !== 'task' || node.id === sourceNodeId) continue;
+      // 与 referenceTargetAt 同一套范围：拆分卡片的来源行也要参与「落点解释」。
+      if (!node || (node.type !== 'task' && node.type !== 'break' && !isBooleanInputNode(node)) || node.id === sourceNodeId) continue;
       const pins = nodeVariablePins(node);
       if (!pins.length) continue;
       const pos = position(node);
+      if (isBooleanInputNode(node)) {
+        for (const pin of pins) {
+          const inputOffset = expressionInputOffset(node, pin.param);
+          if (!inputOffset || point.x < pos.x - portRadius || point.x > pos.x + portRadius * 2
+            || Math.abs(point.y - (pos.y + inputOffset.y)) > portRadius + 6) continue;
+          const center = Math.hypot(point.x - (pos.x + inputOffset.x), point.y - (pos.y + inputOffset.y));
+          if (center < bestDistance) {
+            best = { nodeId: node.id, param: pin.param, x: pos.x + inputOffset.x, y: pos.y + inputOffset.y, fields: [] };
+            bestDistance = center;
+          }
+        }
+        continue;
+      }
       const rowHeight = rowHeightOf(node);
       const rowsTop = pos.y + baseHeight;
       if (point.x < pos.x || point.x > pos.x + nodeWidth) continue;
@@ -321,5 +361,5 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
     return variableCardTargetAt(point, state.variableConnect.nodeId, state.variableConnect.param);
   }
 
-  return { connectionTargetAt, variablePinTargetAt, instanceRunInputTargetAt, variableInputTargetAt, variableCardTargetAt, variableCardTargetAtInstanceInput, variableConnectionTargetAt, referenceTargetAt, referenceConnectionTargetAt, referenceMissAt };
+  return { connectionTargetAt, execPortAt, variablePinTargetAt, instanceRunInputTargetAt, variableInputTargetAt, variableCardTargetAt, variableCardTargetAtInstanceInput, variableConnectionTargetAt, referenceTargetAt, referenceConnectionTargetAt, referenceMissAt };
 }

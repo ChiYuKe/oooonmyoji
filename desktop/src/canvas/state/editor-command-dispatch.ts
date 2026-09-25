@@ -145,6 +145,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
       state.selected.clear(); state.selectedEdge = null; state.selectedRun = null; state.selectedVariable = ''; clearVariableCardSelection(); render();
     }
     else if (command === 'addTask') addNode('task');
+    else if (command === 'addCondition') addNode('condition');
     else if (command === 'addSelector') addNode('selector');
     else if (command === 'addSequence') addNode('sequence');
     else if (command === 'addParallel') addNode('simple_parallel');

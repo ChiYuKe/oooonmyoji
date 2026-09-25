@@ -3,7 +3,9 @@
  * 原 `workflow-editor.js` 的 subWorkflowRef 至 conditionSummary 区间。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { documentText } from '../state/document-text';
 import { isBindingValue } from '../../shared/workflow/bindings';
+import { OPERATOR_LABELS } from './node-title';
 
 export interface SubworkflowDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -51,7 +53,7 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
     if (state.dirty) {
       const rect = $('workflow-select').getBoundingClientRect();
       showMenu(rect.left, rect.bottom + 4, [
-        { label: '保存并进入子工作流', run: () => doOpen(JSON.stringify(state.raw, null, 2) + '\n') },
+        { label: '保存并进入子工作流', run: () => doOpen(documentText(state)) },
         { label: '放弃修改并进入', run: () => doOpen(undefined) },
         'separator',
         { label: '取消', run: () => {} },
@@ -64,6 +66,20 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
   function compositeSubtitle(node: any): string {
     const count = Array.isArray(node.children) ? node.children.length : 0;
     if (node.type === 'root') return count ? 'Tree Root' : '等待连接';
+    // 判断节点与布尔判断卡片都是叶子：卡片副标题直接回读条件整句，条件就是它们的全部内容。
+    if (node.type === 'condition') {
+      const text = conditionToText(node.expression);
+      return text ? `当 ${text}` : '未配置判断条件';
+    }
+    if (node.type === 'bool_judge') {
+      const text = conditionToText(node.expression);
+      return text ? `当 ${text} 时为真` : '未配置判断条件';
+    }
+    if (node.type === 'break') {
+      // 拆分卡片：副标题回读来源引用，绑定就是它的全部内容。
+      const ref = node.ref && typeof node.ref === 'object' && typeof node.ref.ref === 'string' ? node.ref.ref : '';
+      return ref ? `拆开 ${ref}` : '未绑定拆分来源';
+    }
     if (node.type === 'simple_parallel') return `${count}/2 · ${node.finish_mode === 'wait_for_background' ? '等待后台' : '中止后台'}`;
     if (node.type === 'instance_parallel') {
       const runs = Array.isArray(node.runs) ? node.runs : [];
@@ -74,10 +90,6 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
 
   function decoratorLabel(decorator: any): string {
     if (!decorator) return 'Decorator';
-    if (decorator.type === 'condition') {
-      const text = conditionToText(decorator.expression) || conditionSummary(decorator.expression);
-      return `Condition · ${compactValue(text, 60)}`;
-    }
     if (decorator.type === 'cooldown') return `Cooldown · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
     if (decorator.type === 'timeout') return `Time Limit · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
     if (decorator.type === 'retry') return `Retry · ${compactValue(decorator.attempts, 22)}${isBindingValue(decorator.attempts) ? '' : ' 次'}`;
@@ -86,16 +98,8 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
     return String(decorator.type || 'Decorator');
   }
 
-  function conditionSummary(expression: any): string {
-    if (typeof expression === 'boolean') return expression ? 'True' : 'False';
-    if (!expression || typeof expression !== 'object') return '未配置';
-    const key = Object.keys(expression)[0];
-    return key ? key.toUpperCase() : '未配置';
-  }
-
-  const CONDITION_VERBS: Record<string, string> = {
-    eq: '等于', ne: '不等于', gt: '大于', gte: '大于等于', lt: '小于', lte: '小于等于', contains: '包含',
-  };
+  /** 条件回读与值卡片标题共用同一张「运算符 → 中文动词」表（见 node-title）。 */
+  const CONDITION_VERBS = OPERATOR_LABELS;
 
   /** 条件的最大解释深度；再深就停下来，避免病态嵌套把回读整句撑爆。 */
   const CONDITION_MAX_DEPTH = 6;
@@ -114,6 +118,8 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
    */
   function conditionToText(expression: any, depth = 0): string {
     if (typeof expression === 'boolean') return expression ? '始终满足' : '始终不满足';
+    // 整卡绑一个 bool 引用：读成「<名字> 为真」，别再报「未配置判断条件」。
+    if (isBindingValue(expression)) return `${referenceLabel(expression.ref)} 为真`;
     if (!expression || typeof expression !== 'object' || Array.isArray(expression)) return '';
     if (depth >= CONDITION_MAX_DEPTH) return '';
     const key = Object.keys(expression)[0];
@@ -138,7 +144,7 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
     return `${conditionOperandText(pair[0], depth)} ${verb} ${conditionOperandText(pair[1], depth)}`;
   }
 
-  /** 装饰器条件的中文回读整句；解释不了时返回空串。 */
+  /** 判断节点的中文回读整句；解释不了时返回空串。 */
   function conditionSentence(expression: any): string {
     const text = conditionToText(expression);
     return text ? `当 ${text} 时执行` : '';
@@ -146,6 +152,6 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
 
   return {
     resolveWorkflowRef, subWorkflowRef, requestOpenSubWorkflow, requestOpenWorkflowReference,
-    compositeSubtitle, decoratorLabel, conditionSummary, conditionToText, conditionSentence,
+    compositeSubtitle, decoratorLabel, conditionToText, conditionSentence,
   };
 }

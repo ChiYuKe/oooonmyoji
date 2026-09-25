@@ -6,6 +6,8 @@
  * 普通连线与变量连线都通过注入的 mutate 修改文档；指针捕获失败时静默降级（合成事件）。
  */
 import type { CanvasState } from '../state/canvas-state';
+import type { ConditionPort } from '../model/exec-ports';
+import { boolJudgeShape, isBoolJudgeBoolPin, isBoolJudgeOperandPin, isBooleanInputPin, isBreakRefPin } from '../model/exec-ports';
 
 export interface ConnectionPoint {
   x: number;
@@ -26,8 +28,10 @@ export interface ConnectionsDeps {
   render(): void;
   snapshot(): string;
   mutate(fn: () => void): void;
-  connect(parentId: string, childId: string, replaceIndex?: number): boolean;
+  connect(parentId: string, childId: string, port?: number | ConditionPort): boolean;
   disconnect(parentId: string, childId: string): void;
+  /** 反向拖线（从子节点输入口往上）落点该接在父节点的哪个执行口上。 */
+  execPortAt?(point: { x: number; y: number }, parentId: string): ConditionPort | null;
   variableConnectionTargetAt(event: unknown): any;
   nodeById(id: string): any;
   instanceRunCards(): any[];
@@ -43,8 +47,12 @@ export interface ConnectionsDeps {
   referenceConnectionTargetAt(event: unknown): any;
   /** 落点被拒绝时光标下的那一行（解释类型不兼容）。 */
   referenceMissAt(point: unknown, sourceNodeId: string): any;
+  /** 源节点的输出候选（拆分卡片的字段引脚按候选直接定向绑定，不再弹菜单）。 */
+  nodeOutputFields?(node: any): Array<{ field: string; label: string; ref: string }>;
   /** 目标参数的显示名（落点菜单与提示用）。 */
   fieldLabel(name: string): string;
+  /** 输出引用落到目标端点时的类型兼容字段；condition 端口也复用这层校验。 */
+  referenceFieldsForPin?(sourceNode: any, targetNode: any, param: string): Array<{ ref?: string; schema?: any }>;
   /** 一个输出有多个字段可绑目标参数时，用菜单让用户挑。 */
   showMenu?(x: number, y: number, items: any[]): void;
   /** 引用显示名（`nodes.<id>.output.0` → `节点名[0]`），用于落点提示。 */
@@ -54,7 +62,7 @@ export interface ConnectionsDeps {
 }
 
 export interface CanvasConnections {
-  startConnection(event: PointerLike | null, parentId: string, at?: ConnectionPoint): void;
+  startConnection(event: PointerLike | null, parentId: string, at?: ConnectionPoint, port?: ConditionPort): void;
   startConnectionFromInput(event: PointerLike | null, childId: string, at?: ConnectionPoint): void;
   captureConnectionPointer(event: PointerLike): number | null;
   releaseConnectionPointer(pointerId: number | null): void;
@@ -70,7 +78,7 @@ export interface CanvasConnections {
   connectVariableToInstanceInput(scope: string, variable: string, nodeId: string, runIndex: number, param: string, cardId?: string): void;
   disconnectVariableFromInstanceInput(nodeId: string, runIndex: number, param: string): void;
   /** 从任务卡输出口开始拖拽：把该节点的输出引用绑到别的参数端点上。 */
-  startReferenceConnection(event: PointerLike | null, nodeId: string, at?: ConnectionPoint): void;
+  startReferenceConnection(event: PointerLike | null, nodeId: string, at?: ConnectionPoint, field?: string): void;
   cancelReferenceConnection(): void;
   finishReferenceConnection(event: PointerLike): void;
   connectReferenceToPin(sourceNodeId: string, ref: string, label: string, nodeId: string, param: string): void;
@@ -83,7 +91,7 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     nodeById, instanceRunCards, variableCompatibleWithPin, variableCompatibleWithInstanceInput,
     variableLinks, displayNameOfDefinition, variableDisplayNameOf, toast, variableCardList,
     referenceConnectionTargetAt, referenceMissAt, fieldLabel, showMenu, referenceDisplayNameOf,
-    onEmptyVariableDrop,
+    nodeOutputFields, onEmptyVariableDrop,
   } = deps;
 
   function captureConnectionPointer(event: PointerLike): number | null {
@@ -97,11 +105,16 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     try { (graph as Element & { releasePointerCapture(id: number): void }).releasePointerCapture(pointerId!); } catch { /* Capture may already be released. */ }
   }
 
-  function startConnection(event: PointerLike | null, parentId: string, at?: ConnectionPoint): void {
+  function startConnection(event: PointerLike | null, parentId: string, at?: ConnectionPoint, port?: ConditionPort): void {
     if (event && event.button !== 0) return;
     if (event) { event.preventDefault(); event.stopPropagation(); }
     const point = at || (event ? worldPoint(event as PointerLike & { clientX: number; clientY: number }) : { x: 0, y: 0 });
-    state.connect = { direction: 'from-output', parent: parentId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
+    state.connect = {
+      direction: 'from-output', parent: parentId, x: point.x, y: point.y, hover: null,
+      pointerId: event ? captureConnectionPointer(event) : null,
+      // 判断节点：记住从哪个口（真/假）拖出来的，落点才知道接哪一支。
+      ...(port ? { slot: port } : {}),
+    };
     state.selectedEdge = null;
     render();
   }
@@ -133,11 +146,14 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     const before = snapshot();
     mutate(() => {
       if (connection.direction === 'from-input') {
-        connect(childId, connection.child);
+        // 反向拖线：判断节点要看落点离哪个口更近（真口/假口），普通节点没有口位。
+        const slot = deps.execPortAt?.(worldPoint(event as PointerLike & { clientX: number; clientY: number }), childId) || undefined;
+        connect(childId, connection.child, slot);
         return;
       }
+      const slot = connection.slot ?? connection.oldIndex;
       if (connection.oldChild) disconnect(connection.parent, connection.oldChild);
-      if (!connect(connection.parent, childId, connection.oldIndex) && connection.oldChild) connect(connection.parent, connection.oldChild, connection.oldIndex);
+      if (!connect(connection.parent, childId, slot) && connection.oldChild) connect(connection.parent, connection.oldChild, slot);
     });
     if (snapshot() === before) render();
   }
@@ -216,7 +232,21 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     }
     const link = variableCardIdOf(scope, variable, cardId);
     mutate(() => {
-      if (param.startsWith('inputs.')) {
+      if (isBooleanInputPin(node, param) || isBoolJudgeBoolPin(node, param)) {
+        // 判断节点与布尔判断卡的布尔口：整卡/整节点就是一个 bool 绑定。
+        node.expression = { ref: `${scope}.${variable}` };
+      } else if (isBoolJudgeOperandPin(node, param)) {
+        // 只有比较形态才有操作数引脚；嵌套/绑定形态的卡片没有可写的操作数（防住过期拖拽）。
+        if (boolJudgeShape(node) !== 'comparison') return;
+        const expression = node.expression && typeof node.expression === 'object' && !Array.isArray(node.expression) ? node.expression : { eq: ['', ''] };
+        const operator = Object.keys(expression)[0] || 'eq';
+        const operands = Array.isArray(expression[operator]) && expression[operator].length === 2 ? expression[operator].slice() : ['', ''];
+        operands[param === 'left' ? 0 : 1] = { ref: `${scope}.${variable}` };
+        node.expression = { [operator]: operands };
+      } else if (isBreakRefPin(node, param)) {
+        // 拆分卡片的来源绑定写在顶层 ref 字段上。
+        node.ref = { ref: `${scope}.${variable}` };
+      } else if (param.startsWith('inputs.')) {
         if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
         node.params.inputs[param.slice('inputs.'.length)] = { ref: `${scope}.${variable}` };
       } else {
@@ -233,11 +263,38 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
 
   function disconnectVariableFromPin(nodeId: string, param: string): void {
     const node = nodeById(nodeId);
-    if (!node || !node.params || typeof node.params !== 'object') return;
-    const current = param.startsWith('inputs.') ? node.params.inputs?.[param.slice('inputs.'.length)] : node.params[param];
+    if (!node) return;
+
+    // bool_judge 的变量分别写在比较表达式的两个 operand 中，不能像普通参数一样
+    // 直接读取整个 expression；否则永远看不到当前一侧的 `{ ref: ... }`，断开会被提前返回。
+    if (isBoolJudgeOperandPin(node, param)) {
+      const expression = node.expression && typeof node.expression === 'object' && !Array.isArray(node.expression) ? node.expression : { eq: ['', ''] };
+      const operator = Object.keys(expression)[0] || 'eq';
+      const operands = Array.isArray(expression[operator]) && expression[operator].length === 2 ? expression[operator].slice() : ['', ''];
+      const index = param === 'left' ? 0 : 1;
+      const current = operands[index];
+      if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.ref !== 'string') return;
+      mutate(() => {
+        operands[index] = '';
+        node.expression = { [operator]: operands };
+        delete variableLinks()[`${nodeId}:${param}`];
+      });
+      toast(`已断开参数 ${param}`);
+      return;
+    }
+
+    const current = isBooleanInputPin(node, param) || isBoolJudgeBoolPin(node, param)
+      ? node.expression
+      : isBreakRefPin(node, param)
+        ? node.ref
+        : (!node.params || typeof node.params !== 'object' ? undefined : param.startsWith('inputs.') ? node.params.inputs?.[param.slice('inputs.'.length)] : node.params[param]);
     if (!current || typeof current !== 'object' || Array.isArray(current) || typeof current.ref !== 'string') return;
     mutate(() => {
-      if (param.startsWith('inputs.')) {
+      if (isBooleanInputPin(node, param) || isBoolJudgeBoolPin(node, param)) {
+        node.expression = { eq: [1, 1] };
+      } else if (isBreakRefPin(node, param)) {
+        delete node.ref;
+      } else if (param.startsWith('inputs.')) {
         if (node.params.inputs && typeof node.params.inputs === 'object') delete node.params.inputs[param.slice('inputs.'.length)];
       } else delete node.params[param];
       delete variableLinks()[`${nodeId}:${param}`];
@@ -286,12 +343,15 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
       && typeof value.ref === 'string' && value.ref.startsWith('nodes.');
   }
 
-  /** 从任务卡右侧的输出口开始拖拽：目标只能是别的节点的参数端点。 */
-  function startReferenceConnection(event: PointerLike | null, nodeId: string, at?: ConnectionPoint): void {
+  /**
+   * 从任务卡右侧的输出口开始拖拽：目标只能是别的节点的参数端点。
+   * 拆分卡片的字段引脚带 `field` 起拖：字段已定，落点直接绑这一个引用，不再弹菜单。
+   */
+  function startReferenceConnection(event: PointerLike | null, nodeId: string, at?: ConnectionPoint, field?: string): void {
     if (event && event.button !== 0) return;
     if (event) { event.preventDefault(); event.stopPropagation(); }
     const point = at || (event ? worldPoint(event as PointerLike & { clientX: number; clientY: number }) : { x: 0, y: 0 });
-    state.referenceConnect = { nodeId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
+    state.referenceConnect = { nodeId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null, field: field === undefined ? null : field };
     state.selectedEdge = null;
     render();
   }
@@ -308,8 +368,33 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
   function connectReferenceToPin(sourceNodeId: string, ref: string, label: string, nodeId: string, param: string): void {
     const node = nodeById(nodeId);
     if (!node || typeof ref !== 'string' || !ref) return;
+    // 判断节点/布尔判断卡片的左侧端口是严格 boolean 输入。节点输出引用在落点阶段已做
+    // 类型筛选，但这里再拦一次，避免菜单/旧调用方绕过命中测试写入错误类型。
+    if (isBooleanInputPin(node, param) || isBoolJudgeBoolPin(node, param)) {
+      const source = nodeById(sourceNodeId);
+      const fields = source && deps.referenceFieldsForPin
+        ? deps.referenceFieldsForPin(source, node, param)
+        : [];
+      if (!fields.some((field) => field && field.ref === ref)) {
+        toast('布尔条件端口只接受 boolean 输出', true);
+        return;
+      }
+    }
     mutate(() => {
-      if (param.startsWith('inputs.')) {
+      if (isBooleanInputPin(node, param) || isBoolJudgeBoolPin(node, param)) {
+        node.expression = { ref };
+      } else if (isBoolJudgeOperandPin(node, param)) {
+        // 只有比较形态才有操作数引脚；嵌套/绑定形态的卡片没有可写的操作数（防住过期拖拽）。
+        if (boolJudgeShape(node) !== 'comparison') return;
+        const expression = node.expression && typeof node.expression === 'object' && !Array.isArray(node.expression) ? node.expression : { eq: ['', ''] };
+        const operator = Object.keys(expression)[0] || 'eq';
+        const operands = Array.isArray(expression[operator]) && expression[operator].length === 2 ? expression[operator].slice() : ['', ''];
+        operands[param === 'left' ? 0 : 1] = { ref };
+        node.expression = { [operator]: operands };
+      } else if (isBreakRefPin(node, param)) {
+        // 拆分卡片的来源绑定写在顶层 ref 字段上。
+        node.ref = { ref };
+      } else if (param.startsWith('inputs.')) {
         if (!node.params.inputs || typeof node.params.inputs !== 'object' || Array.isArray(node.params.inputs)) node.params.inputs = {};
         node.params.inputs[param.slice('inputs.'.length)] = { ref };
       } else {
@@ -325,7 +410,42 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
   /** 断开参数上的节点输出引用（把该参数恢复成未配置）。 */
   function disconnectReferenceFromPin(nodeId: string, param: string): void {
     const node = nodeById(nodeId);
-    if (!node || !node.params || typeof node.params !== 'object') return;
+    if (!node) return;
+    // 表达式输入端口的引用写在 `expression` 上。
+    if (isBooleanInputPin(node, param) || isBoolJudgeBoolPin(node, param)) {
+      if (!isReferenceValue(node.expression)) return;
+      mutate(() => {
+        node.expression = { eq: [1, 1] };
+        delete variableLinks()[`${nodeId}:${param}`];
+      });
+      toast(`已断开 ${fieldLabel(param)} 的引用`);
+      return;
+    }
+    if (isBreakRefPin(node, param)) {
+      // 拆分卡片的来源绑定写在顶层 ref 字段上。
+      if (!isReferenceValue(node.ref)) return;
+      mutate(() => {
+        delete node.ref;
+        delete variableLinks()[`${nodeId}:${param}`];
+      });
+      toast(`已断开 ${fieldLabel(param)} 的引用`);
+      return;
+    }
+    if (isBoolJudgeOperandPin(node, param)) {
+      const expression = node.expression && typeof node.expression === 'object' && !Array.isArray(node.expression) ? node.expression : { eq: ['', ''] };
+      const operator = Object.keys(expression)[0] || 'eq';
+      const operands = Array.isArray(expression[operator]) && expression[operator].length === 2 ? expression[operator].slice() : ['', ''];
+      const index = param === 'left' ? 0 : 1;
+      if (!isReferenceValue(operands[index])) return;
+      mutate(() => {
+        operands[index] = '';
+        node.expression = { [operator]: operands };
+        delete variableLinks()[`${nodeId}:${param}`];
+      });
+      toast(`已断开 ${fieldLabel(param)} 的引用`);
+      return;
+    }
+    if (!node.params || typeof node.params !== 'object') return;
     const current = param.startsWith('inputs.') ? node.params.inputs?.[param.slice('inputs.'.length)] : node.params[param];
     if (!isReferenceValue(current)) return;
     mutate(() => {
@@ -357,6 +477,19 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
       return;
     }
     const fields: any[] = Array.isArray(target.fields) ? target.fields : [];
+    if (connection.field !== null && connection.field !== undefined) {
+      // 拆分卡片的字段引脚起拖（`field: ''` 表示「整体输出」那个引脚）：
+      // 绑哪个引用已经定了，直接写目标行。
+      const source = nodeById(connection.nodeId);
+      const candidate = source && nodeOutputFields
+        ? (nodeOutputFields(source) || []).find((item) => item && item.field === connection.field)
+        : null;
+      if (candidate) {
+        const sourceName = source ? (source.name || source.id) : connection.nodeId;
+        connectReferenceToPin(connection.nodeId, candidate.ref, candidate.field ? `${sourceName}.${candidate.field}` : sourceName, target.nodeId, target.param);
+        return;
+      }
+    }
     if (!fields.length) { render(); return; }
     if (fields.length === 1) {
       connectReferenceToPin(connection.nodeId, fields[0].ref, fields[0].label, target.nodeId, target.param);

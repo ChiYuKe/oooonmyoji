@@ -8,6 +8,7 @@
  */
 import { createVariableSystem } from '../model/variable-system';
 import { isBindingValue } from '../../shared/workflow/bindings';
+import { CONDITION_PORT_LABELS, CONDITION_PORT_ORDER, conditionPortsOf } from '../model/exec-ports';
 
 export type UiNode = HTMLElement & Record<string, any>;
 
@@ -53,6 +54,8 @@ export interface CompositeInspectorDeps {
   conditionParseLiteral(value: string): unknown;
   /** 条件表达式 → 中文回读整句；认不出来时返回空串。 */
   conditionSentence(expression: unknown): string;
+  /** 条件表达式 → 中文回读（不带「时执行」后缀），布尔判断卡片用它。 */
+  conditionToText(expression: unknown): string;
   nodeChildrenOptions(node: CompositeNode, current?: unknown): SelectOption[];
   nodeById(id: string): { name?: string } | undefined;
   mutate(fn: () => void): void;
@@ -86,12 +89,47 @@ export interface CompositeInspector {
 export function createCompositeInspector(deps: CompositeInspectorDeps): CompositeInspector {
   const {
     el, section, field, selectInput, checkbox, segmentedInput, textInput, iconButton, addRowButton,
-    conditionControl, conditionOperandControl, conditionParseLiteral, conditionSentence, nodeChildrenOptions, nodeById,
+    conditionControl, conditionOperandControl, conditionParseLiteral, conditionSentence, conditionToText, nodeChildrenOptions, nodeById,
     mutate, disconnect, runtimeInstanceLabel, removeInstanceRun, workflowInputs, render, state,
     decoratorLabel, clone, allRefs, referenceLabel, valueBindingMenu, toast, UI,
   } = deps;
 
   function renderCompositeInspector(body: UiNode, node: CompositeNode): void {
+    // 值卡片（布尔判断 / 拆分）的内容在画布上的浮动编辑器里编辑（见 value-card-fields.ts），
+    // 这里不再分支处理：选中它们不会打开详情面板。
+    if (node.type === 'condition') {
+      // 判断节点：一个条件 + 真/假两条分支槽位（各最多一个子节点）。
+      body.appendChild(el('div', 'description', '判断一个条件：成立走真口、不成立走假口。真/假口各最多接一个子节点，在画布上从口拖线即可连接；两个口都没接时就是纯判断——成立成功、不成立失败。'));
+      // UE 分支节点的条件来自左侧 Bool 数据 Pin；不在详情栏再维护一份独立比较表达式。
+      // 保留 expression 作为文档兼容/运行时存储，但只能由数据 Pin 连线写入。
+      const input = field(body, '布尔输入');
+      input.appendChild(el('div', 'condition-input-readonly', '请从节点左侧“布尔条件”端口接入值。'));
+      const sentence = conditionSentence(node.expression);
+      if (sentence) body.appendChild(el('div', 'condition-readback', sentence));
+      section(body, '分支');
+      const children = Array.isArray(node.children) ? node.children : [];
+      const ports = conditionPortsOf(node);
+      for (const port of CONDITION_PORT_ORDER) {
+        const index = ports.indexOf(port);
+        const childId = index >= 0 && index < children.length ? String(children[index]) : '';
+        const slot = el('div', 'condition-slot');
+        slot.appendChild(el('span', `condition-slot-title condition-slot-${port}`, CONDITION_PORT_LABELS[port]));
+        if (childId) {
+          const name = el('span', 'condition-slot-child', nodeById(childId)?.name || childId);
+          name.title = childId;
+          slot.appendChild(name);
+          const removeTip = `断开${CONDITION_PORT_LABELS[port]}口上的分支`;
+          const remove = iconButton('icon-button danger condition-slot-remove', removeTip, 'trash', () => {
+            mutate(() => disconnect(node.id ?? '', childId));
+          });
+          slot.appendChild(remove);
+        } else {
+          slot.appendChild(el('span', 'condition-slot-empty', '未接：这条路径没有内容，按失败返回'));
+        }
+        body.appendChild(slot);
+      }
+      return;
+    }
     if (!['sequence', 'selector'].includes(node.type)) section(body, '执行设置');
     if (node.type === 'selector') body.appendChild(el('div', 'description', '按顺序执行，首个成功后返回成功。'));
     if (node.type === 'sequence') body.appendChild(el('div', 'description', '按顺序执行，首个失败后返回失败。'));
@@ -254,15 +292,16 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
 
   function renderDecorators(body: UiNode, node: CompositeNode): void {
     const add = selectInput('', [
-      { value: '', label: '＋ 添加' }, { value: 'condition', label: 'Condition' }, { value: 'cooldown', label: 'Cooldown' },
+      { value: '', label: '＋ 添加' }, { value: 'cooldown', label: 'Cooldown' },
       { value: 'timeout', label: 'Time Limit' }, { value: 'retry', label: 'Retry' }, { value: 'repeat', label: 'Repeat' },
       { value: 'do_once', label: 'Do Once' },
     ], (type) => {
-      if (!type) return;
+      const defaults: Record<string, DecoratorLike> = { cooldown: { type, seconds: 1 }, timeout: { type, seconds: 10 }, retry: { type, attempts: 2, delay_seconds: 0 }, repeat: { type, count: 2 }, do_once: { type, reset_on_failure: false } };
+      const decorator = defaults[type];
+      if (!decorator) return;
       mutate(() => {
         if (!Array.isArray(node.decorators)) node.decorators = [];
-        const defaults: Record<string, DecoratorLike> = { condition: { type, expression: true }, cooldown: { type, seconds: 1 }, timeout: { type, seconds: 10 }, retry: { type, attempts: 2, delay_seconds: 0 }, repeat: { type, count: 2 }, do_once: { type, reset_on_failure: false } };
-        node.decorators.push(defaults[type]);
+        node.decorators.push(decorator);
       });
     }, 'decorator-add');
     section(body, '装饰器', add);
@@ -383,8 +422,8 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
 
   function renderDecorator(body: UiNode, node: CompositeNode, decorator: DecoratorLike, index: number): void {
     const block = el('div', 'decorator-block');
-    const titles: Record<string, string> = { retry: '失败重试', repeat: '重复执行', cooldown: '冷却', timeout: '限时', condition: '条件', do_once: '仅执行一次' };
-    const subtitles: Record<string, string> = { retry: 'Retry', repeat: 'Repeat', cooldown: 'Cooldown', timeout: 'Time Limit', condition: 'Condition', do_once: 'Do Once' };
+    const titles: Record<string, string> = { retry: '失败重试', repeat: '重复执行', cooldown: '冷却', timeout: '限时', do_once: '仅执行一次' };
+    const subtitles: Record<string, string> = { retry: 'Retry', repeat: 'Repeat', cooldown: 'Cooldown', timeout: 'Time Limit', do_once: 'Do Once' };
     const head = el('div', 'decorator-heading');
     const title = el('span', 'decorator-title', titles[decorator.type] || decoratorLabel(decorator));
     title.title = decoratorLabel(decorator);
@@ -397,8 +436,7 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
     remove.setAttribute('aria-label', `移除${titles[decorator.type] || '装饰器'}`);
     remove.addEventListener('click', () => mutate(() => node.decorators.splice(index, 1)));
     block.appendChild(head);
-    if (decorator.type === 'condition') block.appendChild(decoratorParameterControl(node, decorator, 'expression', conditionDecoratorControl(node, decorator), headActions));
-    else if (decorator.type === 'cooldown' || decorator.type === 'timeout') {
+    if (decorator.type === 'cooldown' || decorator.type === 'timeout') {
       const fieldNode = decoratorField('时长（秒）', decoratorParameterControl(node, decorator, 'seconds', textInput(decorator.seconds, (value) => mutate(() => { decorator.seconds = Math.max(0.001, parseFloat(value || '0')); }), { type: 'number', min: 0.001, step: 0.1 }), headActions));
       fieldNode.classList.add('decorator-field-inline');
       block.appendChild(fieldNode);
@@ -482,28 +520,6 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
       decorator.count = { ref: `inputs.${name}` };
     });
     toast(`循环次数已公开为输入：${name}`);
-  }
-
-  /**
-   * 装饰器条件编辑器：结构和参数区共用同一套 conditionControl，所以「全部满足 / 任一满足」
-   * 会就地长出子条件行，不再退化成一段要手写的 JSON。上方那句中文回读是给新手的保险——
-   * 只要这句话读得通，条件就是对的。
-   */
-  function conditionDecoratorControl(node: CompositeNode, decorator: DecoratorLike): UiNode {
-    const shell = el('div', 'decorator-condition');
-    const readback = el('div', 'condition-readback');
-    const refresh = () => {
-      const sentence = conditionSentence(decorator.expression);
-      readback.textContent = sentence;
-      readback.classList.toggle('hidden', !sentence);
-    };
-    refresh();
-    shell.appendChild(readback);
-    shell.appendChild(conditionControl(decorator.expression, (value) => mutate(() => {
-      decorator.expression = value;
-      refresh();
-    }), { node, allowLiteral: true }));
-    return shell;
   }
 
   return {

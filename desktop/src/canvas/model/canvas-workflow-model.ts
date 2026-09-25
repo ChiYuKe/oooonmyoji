@@ -6,6 +6,10 @@
  */
 import type { CanvasState } from '../state/canvas-state';
 import { cardRowLabel, cardRowOf, cardRowParams, hasCardLayout } from '../render/card-layout';
+import { nodeOutputSchema } from '../../shared/workflow/graph';
+import { schemaAtPath } from '../../shared/workflow/schema-path';
+import { schemaTypes } from '../../shared/workflow/bindings';
+import { CONDITION_INPUT_X, CONDITION_INPUT_Y, boolJudgeShape, expressionInputOffset, isBoolJudgeBoolPin, isBoolJudgeNode, isBooleanInputNode, isBooleanInputPin, isBreakRefPin } from './exec-ports';
 
 /** 清单声明了长度的数组输出，最多给到第几项的下标引用；单层对象字段最多展开几个。 */
 const REFERENCE_INDEX_LIMIT = 4;
@@ -83,9 +87,114 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     return all.length ? all : names;
   }
 
-  /** 节点卡片左侧的变量端点：任务参数，以及子工作流的输入。 */
+  function expressionOperandPin(param: 'left' | 'right', value: any): any {
+    const binding = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string'
+      ? value.ref
+      : '';
+    const scope = binding.startsWith('variables.') ? 'variables' : 'inputs';
+    const variable = binding.startsWith(`${scope}.`) ? binding.slice(scope.length + 1) : '';
+    const variableDefinition = variable && state.raw?.[scope] && typeof state.raw[scope] === 'object'
+      ? state.raw[scope][variable]
+      : null;
+    const type = binding && variableDefinition && typeof variableDefinition.type === 'string'
+      ? variableDefinition.type
+      : literalOperandType(value);
+    return {
+      param,
+      variable,
+      scope,
+      type,
+      label: param === 'left' ? '左值' : '右值',
+      definition: type === 'any' ? {} : { type },
+      configured: value !== undefined,
+      required: false,
+      value,
+    };
+  }
+
+  function literalOperandType(value: unknown): string {
+    if (typeof value === 'boolean') return 'boolean';
+    if (typeof value === 'string') return 'string';
+    if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';
+    if (Array.isArray(value)) return 'array';
+    if (value && typeof value === 'object' && typeof (value as { ref?: unknown }).ref !== 'string') return 'object';
+    return 'any';
+  }
+
+  /** 节点卡片左侧的变量端点：bool_judge 暴露左/右操作数，condition 保持单一 bool 条件口。 */
   function nodeVariablePinsDefault(node: any): any[] {
-    if (!node || node.type !== 'task') return [];
+    if (!node) return [];
+    if (isBoolJudgeNode(node)) {
+      // 卡面形态决定端点：比较卡两个操作数；整卡绑定 bool 来源时只有一个布尔口；
+      // 嵌套条件（and/or/not/exists）没有可拖的端点——它的内容在「嵌套条件（进阶）」里编。
+      const shape = boolJudgeShape(node);
+      if (shape === 'comparison') {
+        const expression = node.expression;
+        const operator = Object.keys(expression)[0];
+        const operands = Array.isArray(expression[operator]) ? expression[operator] : [];
+        return [expressionOperandPin('left', operands[0]), expressionOperandPin('right', operands[1])];
+      }
+      if (shape === 'binding') {
+        const expression = node.expression;
+        const binding = expression && typeof expression === 'object' && !Array.isArray(expression)
+          && typeof (expression as { ref?: unknown }).ref === 'string'
+          ? (expression as { ref: string }).ref
+          : '';
+        const scope = binding.startsWith('variables.') ? 'variables' : 'inputs';
+        const variable = binding.startsWith(`${scope}.`) ? binding.slice(scope.length + 1) : '';
+        return [{
+          param: 'condition',
+          variable,
+          scope,
+          type: 'boolean',
+          label: '布尔值',
+          definition: { type: 'boolean' },
+          configured: Boolean(binding) || typeof expression === 'boolean',
+          required: false,
+          value: expression,
+        }];
+      }
+      return [];
+    }
+    if (isBooleanInputNode(node)) {
+      const expression = node.expression;
+      const binding = expression && typeof expression === 'object' && !Array.isArray(expression)
+        && typeof expression.ref === 'string'
+        ? expression.ref
+        : '';
+      const scope = binding.startsWith('variables.') ? 'variables' : 'inputs';
+      const variable = binding.startsWith(`${scope}.`) ? binding.slice(scope.length + 1) : '';
+      return [{
+        param: 'condition',
+        variable,
+        scope,
+        type: 'boolean',
+        label: '布尔条件',
+        definition: { type: 'boolean' },
+        configured: Boolean(binding),
+        required: false,
+        value: expression,
+      }];
+    }
+    if (node.type === 'break') {
+      // 拆分卡片：一行「拆分来源」，绑定写在节点顶层 ref 字段上（不是 params）。
+      // 类型不设限（对象/数组都能拆），具体目标校验交给两端校验器。
+      const binding = node.ref && typeof node.ref === 'object' && !Array.isArray(node.ref) && typeof node.ref.ref === 'string' ? node.ref.ref : '';
+      const scope = binding.startsWith('variables.') ? 'variables' : binding.startsWith('inputs.') ? 'inputs' : 'inputs';
+      const variable = scope && binding.startsWith(`${scope}.`) ? binding.slice(scope.length + 1) : '';
+      return [{
+        param: 'ref',
+        variable,
+        scope,
+        type: 'any',
+        label: '拆分来源',
+        definition: null,
+        configured: Boolean(binding),
+        required: true,
+        value: binding ? node.ref : undefined,
+      }];
+    }
+    if (node.type !== 'task') return [];
     const params = node.params && typeof node.params === 'object' && !Array.isArray(node.params) ? node.params : {};
     const pins = [];
     const spec = catalogByName(node.action);
@@ -237,12 +346,33 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   }
 
   function variablePinPosition(node: any, index: number): { x: number; y: number } {
+    const pin = nodeVariablePins(node)[index];
+    const inputOffset = expressionInputOffset(node, pin?.param);
+    if (inputOffset) {
+      // 表达式端点固定在左侧说明区，不跟随参数行索引。
+      return { x: position(node).x + inputOffset.x, y: position(node).y + inputOffset.y };
+    }
     return { x: position(node).x + VARIABLE_PIN_X, y: rowCenterY(node, index) };
   }
 
   function variableCompatibleWithPin(scope: string, variableName: string, node: any, param: any): boolean {
     if (!node) return false;
     if (scope === 'variables' && !VariableSystem.visible(state.raw, state.raw.variables?.[variableName]?.owner, node.id)) return false;
+    if (isBooleanInputPin(node, param)) {
+      const variableDefinition = state.raw[scope] && state.raw[scope][variableName];
+      return !variableDefinition || compatibleRefType({ type: 'boolean' }, definitionSchema(variableDefinition));
+    }
+    // 布尔判断卡的布尔口：整卡就是一个 bool，只接受 boolean 变量（与判断节点的布尔条件口一致）。
+    if (isBoolJudgeBoolPin(node, param)) {
+      const variableDefinition = state.raw[scope] && state.raw[scope][variableName];
+      return !variableDefinition || compatibleRefType({ type: 'boolean' }, definitionSchema(variableDefinition));
+    }
+    if (isBoolJudgeNode(node) && (param === 'left' || param === 'right')) return true;
+    if (isBreakRefPin(node, param)) {
+      // 拆分来源只接受 object / array 变量（标量变量拆不出字段）。
+      const variableDefinition = state.raw[scope] && state.raw[scope][variableName];
+      return !variableDefinition || isCompositeSchema(definitionSchema(variableDefinition));
+    }
     const spec = node.action ? catalogByName(node.action) : null;
     let definition = spec && spec.parameters ? spec.parameters[param] : undefined;
     if (!definition && typeof param === 'string' && param.startsWith('inputs.')) {
@@ -266,10 +396,65 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
    * 独立语义，运行时也可能不存在（只命中 1 个时引用下标会直接报错）。要列更多项，
    * 得靠清单声明 prefixItems / maxItems 把长度写死。
    */
+  /** inputs / variables 的定义编译成 schema 树（拆分卡片引用它们时按路径取子 schema）。 */
+  function referenceSchemaTree(): Record<string, unknown> {
+    const scopeSchema = (scope: 'inputs' | 'variables'): Record<string, unknown> => {
+      const definitions = state.raw && state.raw[scope] && typeof state.raw[scope] === 'object' && !Array.isArray(state.raw[scope])
+        ? state.raw[scope] as Record<string, any>
+        : {};
+      const properties: Record<string, unknown> = {};
+      for (const [name, definition] of Object.entries(definitions)) properties[name] = definitionSchema(definition);
+      return { type: 'object', properties, additionalProperties: false };
+    };
+    return {
+      type: 'object',
+      properties: { inputs: scopeSchema('inputs'), variables: scopeSchema('variables') },
+      additionalProperties: false,
+    };
+  }
+
+  /**
+   * `inputs.<键>[.<路径>]` / `variables.<键>[.<路径>]` 指向的 schema。
+   *
+   * 拆分卡片的来源可以是工作流输入/变量（例如 `inputs.识别区域` 这种 rect），推导输出 schema
+   * 时必须能解析它们，否则卡片排不出字段引脚（以前会当成空对象）。
+   */
+  function resolveReferenceSchema(reference: string): Record<string, unknown> | undefined {
+    const parts = String(reference || '').split('.');
+    if (parts.length < 2 || (parts[0] !== 'inputs' && parts[0] !== 'variables') || !parts.slice(1).every(Boolean)) return undefined;
+    return schemaAtPath(referenceSchemaTree(), parts);
+  }
+
+  /** 节点输出的整体 schema：Task 取 Action 清单；值卡片按各自规则推导（拆分卡片递归）。 */
+  function outputSchemaOf(node: any): any {
+    if (!node) return null;
+    if (node.type === 'bool_judge') return { type: 'boolean' };
+    if (node.type === 'break') {
+      return nodeOutputSchema(
+        node,
+        { byName: (name: string) => catalogByName(name), names: () => [] },
+        (id: string) => nodes().find((item: any) => item && item.id === id),
+        resolveReferenceSchema,
+      );
+    }
+    const spec = node.action ? catalogByName(node.action) : null;
+    return spec && spec.outputSchema ? spec.outputSchema : null;
+  }
+
+  /** schema 是不是 object / array（拆分来源只接受这两类）。 */
+  function isCompositeSchema(schema: any): boolean {
+    const types = schemaTypes(schema && typeof schema === 'object' ? schema : undefined);
+    return types.has('object') || types.has('array');
+  }
+
   function nodeOutputFields(node: any): Array<{ field: string; label: string; schema: any; ref: string }> {
     if (!node || !node.id) return [];
-    const spec = node.action ? catalogByName(node.action) : null;
-    const schema = spec && spec.outputSchema ? spec.outputSchema : null;
+    // 布尔判断卡片没有 Action：输出形状固定是 `{ value: boolean }`，
+    // 与 Python 侧 `BOOL_JUDGE_OUTPUT_SCHEMA` 一致。
+    if (node.type === 'bool_judge') {
+      return [{ field: 'value', label: fieldLabel('value'), schema: { type: 'boolean' }, ref: `nodes.${node.id}.output.value` }];
+    }
+    const schema = outputSchemaOf(node);
     if (!schema || typeof schema !== 'object') return [];
     const base = `nodes.${node.id}.output`;
     const candidates: Array<{ field: string; label: string; schema: any; ref: string }> = [];
@@ -292,24 +477,35 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
       }
       return candidates;
     }
-    push('', '输出', schema);
-    if (schema.type !== 'array') return candidates;
-    const itemSchema = Array.isArray(schema.prefixItems) && schema.prefixItems.length
-      ? schema.prefixItems[0]
-      : (schema.items && typeof schema.items === 'object' ? schema.items : null);
-    // 元素类型未知（没有 items）时不瞎给下标：那种引用在运行时也解析不出字段。
-    if (!itemSchema || !itemSchema.type) return candidates;
+    if (schema.type !== 'array') {
+      push('', '输出', schema);
+      return candidates;
+    }
+    const prefixItems = Array.isArray(schema.prefixItems) ? schema.prefixItems : [];
+    const items = schema.items && typeof schema.items === 'object' ? schema.items : null;
+    // 定长元组（`prefixItems`，例如区域 rect = [x, y, w, h]）是结构体语义：只列成员，
+    // 不列「整体」——`In Vec` 那种卡片拆出来就是 X / Y / Z。
+    const fixedTuple = prefixItems.length > 0;
+    if (!fixedTuple) push('', '输出', schema);
+    const elementAt = (index: number): any => (prefixItems[index] && typeof prefixItems[index] === 'object' ? prefixItems[index] : items);
+    const first = elementAt(0);
+    // 元素类型未知（没有 items / prefixItems）时不瞎给下标：那种引用在运行时也解析不出字段。
+    if (!first || !first.type) return candidates;
     // 下标只有两种来源才算「有语义」：声明了 prefixItems（定长元组）或 maxItems（长度有界）。
     // 自由长度的数组（匹配结果、OCR 结果）没有声明长度，多列几个下标只会给出同样内容、
     // 运行时还可能解析不到——所以只给第 1 项。
-    const declared = Array.isArray(schema.prefixItems) && schema.prefixItems.length
-      ? schema.prefixItems.length
+    const declared = prefixItems.length
+      ? prefixItems.length
       : (typeof schema.maxItems === 'number' ? schema.maxItems : 1);
     const indexes = Math.max(1, Math.min(REFERENCE_INDEX_LIMIT, declared));
     for (let index = 0; index < indexes; index += 1) {
-      push(String(index), `第 ${index + 1} 项`, itemSchema);
+      const itemSchema = elementAt(index);
+      if (!itemSchema || !itemSchema.type) continue;
+      // 元组项带 `title` 时（rect 的 X/Y/W/H）直接用它当标签，否则退回「第 N 项」。
+      const itemLabel = typeof itemSchema.title === 'string' && itemSchema.title ? itemSchema.title : `第 ${index + 1} 项`;
+      push(String(index), itemLabel, itemSchema);
       if (itemSchema.type === 'object') {
-        for (const [field, child] of objectFields(itemSchema)) push(`${index}.${field}`, `第 ${index + 1} 项 · ${fieldLabel(field)}`, child);
+        for (const [field, child] of objectFields(itemSchema)) push(`${index}.${field}`, `${itemLabel} · ${fieldLabel(field)}`, child);
       }
     }
     return candidates;
@@ -321,6 +517,16 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     const candidate = nodeOutputFields(sourceNode).find((item) => item.field === (field || ''))
       || nodeOutputFields(sourceNode)[0];
     if (!candidate) return false;
+    if (isBooleanInputPin(targetNode, param)) {
+      return compatibleRefType({ type: 'boolean' }, definitionSchema(candidate.schema));
+    }
+    if (isBoolJudgeBoolPin(targetNode, param)) {
+      return compatibleRefType({ type: 'boolean' }, definitionSchema(candidate.schema));
+    }
+    if (isBoolJudgeNode(targetNode) && (param === 'left' || param === 'right')) return true;
+    // 拆分来源只接受 object / array 输出（与 Python `break_target_schema` 的类型检查一致）：
+    // 绑一个标量过去运行时也拆不出字段，属于无效引用。
+    if (isBreakRefPin(targetNode, param)) return isCompositeSchema(candidate.schema);
     const spec = targetNode.action ? catalogByName(targetNode.action) : null;
     let definition = spec && spec.parameters ? spec.parameters[param] : undefined;
     if (!definition && typeof param === 'string' && param.startsWith('inputs.')) {
@@ -331,8 +537,69 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     return compatibleRefType(definitionSchema(definition), definitionSchema(candidate.schema));
   }
 
+  /**
+   * 拆分来源的落点候选：整体输出能拆时就只给整体（`nodes.<id>.output`）。
+   *
+   * UE 的 Break 节点输入就是一个结构体，没有「挑某个成员当输入」这一说；把整张卡片的
+   * 输出拆开也是最常见的用法。整体不是 object / array 时（例如拆分卡拆出来一个标量）
+   * 退回可拆的复合字段，避免出现「一点候选都没有」的死角。标量字段永远不进候选：
+   * 绑过去就是 Python 校验里的 `break-target-not-object`。
+   */
+  function breakSourceFields(sourceNode: any): Array<{ field: string; label: string; schema: any; ref: string }> {
+    if (!sourceNode || !sourceNode.id) return [];
+    const whole = outputSchemaOf(sourceNode);
+    if (isCompositeSchema(whole)) {
+      return [{ field: '', label: '输出', schema: whole, ref: `nodes.${sourceNode.id}.output` }];
+    }
+    return nodeOutputFields(sourceNode)
+      .filter((candidate) => candidate.field && isCompositeSchema(candidate.schema));
+  }
+
+  /**
+   * 拆分卡片右侧的字段输出引脚：输出 schema 是 object / array 时按顶层字段排引脚
+   * （UE Break 结构体的样子：`In Vec` ↔ `X / Y / Z`）。标量输出（未绑定、或拆出来就是一个
+   * 标量）没有引脚，卡片退回一个通用输出引用口。
+   *
+   * 只取顶层字段：`x.y` 这类嵌套候选留给落点菜单，不铺成引脚，否则卡片会被撑得很长。
+   */
+  function breakFieldPins(node: any): Array<{ field: string; label: string; schema: any; ref: string }> {
+    if (!node || node.type !== 'break') return [];
+    if (!isCompositeSchema(outputSchemaOf(node))) return [];
+    return nodeOutputFields(node).filter((candidate) => !String(candidate.field).includes('.'));
+  }
+
+  /**
+   * 拆分卡片可选的来源清单：等于 UE 调色板里「按结构体逐条列出 Break <Struct>」的那份列表。
+   * 只有 schema 是 object / array / 定长元组的来源才进列表（标量拆不出成员），
+   * 每项给出可直接写进 `ref` 的引用文本与显示名。
+   */
+  function breakSourceCandidates(excludeNodeId?: string): Array<{ ref: string; label: string }> {
+    const candidates: Array<{ ref: string; label: string }> = [];
+    for (const node of nodes()) {
+      if (!node || !node.id || node.id === excludeNodeId) continue;
+      if (node.type === 'condition' || node.type === 'root') continue;
+      if (!isCompositeSchema(outputSchemaOf(node))) continue;
+      const name = node.name || (node.action ? fieldLabel(node.action) : '') || node.id;
+      candidates.push({ ref: `nodes.${node.id}.output`, label: `${name} · 输出` });
+    }
+    for (const scope of ['inputs', 'variables'] as const) {
+      const definitions = state.raw && state.raw[scope] && typeof state.raw[scope] === 'object' && !Array.isArray(state.raw[scope])
+        ? state.raw[scope] as Record<string, any>
+        : {};
+      for (const [name, definition] of Object.entries(definitions)) {
+        if (!isCompositeSchema(definitionSchema(definition))) continue;
+        candidates.push({
+          ref: `${scope}.${name}`,
+          label: `${fieldLabel(name)} · ${scope === 'inputs' ? '输入' : '变量'}`,
+        });
+      }
+    }
+    return candidates;
+  }
+
   /** 目标参数能接受源节点输出里的哪些字段（按清单顺序）。 */
   function referenceFieldsForPin(sourceNode: any, targetNode: any, param: string): Array<{ field: string; label: string; schema: any; ref: string }> {
+    if (targetNode && isBreakRefPin(targetNode, param)) return breakSourceFields(sourceNode);
     return nodeOutputFields(sourceNode).filter((candidate) => referenceCompatibleWithPin(sourceNode, candidate.field, targetNode, param));
   }
 
@@ -424,17 +691,23 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   let portLinkVersion = -1;
   let portLinkOutputs = new Set<string>();
   let portLinkVariables = new Set<string>();
+  /** 节点 id → 被引用的 output 尾段集合（'' = 整个 output；'state' = .state；'0.score' = 深层路径）。 */
+  let portLinkOutputTails = new Map<string, Set<string>>();
   function portLinks(): void {
     const version = Number(state.docVersion || 0);
     if (version === portLinkVersion) return;
     const outputs = new Set<string>();
     const variables = new Set<string>();
+    const tails = new Map<string, Set<string>>();
     const collect = (reference: unknown): void => {
       const ref = typeof reference === 'string' ? reference : '';
       if (!ref) return;
-      const output = /^nodes\.([^\.]+)\.output(?:\.|$)/.exec(ref);
+      const output = /^nodes\.([^\.]+)\.output(?:\.(.+))?$/.exec(ref);
       if (output) {
         outputs.add(output[1]);
+        const tailSet = tails.get(output[1]) || new Set<string>();
+        tailSet.add(output[2] ?? '');
+        tails.set(output[1], tailSet);
         return;
       }
       const variable = /^(inputs|variables)\.([^\.]+)/.exec(ref);
@@ -459,12 +732,30 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     portLinkVersion = version;
     portLinkOutputs = outputs;
     portLinkVariables = variables;
+    portLinkOutputTails = tails;
   }
 
   /** 任务卡的「节点输出引用」口是否已经连出去：连了画实心，没连是空心环。 */
   function outputReferenced(nodeId: string): boolean {
     portLinks();
     return portLinkOutputs.has(String(nodeId));
+  }
+
+  /**
+   * 拆分卡片的某个字段引脚是否已经连出去。整个 output 被引用（`nodes.<id>.output`，
+   * 例如别的拆分卡片镜像了它）时所有字段都算已连接；否则按尾段精确匹配（`state`、
+   * `0.score` 这类深层路径也算在首段字段上）。
+   */
+  function outputFieldReferenced(nodeId: string, field: string): boolean {
+    portLinks();
+    const tails = portLinkOutputTails.get(String(nodeId));
+    if (!tails) return false;
+    if (tails.has('')) return true;
+    const name = String(field || '');
+    for (const tail of tails) {
+      if (tail === name || (name && tail.startsWith(`${name}.`))) return true;
+    }
+    return false;
   }
 
   /** 变量卡片的输出口是否已经连出去（有没有端点或实例卡输入引用这个变量）。 */
@@ -478,8 +769,8 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     paramRowsExpanded: () => paramRowsExpandedSet(state),
     syncLegacyInputParameters, syncLegacyVariableCards, variablePinPosition, variableCompatibleWithPin,
     variableCompatibleWithInstanceInput, workflowDescriptor, workflowInputs, instanceRunCards, instanceRunInputPosition,
-    nodeOutputFields, referenceCompatibleWithPin, referenceFieldsForPin, referenceDisplayName,
-    outputReferenced, variableInUse,
+    nodeOutputFields, breakFieldPins, breakSourceCandidates, resolveReferenceSchema, referenceCompatibleWithPin, referenceFieldsForPin, referenceDisplayName,
+    outputReferenced, outputFieldReferenced, variableInUse,
   };
 }
 

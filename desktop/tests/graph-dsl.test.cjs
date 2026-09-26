@@ -180,7 +180,7 @@ for (const item of CASES) {
 }
 
 test('只有 3 个非法用例写不出来', () => {
-  assert.equal(CASES.length, 40);
+  assert.equal(CASES.length, 41);
   assert.deepStrictEqual(
     [...unwritable].sort(),
     ['变量节点必须有作用域', '变量节点必须有键名', '边指向不存在的节点'].sort(),
@@ -438,6 +438,68 @@ test('| 多行文本块', () => {
   );
   assert.equal(document.description, '第一行\n  缩进保留\n第三行');
   assert.equal(parseDocument(emitDocument(document)).description, document.description);
+});
+
+test('注释文字里的换行也能往返（画布上的注释框允许多行）', () => {
+  const document = parseDocument(
+    'workflow demo\n' +
+      '  version: 1.0.0\n' +
+      '  resolution: [1920, 1080]\n' +
+      '  root: root\n' +
+      '  comment comment_1\n' +
+      '    text: |\n' +
+      '      第一行\n' +
+      '      第二行\n' +
+      '    at: [40, 40]\n',
+  );
+  assert.equal(document.comments[0].text, '第一行\n第二行');
+  // 写盘 → 读回：多行注释文字不能丢换行，也不能把文件写成读不回来的形状
+  // （注释头行必须仍是一行，换行只能以转义出现）。
+  const text = emitDocument(document);
+  assert.equal(parseDocument(text).comments[0].text, '第一行\n第二行');
+  const header = text.split('\n').find((line) => line.includes('comment comment_1'));
+  assert.ok(header.includes('\\n'), `注释头行要把换行写成 \\n：${header}`);
+});
+
+test('注释框的分类色与字号也往返（详情面板改的就是这两个字段）', () => {
+  const document = parseDocument(
+    'workflow demo\n' +
+      '  version: 1.0.0\n' +
+      '  resolution: [1920, 1080]\n' +
+      '  root: root\n' +
+      '  comment comment_1 结算页分支\n' +
+      '    tint: warning\n' +
+      '    fontSize: 18\n' +
+      '    at: [40, 40]\n' +
+      '    size: [420, 260]\n',
+  );
+  assert.equal(document.comments[0].tint, 'warning');
+  assert.equal(document.comments[0].fontSize, 18);
+  assert.deepEqual(document.comments[0].size, { w: 420, h: 260 });
+  const back = parseDocument(emitDocument(document)).comments[0];
+  assert.equal(back.tint, 'warning');
+  assert.equal(back.fontSize, 18);
+  assert.equal(back.text, '结算页分支');
+});
+
+test('注释框的自定义颜色（#rrggbb）往返：DSL 里要加引号，读回来一模一样', () => {
+  const document = parseDocument(
+    'workflow demo\n' +
+      '  version: 1.0.0\n' +
+      '  resolution: [1920, 1080]\n' +
+      '  root: root\n' +
+      '  comment comment_1 结算页分支\n' +
+      '    tint: "#c0564f"\n' +
+      '    opacity: 0.4\n' +
+      '    at: [40, 40]\n',
+  );
+  assert.equal(document.comments[0].tint, '#c0564f');
+  assert.equal(document.comments[0].opacity, 0.4);
+  const text = emitDocument(document);
+  // `#` 是注释符：不引起来会被当成行尾注释吃掉。
+  assert.match(text, /tint: "#c0564f"/);
+  assert.equal(parseDocument(text).comments[0].tint, '#c0564f');
+  assert.equal(parseDocument(text).comments[0].opacity, 0.4);
 });
 
 test('看起来像别的值的字符串必须加引号', () => {

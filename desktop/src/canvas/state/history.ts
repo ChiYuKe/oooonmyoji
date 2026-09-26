@@ -6,6 +6,8 @@
  */
 import type { CanvasState } from './canvas-state';
 import { normalizeRaw as defaultNormalizeRaw } from './normalize';
+import { parseDocument } from '../../shared/workflow/graph-dsl';
+import { toCanvasDocument } from '../../shared/workflow/graph-document';
 
 export interface HistoryDeps {
   state: CanvasState;
@@ -73,9 +75,31 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     renderAfterDocumentChange();
   }
 
+  /**
+   * 整份替换正文。
+   *
+   * 输入有两种形态，都要认：
+   * - **`.owf` 文本**：壳层把「详细信息镜像」里改出来的正文回推给真画布时用的就是它
+   *   （见 `renderer/editor-host.ts` 的 `documentStateChanged` 分支，正文来自
+   *   `state/document-text.ts` 的 `emitRuntimeDocument`）。以前这里只 `JSON.parse`，
+   *   于是镜像里的改动（改颜色、改字号、改参数…）到真画布这一步被静默丢掉——
+   *   表现就是「面板里改了没反应」。
+   * - **JSON**：内部快照/撤销恢复与部分测试直接给编辑形态。
+   */
   function replaceDocument(text: string, recordHistory = false): void {
-    let parsed: unknown;
-    try { parsed = JSON.parse(text); } catch { return; }
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      try {
+        parsed = toCanvasDocument(parseDocument(text));
+      } catch {
+        return;
+      }
+    }
     const before = snapshot();
     const next = normalizeRaw(parsed);
     if (JSON.stringify(next) === before) return;
@@ -93,6 +117,14 @@ export function createEditorHistory(deps: HistoryDeps): EditorHistory {
     }
     if (state.inspector === 'variables' && !Object.prototype.hasOwnProperty.call(state.raw?.[state.selectedVariableScope] || {}, state.selectedVariable)) {
       state.selectedVariable = '';
+    }
+    // 注释框被删掉（多半是详情栏镜像删的）时别让面板停在一条不存在的注释上。
+    if (state.inspector === 'comment') {
+      const comments = Array.isArray(state.raw?.comments) ? state.raw.comments : [];
+      if (!comments.some((item: any) => item && item.id === state.selectedCommentId)) {
+        state.selectedCommentId = '';
+        state.inspector = 'node';
+      }
     }
     // 整份替换：节点集合可能整体变化，按整层重绘处理。
     deps.renderAll?.();

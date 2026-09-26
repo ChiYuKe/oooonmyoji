@@ -10,7 +10,7 @@ function harness(raw, options = {}) {
   const state = createCanvasState();
   state.raw = raw;
   const model = createWorkflowModel(state);
-  const calls = {rendered: 0, dirty: 0, hidden: 0, cleared: 0, connections: [], cancelled: 0, finishedVariable: 0, events: []};
+  const calls = {rendered: 0, dirty: 0, hidden: 0, cleared: 0, connections: [], cancelled: 0, finishedVariable: 0, events: [], inspectorNotices: 0};
   const graph = {id: 'graph'};
   const pointer = createCanvasPointer({
     state,
@@ -25,6 +25,7 @@ function harness(raw, options = {}) {
     render: () => { calls.rendered += 1; },
     hideMenus: () => { calls.hidden += 1; },
     clearVariableCardSelection: () => { calls.cleared += 1; model.clearVariableCardSelection(); },
+    notifyInspector: () => { calls.inspectorNotices += 1; },
     layout: model.layout,
     variableCards: model.variableCards,
     variableCardList: model.variableCardList,
@@ -70,12 +71,15 @@ test('onPointerDown 区分平移与框选并清空选择', () => {
   assert.equal(m.state.drag.kind, 'marquee');
   assert.equal(m.state.selected.size, 0);
   assert.equal(m.calls.cleared, 1);
+  // 清空选区必须告诉详情栏镜像（可见面板在它那边），否则它会停在上一份选区上。
+  assert.equal(m.calls.inspectorNotices, 1, '点空白要通知详情面板清空');
 
   const additive = harness({nodes: [], _layout: {}});
   additive.state.selected.add('keep');
   additive.pointer.onPointerDown(event({target: additive.graph, shiftKey: true}));
   assert.deepEqual([...additive.state.selected], ['keep']);
   assert.equal(additive.state.marquee.additive, true);
+  assert.equal(additive.calls.inspectorNotices, 0, 'shift 追加框选没有清空，不用通知');
 });
 
 test('平移移动累积位移并标记 moved；自动平移在边缘触发', () => {
@@ -112,6 +116,62 @@ test('未移动的拖拽不进入历史', () => {
   h.pointer.onPointerUp(event());
   assert.equal(h.state.undo.length, 0);
   assert.equal(h.calls.dirty, 0);
+});
+
+test('pointerdown 起手的拖拽标记 fromPointer：画布入口据此改用 pointer 事件驱动', () => {
+  // 起手那一下 preventDefault() 让 Chromium **整段交互都不再派发兼容 mouse 事件**
+  // （mousedown / mousemove / mouseup 全没有，实测），只认 mousemove 的话这类拖拽根本
+  // 拖不动——「注释框没法像卡片那样拖」就是这么来的。所以它们必须标记出来，
+  // 由画布入口改用 pointermove / pointerup 驱动（见 editor.ts 的 pointerDrivenDrag）。
+  const h = harness({nodes: [], comments: [{id: 'comment_1', text: 'x', at: {x: 0, y: 0}}]});
+  h.pointer.startCommentDrag(event({clientX: 0, clientY: 0}), h.state.raw.comments[0], 'move');
+  assert.equal(h.state.drag.fromPointer, true, '注释框拖拽要走 pointer');
+
+  h.pointer.startWaypointDrag(event({clientX: 0, clientY: 0}), 'a', 'b', 0);
+  assert.equal(h.state.drag.fromPointer, true, '折点拖拽同样在 pointerdown 里起手');
+
+  // 卡片拖拽是在 mousedown 里起手的：兼容 mouse 事件照常派发，照旧走 mouse，别重复驱动。
+  const nodes = harness({nodes: [{id: 'a'}], _layout: {a: {x: 0, y: 0}}});
+  nodes.pointer.startNodeDrag(event(), 'a');
+  assert.ok(!nodes.state.drag.fromPointer, '卡片拖拽不该标记成 pointer 驱动');
+});
+
+test('抬手事件丢了也不会一直拖：没按键还在移动就按松手收尾', () => {
+  // 复现「点一下注释框，它就一直跟着鼠标走」：
+  // 注释框/折点是在 pointerdown 里起手的，起手那一下 preventDefault() 会让 Chromium
+  // 整段交互都不再派发兼容 mouse 事件（实测连 mouseup 都没有），只挂 mouseup 收尾的话
+  // state.drag 永远清不掉，之后每一次 mousemove 都还在拖。
+  const h = harness({nodes: [], edges: [], comments: [{id: 'comment_1', text: '注释', at: {x: 100, y: 100}, size: {w: 200, h: 120}}]});
+  const comment = h.state.raw.comments[0];
+  h.pointer.startCommentDrag(event({clientX: 100, clientY: 100}), comment, 'move');
+  assert.equal(h.state.drag.kind, 'comment');
+
+  // 松手事件丢了：只有 mousemove，且 buttons === 0。
+  h.pointer.onPointerMove(event({clientX: 300, clientY: 260, buttons: 0}));
+  assert.equal(h.state.drag, null, '没按键还在移动 = 抬手丢了，必须收尾');
+  assert.deepEqual(comment.at, {x: 100, y: 100}, '收尾那一帧不再套用位移');
+
+  // 之后再挪鼠标也不该动它。
+  h.pointer.onPointerMove(event({clientX: 500, clientY: 400, buttons: 0}));
+  assert.deepEqual(comment.at, {x: 100, y: 100});
+
+  // 真按住时照常拖（buttons 里有左键），并且照旧按 8 像素吸附。
+  h.pointer.startCommentDrag(event({clientX: 100, clientY: 100}), comment, 'move');
+  h.pointer.onPointerMove(event({clientX: 180, clientY: 140, buttons: 1}));
+  assert.deepEqual(comment.at, {x: 184, y: 144});
+
+  // 平移与连线拖拽同样受兜底保护，且不影响正常路径。
+  const pan = harness({nodes: []});
+  pan.pointer.onPointerDown(event({button: 2, clientX: 0, clientY: 0}));
+  const panBefore = pan.state.panX;
+  pan.pointer.onPointerMove(event({clientX: 40, clientY: 40, buttons: 0}));
+  assert.equal(pan.state.drag, null, '平移也会收尾');
+  assert.equal(pan.state.panX, panBefore, '收尾帧不再叠加位移');
+
+  const connect = harness({nodes: []});
+  connect.state.connect = {x: 0, y: 0, pointerId: 5, hover: null};
+  connect.pointer.onPointerMove(event({pointerId: 5, clientX: 40, clientY: 40, buttons: 0}));
+  assert.equal(connect.calls.cancelled, 1, '丢抬手的连线拖拽也要收尾');
 });
 
 test('变量卡片拖拽按 origins 移动整组选中的卡片', () => {

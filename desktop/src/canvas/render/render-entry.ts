@@ -60,7 +60,10 @@ export interface RenderEntryDeps {
   syncLegacyInputParameters(): boolean;
   syncLegacyVariableCards(): boolean;
   setDirty(value?: boolean): void;
-  /** 重绘收尾：让贴在卡片行上的浮层（行内参数编辑器）跟随 pan/zoom 重新贴合。 */
+  /**
+   * 帧尾贴合：让不参与控制器增量渲染的东西（行内参数编辑器这类 HTML 浮层、
+   * 注释框图层）在**每一帧**都重新贴合——同步帧与 `coalesce()` 的合并帧都算。
+   */
   afterRender?(): void;
   /** 该节点引用了哪些节点输出。 */
   referenceSourceIds?(node: any): string[];
@@ -669,7 +672,12 @@ export function createRenderEntry(deps: RenderEntryDeps) {
 
   const entry: CanvasRenderEntry = {
     render,
-    coalesce: (flags?: RenderFlags) => controller.coalesce(flags),
+    coalesce: (flags?: RenderFlags) => {
+      // 合并帧（指针拖拽、滚轮）走的是控制器内部的增量重绘，不经过上面的 render()：
+      // 帧尾贴合必须在这里补一次，否则拖动注释框时框体不跟着指针走，要等抬手才跳到位。
+      controller.coalesce(flags);
+      afterRender?.();
+    },
     focusNode,
     focusNodeDetail,
     setRenderAll: (value: boolean) => {

@@ -20,6 +20,8 @@ export interface InspectorRenderers {
   renderVariablesInspector(): void;
   renderInstanceRunInspector(): void;
   renderEdgeInspector(): void;
+  /** 注释框（UE Comment）：选中它时详情面板显示颜色 / 字号 / 文字。 */
+  renderCommentInspector(): void;
 }
 
 export interface InspectorPanelDeps {
@@ -162,6 +164,7 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     const valueCardSelected = Boolean(selectedNode) && isValueCardNode(selectedNode);
     const open = state.inspector === 'workflow'
       || state.inspector === 'variables'
+      || state.inspector === 'comment'
       || Boolean(state.selectedRun)
       || Boolean(state.selectedEdge)
       || Boolean(selectedNode && !valueCardSelected);
@@ -177,6 +180,8 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     }
     if (state.inspector === 'workflow') { renderers.renderWorkflowInspector(); return; }
     if (state.inspector === 'variables') { renderers.renderVariablesInspector(); return; }
+    // 注释框不是节点：它自己的选中态就存在 state.inspector 里，先于节点分派。
+    if (state.inspector === 'comment') { renderers.renderCommentInspector(); return; }
     if (state.selectedRun) { renderers.renderInstanceRunInspector(); return; }
     if (state.selectedEdge) { renderers.renderEdgeInspector(); return; }
     if (selected.length !== 1) {

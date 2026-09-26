@@ -145,6 +145,7 @@ export function createCanvasState(): CanvasState {
     selectedVariableScope: 'inputs',
     selectedVariableCardId: '',
     selectedVariableCardIds: new Set(),
+    selectedCommentId: '',
     zoom: 1,
     panX: 80,
     panY: 48,

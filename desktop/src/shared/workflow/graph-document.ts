@@ -865,6 +865,15 @@ export function graphCommentIssues(raw: unknown): ValidationIssue[] {
     if (typeof comment.text !== 'string') {
       issues.push(issue(['comments', index, 'text'], `注释框 ${commentId} 的 text 必须是字符串`, 'graph-comment-text'));
     }
+    if (comment.tint !== undefined && typeof comment.tint !== 'string') {
+      issues.push(issue(['comments', index, 'tint'], `注释框 ${commentId} 的 tint 必须是字符串`, 'graph-comment-tint'));
+    }
+    if (comment.fontSize !== undefined && (!Number.isFinite(comment.fontSize) || comment.fontSize <= 0)) {
+      issues.push(issue(['comments', index, 'fontSize'], `注释框 ${commentId} 的 fontSize 必须是正数`, 'graph-comment-font-size'));
+    }
+    if (comment.opacity !== undefined && (!Number.isFinite(comment.opacity) || comment.opacity <= 0 || comment.opacity > 1)) {
+      issues.push(issue(['comments', index, 'opacity'], `注释框 ${commentId} 的 opacity 必须是 (0, 1] 之间的数`, 'graph-comment-opacity'));
+    }
     if (!isPosition(comment.at)) {
       issues.push(issue(['comments', index, 'at'], `注释框 ${commentId} 必须写整数坐标 at`, 'graph-comment-position'));
     }

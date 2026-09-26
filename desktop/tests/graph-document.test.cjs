@@ -408,6 +408,15 @@ test('注释框的问题逐条报出来', () => {
   assert.ok(codes(base([{ id: 'c1', text: 'a' }])).has('graph-comment-position'));
   assert.ok(codes(base([{ id: 'c1', text: 3, at: { x: 0, y: 0 } }])).has('graph-comment-text'));
   assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, size: { w: 0, h: 10 } }])).has('graph-comment-size'));
+  // 详情面板能改的两项也要自洽：颜色是字符串、字号是正数。
+  assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, tint: 3 }])).has('graph-comment-tint'));
+  assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, fontSize: 0 }])).has('graph-comment-font-size'));
+  assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, fontSize: '13' }])).has('graph-comment-font-size'));
+  // 不透明度必须在 (0, 1]：0 与 >1 都是写坏了的文档。
+  assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, opacity: 0 }])).has('graph-comment-opacity'));
+  assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, opacity: 1.5 }])).has('graph-comment-opacity'));
+  assert.ok(codes(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, opacity: '0.5' }])).has('graph-comment-opacity'));
+  assert.deepEqual(graphDocumentIssues(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 }, tint: 'info', fontSize: 18, opacity: 0.4 }])), []);
   assert.deepEqual(graphDocumentIssues(base([{ id: 'c1', text: 'a', at: { x: 0, y: 0 } }])), []);
 });
 

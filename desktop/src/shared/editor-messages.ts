@@ -31,13 +31,15 @@ export interface SidebarVariable {
 
 /** 详细信息面板的选中项（画布投影给壳层转发）。 */
 export interface InspectorSelection {
-  kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow';
+  kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow' | 'comment';
   nodeId?: string;
   index?: number;
   parent?: string;
   child?: string;
   name?: string;
   scope?: 'inputs' | 'variables';
+  /** 注释框（UE Comment）的选区：详细信息镜像据此渲染颜色 / 字号 / 标题。 */
+  commentId?: string;
 }
 
 export interface ReadyMessage {

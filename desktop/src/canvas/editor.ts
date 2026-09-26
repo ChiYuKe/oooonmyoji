@@ -14,9 +14,12 @@
  * 验证脚本与旧展示页的调试出口（画布模块自身不再读取）。
  */
 import { createCanvasEdges } from './canvas/edges';
-import { createCanvasComments } from './canvas/comments';
+import {
+  createCanvasComments, COMMENT_TINTS, COMMENT_TINT_COLORS, DEFAULT_COMMENT_TINT, commentTintColor,
+  commentOpacity, MIN_COMMENT_OPACITY, DEFAULT_COMMENT_OPACITY,
+  DEFAULT_COMMENT_FONT_SIZE, MIN_COMMENT_FONT_SIZE, MAX_COMMENT_FONT_SIZE,
+} from './canvas/comments';
 import { addStructuralWaypoint, clearStructuralWaypoints, moveStructuralWaypoint, removeStructuralWaypoint, structuralWaypoints } from './model/edge-waypoints';
-import { collapseNodeIntoCustomType } from './model/custom-types';
 import { createCanvasMinimap } from './canvas/minimap';
 import { createCanvasViewport } from './canvas/viewport';
 import { groupMemberIdsOf } from './canvas/card-follow-layout';
@@ -45,13 +48,14 @@ import { createTemplateCheck } from './interactions/template-check';
 import { createWorkflowBrowser } from './interactions/workflow-browser';
 import { createCompositeInspector } from './inspector/composite-inspector';
 import { createDetailInspectors } from './inspector/detail-inspectors';
+import { createCommentInspector } from './inspector/comment-inspector';
 import { createInspectorPanel, type InspectorRenderers } from './inspector/panel';
 import { createParameterControls } from './inspector/parameter-controls';
 import { createVariableInspectors } from './inspector/variable-inspectors';
 import { createCanvasWorkflowModel } from './model/canvas-workflow-model';
-import { isBooleanInputNode } from './model/exec-ports';
+import { fixedRowCardHeight, isBooleanInputNode } from './model/exec-ports';
 import { isNodeLocked, toggleNodeLock } from './model/layout-locks';
-import { createNodeGroups, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from './model/node-groups';
+import { createNodeGroups, isGroupInterfaceNode, isGroupOutputInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from './model/node-groups';
 import { issuesByEdge, issueTitle, issuesByNode, nodeIssues, splitBySeverity, warningsByNode } from './model/card-issues';
 import { editorAdvisories } from './model/advisories';
 import { createCanvasReferences } from './model/references';
@@ -564,6 +568,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const Pointer = createCanvasPointer({
     state, graph, wrap, measurement: wrapMeasurement, worldPoint, position: viewPosition, nodeById: viewNodeById, nodes: viewNodes, nodeHeight: viewNodeHeight, snapshot, render, hideMenus,
     clearVariableCardSelection, layout, variableCards, variableCardList, connectionTargetAt,
+    // 清空选区（点空白）也要通知详情栏镜像，否则它会停在上一份选区上。
+    notifyInspector: () => requestInspector(),
     variableConnectionTargetAt, referenceConnectionTargetAt,
     finishConnection, cancelConnection, finishVariableConnection, finishReferenceConnection, setDirty,
     coalesce: (flags) => renderPieces?.coalesce(flags ?? { viewport: true, interaction: true }),
@@ -590,6 +596,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, host: graph, svgEl, el, wrap, mutate, worldPoint, toast: (message, error) => toast(message, error),
     render: (flags) => render(flags),
     startCommentDrag: (event, comment, mode) => Pointer.startCommentDrag(event, comment, mode),
+    clearVariableSelection: () => clearVariableCardSelection(),
+    // 可见的「详细信息」面板是壳层里的镜像画布：选中注释框要把选区投影过去。
+    requestInspector: () => requestInspector(),
   });
 
   const CanvasHelpers = createCanvasHelpers({
@@ -726,11 +735,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   /** 详情面板 ⇄ 各详情渲染器互调：面板先建，内容渲染器构造后填表。 */
   const inspectorRenderers: InspectorRenderers = {
     renderTaskInspector: () => {}, renderCompositeInspector: () => {}, renderDecorators: () => {},
-    renderWorkflowInspector: () => {}, renderVariablesInspector: () => {}, renderInstanceRunInspector: () => {}, renderEdgeInspector: () => {},
+    renderWorkflowInspector: () => {}, renderVariablesInspector: () => {}, renderInstanceRunInspector: () => {},
+    renderEdgeInspector: () => {}, renderCommentInspector: () => {},
   };
   const InspectorPanel = createInspectorPanel({
     state, UI, $, el, nodeById: (id) => viewNodeById(id) || nodeById(id), hideAssetPathPreview, types: TYPES, typeNames: TYPE_NAMES, typeLabels: TYPE_LABEL,
-    renameNode, renameNodeGroup: renameGroup, changeNodeType, mutate, deleteSelection,
+    renameNode, renameNodeGroup: renameGroup, execPinNames, addExecPin, renameExecPin, removeExecPin,
+    changeNodeType, mutate, deleteSelection,
     renderers: inspectorRenderers,
   });
   const {
@@ -808,6 +819,30 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const { renderCompositeInspector, renderDecorators } = StudioCompositeInspector;
 
+  // 注释框的详情面板：颜色（自由取色）/ 字号 / 标题文字。注释不是节点，选中态在 state.inspector 里。
+  const CommentInspector = createCommentInspector({
+    state, el, clearInspector, section, field, textInput,
+    tints: COMMENT_TINTS,
+    tintColors: COMMENT_TINT_COLORS,
+    defaultTint: DEFAULT_COMMENT_TINT,
+    resolveTint: (tint) => commentTintColor(tint),
+    resolveOpacity: (opacity) => commentOpacity(opacity),
+    opacityRange: { min: MIN_COMMENT_OPACITY, fallback: DEFAULT_COMMENT_OPACITY },
+    fontSizeRange: { min: MIN_COMMENT_FONT_SIZE, max: MAX_COMMENT_FONT_SIZE, fallback: DEFAULT_COMMENT_FONT_SIZE },
+    comments: {
+      remove: (id) => {
+        Comments.remove(id);
+        // 删完别把面板留在注释档上：下一次重绘按新的选中项（多半是空态）走。
+        state.inspector = 'node';
+        render({ panels: true, selection: true });
+      },
+      setText: (id, text) => Comments.setText(id, text),
+      setTint: (id, tint) => Comments.setTint(id, tint),
+      setFontSize: (id, size) => Comments.setFontSize(id, size),
+      setOpacity: (id, opacity) => Comments.setOpacity(id, opacity),
+    },
+  });
+
   inspectorRenderers.renderTaskInspector = renderTaskInspector;
   inspectorRenderers.renderInstanceRunInspector = renderInstanceRunInspector;
   inspectorRenderers.renderCompositeInspector = renderCompositeInspector;
@@ -815,6 +850,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   inspectorRenderers.renderWorkflowInspector = renderWorkflowInspector;
   inspectorRenderers.renderVariablesInspector = renderVariablesInspector;
   inspectorRenderers.renderEdgeInspector = renderEdgeInspector;
+  inspectorRenderers.renderCommentInspector = CommentInspector.renderCommentInspector;
 
   const Cards = createCanvasCards({
     state, svgEl, nodeCards, displayNameOfDefinition, assetPreviewForPath, bindAssetPathPreview,
@@ -976,7 +1012,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
       },
     },
     beforeEdgeRebuild: () => resetPatchRegistry(),
-    afterRender: () => { refreshInlineEditor(); NodeNameEditor.refresh(); ValueCardEditor.refresh(); },
+    // 帧尾贴合：HTML 浮层（就地编辑器）与注释框图层都不参与控制器的增量渲染，
+    // 同步帧与合并帧都要跑一次——拖动注释框走的是合并帧，漏掉的话框体只在抬手时跳到位。
+    afterRender: () => { refreshInlineEditor(); NodeNameEditor.refresh(); ValueCardEditor.refresh(); Comments.render(); },
     nodeWidth: NODE_W,
     variableCardWidth: VARIABLE_CARD_W, variableCardHeight: VARIABLE_CARD_H,
     runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H,
@@ -1046,9 +1084,24 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   graph.addEventListener('mousemove', onPointerMove);
   graph.addEventListener('mouseup', onPointerUp);
   graph.addEventListener('mousemove', (event) => { state.mouse = worldPoint(event); });
-  graph.addEventListener('pointermove', (event) => { if (state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
-  graph.addEventListener('pointerup', (event) => { if (state.connect || state.variableConnect || state.referenceConnect) onPointerUp(event); });
-  graph.addEventListener('pointercancel', () => { cancelConnection(); cancelVariableConnection(); cancelReferenceConnection(); });
+  /**
+   * 起手在 `pointerdown` 的拖拽（注释框、手工折点）：起手那一下 `preventDefault()` 会让
+   * Chromium **整段交互都不再派发兼容 mouse 事件**（mousedown / mousemove / mouseup 全都
+   * 没有，实测只剩 pointerdown / pointermove / pointerup）。这类拖拽的「跟手移动」与
+   * 「抬手收尾」都必须走 pointer 事件：只认 mousemove 的话它根本拖不动（这正是
+   * 「注释框没法像卡片那样拖」的原因），只认 mouseup 的话抬手收不了尾，
+   * 之后每次移动都还在拖它（「点一下就一直跟着鼠标走」）。
+   * 卡片 / 框选 / 平移是在 `mousedown` 里起手的，照旧走 mouse 事件：两套事件各管各的，
+   * 不会把 autoPan 这种逐事件累加的动作跑两遍。
+   */
+  const pointerDrivenDrag = (): boolean => Boolean(state.drag && state.drag.fromPointer);
+  graph.addEventListener('pointermove', (event) => { if (pointerDrivenDrag() || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
+  graph.addEventListener('pointerup', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerUp(event); });
+  graph.addEventListener('pointercancel', (event) => {
+    cancelConnection(); cancelVariableConnection(); cancelReferenceConnection();
+    // 指针被系统取消（触控/笔、浏览器接管手势）也要收尾，否则拖拽状态会一直挂着。
+    if (state.drag) onPointerUp(event);
+  });
   graph.addEventListener('mouseleave', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
   // 滚轮缩放：事件可以远高于帧率，累积到本帧只做一次视口更新。
   graph.addEventListener('wheel', (event) => {

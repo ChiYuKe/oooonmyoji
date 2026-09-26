@@ -571,24 +571,39 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 }
 .comment-box .comment-title {
   fill: var(--card-head-text, #dfe3e8);
-  font-size: 12px;
+  /* 字号不在这里写：CSS 声明会盖过 SVG 的 font-size 属性，字号由模型按注释框逐个给出
+     （见 comments.ts buildComment），这里留空才是"属性说了算"。 */
   font-weight: 600;
   dominant-baseline: middle;
   pointer-events: none;
 }
+/* 删除按钮：透明的方形命中区（22–26px）比「×」字形大一圈，悬停时整块亮一下。 */
+.comment-box .comment-remove-button { cursor: pointer; }
+.comment-box .comment-remove-hit { fill: transparent; pointer-events: all; }
+.comment-box .comment-remove-button:hover .comment-remove-hit {
+  fill: color-mix(in srgb, var(--card-tint, #6b7785) 32%, transparent);
+}
 .comment-box .comment-remove {
   fill: var(--card-muted, #9aa4ae);
-  font-size: 14px;
+  /* 字号同理由 buildComment 按注释框字号给出（属性会被 CSS 盖掉，所以这里不能写）。 */
   text-anchor: middle;
   dominant-baseline: middle;
   cursor: pointer;
+  pointer-events: none;
 }
-.comment-box .comment-remove:hover { fill: var(--danger, #d9737a); }
+.comment-box .comment-remove-button:hover .comment-remove { fill: var(--danger, #d9737a); }
 .comment-box .comment-resize {
   stroke: var(--card-muted, #9aa4ae);
   stroke-width: 1.5;
   fill: none;
   cursor: nwse-resize;
+}
+/* 把手只有 1.5px 描边，照着角点很容易差几像素落到框体上（变成整体移动）：
+   叠一条透明的加宽命中带，只负责吃指针，不画东西。 */
+.comment-box .comment-resize-hit {
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
 }
 .comment-box.selected .comment-frame {
   stroke: var(--select, #4a90d9);
@@ -600,7 +615,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .comment-box.tint-success { --card-tint: #5a9e6f; }
 .comment-box.tint-info { --card-tint: #4a90d9; }
 
-/* 就地改注释文字：与节点改名同一套「HTML 输入框盖在 SVG 上」的做法。 */
+/* 就地改注释文字：与节点改名同一套「HTML 输入框盖在 SVG 上」的做法。
+   注释文字会折行，所以这里是 textarea；字号 / 行高由浮层按缩放写成行内样式。 */
 .comment-text-editor {
   position: absolute;
   z-index: 30;
@@ -610,12 +626,16 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  padding: 0 8px;
+  padding: 4px 8px;
   border: 1px solid var(--select, #4a90d9);
   border-radius: 3px;
   background: var(--panel, #202020);
   color: var(--text, #e6e8ea);
   font: inherit;
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow: auto;
+  resize: none;
 }
 
 /* ---------------------------------------------------------------------------

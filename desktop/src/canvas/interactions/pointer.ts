@@ -18,6 +18,13 @@ export interface PointerEventLike {
   clientX: number;
   clientY: number;
   pointerId?: number;
+  /**
+   * 当前按下的键位掩码（mousemove / pointermove / mouseleave 都有）。
+   * 用来兜底「抬手事件丢了」：注释框、折点这类拖拽在 pointerdown 里起手，
+   * 起手那一下 preventDefault() 会让 Chromium 整段交互都不再派发兼容 mouse 事件
+   * （实测连 mouseup 都没有），只等 mouseup 收尾的话拖拽状态会一直挂着。
+   */
+  buttons?: number;
   shiftKey?: boolean;
   altKey?: boolean;
   target?: unknown;
@@ -47,6 +54,13 @@ export interface PointerDeps {
   coalesce?(flags?: { viewport?: boolean; interaction?: boolean }): void;
   hideMenus(): void;
   clearVariableCardSelection(): void;
+  /**
+   * 选区变化后通知「详细信息」面板。
+   *
+   * 可见的详情面板在壳层的镜像画布里（画布自己的 `#inspector` 是隐藏的），
+   * 所以清空选区（点空白处）也要说一声，否则镜像会停在上一份选区上。
+   */
+  notifyInspector?(): void;
   layout(): Record<string, any>;
   variableCards(): Record<string, any>;
   variableCardList(): any[];
@@ -139,8 +153,13 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
   /**
    * 注释框拖拽（移动 / 改尺寸）。
    *
-   * 与卡片拖拽共用同一套 `state.drag` + `onPointerMove/Up`：这样 autoPan、历史快照与
+   * 与卡片拖拽共用同一套 `state.drag` + 移动/抬手收尾：这样 autoPan、历史快照与
    * 「位置改了才记一条撤销」的行为完全一致，注释框模块自己不用再管指针捕获。
+   *
+   * 但收尾事件不是一套：这里是在 `pointerdown` 里起手的，而起手那一下 `preventDefault()`
+   * 会让 Chromium **整段交互都不再派发兼容 mouse 事件**（mousedown / mousemove / mouseup
+   * 全都没有，实测）。所以标记 `fromPointer`，由画布入口改用 `pointermove` / `pointerup`
+   * 驱动它——卡片那种在 mousedown 里起手的拖拽照旧走 mouse 事件，两边不重叠。
    */
   function startCommentDrag(event: PointerEventLike, comment: any, mode: 'move' | 'resize'): void {
     if (event.button !== 0) return;
@@ -149,6 +168,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     const size = comment.size && typeof comment.size === 'object' ? comment.size : { w: 360, h: 200 };
     state.drag = {
       kind: 'comment',
+      fromPointer: true,
       mode,
       comment,
       start: worldPoint(event),
@@ -165,6 +185,8 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
    *
    * 折点只影响它自己那条连线，所以拖动时走 `drag.kind = 'waypoint'`：由渲染层只补这一条边
    * 的 `d`（见 `render-controller.applyPatches`），不重建整张画布。
+   *
+   * 和注释框一样在 `pointerdown` 里起手，因此同样标 `fromPointer`（见 `startCommentDrag`）。
    */
   function startWaypointDrag(event: PointerEventLike, parentId: string, childId: string, pointIndex: number): void {
     if (event.button !== 0) return;
@@ -172,6 +194,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
     event.stopPropagation();
     state.drag = {
       kind: 'waypoint',
+      fromPointer: true,
       parentId,
       childId,
       pointIndex,
@@ -199,6 +222,8 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       state.selectedEdge = null;
       state.selectedRun = null;
       state.inspector = 'node';
+      // 点空白 = 清空选区：详情栏镜像也要收到「现在没选中东西」。
+      if (!event.shiftKey) deps.notifyInspector?.();
       state.marquee = { x1: point.x, y1: point.y, x2: point.x, y2: point.y, additive: event.shiftKey };
       state.drag = { kind: 'marquee' };
       render();
@@ -226,6 +251,13 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
   }
 
   function onPointerMove(event: PointerEventLike): void {
+    // 兜底收尾：指针已经在动、却一个键都没按下（`buttons === 0`），说明抬手事件丢了
+    // （起手在 pointerdown 的拖拽收不到兼容 mouseup；指针也可能在窗口外松开）。
+    // 这时按松手处理，否则拖拽状态一直挂着——表现就是「点一下注释框，它就一直跟着鼠标走」。
+    if (event.buttons === 0 && (state.drag || state.connect || state.variableConnect || state.referenceConnect)) {
+      onPointerUp(event);
+      return;
+    }
     if (state.connect) {
       if (Number.isInteger(event.pointerId) && Number.isInteger(state.connect.pointerId) && event.pointerId !== state.connect.pointerId) return;
       autoPan(event);

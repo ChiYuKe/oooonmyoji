@@ -579,10 +579,13 @@
 :root[data-theme="light"] .comment-box .comment-title {
     fill: var(--card-head-text, #cccccc)
 }
+:root[data-theme="light"] .comment-box .comment-remove-button:hover .comment-remove-hit {
+    fill: color-mix(in srgb, var(--card-tint, #cccccc) 32%, transparent)
+}
 :root[data-theme="light"] .comment-box .comment-remove {
     fill: var(--card-muted, #cccccc)
 }
-:root[data-theme="light"] .comment-box .comment-remove:hover {
+:root[data-theme="light"] .comment-box .comment-remove-button:hover .comment-remove {
     fill: var(--danger, #faebec)
 }
 :root[data-theme="light"] .comment-box .comment-resize {

@@ -64,6 +64,7 @@ function harness(selectedNode, overrides = {}) {
       renderVariablesInspector() { rendered.push('variables'); },
       renderInstanceRunInspector() { rendered.push('run'); },
       renderEdgeInspector() { rendered.push('edge'); },
+      renderCommentInspector() { rendered.push('comment'); },
     },
   });
   return { panel, elements, rendered };
@@ -101,4 +102,17 @@ test('工作流 / 变量这些面板不受值卡片影响', () => {
   variables.panel.renderInspector();
   assert.equal(variables.elements.get('inspector').classList.contains('hidden'), false, '变量面板照旧打开');
   assert.deepEqual(variables.rendered, ['variables']);
+});
+
+test('选中注释框时打开详情面板并走注释渲染器（注释不是节点）', () => {
+  const h = harness({ id: 'task_1', type: 'task' }, { inspector: 'comment', selectedCommentId: 'comment_1' });
+  h.panel.renderInspector();
+  assert.equal(h.elements.get('inspector').classList.contains('hidden'), false, '注释框也要能打开面板');
+  assert.equal(h.elements.get('editor-main').classList.contains('inspector-open'), true);
+  assert.deepEqual(h.rendered, ['comment'], '注释档不该去渲染节点详情');
+
+  // 面板切回节点档：注释渲染器不再被调用。
+  const back = harness({ id: 'task_1', type: 'task' }, { inspector: 'node', selectedCommentId: 'comment_1' });
+  back.panel.renderInspector();
+  assert.deepEqual(back.rendered, ['task']);
 });

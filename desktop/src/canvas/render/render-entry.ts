@@ -498,6 +498,33 @@ export function createRenderEntry(deps: RenderEntryDeps) {
   let arrangePreviewLayer: any = null;
   /** 上一次已经请求记录过的视口（pan/zoom）：不变就不再排定时器。 */
   let lastViewportKey = '';
+
+  /** 网格图层（`#canvas-grid`）的 style；找不到时退回容器本身。 */
+  let gridStyle: any = null;
+
+  /**
+   * 网格背景跟随视口：把尺寸与平移量写进 `--canvas-grid-*`。
+   *
+   * **必须写在独立图层（`#canvas-grid`）上，不能写回 `#canvas-wrap`。** 自定义属性会被
+   * 后代继承，而 `#canvas-wrap` 是整个 `#graph` SVG 的祖先：写一次就让整棵画布子树
+   * 重新计算样式（overview 档 101 张卡 / 1580 个元素实测 12 ms，对照组写在叶子元素上
+   * 0.6 ms）。滚轮缩放与框选是逐帧走这里的，挂在祖先上等于每帧白扔半个帧预算。
+   *
+   * 图层缺失（旧 HTML、测试替身）时退回容器：画面照旧正确，只是又变回整棵子树失效。
+   */
+  function applyGridTransform(): void {
+    if (!gridStyle) {
+      let layer: any = null;
+      try { layer = $('canvas-grid'); } catch { layer = null; }
+      if (layer && layer.style && typeof layer.style.setProperty === 'function') gridStyle = layer.style;
+    }
+    const style = gridStyle || (wrap as any).style;
+    if (!style || typeof style.setProperty !== 'function') return;
+    style.setProperty('--canvas-grid-size', `${24 * state.zoom}px`);
+    style.setProperty('--canvas-grid-pan-x', `${state.panX}px`);
+    style.setProperty('--canvas-grid-pan-y', `${state.panY}px`);
+  }
+
   function renderArrangePreview(): void {
     const overlays = controller.getLayer().overlays;
     const preview = state.arrangePreview;
@@ -562,12 +589,7 @@ export function createRenderEntry(deps: RenderEntryDeps) {
       const viewportKey = `${state.panX},${state.panY},${state.zoom}`;
       if (viewportKey !== lastViewportKey) {
         lastViewportKey = viewportKey;
-        const gridStyle = wrap.style;
-        if (gridStyle && typeof gridStyle.setProperty === 'function') {
-          gridStyle.setProperty('--canvas-grid-size', `${24 * state.zoom}px`);
-          gridStyle.setProperty('--canvas-grid-pan-x', `${state.panX}px`);
-          gridStyle.setProperty('--canvas-grid-pan-y', `${state.panY}px`);
-        }
+        applyGridTransform();
         deps.recordViewportSoon?.();
       }
     }

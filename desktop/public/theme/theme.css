@@ -76,7 +76,7 @@
 :root[data-theme="dark"] :is(.menu-trigger:hover, .menu-root.open > .menu-trigger, .window-control:not(.close):hover) { background: var(--ui-hover); }
 :root[data-theme="dark"] :is(.menu-separator, .desktop-more-separator) { background: var(--ui-line); }
 :root[data-theme="dark"] :is(.reference-graph, #canvas-wrap) { background-color: var(--dark-canvas); }
-:root[data-theme="dark"] #canvas-wrap { background-image: linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px); }
+:root[data-theme="dark"] #canvas-grid { background-image: linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px); }
 :root[data-theme="dark"] #workflow-breadcrumb { background: rgba(28,28,28,.92); color: var(--ui-muted); }
 :root[data-theme="dark"] #minimap { background: #1e1e1e; border: 1px solid var(--border); box-shadow: none; }
 :root[data-theme="dark"] .mini-node { fill: #777777; stroke: #aaaaaa; }
@@ -157,7 +157,7 @@
 :root[data-theme="light"] .content-browser-items.grid .content-item:hover { background: transparent; }
 :root[data-theme="light"] .content-browser-items.grid :is(.content-item.selected, .content-item.selected:hover) { background: var(--content-selection-surface); }
 :root[data-theme="light"] :is(.reference-graph, #canvas-wrap) { background-color: var(--light-canvas); }
-:root[data-theme="light"] #canvas-wrap { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
+:root[data-theme="light"] #canvas-grid { background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
 
 /* Flat, paper-like graph nodes; shape fills and text fills are intentionally separate. */
 :root[data-theme="light"] :is(.node .node-box, .instance-run-card .instance-run-card-box, .variable-card .variable-card-box) { fill: #f9fafb; stroke: #aab8c3; stroke-width: 1; filter: none; }

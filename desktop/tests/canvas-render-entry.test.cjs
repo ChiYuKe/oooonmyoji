@@ -48,6 +48,17 @@ function fakeElement(tag, attrs = {}) {
   return element;
 }
 
+/** 最小 style 替身：记录 setProperty，用来断言视口变量写在哪个元素上。 */
+function styleSpy() {
+  const values = new Map();
+  const calls = [];
+  return {
+    calls,
+    setProperty(name, value) { calls.push([name, String(value)]); values.set(name, String(value)); },
+    getPropertyValue(name) { return values.has(name) ? values.get(name) : ''; },
+  };
+}
+
 function harness(options = {}) {
   const state = createCanvasState();
   const previewCalls = {connection: 0, variable: 0, reference: 0};
@@ -444,6 +455,64 @@ test('视口真的变了才请求「稍后记录画布位置」，选中/交互�
   assert.equal(records, 2);
 });
 
+// —— 网格背景：视口变量必须写在独立图层上，不能写回 SVG 的祖先 ——
+
+test('网格变量写在独立图层 #canvas-grid 上，不写进 #canvas-wrap', () => {
+  // 性能回归护栏：`--canvas-grid-*` 会被后代继承。写在 #canvas-wrap（整个 #graph 的祖先）上，
+  // 就等于每帧让整棵画布子树重新计算样式。真实画布实测（101 张卡 / 1580 个元素）：
+  // 写祖先 11.5 ms/帧、写独立图层 0.6 ms，而滚轮缩放与框选是逐帧走这条路的。
+  const gridStyle = styleSpy();
+  const wrapStyle = styleSpy();
+  const h = harness({
+    measurement: {read: () => ({width: 1200, height: 800, left: 0, top: 0})},
+    entryDeps: {$: (id) => (id === 'canvas-grid' ? {style: gridStyle} : fakeElement('div'))},
+  });
+  h.graph.style = wrapStyle; // harness 里 wrap 就是 graph
+  h.entry.render({full: true});
+  h.state.panX = 120;
+  h.state.panY = 48;
+  h.state.zoom = 0.5;
+  h.entry.render({viewport: true});
+
+  assert.equal(gridStyle.getPropertyValue('--canvas-grid-pan-x'), '120px');
+  assert.equal(gridStyle.getPropertyValue('--canvas-grid-pan-y'), '48px');
+  assert.equal(gridStyle.getPropertyValue('--canvas-grid-size'), '12px');
+  assert.equal(wrapStyle.calls.length, 0,
+    '网格变量绝不能写在 #canvas-wrap 上：自定义属性会继承，整棵画布子树每帧都要重算样式');
+});
+
+test('没有 #canvas-grid 图层时退回容器，不抛错', () => {
+  const wrapStyle = styleSpy();
+  const h = harness({entryDeps: {$: () => fakeElement('div')}});
+  h.graph.style = wrapStyle;
+  h.entry.render({full: true});
+  assert.ok(wrapStyle.calls.some(([name]) => name === '--canvas-grid-pan-x'),
+    '拿不到独立图层时仍要把变量写下去（旧 HTML / 测试替身的安全退路）');
+});
+
+test('网格背景留在独立图层：CSS 不得把它放回 #canvas-wrap，HTML 要有这一层', () => {
+  const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts), 'utf8').replace(/\r\n/g, '\n');
+  const css = read('public/legacy/workflow-editor.css');
+  const block = (selector) => {
+    const start = css.indexOf(`\n${selector} {`);
+    assert.notEqual(start, -1, `CSS 里找不到规则：${selector}`);
+    return css.slice(start, css.indexOf('\n}', start));
+  };
+  assert.doesNotMatch(block('#canvas-wrap'), /background-image/,
+    '#canvas-wrap 是 SVG 的祖先，网格背景不能挂在它的背景上');
+  assert.match(block('#canvas-grid'), /var\(--canvas-grid-size/);
+  assert.match(block('#canvas-grid'), /z-index: -1/, '网格要落在容器背景之上、SVG 之下');
+
+  // 主题里的深/浅两套网格同样必须挂在独立图层上。
+  const theme = read('public/theme/theme.css');
+  assert.doesNotMatch(theme, /#canvas-wrap \{ background-image/, '主题里的网格也不能写在祖先上');
+  assert.match(theme, /#canvas-grid \{ background-image/);
+
+  const html = read('src/renderer/canvas.html');
+  assert.match(html, /<div id="canvas-grid"[^>]*><\/div>\s*<svg id="graph"/,
+    '#canvas-grid 必须是 #graph 的前一个兄弟节点，不能包住 SVG');
+});
+
 test('定位后节点短暂闪烁：立刻高亮、1.4 秒后自动消退', (t) => {
   // flashNode 走 window.setTimeout（画布里就是浏览器）；这里补一个最小 window 与假计时器。
   const originalWindow = global.window;
@@ -479,5 +548,19 @@ test('搜索定位与结构树定位共用同一条闪烁路径', () => {
   const renderEntry = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/render/render-entry.ts'), 'utf8');
   const focusFn = renderEntry.slice(renderEntry.indexOf('function focusNode('), renderEntry.indexOf('function focusNodeDetail('));
   assert.match(focusFn, /flashNode\(id, param\)/, '搜索/结构树定位都会闪烁');
+});
+
+test('帧尾贴合在合并帧里也会跑：HTML 浮层与注释框图层靠它跟手', () => {
+  // 拖拽/滚轮走的是 coalesce 的合并帧，它只跑控制器内部的增量重绘；
+  // 注释框图层与 HTML 浮层都在控制器之外，帧尾不补这一下的话，
+  // 拖动注释框只有抬手时才跳到新位置（用户看到的就是「拖不动」）。
+  let tails = 0;
+  const h = harness({entryDeps: {afterRender: () => { tails += 1; }}});
+  h.entry.render({full: true});
+  assert.ok(tails > 0, '同步帧必须跑帧尾贴合');
+  const afterSync = tails;
+  h.state.drag = {kind: 'comment'};
+  h.entry.coalesce({viewport: true, interaction: true});
+  assert.ok(tails > afterSync, '合并帧同样必须跑帧尾贴合（拖注释框走的就是这条路）');
 });
 

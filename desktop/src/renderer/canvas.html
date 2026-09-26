@@ -36,6 +36,12 @@
   <div id="external-banner" class="hidden"></div>
   <main id="editor-main">
     <section id="canvas-wrap">
+      <!--
+        网格背景是**独立图层**，不是 #graph 的祖先：`--canvas-grid-*` 由 render-entry
+        每帧写在它身上，而自定义属性会继承——写在 #canvas-wrap 上会让整棵画布子树
+        每帧重算样式。它只承背景，不接指针事件。
+      -->
+      <div id="canvas-grid" aria-hidden="true"></div>
       <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="viewport-tools">
         <button id="btn-viewport-back" class="icon-button" title="画布后退（上一个位置）">↩</button>

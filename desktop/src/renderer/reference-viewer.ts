@@ -15,12 +15,13 @@ import {
   X,
   createElement,
 } from 'lucide';
-import type { ReferenceGraph, ReferenceItem, ReferenceNode } from '../shared/contracts';
+import type { ContentPreview, ReferenceGraph, ReferenceItem, ReferenceNode } from '../shared/contracts';
 import type { WorkbenchFrameController } from './docking';
 
 export interface ReferenceViewerDeps {
   getWorkbenchFrame: () => WorkbenchFrameController | undefined;
   getReferenceGraph: (path: string) => Promise<ReferenceGraph>;
+  readContentPreview: (path: string) => Promise<ContentPreview>;
   contentName: (path: string) => string;
   showToast: (message: string, error?: boolean) => void;
   errorMessage: (error: unknown) => string;
@@ -35,6 +36,32 @@ export interface ReferenceViewer {
 // 因此屏幕坐标 = pan + zoom × 图形坐标）。
 export const REFERENCE_ZOOM_MIN = .2;
 export const REFERENCE_ZOOM_MAX = 1.6;
+
+/** 悬停多久才弹内容浮窗：太灵敏会在鼠标横扫关系图时闪个不停。 */
+export const REFERENCE_PREVIEW_DELAY = 180;
+/** 文本预览最多显示的行数与单行字符数：浮窗不滚动，超出的部分截断并注明。 */
+export const REFERENCE_PREVIEW_MAX_LINES = 26;
+export const REFERENCE_PREVIEW_MAX_CHARS = 160;
+
+/**
+ * 文本预览的取行规则：统一换行、去掉尾部空行，按行数与单行长度截断。
+ * 返回 `truncated` 表示还有没显示出来的内容（行数或行宽被截断）。
+ */
+export function previewTextLines(
+  text: string,
+  maxLines = REFERENCE_PREVIEW_MAX_LINES,
+  maxChars = REFERENCE_PREVIEW_MAX_CHARS,
+): { lines: string[]; truncated: boolean } {
+  const all = text.replace(/\r\n?/g, '\n').split('\n');
+  while (all.length > 0 && all[all.length - 1].trim() === '') all.pop();
+  let truncated = all.length > maxLines;
+  const lines = all.slice(0, maxLines).map((line) => {
+    if (line.length <= maxChars) return line;
+    truncated = true;
+    return `${line.slice(0, maxChars)}…`;
+  });
+  return { lines, truncated };
+}
 
 /** 以指针为锚点缩放：锚点下方的图形坐标保持不动，画面不会跳动。 */
 export function anchoredReferencePan(
@@ -57,7 +84,7 @@ export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
 }
 
 export function createReferenceViewer(deps: ReferenceViewerDeps): ReferenceViewer {
-  const { getWorkbenchFrame, getReferenceGraph, contentName, showToast, errorMessage } = deps;
+  const { getWorkbenchFrame, getReferenceGraph, readContentPreview, contentName, showToast, errorMessage } = deps;
 
 let referenceViewerDocument: Document | undefined;
 let referenceViewerPanel: HTMLElement | undefined;
@@ -75,9 +102,136 @@ let referenceViewerFit = true;
 let referenceViewerPan = { x: 0, y: 0 };
 let referenceViewerResizeObserver: ResizeObserver | undefined;
 let referenceViewerLocationDisposable: { dispose(): void } | undefined;
+let referencePreviewElement: HTMLElement | undefined;
+let referencePreviewTarget: HTMLElement | undefined;
+let referencePreviewTimer: number | undefined;
+let referencePreviewToken = 0;
+
+/** 收起内容浮窗：作废在途请求、取消待弹定时器并移除已挂出的浮层。 */
+function hideReferencePreview(): void {
+  referencePreviewToken += 1;
+  referencePreviewTarget = undefined;
+  if (referencePreviewTimer !== undefined) {
+    window.clearTimeout(referencePreviewTimer);
+    referencePreviewTimer = undefined;
+  }
+  referencePreviewElement?.remove();
+  referencePreviewElement = undefined;
+}
+
+/**
+ * 浮层挂在节点所属文档的 body 上（面板被弹出成独立窗口时就是那个窗口）：
+ * 既不会被画布的缩放变换带着放大，也不会被面板的滚动容器裁剪。
+ */
+function positionReferencePreview(doc: Document, element: HTMLElement, target: HTMLElement): void {
+  const view = doc.defaultView;
+  const rect = target.getBoundingClientRect();
+  element.style.left = '0px';
+  element.style.top = '0px';
+  const width = element.offsetWidth || 0;
+  const height = element.offsetHeight || 0;
+  const margin = 10;
+  const gap = 12;
+  const viewWidth = view?.innerWidth ?? rect.right + width + margin;
+  const viewHeight = view?.innerHeight ?? rect.bottom + height + margin;
+  // 优先卡片外侧（远离关系图中心：右边那一列放右侧、左边那一列放左侧），外侧放不下再翻到内侧。
+  const outward = rect.left + rect.width / 2 > viewWidth / 2
+    ? [rect.right + gap, rect.left - width - gap]
+    : [rect.left - width - gap, rect.right + gap];
+  const fits = (candidate: number): boolean => candidate >= margin && candidate + width <= viewWidth - margin;
+  const left = Math.max(margin, Math.min(outward.find(fits) ?? outward[0], viewWidth - width - margin));
+  let top = rect.top;
+  if (top + height > viewHeight - margin) top = viewHeight - height - margin;
+  top = Math.max(margin, top);
+  element.style.left = `${Math.round(left)}px`;
+  element.style.top = `${Math.round(top)}px`;
+}
+
+/** 浮窗主体：图片直接显示，文本显示前若干行，其余情况给一句「为什么没有内容」。 */
+function fillReferencePreview(doc: Document, body: HTMLElement, preview: ContentPreview): void {
+  body.replaceChildren();
+  const empty = (message: string): void => {
+    const node = doc.createElement('div');
+    node.className = 'reference-hover-preview-empty';
+    node.textContent = message;
+    body.appendChild(node);
+  };
+  if (preview.kind === 'image') {
+    const image = doc.createElement('img');
+    image.src = preview.uri;
+    image.alt = '';
+    image.decoding = 'async';
+    image.addEventListener('error', () => {
+      image.remove();
+      empty('图片无法预览');
+    }, { once: true });
+    body.appendChild(image);
+    return;
+  }
+  if (preview.kind !== 'text') return empty(preview.message);
+  const { lines, truncated } = previewTextLines(preview.text);
+  if (lines.length === 0) return empty('文件是空的');
+  const text = doc.createElement('pre');
+  text.className = 'reference-hover-preview-text';
+  text.textContent = lines.join('\n');
+  body.appendChild(text);
+  if (truncated || preview.truncated) {
+    const note = doc.createElement('div');
+    note.className = 'reference-hover-preview-note';
+    note.textContent = preview.truncated ? '文件较大，仅预览开头部分' : '内容较长，仅预览开头部分';
+    body.appendChild(note);
+  }
+}
+
+async function showReferencePreview(doc: Document, target: HTMLElement, node: ReferenceNode, clickable: boolean): Promise<void> {
+  const token = ++referencePreviewToken;
+  let preview: ContentPreview;
+  try {
+    preview = await readContentPreview(node.path);
+  } catch (error) {
+    preview = { kind: 'missing', path: node.path, message: errorMessage(error) };
+  }
+  // 期间鼠标移开了卡片、换了目标或关系图重画了：丢弃这次结果。
+  if (referencePreviewToken !== token || referencePreviewTarget !== target) return;
+  const host = doc.body;
+  if (!host) return;
+  const element = doc.createElement('div');
+  element.className = 'reference-hover-preview';
+  element.setAttribute('role', 'tooltip');
+  const body = doc.createElement('div');
+  body.className = 'reference-hover-preview-body';
+  fillReferencePreview(doc, body, preview);
+  const pathLine = doc.createElement('div');
+  pathLine.className = 'reference-hover-preview-path';
+  pathLine.textContent = node.path;
+  const hint = doc.createElement('div');
+  hint.className = 'reference-hover-preview-hint';
+  hint.textContent = clickable ? '点击卡片可继续追踪该资源的引用' : '当前资源';
+  element.append(body, pathLine, hint);
+  host.appendChild(element);
+  referencePreviewElement = element;
+  positionReferencePreview(doc, element, target);
+  // 图片要等解码完才知道真实高度，加载完再摆一次位置。
+  element.querySelector('img')?.addEventListener('load', () => {
+    if (referencePreviewElement === element && referencePreviewTarget === target) positionReferencePreview(doc, element, target);
+  }, { once: true });
+}
+
+/** 悬停一小会儿才弹浮窗；期间移开就取消。 */
+function scheduleReferencePreview(target: HTMLElement, node: ReferenceNode, clickable: boolean): void {
+  hideReferencePreview();
+  referencePreviewTarget = target;
+  const doc = target.ownerDocument;
+  referencePreviewTimer = window.setTimeout(() => {
+    referencePreviewTimer = undefined;
+    if (referencePreviewTarget !== target) return;
+    void showReferencePreview(doc, target, node, clickable);
+  }, REFERENCE_PREVIEW_DELAY);
+}
 
 function closeReferenceViewer(): void {
   referenceViewerToken += 1;
+  hideReferencePreview();
   if (referenceViewerPanel && referenceViewerKeyHandler) {
     referenceViewerPanel.removeEventListener('keydown', referenceViewerKeyHandler, true);
   }
@@ -152,8 +306,12 @@ function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceI
   button.style.top = `${y}px`;
   button.style.width = `${width}px`;
   button.setAttribute('aria-label', `${referenceKindLabel(node.kind)} ${node.name}`);
+  // 不再用原生 title：统一的文本 tooltip 会和内容浮窗叠成两层，路径与跳转提示都放进浮窗。
+  button.addEventListener('mouseenter', () => scheduleReferencePreview(button, node, side !== 'target'));
+  button.addEventListener('mouseleave', hideReferencePreview);
+  button.addEventListener('focus', () => scheduleReferencePreview(button, node, side !== 'target'));
+  button.addEventListener('blur', hideReferencePreview);
   if (side !== 'target') {
-    button.title = `${node.path}\n点击查看该内容的引用`;
     button.addEventListener('click', () => navigateReferenceViewer(node.path));
   }
   const icon = doc.createElement('span');
@@ -178,6 +336,8 @@ function appendReferenceNode(doc: Document, layer: HTMLElement, item: ReferenceI
 function renderReferenceGraph(doc: Document, graph: ReferenceGraph): void {
   const canvas = referenceViewerCanvas;
   if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
+  // 卡片马上会被整批替换，浮窗指向的旧卡片就此作废。
+  hideReferencePreview();
   const zoomControls = canvas.querySelector<HTMLElement>('.reference-zoom-controls');
   canvas.replaceChildren();
   const edges = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -338,6 +498,7 @@ async function renderReferenceViewer(): Promise<void> {
   canvas.addEventListener('pointerdown', (event) => {
     if ((event.target as HTMLElement).closest('button')) return;
     referenceViewerFit = false;
+    hideReferencePreview();
     dragOrigin = { x: event.clientX, y: event.clientY, panX: referenceViewerPan.x, panY: referenceViewerPan.y };
     canvas.setPointerCapture(event.pointerId);
   });
@@ -357,6 +518,7 @@ async function renderReferenceViewer(): Promise<void> {
   canvas.addEventListener('wheel', (event) => {
     // 画布内的滚轮就是缩放：锚定在指针位置，并让在途拖拽跟着新的 pan 继续。
     event.preventDefault();
+    hideReferencePreview();
     const previous = referenceViewerZoom;
     const next = Math.min(REFERENCE_ZOOM_MAX, Math.max(REFERENCE_ZOOM_MIN, previous * wheelZoomFactor(event.deltaY, event.deltaMode)));
     if (next === previous) return;

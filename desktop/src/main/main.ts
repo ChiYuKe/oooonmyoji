@@ -332,6 +332,7 @@ function registerIpc(): void {
   ipcMain.handle('project:rename-content', (_event, request) => project.renameContent(request));
   ipcMain.handle('project:delete-content', (_event, relativePath: string) => project.deleteContent(relativePath));
   ipcMain.handle('project:reference-graph', (_event, target: string) => project.getReferenceGraph(target));
+  ipcMain.handle('project:read-content-preview', (_event, relativePath: string) => project.readContentPreview(relativePath));
   ipcMain.handle('project:list-assets', () => project.listAssets());
   ipcMain.handle('project:read-asset-data', (_event, paths: string[]) => project.readAssetData(paths));
   ipcMain.handle('project:save-template', (_event, request: SaveTemplateRequest) => project.saveTemplate(request));

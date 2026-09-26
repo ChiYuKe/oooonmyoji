@@ -514,6 +514,7 @@ function renderInstances(instances: RuntimeInstance[], requested = selectedInsta
 const referenceViewer = createReferenceViewer({
   getWorkbenchFrame: () => workbenchFrame,
   getReferenceGraph: (path) => api.getReferenceGraph(path),
+  readContentPreview: (path) => api.readContentPreview(path),
   contentName,
   showToast,
   errorMessage,

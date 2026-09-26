@@ -356,6 +356,15 @@ export interface ReferenceGraph {
   references: ReferenceItem[];
 }
 
+/**
+ * 引用查看器悬停浮窗要显示的内容。
+ * 图片给可直接加载的资源 URL（`onmyoji-resource:`），文本直接回传（超长已按字节截断）。
+ */
+export type ContentPreview =
+  | { kind: 'image'; path: string; uri: string }
+  | { kind: 'text'; path: string; text: string; truncated: boolean }
+  | { kind: 'missing'; path: string; message: string };
+
 export type RuntimeResourceVariantId = 'cpu' | 'gpu';
 
 export interface RuntimeResourceVariantStatus {
@@ -412,6 +421,8 @@ export interface OnmyojiDesktopApi {
   renameContent(request: RenameContentRequest): Promise<MoveContentResult>;
   deleteContent(path: string): Promise<void>;
   getReferenceGraph(target: string): Promise<ReferenceGraph>;
+  /** 引用查看器悬停浮窗：按项目相对路径取一份可预览的内容。 */
+  readContentPreview(path: string): Promise<ContentPreview>;
   runWorkflow(request: RunWorkflowRequest): Promise<void>;
   stopWorkflow(): Promise<void>;
   getDebugSettings(): Promise<RuntimeDebugSettings>;

@@ -5,6 +5,7 @@ import { BrowserWindow, dialog, shell } from 'electron';
 import type {
   AssetImage,
   BootstrapData,
+  ContentPreview,
   ReferenceGraph,
   RuntimeInstance,
   SaveCanvasRequest,
@@ -634,6 +635,48 @@ export class ProjectService {
   /** 构建引用图：给定项目相对路径（工作流或模板图片），返回谁引用了它、它引用了谁。 */
   async getReferenceGraph(target: string): Promise<ReferenceGraph> {
     return buildReferenceGraph(this.projectRoot, target);
+  }
+
+  /**
+   * 引用查看器悬停浮窗的内容：图片回资源 URL（渲染层直接 `<img>` 加载），
+   * `.owf` / JSON / 说明文档回文本。只认项目内的 `workflows/` 与 `assets/`，
+   * 其它路径一律当作「没有可预览的内容」，避免浮窗变成任意文件读取入口。
+   */
+  async readContentPreview(relativePath: string): Promise<ContentPreview> {
+    const relative = relativePath.replace(/\\/g, '/').replace(/^\/+/, '').trim();
+    const absolutePath = path.resolve(this.projectRoot, relative);
+    if (!relative || !isPathInside(this.projectRoot, absolutePath)) {
+      return { kind: 'missing', path: relative, message: '内容不在项目内' };
+    }
+    const unavailable = (message: string): ContentPreview => ({ kind: 'missing', path: relative, message });
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.stat(absolutePath);
+    } catch {
+      return unavailable('文件不存在');
+    }
+    if (!stat.isFile()) return unavailable('不是可预览的文件');
+
+    const extension = path.extname(absolutePath).toLowerCase();
+    const insideWorkflows = relative.startsWith('workflows/') && isPathInside(this.workflowRoot, absolutePath);
+    const insideAssets = relative.startsWith('assets/') && isPathInside(this.assetsRoot, absolutePath);
+    if (!insideWorkflows && !insideAssets) return unavailable('暂不支持预览此文件');
+    if (IMAGE_MIME.has(extension)) {
+      const uri = this.resourceUrl(absolutePath);
+      return uri ? { kind: 'image', path: relative, uri } : unavailable('图片无法预览');
+    }
+    if (!PREVIEW_TEXT_EXTENSIONS.has(extension)) return unavailable('暂不支持预览此类型');
+    const bytes = Math.min(stat.size, PREVIEW_TEXT_MAX_BYTES);
+    const handle = await fs.promises.open(absolutePath, 'r');
+    try {
+      const buffer = Buffer.alloc(bytes);
+      const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+      // 截断可能落在多字节字符中间，去掉尾部的替换字符。
+      const text = buffer.subarray(0, bytesRead).toString('utf8').replace(/\uFFFD+$/, '');
+      return { kind: 'text', path: relative, text, truncated: stat.size > PREVIEW_TEXT_MAX_BYTES };
+    } finally {
+      await handle.close();
+    }
   }
 
   async readAssetData(paths: string[]): Promise<Array<{ path: string; dataUrl: string }>> {

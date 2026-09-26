@@ -1206,6 +1206,28 @@
     background: #e5e5e5;
     color: #232323
 }
+:root[data-theme="light"] .reference-hover-preview {
+    border: 1px solid #dbdbdb;
+    background: #f0f0f0;
+    color: #2b2b2b
+}
+:root[data-theme="light"] .reference-hover-preview img {
+    background: #f6f6f6
+}
+:root[data-theme="light"] .reference-hover-preview-text {
+    background: #f5f5f5;
+    color: #2e2e2e
+}
+:root[data-theme="light"] .reference-hover-preview-empty {
+    background: #f5f5f5;
+    color: #696969
+}
+:root[data-theme="light"] .reference-hover-preview-path {
+    color: #606060
+}
+:root[data-theme="light"] .reference-hover-preview-note, :root[data-theme="light"] .reference-hover-preview-hint {
+    color: #696969
+}
 :root[data-theme="light"] .vision-title-text {
     color: #232323
 }

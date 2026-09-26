@@ -53,6 +53,7 @@ const api: OnmyojiDesktopApi = {
   renameContent: (request: RenameContentRequest) => ipcRenderer.invoke('project:rename-content', request),
   deleteContent: (path) => ipcRenderer.invoke('project:delete-content', path),
   getReferenceGraph: (target) => ipcRenderer.invoke('project:reference-graph', target),
+  readContentPreview: (path) => ipcRenderer.invoke('project:read-content-preview', path),
   runWorkflow: (request: RunWorkflowRequest) => ipcRenderer.invoke('runtime:run-workflow', request),
   stopWorkflow: () => ipcRenderer.invoke('runtime:stop-workflow'),
   getDebugSettings: () => ipcRenderer.invoke('runtime:get-debug-settings'),

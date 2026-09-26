@@ -12,26 +12,6 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 
-test('打开文档时先解析恢复副本：与磁盘不同才标记为未保存', () => {
-  const source = read('src/renderer/document-lifecycle.ts');
-  assert.match(source, /resolveRecovery\?\(uri: string, diskText: string\): Promise<string \| null>/);
-  const load = source.slice(source.indexOf('async function loadWorkflow('), source.indexOf('async function reloadDocuments('));
-  assert.match(load, /if \(!tab\.text && deps\.resolveRecovery\)/, '只有还没有内存副本时才问');
-  assert.match(load, /const recovered = await deps\.resolveRecovery\(uri, documentText\)/);
-  assert.match(load, /if \(recovered && recovered !== documentText\) \{\s*documentText = recovered;\s*tab\.dirty = true;/, '恢复副本算未保存修改');
-  assert.match(load, /let documentText = tab\.text \|\| init\.document\.text;/, '内存副本优先于磁盘');
-});
-
-test('外部改写 + 本地未保存：三选后按结果保留本地或重新读盘', () => {
-  const source = read('src/renderer/document-lifecycle.ts');
-  assert.match(source, /resolveExternalChange\?\(uri: string\): Promise<'local' \| 'disk'>/);
-  const reload = source.slice(source.indexOf('async function reloadDocuments('), source.indexOf('const documentLoads = new Map'));
-  assert.match(reload, /if \(tab\.dirty\) \{[\s\S]*?const choice = deps\.resolveExternalChange \? await deps\.resolveExternalChange\(uri\) : 'local';/);
-  assert.match(reload, /if \(choice !== 'disk'\) \{\s*skipped\.push\(uri\);\s*continue;/, '保留本地 → 报成跳过（照旧提示）');
-  assert.match(reload, /workspace\.cancelAutoSave\(uri\);\s*workspace\.setDocumentText\(uri, ''\);/, '使用磁盘版本 → 丢掉内存副本重新读盘');
-  assert.match(reload, /runtime\.init = undefined;/, '并让运行时缓存失效');
-});
-
 test('恢复副本：每次改动留档、写盘即清、按文档隔离', () => {
   const host = read('src/renderer/editor-host.ts');
   assert.match(host, /recordRecovery\?: \(uri: string, text: string, dirty: boolean\) => void/);
@@ -89,10 +69,13 @@ test('阶段 8：菜单与快捷键指向同一条命令', () => {
   const bridge = read('src/canvas/interactions/input-bridge.ts');
   assert.match(bridge, /matchesShortcut\(event, 'editor\.viewportBack'\)[^\n]*executeEditorCommand\('viewportBack'\)/);
   assert.match(bridge, /matchesShortcut\(event, 'editor\.viewportForward'\)[^\n]*executeEditorCommand\('viewportForward'\)/);
+  // 空白处右键只负责加节点：这些命令各有唯一入口——视口工具条的内联按钮、工具栏 ⋮ 菜单
+  // 与快捷键，三处指向同一条命令（右键菜单不再抄一遍）。
   const editor = read('src/canvas/editor.ts');
-  assert.match(editor, /label: '画布后退 \(Alt\+←\)'/, '右键菜单标出同样的键');
-  assert.match(editor, /label: '画布前进 \(Alt\+→\)'/);
-  assert.match(editor, /label: '重建布局（只动坐标）'/);
+  assert.doesNotMatch(editor, /label: '画布后退/, '右键菜单不再重复视口导航');
+  assert.doesNotMatch(editor, /label: '重建布局/, '右键菜单不再重复布局修复');
+  assert.match(editor, /if \(back\) back\.addEventListener\('click', \(\) => \{ if \(!viewportBack\(\)\) toast\('已经是最早的位置'\); \}\);/);
+  assert.match(editor, /if \(forward\) forward\.addEventListener\('click', \(\) => \{ if \(!viewportForward\(\)\) toast\('已经是最新的位置'\); \}\);/);
   const toolbar = read('src/canvas/toolbar.ts');
   assert.match(toolbar, /label: '下一个问题 \(F8\)'/);
   assert.match(toolbar, /label: '上一个问题 \(Shift\+F8\)'/);

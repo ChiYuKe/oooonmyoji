@@ -880,22 +880,6 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     openValueCardEditor: (nodeId: string) => ValueCardEditor.open(nodeId),
     valueCardMenuItems,
     enterNodeGroup: enterGroup, ungroupNodeGroup: ungroup, groupSelection,
-    // 「收成自定义类型」：把选中节点的配置变成可复用的 x- 类型（字面量进预设，引用不进）。
-    collapseIntoCustomType: () => {
-      const target = [...state.selected][0];
-      if (!target) return;
-      let result: { name?: string; error?: string } = {};
-      mutate(() => {
-        result = collapseNodeIntoCustomType(state.raw, target);
-      });
-      if (result.error) {
-        toast(result.error, true);
-        return;
-      }
-      setDirty(true);
-      render({ graph: true, minimap: true, panels: true, selection: true });
-      toast(`已收成自定义类型 ${result.name}：以后建同类型节点会带上这份预设（引用型参数不进预设）`);
-    },
     focusNodeDetail,
     contextMenuSuppressedByPan,
     copySelection, cutSelection, deleteSelection,
@@ -1085,6 +1069,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     event.preventDefault();
     if (contextMenuSuppressedByPan()) return;
     const point = worldPoint(event);
+    // 空白处右键只有一件事：**在这里加东西**（节点 / 注释框 / 自定义类型），
+    // 外加「在光标处粘贴」。复制剪切、自动排列、锁定、视口前进后退、重建布局都各有
+    // 唯一入口（菜单栏 / 视口工具条 / 工具栏菜单 / 快捷键），不在这里再抄一遍。
     const items: MenuEntry[] = [
       { label: '＋ Task', run: () => addNode('task', point) }, { label: '＋ Condition（判断）', run: () => addNode('condition', point) },
       { label: '＋ Bool Judge（布尔判断卡片）', run: () => addNode('bool_judge', point) }, { label: '＋ Break（拆分卡片）', run: () => addNode('break', point) }, { label: '＋ Selector', run: () => addNode('selector', point) },
@@ -1094,58 +1081,37 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
       { label: '＋ Instance Parallel', run: () => addNode('instance_parallel', point) },
       'separator',
       { label: '＋ 注释框 (Comment)', run: () => { const comment = Comments.create(point.x, point.y); if (comment) Comments.editText(comment.id); } },
-      'separator',
     ];
-    // 文档里声明的自定义类型（`nodeTypes`）：建出来的节点按基类工作，但保留自己的类型名。
-    const customTypes = state.raw && typeof state.raw === 'object' && state.raw.nodeTypes && typeof state.raw.nodeTypes === 'object'
-      ? Object.entries(state.raw.nodeTypes as Record<string, any>)
-      : [];
-    if (customTypes.length) {
-      items.push({ label: `＋ 自定义类型（${customTypes.length}）`, run: () => {} });
-      for (const [name, definition] of customTypes) {
-        const title = definition && typeof definition.title === 'string' && definition.title ? definition.title : name;
-        const base = definition && typeof definition.base === 'string' ? definition.base : '?';
-        items.push({ label: `　　＋ ${title}　(${name} · ${base})`, run: () => addNode(name, point) });
-      }
-      items.push('separator');
-    }
-    if (state.selected.size > 0) {
-      items.push(
-        { label: '复制 (Ctrl+C)', run: () => copySelection() },
-        { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
-      );
-    }
+    // 粘贴落在右键的位置上：这是右键菜单里唯一「用当前位置」的动作，留着最有用。
     if (state.clipboard && state.clipboard.nodes.length > 0) {
-      items.push({ label: `粘贴 (Ctrl+V) · ${state.clipboard.nodes.length} 个节点`, run: () => pasteClipboard(point) });
+      items.push('separator', { label: `粘贴 (Ctrl+V) · ${state.clipboard.nodes.length} 个节点`, run: () => pasteClipboard(point) });
     }
-    // 自动排列只保留「全部」一种范围：先出虚影预览，点画布顶部的「应用排列」才写文档。
-    items.push('separator', { label: '自动排列（先预览）', run: () => previewAutoLayout('all') });
-    items.push('separator');
-    // 锁定位置：单选节点时直接开关；多选时逐个锁定（保持选择不串味）。
-    const lockedCount = [...state.selected].filter((id) => isNodeLocked(state.raw, id)).length;
-    items.push({
-      label: state.selected.size > 1
-        ? (lockedCount === state.selected.size ? '解锁所选卡片位置' : '锁定所选卡片位置')
-        : (state.selected.size === 1 && isNodeLocked(state.raw, [...state.selected][0]) ? '解锁位置' : '锁定位置'),
-      run: () => {
-        const targets = [...state.selected];
-        if (!targets.length) { toast('请先选中要锁定位置的卡片', true); return; }
-        const unlocking = targets.every((id) => isNodeLocked(state.raw, id));
-        mutate(() => { for (const id of targets) if (isNodeLocked(state.raw, id) === unlocking) toggleNodeLock(state.raw, id); });
-        render({ graph: true, selection: true, panels: true });
-        toast(unlocking ? `已解锁 ${targets.length} 张卡片的位置` : `已锁定 ${targets.length} 张卡片的位置`);
-      },
-    });
-    items.push('separator');
-    items.push({ label: '画布后退 (Alt+←)', run: () => { if (!viewportBack()) toast('已经是最早的位置'); } });
-    items.push({ label: '画布前进 (Alt+→)', run: () => { if (!viewportForward()) toast('已经是最新的位置'); } });
-    items.push('separator');
-    items.push({ label: '重建布局（只动坐标）', run: () => repairLayout(true) });
-    if (nodeFilterActive()) items.push({ label: '清除按状态/类型隐藏', run: () => clearNodeFilter() });
+    // 锁定位置只对选中的卡片有意义：没选中时不再摆一个点了只会报错的项。
+    if (state.selected.size > 0) {
+      const targets = [...state.selected];
+      const lockedCount = targets.filter((id) => isNodeLocked(state.raw, id)).length;
+      const allLocked = lockedCount === targets.length;
+      items.push('separator', {
+        label: targets.length > 1
+          ? (allLocked ? '解锁所选卡片位置' : '锁定所选卡片位置')
+          : (allLocked ? '解锁位置' : '锁定位置'),
+        run: () => {
+          const unlocking = targets.every((id) => isNodeLocked(state.raw, id));
+          mutate(() => { for (const id of targets) if (isNodeLocked(state.raw, id) === unlocking) toggleNodeLock(state.raw, id); });
+          render({ graph: true, selection: true, panels: true });
+          toast(unlocking ? `已解锁 ${targets.length} 张卡片的位置` : `已锁定 ${targets.length} 张卡片的位置`);
+        },
+      });
+    }
+    if (nodeFilterActive()) items.push('separator', { label: '清除按状态/类型隐藏', run: () => clearNodeFilter() });
     showMenu(event.clientX, event.clientY, items);
   });
   window.addEventListener('mousemove', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerMove(event); });
   window.addEventListener('mouseup', onPointerUp);
+  // 同上：起手在 pointerdown 的拖拽（注释框 / 折点）收不到兼容 mouse 事件，
+  // 拖动与抬手都得走 pointer，指针在画布外（侧栏、详情栏）时也要跟手与收尾。
+  window.addEventListener('pointermove', (event) => { if (pointerDrivenDrag()) onPointerMove(event); });
+  window.addEventListener('pointerup', (event) => { if (state.drag || state.connect || state.variableConnect || state.referenceConnect) onPointerUp(event); });
 
   // 右键菜单全局收起（UE 行为）：菜单外的任何按下/右键都会先收起当前菜单，
   // 避免端口密集时旧菜单盖住其它端口导致无法再次右键；菜单空白处右键也立即收起并抑制原生菜单。

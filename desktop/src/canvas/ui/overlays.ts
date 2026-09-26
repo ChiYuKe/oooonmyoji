@@ -8,6 +8,8 @@ export type MenuEntry = {
   /** 叶子动作；带 children 的分组项可以不提供。 */
   run?: () => void;
   danger?: boolean;
+  /** 悬停提示：给「显示名」与内部 id / 基类不一致的项用（例如自定义类型）。 */
+  title?: string;
   children?: MenuEntry[];
 } | 'separator';
 
@@ -51,6 +53,13 @@ export function createCanvasOverlays(deps: OverlaysDeps): CanvasOverlays {
     };
     let highlightIndex = -1;
     const visibleButtons = (): HTMLButtonElement[] => Array.from(list.querySelectorAll('button'));
+    /** 菜单项按钮：标签单独包一层，太长时用省略号收尾（不能让它把菜单撑出横向滚动条）。 */
+    const menuButton = (label: string, danger: boolean, title?: string): HTMLElement => {
+      const button = el('button', danger ? 'danger' : '');
+      button.appendChild(el('span', 'menu-label', label));
+      if (title) button.setAttribute('title', title);
+      return button;
+    };
     const highlight = (index: number): void => {
       const buttons = visibleButtons();
       if (!buttons.length) { highlightIndex = -1; return; }
@@ -73,7 +82,7 @@ export function createCanvasOverlays(deps: OverlaysDeps): CanvasOverlays {
           const path = prefix && label ? `${prefix} · ${label}` : (label || prefix);
           if (item.children && item.children.length) { for (const child of item.children) walk(child, path); return; }
           if (!path.toLowerCase().includes(q)) return;
-          const button = el('button', item.danger ? 'danger' : '', path);
+          const button = menuButton(path, Boolean(item.danger), item.title);
           button.addEventListener('click', () => { hideMenus(); item.run?.(); });
           button.addEventListener('mouseenter', () => highlight(visibleButtons().indexOf(button as HTMLButtonElement)));
           list.appendChild(button);
@@ -83,7 +92,7 @@ export function createCanvasOverlays(deps: OverlaysDeps): CanvasOverlays {
         for (const item of items) {
           if (item === 'separator') { list.appendChild(el('div', 'menu-separator')); continue; }
           const label = String(item.label || '');
-          const button = el('button', item.danger ? 'danger' : '', label);
+          const button = menuButton(label, Boolean(item.danger), item.title);
           if (item.children && item.children.length) {
             button.classList.add('has-submenu');
             const chevron = document.createElement('span');
@@ -95,7 +104,7 @@ export function createCanvasOverlays(deps: OverlaysDeps): CanvasOverlays {
               const sub = el('div', 'context-menu context-menu-sub');
               for (const child of item.children!) {
                 if (child === 'separator') { sub.appendChild(el('div', 'menu-separator')); continue; }
-                const childButton = el('button', child.danger ? 'danger' : '', child.label);
+                const childButton = menuButton(child.label, Boolean(child.danger), child.title);
                 childButton.addEventListener('click', () => { hideMenus(); child.run?.(); });
                 sub.appendChild(childButton);
               }

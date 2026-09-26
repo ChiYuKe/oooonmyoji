@@ -870,7 +870,9 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
   background: var(--vscode-menu-background, #2b2d31);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
 }
-.context-menu button { width: 100%; border: 0; text-align: left; background: transparent; }
+.context-menu button { width: 100%; border: 0; text-align: left; background: transparent; display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 标签自己收省略号：菜单宽度固定，长标签（变量路径、自定义类型）不能把面板撑出横向滚动条。 */
+.context-menu .menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-menu button:hover, .context-menu button.menu-highlight { background: var(--vscode-menu-selectionBackground, #094771); }
 .menu-separator { height: 1px; margin: 4px 2px; background: var(--border); }
 .context-menu-list { display: flex; flex-direction: column; }
@@ -890,7 +892,8 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .context-menu-search::placeholder { color: var(--muted); }
 .context-menu button.has-submenu { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .context-menu .menu-chevron { opacity: .55; font-size: 10px; line-height: 1; }
-.context-menu-sub { position: fixed; z-index: 261; min-width: 150px; }
+/* 子菜单按内容定宽（不再继承父菜单的固定 190px），超长时封顶并交给标签省略号处理。 */
+.context-menu-sub { position: fixed; z-index: 261; min-width: 150px; width: auto; max-width: min(320px, calc(100vw - 16px)); overflow-x: hidden; }
 #toast { position: fixed; z-index: 300; left: 50%; bottom: 22px; transform: translateX(-50%); max-width: 480px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 4px; background: #25272c; box-shadow: 0 5px 18px rgba(0, 0, 0, 0.35); }
 #toast.error { border-color: var(--danger); color: #f0a0a6; }
 

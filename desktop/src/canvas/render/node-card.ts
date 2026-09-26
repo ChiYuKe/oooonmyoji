@@ -111,8 +111,6 @@ export interface NodeRenderDeps {
   enterNodeGroup?(groupId: string, focusNodeId?: string): boolean;
   ungroupNodeGroup?(groupId: string): boolean;
   groupSelection?(): boolean;
-  /** 把当前节点收成一个可复用的自定义类型（缺省表示该画布不支持）。 */
-  collapseIntoCustomType?(): void;
   render(): void;
   /** 双击节点：聚焦并把缩放提到完整卡片档（概览 / 紧凑模式下用）。 */
   focusNodeDetail?(nodeId: string): void;
@@ -183,7 +181,6 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     typeIcons, typeNames, runLabels, nodeWidth, baseHeight, portRadius, decoratorHeight, runVariableHeight,
     variablePinX, preview, taskOutputPortY, taskOutputPortX, startReferenceConnection, nodeReferencePortMenuItems, nodeGroupVariableMenuItems, referenceDisplayNameOf,
     nodeIssueInfo, issueTitle, focusNodeDetail, enterNodeGroup, ungroupNodeGroup, groupSelection, nodeGroupRunSummary,
-    collapseIntoCustomType,
     outputReferenced, breakFieldPins, breakFieldPinOffset, outputFieldReferenced, openValueCardEditor, valueCardMenuItems,
   } = deps;
   const isNodeLocked = deps.isNodeLocked ?? (() => false);
@@ -1318,8 +1315,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         state.selectedRun = null;
         render();
         showMenu(event.clientX, event.clientY, [
-          ...(state.selected.size >= 2 && groupSelection ? [{ label: '将所选节点打组', run: () => groupSelection() }, 'separator'] : []),
-          ...(collapseIntoCustomType ? [{ label: '收成自定义类型', title: '把这一个节点的配置变成可复用的 x- 类型（字面量参数进预设，引用不进）', run: () => collapseIntoCustomType() }] : []),
+          ...(state.selected.size >= 2 && groupSelection ? [{ label: '折叠所选节点', run: () => groupSelection() }, 'separator'] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           'separator',

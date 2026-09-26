@@ -110,8 +110,8 @@ test('画布工具条与预览条：按钮、提示与样式都在', () => {
   }
   const editor = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/editor.ts'), 'utf8');
   assert.match(editor, /function bindViewportTools\(\)/);
-  // 排列只保留「全部」一种范围：右键菜单一项，视口 ⤢ 也直接进预览，不再有范围子菜单。
-  assert.match(editor, /自动排列（先预览）/);
+  // 排列只保留「全部」一种范围，入口是视口工具条的 ⤢（空白处右键只负责加节点，不再重复排列）。
+  assert.doesNotMatch(editor, /自动排列（先预览）/, '右键菜单不再重复排列');
   assert.doesNotMatch(editor, /排列全部（预览）/);
   assert.doesNotMatch(editor, /排列选中（预览）/);
   assert.doesNotMatch(editor, /排列当前组（预览）/);

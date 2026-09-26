@@ -61,6 +61,15 @@ def _summary(value: Any) -> Any:
     return value
 
 
+def _path_label(node: WorkflowNode | None, node_id: str) -> str:
+    """面包屑里一个节点怎么显示：有名字就「名字 (id)」，否则只用 id。"""
+
+    name = node.name if node is not None else None
+    if isinstance(name, str) and name.strip() and name.strip() != node_id:
+        return f"{name.strip()} ({node_id})"
+    return node_id
+
+
 def _condition_branch(node: WorkflowNode, port: str) -> str | None:
     """判断节点上挂在某个口（true/false）的子节点 id；该口空着就返回 None。
 
@@ -207,6 +216,9 @@ class WorkflowEngine:
         if node_id in evaluating:
             raise WorkflowError(f"cyclic pure data reference: {node_id}")
         evaluating.add(node_id)
+        # 值卡片不在执行树里：被别的节点按需拉起时，它不属于那个节点的子树，
+        # 路径只写它自己；执行树里走到它（老文档）时才有真实祖先。
+        path_ids, path_names, _ = self._node_path(node_id, ancestors=[] if node_id not in self._node_stack() else None)
         started_perf = time.perf_counter()
         started_at = time.time()
         try:
@@ -236,7 +248,7 @@ class WorkflowEngine:
             error = str(exc)
             if self._data_node_last_event.get(node_id) != ("failed", error):
                 self._data_node_last_event[node_id] = ("failed", error)
-                self._notify_start(node)
+                self._notify_start(node, path=(path_ids, path_names))
                 self._record_node(
                     node,
                     _Outcome(
@@ -246,6 +258,7 @@ class WorkflowEngine:
                     ),
                     started_perf,
                     started_at,
+                    path=(path_ids, path_names),
                 )
             raise
         finally:
@@ -254,8 +267,32 @@ class WorkflowEngine:
                 del self._runtime_local.evaluating_data_nodes
         if self._data_node_last_event.get(node_id) != ("succeeded", output):
             self._data_node_last_event[node_id] = ("succeeded", output)
-            self._notify_start(node)
-            self._record_node(node, _Outcome(ActionStatus.SUCCEEDED, output=output), started_perf, started_at)
+            self._notify_start(node, path=(path_ids, path_names))
+            self._record_node(node, _Outcome(ActionStatus.SUCCEEDED, output=output), started_perf, started_at, path=(path_ids, path_names))
+
+    def _node_stack(self) -> list[str]:
+        """当前线程「根 → 正在执行的节点」的祖先链（最深的在末尾）。"""
+
+        stack = getattr(self._runtime_local, "node_stack", None)
+        if stack is None:
+            stack = []
+            self._runtime_local.node_stack = stack
+        return stack
+
+    def _node_path(self, node_id: str, ancestors: list[str] | None = None) -> tuple[list[str], list[str], list[WorkflowNode | None]]:
+        """把一个节点摊成执行路径：节点 id 列表、显示名列表与对应节点对象。
+
+        `ancestors` 省略时取当前线程的执行栈；栈顶就是正在执行的节点，
+        所以只在「栈里还没有它」时补上。纯数据卡片不在执行树里，由调用方
+        显式传空表，避免把它挂到「碰巧正在执行」的节点下面。
+        """
+
+        if ancestors is None:
+            with self._lock:
+                ancestors = list(self._node_stack())
+        ids = [*ancestors, node_id] if not ancestors or ancestors[-1] != node_id else ancestors
+        nodes = [self.compiled.node_map.get(value) for value in ids]
+        return ids, [_path_label(node, value) for node, value in zip(nodes, ids)], nodes
 
     def _run_node(self, node_id: str, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         local = {name: definition for name, definition in self.workflow.raw.get("variables", {}).items() if definition.get("owner") == node_id}
@@ -263,9 +300,12 @@ class WorkflowEngine:
             saved = {name: deepcopy(self.variables[name]) for name in local}
             for name, definition in local.items():
                 self.variables[name] = deepcopy(self.inputs.get(definition.get("initial_from"), self.workflow.variable_defaults[name]))
+        stack = self._node_stack()
+        stack.append(node_id)
         try:
             return self._run_node_scoped(node_id, deadline, branch_cancel)
         finally:
+            stack.pop()
             with self._lock:
                 self.variables.update(saved)
 
@@ -688,9 +728,13 @@ class WorkflowEngine:
             # A failed reference is still useful in the event as its unresolved source.
             return _summary(node.params)
 
-    def _notify_start(self, node: WorkflowNode) -> None:
+    def _notify_start(self, node: WorkflowNode, *, path: tuple[list[str], list[str]] | None = None) -> None:
         if self.on_step_start is None:
             return
+        if path is None:
+            path_ids, path_names, _ = self._node_path(node.id)
+        else:
+            path_ids, path_names = path
         event = {
             "step_id": node.id,
             "name": node.name,
@@ -702,6 +746,9 @@ class WorkflowEngine:
             "workflow_id": self.workflow.workflow_id,
             "workflow_path": list(self.workflow_path),
             "workflow_depth": len(self.workflow_path) - 1,
+            "node_path": path_ids,
+            "node_path_names": path_names,
+            "breadcrumb": " → ".join(path_names),
             "ts": time.time(),
         }
         if node.is_task:
@@ -718,7 +765,13 @@ class WorkflowEngine:
         attempts: int = 0,
         repeats: int = 0,
         decorator: str | None = None,
+        path: tuple[list[str], list[str]] | None = None,
     ) -> None:
+        if path is None:
+            path_ids, path_names, _ = self._node_path(node.id)
+        else:
+            path_ids, path_names = path
+        breadcrumb = " → ".join(path_names)
         event: dict[str, Any] = {
             "step_id": node.id,
             "name": node.name,
@@ -730,6 +783,9 @@ class WorkflowEngine:
             "workflow_id": self.workflow.workflow_id,
             "workflow_path": list(self.workflow_path),
             "workflow_depth": len(self.workflow_path) - 1,
+            "node_path": path_ids,
+            "node_path_names": path_names,
+            "breadcrumb": breadcrumb,
             "started_at": started_at,
             "duration_ms": round((time.perf_counter() - started_perf) * 1000, 3),
         }
@@ -745,6 +801,9 @@ class WorkflowEngine:
             event["output"] = _summary(outcome.output)
         if outcome.error:
             event["error"] = outcome.error
+            # 失败定位：这条错误落在「根 → … → 失败节点」的哪条链路上。
+            event["error_path"] = path_ids
+            event["error_breadcrumb"] = breadcrumb
         if outcome.category:
             event["error_category"] = outcome.category
         with self._lock:

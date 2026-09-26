@@ -446,6 +446,7 @@ function renderSummary(): void {
     `动作：${step.action ?? '—'}`,
     `节点类型：${step.node_kind ?? '—'}`,
     `步骤：${step.step_id ?? '—'}`,
+    step.breadcrumb ? `路径：${step.breadcrumb}` : '',
     `状态：${step.status ?? '—'}`,
     step.error ? `错误：${step.error}` : '',
     step.error_category ? `错误分类：${step.error_category}` : '',

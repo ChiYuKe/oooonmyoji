@@ -185,6 +185,8 @@ def step_summary(event: dict[str, Any]) -> dict[str, Any]:
     """步骤事件里状态条需要显示的字段。"""
 
     workflow_path = event.get("workflow_path")
+    node_path = event.get("node_path")
+    node_path_names = event.get("node_path_names")
     return {
         "step_id": event.get("step_id"),
         "name": event.get("name"),
@@ -197,6 +199,11 @@ def step_summary(event: dict[str, Any]) -> dict[str, Any]:
         "duration_ms": event.get("duration_ms"),
         "error": event.get("error"),
         "error_category": event.get("error_category"),
+        "node_path": list(node_path) if isinstance(node_path, (list, tuple)) else None,
+        "node_path_names": list(node_path_names) if isinstance(node_path_names, (list, tuple)) else None,
+        "breadcrumb": event.get("breadcrumb"),
+        "error_path": list(event["error_path"]) if isinstance(event.get("error_path"), (list, tuple)) else None,
+        "error_breadcrumb": event.get("error_breadcrumb"),
     }
 
 

@@ -477,6 +477,16 @@ def test_bindings_are_typed_and_use_inputs_and_nodes_namespaces() -> None:
     ], "outer")
     validate(nested_sequence_ref, actions)
 
+    # 折叠图边界卡是单子透传：组内保证的输出，在组之后的兄弟节点里依然可用
+    # （A → 入口 → B ≡ A → B，可用性推导也走同一条透传）。
+    boundary_transparent = tree([
+        {"id": "seq", "type": "sequence", "children": ["entry", "typed"]},
+        {"id": "entry", "type": "group_entry", "children": ["producer"]},
+        task("producer", "test.echo", {"value": 1}),
+        task("typed", "test.typed", {"count": {"ref": "nodes.producer.output.value"}}),
+    ], "seq")
+    validate(boundary_transparent, actions)
+
     optional_selector_output = tree([
         {"id": "outer", "type": "sequence", "children": ["choice", "check"]},
         {"id": "choice", "type": "selector", "children": ["producer", "fallback"]},
@@ -801,6 +811,78 @@ def test_engine_sequence_stops_and_selector_falls_back() -> None:
     result = WorkflowEngine(validate(sequence, actions), actions, Context(), {}).run()
     assert result.status == ActionStatus.FAILED
     assert "never" not in [event["step_id"] for event in result.step_history]
+
+
+def test_engine_step_events_carry_execution_breadcrumb() -> None:
+    """每个步骤事件都带「根 → 当前节点」的路径，失败事件另外给错误面包屑。"""
+
+    actions = registry(action_spec(RetryAction()), action_spec(FailAction()))
+    nested = tree([
+        {"id": "first", "name": "第一段", "type": "sequence", "children": ["second"]},
+        {"id": "second", "name": "第二段", "type": "sequence", "children": ["deep"]},
+        task("deep", "test.retry", decorators=[{"type": "retry", "attempts": 2}]),
+    ], "first")
+    result = WorkflowEngine(validate(nested, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    started = next(event for event in result.step_history if event["step_id"] == "deep")
+    assert started["node_path"] == ["root", "first", "second", "deep"]
+    assert started["node_path_names"] == ["root", "第一段 (first)", "第二段 (second)", "deep"]
+    assert started["breadcrumb"] == "root → 第一段 (first) → 第二段 (second) → deep"
+    assert "error_breadcrumb" not in started
+
+    failing = tree([
+        {"id": "first", "type": "sequence", "children": ["second"]},
+        {"id": "second", "type": "sequence", "children": ["deep"]},
+        task("deep", "test.fail"),
+    ], "first")
+    failed = WorkflowEngine(validate(failing, actions), actions, Context(), {}).run()
+    assert failed.status == ActionStatus.FAILED
+    deep_events = [event for event in failed.step_history if event["step_id"] == "deep"]
+    assert deep_events[-1]["status"] == "failed"
+    assert deep_events[-1]["error_breadcrumb"] == "root → first → second → deep"
+    assert deep_events[-1]["error_path"] == ["root", "first", "second", "deep"]
+
+
+def test_engine_breadcrumb_tracks_the_actually_taken_branch() -> None:
+    """面包屑只写这一轮真正走过的节点：另一条分支的节点不出现。"""
+
+    actions = registry(action_spec(EchoAction()), action_spec(FailAction()))
+    raw = tree([
+        {"id": "route", "name": "分支路由", "type": "selector", "children": ["left", "right"]},
+        {"id": "left", "name": "左边", "type": "sequence", "children": ["miss"]},
+        task("miss", "test.fail"),
+        {"id": "right", "name": "右边", "type": "sequence", "children": ["click"]},
+        task("click", "test.fail"),
+    ], "route")
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+
+    missed = next(event for event in result.step_history if event["step_id"] == "miss")
+    assert missed["status"] == "branch_miss"
+    assert missed["error_breadcrumb"] == "root → 分支路由 (route) → 左边 (left) → miss"
+    failed = next(event for event in reversed(result.step_history) if event["step_id"] == "click")
+    assert failed["status"] == "failed"
+    assert failed["error_breadcrumb"] == "root → 分支路由 (route) → 右边 (right) → click"
+    # 没走过的那条分支不出现在失败路径里。
+    assert "left" not in failed["error_path"]
+    assert "miss" not in failed["error_path"]
+
+
+def test_engine_on_demand_value_card_does_not_inherit_execution_path() -> None:
+    """按需拉起的值卡片不在执行树里，路径只写它自己，不挂到碰巧在跑的节点下面。"""
+
+    actions = registry(action_spec(PassThroughAction()))
+    raw = tree([
+        {"id": "seq", "name": "主流程", "type": "sequence", "children": ["read"]},
+        task("read", "test.passthrough", {"value": {"ref": "nodes.judge.output.value"}}),
+        {"id": "judge", "name": "判断", "type": "bool_judge", "expression": {"eq": [{"ref": "variables.state"}, "settlement"]}},
+    ], "seq")
+    raw["variables"] = {"state": {"type": "string", "default": "settlement"}}
+    result = WorkflowEngine(validate(raw, actions), actions, Context(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    judge_events = [event for event in result.step_history if event["step_id"] == "judge"]
+    assert judge_events[-1]["node_path"] == ["judge"]
+    assert judge_events[-1]["breadcrumb"] == "判断 (judge)"
+    assert "error_breadcrumb" not in judge_events[-1]
 
 
 def guarded_route() -> dict[str, Any]:

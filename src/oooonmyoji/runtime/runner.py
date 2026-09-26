@@ -184,6 +184,74 @@ def _nested_branch_recovery_events(
     return recovered
 
 
+def _failed_path_key(event: dict[str, Any]) -> tuple[str, ...]:
+    """失败事件的定位路径；没有路径的事件不参与失败定位。"""
+
+    for field in ("node_path", "error_path"):
+        value = event.get(field)
+        if isinstance(value, (list, tuple)) and value:
+            return tuple(str(item) for item in value)
+    return ()
+
+
+def _step_finished_at(event: dict[str, Any]) -> float:
+    """一步结束的时刻（开始时间 + 耗时）；没有时间信息时返回 0。"""
+
+    try:
+        return float(event.get("started_at") or 0.0) + float(event.get("duration_ms") or 0.0) / 1000.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _failed_node_event(history: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """最深的一条「真的失败」的步骤事件：被回收的 branch_miss 不算。
+
+    节点一多，光看 `current_step` 只能知道最后停在哪个节点；而容器节点（sequence /
+    selector）在子节点失败后自己也会记一条失败，错误文本往往很泛。这里按定位路径
+    取最深的那条：最深 = 离真正出错的叶子最近。
+
+    选择器回收失败时是**事后**改写历史事件，被回收的那条 `failed` 仍留在历史里
+    （只是多了一条 `branch_miss` 副本），所以只按深度会选中已经不成立的旧记录。
+    因此先锁定「最后一次执行」——历史里结束最晚的那条事件所属的这一次——只在这一次
+    里比较深度。工作流级重试会重跑，旧尝试的失败不会盖过最终结果。
+    """
+
+    valid: list[dict[str, Any]] = []
+    for event in history:
+        # 被回收的失败（branch_miss / recovered_by）只是「这一支没命中」，不算失败位置。
+        if event.get("status") == "branch_miss":
+            continue
+        if event.get("recovered_by") or event.get("recovered_via"):
+            continue
+        if event.get("original_status"):
+            continue
+        if not (event.get("error_breadcrumb") or event.get("breadcrumb")):
+            continue
+        valid.append(event)
+    if not valid:
+        return None
+    final_start = max((float(event.get("started_at") or 0.0) for event in valid), default=0.0)
+    best: dict[str, Any] | None = None
+    best_depth = -1
+    for event in valid:
+        # 只认最后一次执行的事件：开始时间不早于「最后开始的那一刻」。
+        if float(event.get("started_at") or 0.0) < final_start:
+            continue
+        if event.get("status") != ActionStatus.FAILED.value:
+            continue
+        depth = len(_failed_path_key(event))
+        if depth > best_depth:
+            best = event
+            best_depth = depth
+    if best is not None:
+        return best
+    # 最后一次执行里没有失败事件（例如只有 branch_miss 被回收）：退回整段历史里最深的那条。
+    candidates = [event for event in valid if event.get("status") == ActionStatus.FAILED.value]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda event: (len(_failed_path_key(event)), _step_finished_at(event)))
+
+
 class TaskRunner:
     def __init__(
         self,
@@ -424,6 +492,13 @@ class TaskRunner:
                 result = engine.run()
                 if result.requires_worker_restart:
                     record.details["worker_restart_required"] = True
+                if record.failed_node_breadcrumb is None:
+                    # 重试会在同一个引擎实例里重跑，步历史会一直累积；先取到的定位不被覆盖。
+                    failed_step = _failed_node_event(record.step_history)
+                    if failed_step is not None:
+                        record.failed_node_id = str(failed_step.get("step_id")) if failed_step.get("step_id") is not None else None
+                        breadcrumb = failed_step.get("error_breadcrumb") or failed_step.get("breadcrumb")
+                        record.failed_node_breadcrumb = str(breadcrumb) if breadcrumb else None
                 if result.current_step not in {None, "$success", "$failure", "$cancelled"}:
                     record.current_step = result.current_step
                 if result.requires_worker_restart or result.status != ActionStatus.FAILED or attempt + 1 >= attempts:

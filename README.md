@@ -458,6 +458,15 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 `core.save_frame` 时仍会保存指定截图。失败或中断运行写入
 `artifacts/<run-id>/`，包括失败元数据、OCR/模板结果和一张最终现场图；选择器
 正常回退产生的中间失败不会保存截图。
+
+节点一多，「停在哪个节点」不足以定位问题，所以每个步骤事件都带执行路径：
+`node_path`（`root → … → 当前节点`的节点 id）、`node_path_names`（同样的路径，
+带节点显示名）与拼好的 `breadcrumb`；失败事件另外给 `error_path` / `error_breadcrumb`。
+运行记录里另有 `failed_node_id` 与 `failed_node_breadcrumb`，取的是**最深**的那条
+失败链路（容器节点在子节点失败后自己也会报一条泛化错误），被选择器回收的分支失败
+（`branch_miss`）不算失败位置。这三个字段在运行记录 JSON、运行事件 JSONL 与桌面端
+实时视图的步骤摘要里都能看到；`run-workflow` / `run` 结尾的摘要会在失败运行上多打印
+`failed_node` 与 `failed_path`。
 奖励统计截图按游戏实例跨运行滚动保留最近 10 局；OCR 尚未处理的截图不会提前
 删除，结构化奖励统计和运行事件日志不受截图清理影响。
 

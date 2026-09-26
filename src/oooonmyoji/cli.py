@@ -241,6 +241,23 @@ def command_doctor(args: argparse.Namespace) -> int:
         return 2
 
 
+def _failure_summary(record: dict[str, Any]) -> dict[str, Any]:
+    """失败运行时额外打印定位信息：失败节点与「根 → … → 失败节点」面包屑。"""
+
+    if not isinstance(record, dict) or record.get("status") != "failed":
+        return {}
+    summary: dict[str, Any] = {}
+    if record.get("error"):
+        summary["error"] = record["error"]
+    if record.get("error_category"):
+        summary["error_category"] = record["error_category"]
+    if record.get("failed_node_id"):
+        summary["failed_node"] = record["failed_node_id"]
+    if record.get("failed_node_breadcrumb"):
+        summary["failed_path"] = record["failed_node_breadcrumb"]
+    return summary
+
+
 def _run_local(config_path: Path, job_id: str) -> int:
     """在没有监督器时一次性本地执行指定任务。"""
 
@@ -249,7 +266,11 @@ def _run_local(config_path: Path, job_id: str) -> int:
     try:
         run_id = supervisor.run(job_id, wait=True)
         record = AtomicJsonStore(config.artifact_dir / "runs" / f"{run_id}.json").read(default={})
-        _print({"run_id": run_id, "status": record.get("status") if isinstance(record, dict) else None})
+        _print({
+            "run_id": run_id,
+            "status": record.get("status") if isinstance(record, dict) else None,
+            **(_failure_summary(record) if isinstance(record, dict) else {}),
+        })
         return 0 if isinstance(record, dict) and record.get("status") == "succeeded" else 1
     finally:
         supervisor.stop()
@@ -285,10 +306,11 @@ def _run_workflow_local(
                     "instance": item.get("instance"),
                     "workflow": item.get("workflow"),
                     "status": item.get("status"),
+                    **(_failure_summary(item) or {}),
                 } for item in record["runs"] if isinstance(item, dict)],
             })
         else:
-            _print({"run_id": run_id, "status": record.get("status") if isinstance(record, dict) else None})
+            _print({"run_id": run_id, "status": record.get("status") if isinstance(record, dict) else None, **(_failure_summary(record) if isinstance(record, dict) else {})})
         return 0 if isinstance(record, dict) and record.get("status") == "succeeded" else 1
     finally:
         supervisor.stop()

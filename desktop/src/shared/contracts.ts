@@ -267,6 +267,13 @@ export interface LiveViewStep {
   duration_ms?: number | null;
   error?: string | null;
   error_category?: string | null;
+  /** 「根 → … → 当前节点」的执行路径（节点 id 与显示名）。 */
+  node_path?: string[] | null;
+  node_path_names?: string[] | null;
+  breadcrumb?: string | null;
+  /** 失败时的定位面包屑（成功事件没有这两个字段）。 */
+  error_path?: string[] | null;
+  error_breadcrumb?: string | null;
 }
 
 /** 运行时写给桌面端的一帧“眼中的画面”。 */

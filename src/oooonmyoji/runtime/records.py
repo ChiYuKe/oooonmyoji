@@ -44,6 +44,9 @@ class RunRecord:
     duration_ms: float | None = None
     error: str | None = None
     error_category: str | None = None
+    #: 失败节点的定位：「根 → … → 失败节点」的节点 id 与可读面包屑。
+    failed_node_id: str | None = None
+    failed_node_breadcrumb: str | None = None
     artifacts: list[str] = field(default_factory=list)
     step_history: list[dict[str, Any]] = field(default_factory=list)
     step_history_total: int = 0

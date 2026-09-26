@@ -1330,10 +1330,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     const visiblePins = isBooleanInputNode(node)
       ? []
       : nodeVariablePins(node);
-    return BASE_H
+    const height = BASE_H
       + nodeRowCount(node, visiblePins) * nodeRowHeight(node)
       + (Array.isArray(node.decorators) ? node.decorators.length * DECO_H : 0)
       + (node.type === 'condition' ? CONDITION_PORT_H : 0);
+    // 固定行（布尔判断的两个操作数格）只占「说明区」，行数里算不到它们：
+    // 比较形态的右操作数在 y=88，96 的基准高会把那个框切在卡片底边上。
+    return Math.max(height, fixedRowCardHeight(node));
   }
 
   function svgEl(tag: string, attrs: Record<string, unknown>, parent?: Element): SVGElement {

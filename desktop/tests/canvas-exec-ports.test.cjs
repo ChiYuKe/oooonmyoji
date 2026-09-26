@@ -34,6 +34,22 @@ test('bool_judge 左右表达式输入端点几何独立且不复用 condition �
   assert.equal(ports.isBooleanInputPin({type: 'bool_judge'}, 'condition'), false);
 });
 
+test('固定行（操作数格 / bool 条件口）连同收尾空隙都落在卡片高度里', () => {
+  // 比较形态的右操作数在 y=88、格子自身 18 高：卡片高度必须罩住它再加一段底边空隙，
+  // 否则那一格会被卡片底边切掉（96 的基准高就是这个问题）。
+  const compared = {type: 'bool_judge', expression: {eq: [{ref: 'nodes.break_1.output.state'}, 'settlement']}};
+  const bound = {type: 'bool_judge', expression: {ref: 'inputs.是否在结算页'}};
+  const judge = {type: 'condition', expression: {eq: [1, 1]}};
+  const rightBottom = ports.BOOL_JUDGE_RIGHT_INPUT_Y + ports.FIXED_ROW_H / 2;
+  assert.equal(ports.fixedRowCardHeight(compared), rightBottom + ports.FIXED_ROW_TAIL);
+  assert.ok(ports.fixedRowCardHeight(compared) > 88 + 9, '比较形态必须比「右操作数贴底」更高');
+  // 绑定形态只有一行 y=64：96 的基准高本来就罩得住，不需要额外高度。
+  assert.ok(ports.fixedRowCardHeight(bound) < 96, '单行绑定形态不额外抬高卡片');
+  // 判断节点的 bool 条件口同样在 y=64，它本来就比基准高矮（底部还有真/假口）。
+  assert.ok(ports.fixedRowCardHeight(judge) < 112, '判断节点的基准高已经罩得住条件口');
+  assert.equal(ports.fixedRowCardHeight({type: 'task'}), 0, '普通卡片没有固定行');
+});
+
 test('表达式形态：二元比较 / 整卡绑定 / 嵌套（含坏形状）', () => {
   const shape = (expression) => ports.boolJudgeExpressionShape(expression);
   for (const operator of ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains']) {

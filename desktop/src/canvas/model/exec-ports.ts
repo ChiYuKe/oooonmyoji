@@ -110,6 +110,27 @@ export function expressionInputOffset(node: any, param: unknown): { x: number; y
   return null;
 }
 
+/** 卡面上固定行（操作数格 / 布尔条件口）的高度与它下面的收尾空隙。 */
+export const FIXED_ROW_H = 18;
+export const FIXED_ROW_TAIL = 14;
+
+/**
+ * 卡片为了装下「固定行」至少需要多高。
+ *
+ * 布尔判断的操作数格、判断节点的布尔条件口都钉在固定 y 上（见 `expressionInputOffset`），
+ * 它们**不占参数行**，所以 `BASE_H + 行数 × 行高` 不一定罩得住最后一行——
+ * 比较形态的右操作数在 y=88，96 的基准高会把它的框切在卡片底边上。返回 0 表示没有固定行。
+ */
+export function fixedRowCardHeight(node: any): number {
+  if (isBoolJudgeNode(node) && boolJudgeShape(node) === 'comparison') {
+    return BOOL_JUDGE_RIGHT_INPUT_Y + FIXED_ROW_H / 2 + FIXED_ROW_TAIL;
+  }
+  if (isBooleanInputNode(node)) {
+    return CONDITION_INPUT_Y + FIXED_ROW_H / 2 + FIXED_ROW_TAIL;
+  }
+  return 0;
+}
+
 export function isConditionPort(value: unknown): value is ConditionPort {
   return value === 'true' || value === 'false';
 }

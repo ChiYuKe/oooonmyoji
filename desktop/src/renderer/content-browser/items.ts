@@ -13,6 +13,95 @@ export interface ContentBrowserItemLike {
   name: string;
 }
 
+export interface ContentBrowserFolderDraftLike {
+  parentPath: string;
+  name: string;
+}
+
+export interface ContentBrowserRenameDraftLike<T extends ContentBrowserItemLike> {
+  item: T;
+}
+
+export interface ContentBrowserRenderPlanItem<T extends ContentBrowserItemLike> {
+  item: T;
+  editing: boolean;
+}
+
+export interface ContentBrowserRenderPlanOptions<T extends ContentBrowserItemLike> {
+  entries: readonly T[];
+  folder: string;
+  query: string;
+  folderDraft?: ContentBrowserFolderDraftLike;
+  renameDraft?: ContentBrowserRenameDraftLike<T>;
+  createFolderDraft(path: string, name: string): T;
+}
+
+/**
+ * 生成内容区的稳定渲染计划。
+ *
+ * 新建文件夹固定排在第一项；正在重命名但被筛选隐藏的条目也临时补到第一项。
+ * 这段规则不接触 DOM，视图层只需按顺序创建元素，测试也能直接验证真实实现。
+ */
+export function contentBrowserRenderPlan<T extends ContentBrowserItemLike>(
+  options: ContentBrowserRenderPlanOptions<T>,
+): ContentBrowserRenderPlanItem<T>[] {
+  const entries = [...options.entries];
+  const folderDraftVisible = Boolean(
+    options.folderDraft
+    && options.folderDraft.parentPath === options.folder
+    && !options.query,
+  );
+  if (folderDraftVisible && options.folderDraft) {
+    entries.unshift(options.createFolderDraft(
+      `${options.folderDraft.parentPath}/.new-folder`,
+      options.folderDraft.name,
+    ));
+  }
+  if (options.renameDraft && !entries.some((entry) => entry.path === options.renameDraft!.item.path)) {
+    entries.unshift(options.renameDraft.item);
+  }
+  return entries.map((item, index) => ({
+    item,
+    editing: Boolean(
+      (folderDraftVisible && index === 0 && item.path.endsWith('/.new-folder'))
+      || (options.renameDraft && item.path === options.renameDraft.item.path),
+    ),
+  }));
+}
+
+export interface ContentFolderRelocation {
+  oldUri: string;
+  newUri: string;
+}
+
+export interface ContentFolderRelocationOptions {
+  oldFolder: string;
+  newFolder: string;
+  tabs: readonly { uri: string }[];
+  relativePath(uri: string): string;
+  targetUri(relativePath: string): string | undefined;
+}
+
+/**
+ * 计算文件夹改名后需要迁移的已打开工作流标签。
+ *
+ * 路径比较忽略大小写但要求完整目录边界，避免把 `foo` 的移动误应用到 `foo2`。
+ * 本函数只生成计划，文档状态的实际迁移仍由工作台统一执行。
+ */
+export function contentFolderRelocations(options: ContentFolderRelocationOptions): ContentFolderRelocation[] {
+  const folder = options.oldFolder.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!folder) return [];
+  const prefix = `${folder}/`;
+  const moved: ContentFolderRelocation[] = [];
+  for (const tab of options.tabs) {
+    const relative = options.relativePath(tab.uri).replace(/\\/g, '/');
+    if (!relative.toLowerCase().startsWith(prefix.toLowerCase())) continue;
+    const newUri = options.targetUri(`${options.newFolder}/${relative.slice(prefix.length)}`);
+    if (newUri) moved.push({ oldUri: tab.uri, newUri });
+  }
+  return moved;
+}
+
 /** 是否位于目录下（含目录自身）；空目录表示项目根，永远为真。 */
 export function isUnderContentFolder(path: string, folder: string): boolean {
   if (!folder) return true;

@@ -19,6 +19,7 @@
     "src/renderer/recovery-store.ts",
     "src/renderer/content-browser/items.ts",
     "src/renderer/content-browser/rewrite-report.ts",
+    "src/renderer/content-browser/rewrite-dialog.ts",
     "src/renderer/overview/card.ts",
     "src/renderer/editor-host.ts",
     "src/renderer/document-lifecycle.ts",

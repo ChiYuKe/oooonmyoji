@@ -234,41 +234,31 @@ test('内容浏览器之外：独立窗口的分组拖回主窗口', () => {
   assert.equal((docHandlers.get('pointerup') || []).length, 0);
 });
 
-test('content browser keeps item instances, draft editing and flat grid/list rendering', () => {
-  const source = read('src/renderer/content-browser.ts');
-  const start = source.indexOf('function renderContentBrowser(): void {');
-  const js = require('node:module').stripTypeScriptTypes(source.slice(start, source.indexOf('\n}\n', start) + 2));
-  const element = () => ({children: [], classList: {toggle() {}}, setAttribute() {}, textContent: '',
-    append(...children) {this.children.push(...children);}, appendChild(child) {this.children.push(child);},
-    replaceChildren(...children) {this.children = children;}});
-  const container = element(), created = [];
+test('content browser keeps draft editing and flat entry order', () => {
+  const { contentBrowserRenderPlan } = require('../dist-test-renderer/renderer/content-browser/items.js');
   const entries = [{kind:'asset',name:'template',path:'template.png'}, {kind:'workflow',name:'main',path:'main.json'}, {kind:'folder',name:'assets',path:'assets'}];
-  const ctx = vm.createContext({contentFolders: () => [''], contentBrowserFolder: '', contentBrowserQuery: '',
-    renderContentBrowserTree() {}, renderContentBrowserBreadcrumbs() {}, renderContentBrowserFilters() {},
-    contentBrowserEntries: () => [...entries],
-    contentFolderDraft: {parentPath:'',name:'新建文件夹'}, contentRenameDraft: null,
-    contentBrowserItems:container, contentBrowserView:'grid', selectedContentPath:'',
-    createContentItem(item, draft) { const result = {...element(), item, draft}; created.push(result); return result; },
-    document: {createElement: element, querySelector: element, querySelectorAll: () => []}, createIconsRef() {}, desktopIconsRef: {}});
-  vm.runInContext(js, ctx); ctx.renderContentBrowser();
+  const plan = (folderDraft, renameDraft, currentEntries = entries) => contentBrowserRenderPlan({
+    entries: currentEntries,
+    folder: '',
+    query: '',
+    folderDraft,
+    renameDraft,
+    createFolderDraft: (path, name) => ({kind: 'folder', path, name}),
+  });
   // UE 风格：过滤交给左侧类型列，主区直接平铺条目；新建草稿排在最前。
-  assert.equal(container.children.length, 4);
-  assert.equal(container.children[0], created[0]);
-  assert.equal(created[0].draft, true);
-  assert.deepEqual(container.children.map(item => item.item.kind), ['folder', 'asset', 'workflow', 'folder']);
-  ctx.contentBrowserView = 'list'; ctx.contentFolderDraft = null; created.length = 0;
-  ctx.renderContentBrowser(); assert.deepEqual(container.children, created); assert.equal(container.children.length, 3);
+  const withFolderDraft = plan({parentPath:'',name:'新建文件夹'}, undefined);
+  assert.equal(withFolderDraft.length, 4);
+  assert.equal(withFolderDraft[0].editing, true);
+  assert.deepEqual(withFolderDraft.map(({item}) => item.kind), ['folder', 'asset', 'workflow', 'folder']);
+  assert.equal(plan(undefined, undefined).length, 3);
   // 行内重命名：目标条目原地进入编辑态。
-  ctx.contentRenameDraft = {item: entries[1], name: 'main', busy: false}; created.length = 0;
-  ctx.renderContentBrowser();
-  assert.equal(container.children.find(el => el.item.path === 'main.json').draft, true);
-  assert.equal(container.children.filter(el => el.draft).length, 1);
+  const renamed = plan(undefined, {item: entries[1]});
+  assert.equal(renamed.find(({item}) => item.path === 'main.json').editing, true);
+  assert.equal(renamed.filter(({editing}) => editing).length, 1);
   // 被筛选/目录藏起来的重命名目标补进网格，保证输入框出现。
-  ctx.contentRenameDraft = {item: {kind:'workflow', name:'hidden', path:'workflows/hidden.json'}, name: 'hidden', busy: false};
-  created.length = 0;
-  ctx.renderContentBrowser();
-  assert.equal(container.children.length, 4);
-  assert.equal(container.children[0].item.path, 'workflows/hidden.json');
-  assert.equal(container.children[0].draft, true);
-  ctx.contentRenameDraft = null;
+  const hidden = {kind:'workflow', name:'hidden', path:'workflows/hidden.json'};
+  const withHiddenRename = plan(undefined, {item: hidden});
+  assert.equal(withHiddenRename.length, 4);
+  assert.equal(withHiddenRename[0].item.path, 'workflows/hidden.json');
+  assert.equal(withHiddenRename[0].editing, true);
 });

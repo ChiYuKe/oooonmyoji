@@ -2,7 +2,7 @@
  * 内容浏览器：工作流 / 资源文件的树、网格、右键菜单、命名弹窗与拖放。
  * 状态由本模块持有，通过 createContentBrowser 注入实时状态与共享操作。
  * 纯条目工具（目录归属、递归类型过滤）已抽到 content-browser/items.ts。
- * 注意：workbench.test.cjs 仍按函数名切片 renderContentBrowser，改动需同步测试。
+ * 条目顺序与编辑态由纯函数生成，DOM 渲染只消费计划，不再依赖源码切片测试。
  */
 import { Box, Copy, FileJson2, FolderOpen, FolderPlus, Image, Network, Pencil, RefreshCw, Trash2 } from 'lucide';
 import type { createElement, createIcons } from 'lucide';
@@ -14,8 +14,17 @@ import type {
   WorkflowDescriptor,
 } from '../shared/contracts';
 import type { DockingController } from './docking';
-import { contentBrowserRecursiveItems, isUnderContentFolder, nextContentBrowserZoom, CONTENT_BROWSER_ZOOM_MIN, CONTENT_BROWSER_ZOOM_MAX, type ContentBrowserItemKind } from './content-browser/items';
-import { contentRewriteReport } from './content-browser/rewrite-report';
+import {
+  contentBrowserRecursiveItems,
+  contentFolderRelocations,
+  contentBrowserRenderPlan,
+  isUnderContentFolder,
+  nextContentBrowserZoom,
+  CONTENT_BROWSER_ZOOM_MIN,
+  CONTENT_BROWSER_ZOOM_MAX,
+  type ContentBrowserItemKind,
+} from './content-browser/items';
+import { showContentRewriteResult } from './content-browser/rewrite-dialog';
 
 interface WorkflowDocumentTab {
   uri: string;
@@ -660,26 +669,20 @@ function renderContentBrowser(): void {
   renderContentBrowserTree();
   renderContentBrowserBreadcrumbs();
   renderContentBrowserFilters();
-  const entries = contentBrowserEntries();
-  if (contentFolderDraft && contentFolderDraft.parentPath === contentBrowserFolder && !contentBrowserQuery) {
-    entries.unshift({
-      kind: 'folder',
-      path: `${contentFolderDraft.parentPath}/.new-folder`,
-      name: contentFolderDraft.name,
-    });
-  }
-  if (contentRenameDraft && !entries.some((entry) => entry.path === contentRenameDraft!.item.path)) {
-    // 筛选（例如只看工作流）会把重命名目标藏起来：补进网格保证输入框出现。
-    entries.unshift(contentRenameDraft.item);
-  }
-  contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
-  const renderedEntries = entries.map((item, index) => {
-    const editing = Boolean(
-      (contentFolderDraft && index === 0 && item.path.endsWith('/.new-folder'))
-      || (contentRenameDraft && item.path === contentRenameDraft.item.path),
-    );
-    return { item, element: createContentItem(item, editing) };
+  const renderPlan = contentBrowserRenderPlan({
+    entries: contentBrowserEntries(),
+    folder: contentBrowserFolder,
+    query: contentBrowserQuery,
+    folderDraft: contentFolderDraft,
+    renameDraft: contentRenameDraft,
+    createFolderDraft: (path, name) => ({ kind: 'folder', path, name }),
   });
+  const entries = renderPlan.map(({ item }) => item);
+  contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
+  const renderedEntries = renderPlan.map(({ item, editing }) => ({
+    item,
+    element: createContentItem(item, editing),
+  }));
   contentBrowserItems.replaceChildren(...renderedEntries.map((entry) => entry.element));
   document.querySelector<HTMLElement>('#content-browser-empty')!.classList.toggle('hidden', entries.length > 0);
   document.querySelector<HTMLElement>('#content-browser-summary')!.textContent = `${entries.length} 项`;
@@ -860,33 +863,18 @@ function hideContentRewriteDialog(): void {
  * `skipped` 是有未保存修改、因而没有跟着重载的文档：保存它们会把重定向覆盖回去，必须在弹窗里点名。
  */
 function reportContentRewrite(result: MoveContentResult, verb: '重命名' | '移动', skipped: readonly string[] = []): void {
-  const report = contentRewriteReport(result, verb);
-  if (report.rows.length === 0) {
-    showToast(report.title);
-    return;
-  }
-  showToast(`${report.title}，已重定向 ${report.references} 处引用`);
-  contentRewriteTitle.textContent = report.title;
-  contentRewriteSubtitle.textContent = report.subtitle;
-  contentRewriteHint.textContent = skipped.length > 0
-    ? `另有 ${skipped.length} 个文件有未保存修改，未自动重载：保存它们会覆盖本次重定向（${skipped.join('、')}）`
-    : '改动已写入磁盘，可用右键菜单的「引用查看器」复核';
-  contentRewriteList.replaceChildren(...report.rows.map((detail) => {
-    const row = document.createElement('div');
-    row.className = 'content-rewrite-item';
-    const path = document.createElement('span');
-    path.className = 'content-rewrite-path';
-    path.textContent = detail.path;
-    path.title = detail.path;
-    const count = document.createElement('span');
-    count.className = 'content-rewrite-count';
-    count.textContent = `${detail.references} 处`;
-    row.append(path, count);
-    return row;
-  }));
-  contentRewriteModal.classList.remove('hidden');
-  contentRewriteModal.setAttribute('aria-hidden', 'false');
-  window.setTimeout(() => contentRewriteConfirm.focus(), 0);
+  showContentRewriteResult(result, verb, skipped, {
+    modal: contentRewriteModal,
+    title: contentRewriteTitle,
+    subtitle: contentRewriteSubtitle,
+    hint: contentRewriteHint,
+    list: contentRewriteList,
+    confirm: contentRewriteConfirm,
+  }, {
+    document,
+    showToast,
+    schedule: (callback) => { window.setTimeout(callback, 0); },
+  });
 }
 
 /**
@@ -894,19 +882,15 @@ function reportContentRewrite(result: MoveContentResult, verb: '重命名' | '�
  * 必须在刷新目录之后调用（新描述符此时才在 bootstrap 里），返回搬迁后的文档 URI。
  */
 function relocateFolderDocuments(oldFolder: string, newFolder: string): string[] {
-  const folder = oldFolder.replace(/\\/g, '/').replace(/\/+$/, '');
-  const prefix = `${folder}/`;
-  const moved: string[] = [];
-  if (!folder) return moved;
-  for (const tab of getWorkflowTabs()) {
-    const relative = relativeToProject(displayFileUri(tab.uri)).replace(/\\/g, '/');
-    if (!relative.toLowerCase().startsWith(prefix.toLowerCase())) continue;
-    const target = workflowDescriptorForPath(`${newFolder}/${relative.slice(prefix.length)}`);
-    if (!target) continue;
-    relocateDocument(tab.uri, target.uri);
-    moved.push(target.uri);
-  }
-  return moved;
+  const relocations = contentFolderRelocations({
+    oldFolder,
+    newFolder,
+    tabs: getWorkflowTabs(),
+    relativePath: (uri) => relativeToProject(displayFileUri(uri)),
+    targetUri: (relative) => workflowDescriptorForPath(relative)?.uri,
+  });
+  for (const relocation of relocations) relocateDocument(relocation.oldUri, relocation.newUri);
+  return relocations.map(({ newUri }) => newUri);
 }
 
 async function createContentFolderAt(parentPath: string): Promise<void> {

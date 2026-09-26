@@ -11,6 +11,7 @@ import {
   net,
   nativeTheme,
   protocol,
+  screen,
   shell,
   type IpcMainInvokeEvent,
 } from 'electron';
@@ -38,6 +39,14 @@ import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
 import { RuntimeResourceManager } from './runtimeResources';
 import { VisionStream } from './visionStream';
+import {
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  parseWindowState,
+  resolveWindowGeometry,
+  serializeWindowState,
+  type WindowState,
+} from './windowState';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -69,6 +78,12 @@ let runtimeInitialized = false;
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 const THEME_STORE_KEY = 'onmyoji-studio.appearance';
 const LIVE_VIEW_INTERVAL_STORE_KEY = 'onmyoji-studio.live-view.interval-ms';
+/** 主窗口几何（位置/尺寸/最大化）与停靠布局同库存放：都是「用户布局」。 */
+const WINDOW_STATE_STORE_KEY = 'onmyoji-studio.window-state.v1';
+const DEFAULT_WINDOW_WIDTH = 1560;
+const DEFAULT_WINDOW_HEIGHT = 940;
+/** 拖动/缩放时的合并窗口：move 事件很多，逐次同步重写整份布局存储不划算。 */
+const WINDOW_STATE_WRITE_DELAY_MS = 300;
 function readTheme(): AppearanceTheme {
   const value = readLayoutStore()[THEME_STORE_KEY];
   return isAppearanceTheme(value) ? value : 'dark';
@@ -162,6 +177,11 @@ function writeLayout(key: unknown, value: unknown): void {
   } catch {
     // Layout persistence is best-effort; a renderer failure must not affect the app.
   }
+}
+
+/** 上一份主窗口几何；没有（首次运行）或存坏了都按 `undefined` 处理。 */
+function readWindowState(): WindowState | undefined {
+  return parseWindowState(readLayoutStore()[WINDOW_STATE_STORE_KEY]);
 }
 
 function stopVisionTestStream(): void {
@@ -450,11 +470,19 @@ function createBenchmarkWindow(): BrowserWindow {
 }
 
 function createWindow(): BrowserWindow {
+  // 用户布局：窗口位置、尺寸与最大化状态一并恢复。上一份几何落不到任何显示器
+  // 工作区里（换屏/改分辨率）时退回默认窗口，交给系统居中。
+  const geometry = resolveWindowGeometry(
+    readWindowState(),
+    screen.getAllDisplays().map((display) => display.workArea),
+    { width: DEFAULT_WINDOW_WIDTH, height: DEFAULT_WINDOW_HEIGHT },
+  );
   const window = new BrowserWindow({
-    width: 1560,
-    height: 940,
-    minWidth: 880,
-    minHeight: 620,
+    width: geometry.width,
+    height: geometry.height,
+    ...(geometry.x === undefined || geometry.y === undefined ? {} : { x: geometry.x, y: geometry.y }),
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     frame: false,
     title: 'AutoFlow Studio',
@@ -468,6 +496,8 @@ function createWindow(): BrowserWindow {
       webSecurity: true,
     },
   });
+  // 在 show 之前最大化：窗口第一次出现就是最大化状态，不会先闪一个窗口化的尺寸。
+  if (geometry.maximized) window.maximize();
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     try {
@@ -509,8 +539,34 @@ function createWindow(): BrowserWindow {
   });
   window.once('ready-to-show', () => window.show());
   const sendMaximizedState = (): void => window.webContents.send('window:maximized', window.isMaximized());
-  window.on('maximize', sendMaximizedState);
-  window.on('unmaximize', sendMaximizedState);
+  // 拖动/缩放按合并窗口写入，最大化状态与关闭前各补一次；最大化时记的是还原后的
+  // 几何（`getNormalBounds`），所以取消最大化仍能回到原来的位置与尺寸。
+  const rememberWindowState = (): void => {
+    if (window.isDestroyed()) return;
+    writeLayout(WINDOW_STATE_STORE_KEY, serializeWindowState({
+      bounds: window.getNormalBounds(),
+      maximized: window.isMaximized(),
+    }));
+  };
+  let windowStateTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRememberWindowState = (): void => {
+    if (windowStateTimer !== undefined) clearTimeout(windowStateTimer);
+    windowStateTimer = setTimeout(() => {
+      windowStateTimer = undefined;
+      rememberWindowState();
+    }, WINDOW_STATE_WRITE_DELAY_MS);
+  };
+  window.on('resize', scheduleRememberWindowState);
+  window.on('move', scheduleRememberWindowState);
+  window.on('maximize', () => { sendMaximizedState(); scheduleRememberWindowState(); });
+  window.on('unmaximize', () => { sendMaximizedState(); scheduleRememberWindowState(); });
+  window.on('close', () => {
+    if (windowStateTimer !== undefined) {
+      clearTimeout(windowStateTimer);
+      windowStateTimer = undefined;
+    }
+    rememberWindowState();
+  });
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = undefined;
   });

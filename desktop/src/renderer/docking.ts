@@ -26,6 +26,7 @@ import { createElement, ExternalLink } from 'lucide';
 import {
   LAYOUT_STORAGE_KEY,
   WORKBENCH_LAYOUT_STORAGE_KEY,
+  clearPersistedLayout,
   persistLayout,
   readPersistedLayout,
   resolveDropOverlayModel,
@@ -491,12 +492,13 @@ export function createDockingWorkspace(
 
   // 布局恢复只负责重建面板；文档由壳层根据会话逐条打开。
   const savedLayout = readPersistedLayout(LAYOUT_STORAGE_KEY);
+  let restoredLayout = false;
   if (savedLayout) {
     try {
       api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
+      restoredLayout = api.totalPanels > 0;
     } catch {
-      window.onmyoji.writeLayout(LAYOUT_STORAGE_KEY, null);
-      window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
+      clearPersistedLayout(LAYOUT_STORAGE_KEY);
     }
   }
   suspendPersistence = false;
@@ -510,7 +512,13 @@ export function createDockingWorkspace(
       return;
     }
     const hadScaffolding = DEFAULT_PANEL_ORDER.some((panelId) => api.getPanel(panelId));
-    DEFAULT_PANEL_ORDER.forEach(addPanel);
+    // 只有「没有可恢复的布局」（首次运行、布局被清掉）才铺默认脚手架：用户关掉的
+    // 面板已经不在持久化布局里，重启后不该自己回来。恢复过布局时这里只保证
+    // 「至少有一个工作流画布」——那是画布容器本身，不是可关闭的功能面板。
+    if (!restoredLayout) {
+      DEFAULT_PANEL_ORDER.forEach(addPanel);
+      restoredLayout = true;
+    }
     suspendPersistence = false;
     saveLayout();
     if (!hadScaffolding) window.requestAnimationFrame(applyDefaultSizes);
@@ -527,6 +535,7 @@ export function createDockingWorkspace(
     api.clear();
     if (document) openDocument(document.uri, document.title);
     DEFAULT_PANEL_ORDER.forEach(addPanel);
+    restoredLayout = true;
     suspendPersistence = false;
     saveLayout();
     if (activeUri) focusDocument(activeUri);
@@ -693,27 +702,17 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
       api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
       restored = api.totalPanels > 0;
     } catch {
-      window.onmyoji.writeLayout(WORKBENCH_LAYOUT_STORAGE_KEY, null);
-      window.localStorage.removeItem(WORKBENCH_LAYOUT_STORAGE_KEY);
+      clearPersistedLayout(WORKBENCH_LAYOUT_STORAGE_KEY);
     }
   }
   if (!restored) resetLayout();
-  else {
-    if (!api.getPanel('workflow')) addPanel('workflow');
-    if (!api.getPanel('overview')) addPanel('overview');
-  }
+  // 「工作流编辑器」是兜底根模块，任何布局里都必须在；概览等其余面板关掉就是关掉，
+  // 不再无条件补回来（要开走顶部「窗口」菜单）。
+  else if (!api.getPanel('workflow')) addPanel('workflow');
   suspendPersistence = false;
 
-  // 设置默认与工作流编辑器叠在同一行标签；若持久化布局把它恢复成右侧独立
-  // 分组或浮动/弹出窗口，先关闭，打开时再作为标签加入（见 settings.direction）。
-  const settingsTabbedWithWorkflow = (): boolean => {
-    const settings = api.getPanel('settings');
-    const workflow = api.getPanel('workflow');
-    return Boolean(settings && workflow && settings.group === workflow.group);
-  };
-  const restoredSettings = api.getPanel('settings');
-  if (restoredSettings && !settingsTabbedWithWorkflow()) restoredSettings.api.close();
-  // 引用查看器的内容依赖本次会话的当前目标；不要恢复成空白面板。
+  // 设置默认与工作流编辑器叠在同一行标签（见 settings.direction 与 show()）；但恢复
+  // 布局时尊重用户自己停靠的位置，只关掉内容依赖本次会话的面板。
   const restoredReferenceViewer = api.getPanel('referenceViewer');
   if (restoredReferenceViewer) restoredReferenceViewer.api.close();
   // 「变量引用」同理（它现在可以停在内层或外层），由 connectSharedPanelDocking 统一清理。
@@ -726,7 +725,15 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     onLayoutChange?.();
   });
 
+  const settingsTabbedWithWorkflow = (): boolean => {
+    const settings = api.getPanel('settings');
+    const workflow = api.getPanel('workflow');
+    return Boolean(settings && workflow && settings.group === workflow.group);
+  };
+
   const show = (panelId: WorkbenchPanelId): void => {
+    // 「设置」的落点是工作流编辑器那一行标签：从菜单打开时先把它从别处收回，
+    // 再按定义叠进去。用户手动拖到别处/弹出后，重启恢复的是他自己放的位置。
     if (panelId === 'settings' && !settingsTabbedWithWorkflow()) {
       api.getPanel('settings')?.api.close();
     }

@@ -31,3 +31,9 @@ export function readPersistedLayout(key: string): string | null {
 export function persistLayout(key: string, value: string): void {
   window.onmyoji.writeLayout(key, value);
 }
+
+/** 丢掉一份坏掉或不再兼容的布局：主进程存储与 localStorage 回退副本一起清。 */
+export function clearPersistedLayout(key: string): void {
+  window.onmyoji.writeLayout(key, null);
+  window.localStorage.removeItem(key);
+}

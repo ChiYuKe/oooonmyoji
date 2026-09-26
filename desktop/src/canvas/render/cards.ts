@@ -236,12 +236,15 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     nodeCards.text(group, { className: 'variable-card-name card-title', x: 27, y: 22, value: definition.display_name || card.name, width: variableCardWidth - 39, size: 11 });
     const typeName = parameterTypeLabel(type);
     nodeCards.text(group, { className: 'variable-card-access card-meta', x: 12, y: 49, value: `${typeName} · ${card.scope === 'inputs' ? '输入' : '状态'}`, width: 76, size: 9 });
-    const live = card.scope === 'variables' && state.variableValues && Object.prototype.hasOwnProperty.call(state.variableValues, card.name);
-    const value = live ? state.variableValues[card.name] : definition.default;
+    // 测试桩和旧嵌入页可能只实现最小状态形状；缺字段与尚无运行快照含义相同。
+    const liveValues = state.variableValues ?? null;
+    const live = card.scope === 'variables' && liveValues !== null && Object.prototype.hasOwnProperty.call(liveValues, card.name);
+    const value = live && liveValues !== null ? liveValues[card.name] : definition.default;
     const valueNode = nodeCards.text(group, { className: 'variable-card-value', x: variableCardWidth - 12, y: 49, value: live ? compactValue(value, Infinity) : variableValueSummary(definition), width: 58, size: 10, anchor: 'end' });
     if (assetPreviewForPath(value)) bindAssetPathPreview(valueNode, () => {
-      const currentLive = card.scope === 'variables' && state.variableValues && Object.prototype.hasOwnProperty.call(state.variableValues, card.name);
-      return currentLive ? state.variableValues[card.name] : definition.default;
+      const currentValues = state.variableValues ?? null;
+      const currentLive = card.scope === 'variables' && currentValues !== null && Object.prototype.hasOwnProperty.call(currentValues, card.name);
+      return currentLive && currentValues !== null ? currentValues[card.name] : definition.default;
     });
     if (type === 'color') {
       const swatch = paramColorSwatch(live ? value : definition.default);

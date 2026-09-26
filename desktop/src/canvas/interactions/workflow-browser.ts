@@ -9,7 +9,6 @@ export interface WorkflowBrowserFile {
   rel?: string;
   description?: string;
   reference?: string;
-  [key: string]: unknown;
 }
 
 export interface WorkflowBrowserState {

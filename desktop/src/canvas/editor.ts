@@ -145,12 +145,9 @@ export interface CanvasBenchmarkApi {
 }
 
 export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
-  // Initialize before publishing the editor handle: declarations below return
-  // never execute, even when their neighboring function declarations are hoisted.
+  // 这些缓存必须在编辑器句柄发布前初始化；首次渲染会立即读取节点和连线问题。
   let issuesCache: { version: number; raw: unknown; byNode: Map<string, any> } | null = null;
   let issuesListCache: { version: number; raw: unknown; list: any[] } | null = null;
-  // 下面两个缓存与 issuesCache 一样**必须**在建入口之前就绪：
-  // 首次渲染就会问「这个节点有提醒吗 / 这条边有问题吗」，声明放在 return 之后就永远是 TDZ 报错。
   let warningsNodeCache: { version: number; raw: any; byNode: Map<string, any[]> } | null = null;
   let edgeIssueCache: { version: number; raw: any; byEdge: Map<string, any[]> } | null = null;
   /** 上一个/下一个问题：记住当前位置，连续导航才不会来回跳同一个问题。 */
@@ -1344,23 +1341,15 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     return instanceLabel(instanceId, state.instances, fallback);
   }
 
-  /**
-   * 卡片错误标记：文档版本变化时才重跑一次校验，把错误按节点/参数分组。
-   *
-   * 这里刻意只保留缓存逻辑（不含 TS 专有语法）：`tests/canvas-startup-cache.test.cjs`
-   * 会把这段源码原样放进 VM 里跑，用来守住「缓存必须在入口返回渲染句柄之前就绪」。
-   * 校验本身挪到 `validationIssues()`（函数声明提升，位置无所谓）。
-   */
+  /** 卡片错误标记：同一文档版本只校验一次，并按节点和参数分组。 */
   function documentIssues(): Map<string, any> {
     const version = state.docVersion || 0;
-    // 缓存键 = 文档版本 + 文档对象本身：改动走 mutate 会 bump 版本，
-    // 整份替换（载入/撤销/外部同步）会换对象，两条路都能失效。
     if (issuesCache && issuesCache.version === version && issuesCache.raw === state.raw) return issuesCache.byNode;
     let byNode = new Map<string, any>();
     try {
       byNode = issuesByNode(validationIssues());
     } catch {
-      // 校验是渲染路径上的附加信息：目录/文档畸形时宁可不标红，也不能让画布画不出来。
+      // 校验只是渲染附加信息；坏文档宁可暂时不标红，也不能阻断画布显示。
       byNode = new Map();
     }
     issuesCache = { version, raw: state.raw, byNode };
@@ -1394,8 +1383,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   /**
    * 共享校验的原始清单（与 Python 同规则）：`documentIssues` 从这里取错误。
    *
-   * 函数声明会提升，放在调用点之后没问题；放在这里还避开了一处源码复现切片——
-   * `tests/canvas-startup-cache.test.cjs` 复制的是「documentIssues → 文档级注释」那一段。
+   * 函数声明会提升，因此缓存初始化时可以安全闭包引用。
    */
   function validationIssues(): any[] {
     try {

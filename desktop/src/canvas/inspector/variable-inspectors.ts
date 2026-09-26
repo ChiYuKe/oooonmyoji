@@ -70,6 +70,7 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
   function renderEdgeInspector(): void {
     const edge = state.selectedEdge;
     const body = clearInspector('连接');
+    if (!edge) return;
     section(body, '父子关系');
     const from = field(body, '父节点'); from.appendChild(el('div', 'readonly-value', edge.parent));
     const to = field(body, '子节点'); to.appendChild(el('div', 'readonly-value', edge.child));
@@ -746,11 +747,11 @@ export function createVariableInspectors(deps: VariableInspectorsDeps) {
 
   function addVariable(scope: string = 'variables'): void {
     mutate(() => {
-      if (scope !== 'inputs') scope = 'variables';
-      if (!state.raw[scope] || typeof state.raw[scope] !== 'object' || Array.isArray(state.raw[scope])) state.raw[scope] = {};
-      const name = VariableSystem.create(state.raw,scope,'新变量',{type:'string'},'');
+      const normalizedScope: 'inputs' | 'variables' = scope === 'inputs' ? 'inputs' : 'variables';
+      if (!state.raw[normalizedScope] || typeof state.raw[normalizedScope] !== 'object' || Array.isArray(state.raw[normalizedScope])) state.raw[normalizedScope] = {};
+      const name = VariableSystem.create(state.raw,normalizedScope,'新变量',{type:'string'},'');
       state.selectedVariable = name;
-      state.selectedVariableScope = scope;
+      state.selectedVariableScope = normalizedScope;
       clearVariableCardSelection();
       state.inspector = 'variables';
       state.selected.clear();

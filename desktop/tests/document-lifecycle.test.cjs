@@ -102,6 +102,8 @@ function harness(options = {}) {
     errorMessage: (error) => String(error),
     setDocumentPanelDirty: (panelId, dirty) => calls.panelDirty.push([panelId, dirty]),
     resetSharedPanelSurfaces: () => {},
+    resolveRecovery: options.resolveRecovery,
+    resolveExternalChange: options.resolveExternalChange,
   });
   return {
     lifecycle, runtimes, calls,
@@ -169,6 +171,45 @@ test('非活动文档照常加载', async () => {
   assert.ok(h.runtimes.get(OTHER).init);
 });
 
+test('打开文档时采用用户选择的恢复副本，并把标签标记为未保存', async () => {
+  const disk = '{"source":"disk"}';
+  const recovered = '{"source":"recovery"}';
+  const choices = [];
+  const h = harness({
+    diskText: {[ACTIVE]: disk},
+    resolveRecovery: async (uri, diskText) => {
+      choices.push([uri, diskText]);
+      return recovered;
+    },
+  });
+
+  await h.lifecycle.activateWorkflowTab(ACTIVE);
+
+  assert.deepEqual(choices, [[ACTIVE, disk]]);
+  assert.equal(h.tabText(ACTIVE), recovered);
+  assert.ok(h.calls.panelDirty.some(([panelId, dirty]) => panelId === `workflow:${ACTIVE}` && dirty === true));
+  assert.equal(h.runtimes.get(ACTIVE).init.document.text, recovered);
+});
+
+test('已有内存正文时不询问恢复，继续使用当前编辑内容', async () => {
+  let asked = 0;
+  const memory = '{"source":"memory"}';
+  const h = harness({
+    activeText: memory,
+    diskText: {[ACTIVE]: '{"source":"disk"}'},
+    resolveRecovery: async () => {
+      asked += 1;
+      return '{"source":"recovery"}';
+    },
+  });
+
+  await h.lifecycle.activateWorkflowTab(ACTIVE);
+
+  assert.equal(asked, 0);
+  assert.equal(h.tabText(ACTIVE), memory);
+  assert.equal(h.runtimes.get(ACTIVE).init.document.text, memory);
+});
+
 test('画布 iframe 已加载完成但页内 ready 丢失时，初始化仍会补发', async () => {
   const init = {document: {uri: ACTIVE, text: '{}'}, workflows: [], instances: [], selectedInstance: '', issues: []};
   const ready = harness({activeInit: init, activeReady: false, activeReadyState: 'complete'});
@@ -223,6 +264,28 @@ test('有未保存修改的文档不被重载并如实回报，避免覆盖用�
   assert.deepEqual(h.calls.loads, [], '脏文档不能读盘覆盖');
   assert.equal(h.tabText(OTHER), '{"memory":true}', '用户改动原样保留');
   assert.deepEqual(h.calls.posts, []);
+});
+
+test('外部改写遇到未保存内容时，用户选择磁盘版本才重新读盘', async () => {
+  const fresh = '{"source":"disk"}';
+  const choices = [];
+  const h = harness({
+    diskText: {[ACTIVE]: fresh},
+    resolveExternalChange: async (uri) => {
+      choices.push(uri);
+      return 'disk';
+    },
+  });
+  h.setTabText(ACTIVE, '{"source":"memory"}');
+  h.setTabDirty(ACTIVE, true);
+
+  const skipped = await h.lifecycle.reloadDocuments([ACTIVE]);
+
+  assert.deepEqual(choices, [ACTIVE]);
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(h.calls.loads, [ACTIVE]);
+  assert.equal(h.tabText(ACTIVE), fresh);
+  assert.deepEqual(h.calls.dirtyFlags, [[ACTIVE, false]]);
 });
 
 test('没有打开的文档（或未保存改动的活动文档）不会被无谓读盘', async () => {

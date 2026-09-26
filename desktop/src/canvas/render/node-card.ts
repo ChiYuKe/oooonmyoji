@@ -523,6 +523,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     const pos = position(node);
     const height = nodeHeight(node);
     const run = state.run.get(node.id);
+    const runStatus = run?.status || '';
+    const runDuration = run?.duration;
     const subRef = subWorkflowRef(node);
     const template = templatePreview(node);
     const classes = ['node', 'studio-card', `type-${node.type}`, `category-${nodeCardCategory(node)}`];
@@ -550,7 +552,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     svgEl('line', { class: 'node-header-rule', x1: 1, y1: 33, x2: nodeWidth - 1, y2: 33 }, group);
     const iconPlate = svgEl('rect', { class: 'node-icon-plate', x: 10, y: 7, width: 20, height: 20, rx: 4 }, group);
     svgEl('text', { class: 'node-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = typeIcons[node.type] || '•';
-    const hasRunStatus = Boolean(run && run.status);
+    const hasRunStatus = Boolean(runStatus);
     const rows = paramRowInfo ? paramRowInfo(node) : null;
     const allPins = nodeVariablePins(node);
     // 判断节点与布尔判断卡片：bool 输入口是说明区独立端点，不作为参数行渲染。
@@ -572,7 +574,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: titleOf(node), width: nodeWidth - (showRowToggle ? 71 : 51), size: 12 });
     nodeCards.text(group, { className: 'node-type card-kicker', x: contentX, y: 47, value: subRef ? '子工作流' : typeNames[node.type] || node.type, width: 130, size: 10 });
     const nodeErrorText = issueInfo && issueInfo.node.length ? issuesText(issueInfo.node) : '';
-    svgEl('title', {}, group).textContent = `${titleOf(node)}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[run.status] || run.status}${run.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
+    svgEl('title', {}, group).textContent = `${titleOf(node)}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[runStatus] || runStatus}${run?.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
     if (issueInfo && issueInfo.node.length) {
       const dot = svgEl('circle', { class: 'node-error-dot', cx: nodeWidth - 8, cy: 8, r: 4 }, group);
       dot.style.pointerEvents = 'none';
@@ -607,7 +609,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     }
     if (hasRunStatus) {
       svgEl('circle', { class: 'run-dot', cx: nodeWidth - 74, cy: 43, r: 3 }, group);
-      nodeCards.text(group, { className: 'run-label', x: nodeWidth - 14, y: 47, value: runLabels[run.status] || run.status, width: 52, size: 10, anchor: 'end' });
+      nodeCards.text(group, { className: 'run-label', x: nodeWidth - 14, y: 47, value: runLabels[runStatus] || runStatus, width: 52, size: 10, anchor: 'end' });
     }
     const subtitle = node.type === 'task'
       ? (subRef ? subRef.split(/[\\/]/).pop() : (node.action || '未选择动作'))
@@ -734,14 +736,14 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         : '详情栏编辑参数')
       : nodeCardSummary(node);
     if (!isValueCardNode(node)) {
-      nodeCards.text(group, { className: 'node-meta card-meta', x: contentX, y: 84, value: metaValue, width: hasPreview ? 148 : run && Number.isFinite(run.duration) ? 160 : contentRight - contentX, size: 10 });
+      nodeCards.text(group, { className: 'node-meta card-meta', x: contentX, y: 84, value: metaValue, width: hasPreview ? 148 : typeof runDuration === 'number' && Number.isFinite(runDuration) ? 160 : contentRight - contentX, size: 10 });
     }
     if (run && run.thumbnail) {
       const uri = run.thumbnail.startsWith('data:') ? run.thumbnail : `data:image/png;base64,${run.thumbnail}`;
       renderNodePreview(group, { uri, path: '' }, 'step-thumb', 'xMidYMid slice', run.screenshot || uri);
     } else if (template) renderNodePreview(group, template, 'template-thumb', 'xMidYMid meet');
-    else if (run && Number.isFinite(run.duration)) {
-      nodeCards.text(group, { className: 'node-duration', x: nodeWidth - 14, y: 84, value: run.duration < 1000 ? `${run.duration} ms` : `${(run.duration / 1000).toFixed(1)} s`, width: 66, size: 10, anchor: 'end' });
+    else if (typeof runDuration === 'number' && Number.isFinite(runDuration)) {
+      nodeCards.text(group, { className: 'node-duration', x: nodeWidth - 14, y: 84, value: runDuration < 1000 ? `${runDuration} ms` : `${(runDuration / 1000).toFixed(1)} s`, width: 66, size: 10, anchor: 'end' });
     }
     const breakFields = node.type === 'break' ? breakFieldPinsOf(node) : [];
     const rowCount = node.type === 'break' ? Math.max(pins.length, breakFields.length) : pins.length;

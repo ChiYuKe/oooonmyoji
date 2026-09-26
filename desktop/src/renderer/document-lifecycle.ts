@@ -319,6 +319,8 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
       contentBrowser.render();
       document.querySelector<HTMLElement>('#document-path')!.textContent = workspace.displayFileUri(init.document.uri);
       workspace.setDirty(tab.dirty);
+      // 恢复副本可能在加载过程中把标签从干净改为未保存，要同步到 Dockview 标题。
+      syncDocumentTabs();
       sidebar.render();
       workspace.postToFrame(detailsFrame, init as unknown as Record<string, unknown>);
       sendDocumentInit(uri);
@@ -343,7 +345,6 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
   async function reloadDocuments(uris: readonly string[]): Promise<string[]> {
     const skipped: string[] = [];
     const reloaded: string[] = [];
-    const forced: string[] = [];
     for (const uri of uris) {
       const tab = uri ? workspace.tab(uri) : undefined;
       if (!tab) continue;
@@ -353,7 +354,8 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
           skipped.push(uri);
           continue;
         }
-        forced.push(uri);
+        // 用户明确放弃本地修改；后续读回的磁盘正文应当从干净状态开始。
+        workspace.setDocumentDirty(uri, false);
       }
       workspace.cancelAutoSave(uri);
       workspace.setDocumentText(uri, '');
@@ -366,8 +368,6 @@ export function createDocumentLifecycle(deps: DocumentLifecycleDeps): DocumentLi
     const active = workspace.activeUri();
     if (active && reloaded.includes(active)) await loadWorkflow(active);
     else syncDocumentTabs();
-    // 明确选了「使用磁盘版本」的文档：丢弃内存里的修改，别再报成「跳过」。
-    void forced;
     return skipped;
   }
 

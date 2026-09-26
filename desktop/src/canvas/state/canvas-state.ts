@@ -5,6 +5,7 @@
  * 边界类型暂时保持宽松，待 commands/history/canvas 拆出后按职责收紧。
  */
 import type { CanvasClipboardPayload } from '../../shared/editor-messages';
+import type { ActionSpec, RuntimeInstance, ValidationIssue, WorkflowDescriptor } from '../../shared/contracts';
 
 export interface CanvasRefs {
   inputs: string[];
@@ -31,24 +32,46 @@ export interface CanvasArrangePreview {
   nodes: Record<string, { x: number; y: number }>;
 }
 
+export interface CanvasSelectedEdge {
+  parent: string;
+  child: string;
+}
+
+export interface CanvasSelectedRun {
+  nodeId: string;
+  index: number;
+}
+
+export interface CanvasRunState {
+  status?: string;
+  engineStatus?: string;
+  duration?: number;
+  error?: string;
+  errorCategory?: string;
+  thumbnail?: string;
+  screenshot?: string;
+}
+
 export interface CanvasState {
   raw: Record<string, any> | null;
-  catalog: any[];
+  catalog: ActionSpec[];
   refs: CanvasRefs;
-  issues: any[];
-  workflows: any[];
+  issues: ValidationIssue[];
+  workflows: WorkflowDescriptor[];
   docUri: string;
   documentName: string;
-  workflowTrail: any[];
-  instances: any[];
+  workflowTrail: Array<{ uri: string; name: string }>;
+  instances: RuntimeInstance[];
   instanceId: string;
   selected: Set<string>;
-  selectedEdge: any;
-  selectedRun: any;
+  selectedEdge: CanvasSelectedEdge | null;
+  selectedRun: CanvasSelectedRun | null;
   selectedVariable: string;
   selectedVariableScope: 'inputs' | 'variables';
   selectedVariableCardId: string;
   selectedVariableCardIds: Set<string>;
+  /** 选中的注释框（注释不是节点，选中态只能单独放）。 */
+  selectedCommentId: string;
   zoom: number;
   panX: number;
   panY: number;
@@ -75,7 +98,7 @@ export interface CanvasState {
   docVersion: number;
   inspector: string;
   sectionCollapsed?: Record<string, boolean>;
-  run: Map<string, any>;
+  run: Map<string, CanvasRunState>;
   roi: any;
   assetBrowser: any;
   assetPaths: Set<string> | null;
@@ -88,12 +111,19 @@ export interface CanvasState {
   /** 画布剪贴板：节点连同引用到的输入/变量与变量卡片；由壳层在所有画布之间同步。 */
   clipboard: CanvasClipboardPayload | null;
   paramLiteralCache: Record<string, any>;
+  /** 复杂参数当前使用 JSON 文本还是结构化控件，键为参数编辑路径。 */
+  paramJsonModes: Record<string, boolean>;
+  /** 对象数组卡片的展开状态，键为稳定的参数项路径。 */
+  cardExpansion: Record<string, boolean>;
+  /** 当前实例最近一次运行事件携带的工作流变量值。 */
+  variableValues: Record<string, unknown> | null;
+  /** 各实例的变量快照；切换实例时恢复对应值。 */
+  variableSnapshots: Record<string, Record<string, unknown>>;
   /** 展开全部参数行的节点（默认只显示必填 + 已配置，UE 的收起高级引脚）。 */
   paramRowsExpanded: Set<string>;
-  mouse: any;
+  mouse: { x: number; y: number } | null;
   /** 当前进入的编辑器节点组；空字符串表示工作流顶层。 */
   nodeGroupId: string;
-  [key: string]: any;
 }
 
 export function createCanvasState(): CanvasState {
@@ -146,6 +176,10 @@ export function createCanvasState(): CanvasState {
     nodeSearch: { query: '', ids: [], index: -1 },
     clipboard: null,
     paramLiteralCache: {},
+    paramJsonModes: {},
+    cardExpansion: {},
+    variableValues: null,
+    variableSnapshots: {},
     paramRowsExpanded: new Set(),
     mouse: null,
     nodeGroupId: '',

@@ -10,9 +10,12 @@ function harness() {
   const detailsFrame = { id: 'details-frame' };
   const documentFrame = { id: 'workflow:file:///w.json' };
   const runtime = { frame: documentFrame, init: { document: { text: '{}' } } };
+  // 壳层当前持有的正文：上报正文与它一致时不当成编辑（幂等，见下面的回归用例）。
+  const held = { text: '' };
   const workspace = {
     frameUriForFrame: (frame) => (frame === documentFrame ? 'file:///w.json' : undefined),
     activeUri: () => 'file:///w.json',
+    tab: (uri) => (uri === 'file:///w.json' ? held : undefined),
     getDocumentRuntimes: () => new Map([['file:///w.json', runtime]]),
     setDocumentText: (uri, text) => posts.push(['text', uri, text]),
     syncWorkflowDescriptor: (uri, text) => posts.push(['descriptor', uri, text]),
@@ -33,7 +36,7 @@ function harness() {
     loadDocumentOnce: async () => {}, sendDocumentInit: () => {}, resolveWorkflow: () => undefined,
     selectInstance: () => {},
   });
-  return { host, posts, detailsFrame, documentFrame, runtime };
+  return { host, posts, detailsFrame, documentFrame, runtime, held };
 }
 
 const changed = (text) => ({ type: 'documentStateChanged', text, dirty: true });
@@ -71,4 +74,22 @@ test('文档画布自己的编辑不回推给自己', async () => {
   await h.host.handleMessage(changed('{"nodes":[]}\n'), h.documentFrame);
   assert.deepEqual(postsTo(h.posts, 'document'), [], '来源就是文档画布时不要再推一次');
   assert.equal(postsTo(h.posts, 'details').length, 1);
+});
+
+// 幂等：画布存在读路径上的派生补齐（节点组执行引脚名），它会在每次缓存失效后重新上报同一份
+// 正文。以前这里一律当编辑处理（写库 + 排自动保存 + 回灌 replaceDocument），回灌让画布文档
+// 版本 +1、缓存再失效、再次上报 —— 静置状态下 40~180 条/秒的自转环，主窗口主线程 90% 以上
+// 耗在 postMessage，整个应用（含画布）被压到 ~9 fps。
+test('与当前持有正文一致的上报不是编辑：不回灌、不排自动保存', async () => {
+  const h = harness();
+  const text = '{"nodes":[{"id":"tap"}]}\n';
+  h.held.text = text;
+
+  await h.host.handleMessage(changed(text), h.detailsFrame);
+  assert.deepEqual(h.posts, [], '正文一致时不该有任何下游动作（写库 / 脏标记 / 自动保存 / 回灌）');
+
+  // 正文真的变了才走原路径。
+  await h.host.handleMessage(changed('{"nodes":[{"id":"tap"},{"id":"more"}]}\n'), h.detailsFrame);
+  assert.equal(postsTo(h.posts, 'document').length, 1, '真编辑仍要推给文档画布');
+  assert.equal(h.posts.filter(([kind]) => kind === 'autosave').length, 1);
 });

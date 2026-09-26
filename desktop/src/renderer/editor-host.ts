@@ -110,6 +110,14 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
         case 'documentStateChanged': {
           const text = String(message.text ?? '');
           if (!text) return;
+          // 幂等：正文与这份文档当前持有的完全一致，就不是一次真正的编辑。
+          // 画布侧存在读路径上的派生补齐（节点组的执行引脚名由画布自己推导，见
+          // `canvas/model/node-groups.ts`），它会在每次缓存失效后重新上报同一份正文；
+          // 以前这里一律当编辑处理：写库 + 排自动保存 + 把正文回灌给文档画布与详情镜像，
+          // 回灌又让画布文档版本 +1、组缓存失效、再次上报 —— 静置状态下 40~180 条/秒的自转环，
+          // 主线程 90% 以上耗在 postMessage，整个应用被压到 ~9 fps。
+          const held = targetUri ? workspace.tab?.(targetUri)?.text ?? '' : '';
+          if (held && held === text) return;
           workspace.setDocumentText(targetUri, text);
           workspace.syncWorkflowDescriptor(targetUri, text);
           // 崩溃恢复副本：每次正文变化都留档（防抖在存储侧按内容去重），

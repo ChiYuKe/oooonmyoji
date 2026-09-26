@@ -6,6 +6,44 @@
 ## [Unreleased]
 
 ### 新增
+- **工作流失败定位（执行路径面包屑）**：节点一多，运行失败时光看「停在哪个节点」看不出它在
+  「根 → … → 失败节点」这条链路里的位置，现在每条步骤事件都带路径。
+  - 步骤事件新增 `node_path`（节点 id 序列）、`node_path_names`（带显示名）与拼好的
+    `breadcrumb`；失败事件另给 `error_path` / `error_breadcrumb`。路径按**这一轮真正走过**
+    的链路记录：容器节点的名字会出现在面包屑里，没走的兄弟分支不出现。
+  - 运行记录新增 `failed_node_id` 与 `failed_node_breadcrumb`，取**最深**的那条失败链路
+    （容器节点在子节点失败后自己也会记一条泛化错误），被 Selector 回收的 `branch_miss`
+    与工作流级重试的旧尝试都不会被当成失败位置。
+  - `run-workflow` / `run` 的失败摘要多打印 `failed_node` 与 `failed_path`；桌面端实时视图
+    的步骤摘要多一行「路径：」；`live_view` 帧的 `step` 透传这些字段。
+  - 纯数据卡片（`bool_judge` / `break`）不在执行树里，按需被拉起时路径只写它自己，不会
+    挂到「碰巧正在执行」的节点下面。
+  - 测试：`test_engine_step_events_carry_execution_breadcrumb`、
+    `test_engine_breadcrumb_tracks_the_actually_taken_branch`、
+    `test_engine_on_demand_value_card_does_not_inherit_execution_path`、
+    `test_run_record_keeps_the_failed_node_position`、
+    `test_run_record_ignores_selector_recovered_failures`、`test_failure_summary_surfaces_the_failed_node_path`。
+- **用户布局自动保存（主窗口几何 + 停靠布局 + 面板开关）**：重启后回到用户自己摆的样子，
+  不再每次重新进入都要调一遍。
+  - **主窗口几何**：位置、尺寸与最大化状态存进 `onmyoji-layouts.json` 的
+    `onmyoji-studio.window-state.v1`（纯函数与校验在 `desktop/src/main/windowState.ts`）。
+    拖动/缩放按 300 ms 合并写入，最大化/取消最大化与关闭前各补一次；最大化时记的是
+    `getNormalBounds()`（还原后的几何），所以取消最大化仍能回到原位置与尺寸。
+  - **恢复前先判可见性**：这份几何与某个显示器工作区的重叠不足 80 px 就认为看不见，换屏、
+    改分辨率或拔掉外接屏后退回默认 1560×940 并交给系统居中（同时丢掉最大化，不按已不存在的
+    显示器去最大化）；尺寸另按所有工作区并集收敛，多屏并排仍可跨越但不会比桌面还大。
+  - **面板开关状态**：`ensureLayout` 只在「没有可恢复的布局」（首次运行、布局被清掉）时铺
+    默认脚手架，恢复过布局就只保证「至少有一个工作流画布」。以前每次启动都把
+    结构/节点/变量/运行日志/内容浏览器/详细信息 无条件补回来——用户关掉的面板重启后自己
+    回来；外层「概览」同样不再被补回（要开走顶部「窗口」菜单）。
+  - **设置不再被强制归位**：恢复布局时只关掉内容依赖本次会话的「引用查看器」与「变量引用」，
+    设置面板按用户自己停靠的位置（含拖出/弹出）恢复；从「窗口」菜单打开时仍旧收回成
+    工作流编辑器那一行的标签。
+  - 「恢复默认布局」重建脚手架后标记为「已有布局」，不会在下一次启动时再铺一遍；坏掉的布局
+    由 `clearPersistedLayout` 把主进程存储与 localStorage 回退副本一起清掉。
+  - 测试：`desktop/tests/window-state.test.cjs`（几何解析/可见性/尺寸收敛 + 主进程事件接线）、
+    `desktop/tests/dock-layout-restore.test.cjs`（布局存储读写与清理、脚手架只允许出现在
+    首次运行与「恢复默认布局」），桌面端全量 **1006 passed**。
 - **工作流文本格式 v6（`.owf`，P1 文本层）**：磁盘格式从 v5 图文档 JSON 换成自定义文本 DSL，
   图语义与运行时一字不改（解析产出与 v5 同形、只把 `schema_version` 提到 6），
   权威契约见 `docs/workflow-dsl-v6.md`。语法要点：
@@ -401,6 +439,74 @@
   （校验直接拒绝「pure data node cannot be connected to an execution child pin」），
   要么独立摆放后永远「不可用」，14 项 Python 用例因此长期红着。现在两边一致：
   卡片独立摆放、按需求值、值随来源刷新。
+- **折叠图边界卡（`group_entry` / `group_exit`，P4 收尾）**：节点组从「只折叠编辑器视图」
+  升级成 UE Collapse Graph 语义——跨组执行边真的经过一组**真实**的入口/出口节点，
+  运行时把它们当单子透传，展开折叠图后执行关系逐字节还原。
+  - **写进 `.owf`，运行时当透传**：打组时把 `组外父 → 组内子` 改写成
+    `组外父 → 入口卡 → 组内子`、`组内父 → 组外子` 改写成 `组内父 → 出口卡 → 组外子`；
+    入口/出口卡是图文档里的真实节点（`NODE_TYPES` 追加 `group_entry` / `group_exit`，
+    契约用例 `tests/contract_check.py` 两端 10/10），每条跨组边一张卡，卡登记进组的
+    `nodeIds` 与画布 `_layout`。展开折叠图（`ungroup`）把卡内联回两侧的真实边，
+    「折叠前 ↔ 折叠后」可逆；删除成员/删除节点时失效的卡自动内联清理。
+  - **画布投影**：折叠视图里组卡照旧代理执行流，组卡执行出口 = 各出口卡的真实下游
+    （`_execOutputCount` 去重）；进入组内只显示真实成员 + 入口/出口卡（不再注入合成的
+    「节点组接口」卡）；入口卡不画输入箭头、出口卡不画输出口。连线规则同步收紧：
+    入口卡只能由组外父连入、出口卡只能由组内父连入、跨折叠图的执行边一律要经过边界卡，
+    边界卡自身只接一个子节点。
+  - **运行时透传**：`engine.py` 对边界卡走单子透传（与只有一个子节点的 sequence 等价），
+    `graph.py` 的输出可用性判定沿唯一的子节点透传——折叠图内部对外可见的节点输出与
+    展开前完全一致；边界卡留在运行时文档里，不另外剔除。桌面端同一份规则镜像在
+    `desktop/src/shared/workflow/graph.ts`（可用性推导也穿过边界卡），两端不会一边报
+    「不可用」一边放行。
+  - **旧文档迁移**：旧的「有跨组边但没边界卡」折叠图在编辑器首次加载时自动补齐边界卡
+    （`migrateBoundaryCards`，幂等 + 标脏），Python 编译侧只在存在边界卡时才检查边界
+    不变量（组外父 → 入口、出口 → 组外子、恰好一个子节点），纯旧文档照常编译运行。
+  - **同一个父节点折进同一张折叠图的多条边各画一条代理线**：折叠视图以前按目标去重，
+    判断的「真/假」两条都接进同一个折叠图时只画得出一条，另一口看起来根本没接线。
+    现在投影保留每一条真实边（`children` 与 `ports` 仍逐位对齐，徽标照旧写「真/假」），
+    端口位置、连线登记与局部更新都按「(父, 子, 口位)」定位，拖动组卡时两条代理线一起补；
+    运行态也让每条代理线只认自己那张入口卡，真口不会被假口的事件点亮。
+  - **组卡顶边按入口数排输入口**：组外进来几条执行边就在顶边画几个口（判断留在组外、
+    真/假都折进来时就是左右两个口），连线落点与卡片端口共用同一份 `groupPortOffset`，
+    两条线各落各的口而不是汇到顶边中点；只有一个入口时仍落在中点，与普通卡片一致。
+    组卡的输入口数与它的 `_groupEntryCount` 一致，输出侧照旧一个出口一个口。
+  - 验证：桌面端 `node --test` **952 项全部通过**（`npm run build` 含 typecheck 与 vite 通过），
+    Python 全量 **456 passed / 2 skipped**，`mypy` / `ruff` 干净，CLI `validate` 通过；
+    `tests/fixtures/graph-rules/cases.json` 加了一条边界卡编译用例（两端同读，共 41 例）。
+    真实工作流 `结界突破_寮突.owf` 走一遍 headless 迁移与折叠：节点组 1 补出 3 张边界卡
+    （入口 → 判断是否在结算页、真/假两条出边各一张出口 → 点掉结算页 / 打一轮突破），
+    判断口位保持 `ports: [true, false]` 对齐、再读幂等、展开后与加载时逐边一致；
+    把两条分支折进同一张折叠图时，判断的投影 children 是 `["node_group_1", "node_group_1"]`，
+    组卡 `_groupEntryCount = 2`（输入口落在 1/3 与 2/3 处），真/假两条代理线的运行目标
+    分别是各自的入口卡；Python 侧另有「判断留组外、真/假各一张入口卡」的编译 + 运行用例
+    （条件为假时只跑假分支）。
+
+- **注释框：详细信息面板可以改颜色与字号**：以前 `tint` / 字号只能手写文档，画布上没有任何入口。
+  现在选中注释框，右侧「详细信息」显示：
+  - **标题**：多行输入（textarea），长文字照旧按框宽自动折行；
+  - **颜色**：默认 / 黄 / 红 / 绿 / 蓝，落在与卡片同一套 `--card-tint` 变量上；
+  - **字号**：数字输入（9–32，缺省 12），标题行高按 `字号 + 4` 联动，折行结果跟着重算；
+  - **位置与尺寸**读只读摘要 + 「删除注释框」。
+
+  文档层新增可选字段 `fontSize`（正数），`tint` / `fontSize` 都进了文档校验（`graph-comment-tint` /
+  `graph-comment-font-size`）与 `.owf` 往返；改回默认值时字段直接删掉，不留冗余。
+  注释框的选中态借用 `state.inspector = 'comment'` + `state.selectedCommentId`：选中注释会把
+  卡片 / 连线 / 变量卡片的选中让出去（否则 Delete 会删掉上一次选中的卡片），面板切到别的东西时
+  注释层的高亮自动撤掉（`canvas/comments.ts`、`inspector/comment-inspector.ts`、
+  `inspector/panel.ts`、`shared/workflow/graph-document.ts`）。
+- **引用查看器：悬停资源卡片弹出「内容浮窗」**：鼠标停住约 180 ms 后，在卡片外侧弹出一层
+  浮窗显示这份内容本身——模板图片直接显示图片，工作流 `.owf` 与 `rewards/catalog.json`
+  显示开头若干行文本（最多 26 行、单行 160 字符，超出时注明「仅预览开头部分」），
+  下方一行是项目相对路径和「点击卡片可继续追踪该资源的引用」提示。移开卡片、滚轮缩放、
+  拖拽平移、重画关系图都会立刻收起；图片解码完成后再摆一次位，越界时翻到另一侧并夹在窗口内。
+  内容走新增的 `project:read-content-preview`：只认项目内 `workflows/` 与 `assets/`，
+  图片回 `onmyoji-resource:` 资源 URL，文本最多读 256 KB（截断不切断多字节字符），
+  其余路径一律回「不可预览」，不给浮窗留任意文件读取的口子；卡片上原来的原生 title 提示撤掉，
+  路径与跳转提示都并进浮窗，避免统一的文本 tooltip 与浮窗叠成两层
+  （`desktop/src/renderer/reference-viewer.ts`、`desktop/src/main/projectService.ts`、
+  `desktop/src/main/main.ts`、`desktop/src/preload/preload.ts`、`desktop/src/shared/contracts.ts`、
+  `desktop/src/renderer/styles.css`；用例 `desktop/tests/reference-viewer.test.cjs`、
+  `desktop/tests/content-preview.test.cjs`）。
 
 ### 移除
 - **删掉两个旧迁移脚本**：`scripts/migrate_workflows_to_graph_v5.py`（只产出 v5 JSON）与
@@ -419,6 +525,34 @@
     可对备份/其它副本重跑；与编辑器里那份升级规则一致）。
 
 ### 变更
+- **复制粘贴只带节点，不带连线**：粘贴出来的卡片之间不再自动接上原来的执行边（`children` /
+  `ports`，以及 `switch` 的 `cases.child` / `default_child`），参数里**指向别的节点**的引用
+  （`{ref: 'nodes.…'}`）也一并摘掉——以前复制一次就等于凭空多出一份连在一起的子图，
+  还容易撞上「一个节点只能有一个父节点」。字面量与**变量/输入绑定**照旧带过来
+  （绑定表达的是「取值来自哪个变量」，跨画布粘贴还要靠它把变量定义与卡片一起带过去，
+  见 `clipboardCarry`），粘贴提示写「已粘贴 N 个节点（没带连线）」。
+  **剪切 + 粘贴仍然是「搬走这一段」**：子树内部连线与节点引用跟着回来（对外的父连线在剪切时
+  已经断掉，本来就不在剪贴板里），剪贴板用 `keepEdges` 区分这两种手势
+  （`desktop/src/canvas/state/commands.ts`、`shared/editor-messages.ts`）。
+- **画布空白处右键只负责「加东西」**：菜单里原先还抄了一份编辑与视图命令（复制/剪切、
+  自动排列、锁定位置、画布前进后退、重建布局），和菜单栏、视口工具条、工具栏 ⋮ 菜单、
+  快捷键重复。现在右键菜单只留「在这里加节点」：12 种内置节点 + 注释框，外加**落在右键
+  位置**的粘贴；复制/剪切走菜单栏与 Ctrl+C/X，自动排列走视口工具条的 ⤢，画布前进后退走
+  工具条与 Alt+←/→，重建布局走工具栏 ⋮ 菜单。锁定位置没有别的入口，仍然保留，但只在有
+  选中时出现（以前没选中也会摆一项，点了只会报「请先选中要锁定的卡片」）
+  （`desktop/src/canvas/editor.ts`；一致性用例 `canvas-navigation.test.cjs`、
+  `recovery-consistency.test.cjs` 同步改成「命令各有唯一入口」的口径）。
+- **不再提供自定义类型（`x-…`）的编辑入口**：右键菜单不再列自定义类型，节点右键也不再有
+  「收成自定义类型」——做得出定义却没有地方放实例，留着只是死路。**文档格式仍然支持**
+  （`nodeTypes` 的定义、校验、编译与 `buildNode` 解析原样保留），所以文件里已有的
+  `x-是否在结算页` 这类节点照旧加载、编译、运行；模型层的
+  `canvas/model/custom-types.ts` 与它的用例也保留，方便以后接回入口
+  （`desktop/src/canvas/editor.ts`、`canvas/render/node-card.ts`）。
+- **菜单标签不再把面板撑出横向滚动条**：子菜单原先继承父菜单的固定 190px 宽度，
+  长标签（变量路径、自定义类型）会让子菜单底部冒出一条横向滚动条。现在子菜单按内容定宽、
+  封顶 320px，标签统一单行省略号收尾（`.context-menu .menu-label`），`MenuEntry` 也支持
+  `title`，把内部标识放进悬停提示
+  （`desktop/src/canvas/ui/overlays.ts`、`public/legacy/workflow-editor.css`）。
 - **工作流磁盘格式换成 `.owf` 文本**：磁盘上只认 `.owf`，v4 的 Behavior Tree JSON 与 v5 的
   图文档 JSON 一律不再加载（`discover()` 只遍历 `*.owf`），图文档 `schema_version` 由 5 提到 6；
   配置与命令行里写旧后缀 `xxx.json` 仍会解析到 `xxx.owf`。细节见「新增」里的磁盘格式切换条目。
@@ -723,6 +857,123 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **画布/整个工作台卡到 ~9 fps：画布与壳层之间的「脏正文上报 → replaceDocument 回灌」自转环**。
+  链路：`model/node-groups.ts` 在读路径上补齐节点组的执行引脚名（`execInputs` / `execOutputs`），
+  而这两个字段是**画布侧派生**的——图文档与 `.owf` 都不持久化它们（`shared/workflow/graph-document.ts`
+  的 groups 转换只搬 `nodeIds` / `pins` / `pinPolicy`），所以「它不是数组」在每次重新解析后都成立；
+  于是每次组缓存失效都把文档标脏，`state/editor-status.ts` 的 `setDirty` 就原样上报整份正文，
+  壳层 `renderer/editor-host.ts` 又当编辑处理：写库 + 排自动保存 + 把正文回灌
+  `replaceDocument` 给文档画布与详情镜像，回灌让画布文档版本 +1、组缓存再失效、再次上报 ——
+  **静置不动也有 40~180 条/秒**。真实应用实测（隐藏窗口 + 调试端口，只读）：Tracing 6.16s 内
+  `HandlePostMessage` **5731.9 ms / 1114 次**（平均 5 ms、单次最高 42 ms，占主线程 93%），
+  而画布自身的渲染 JS 只有 **0.1 ms**；整个应用被压到 **8.76 fps**。它同时把文档永久置为脏，
+  自动保存每 ~700ms 落盘一次——错正文被写进文件就是这个落盘通路。现在三层一起收口：
+  - 派生补齐不再算「迁移」（`node-groups.ts`：只补齐、不 `markDirty`）；
+  - 画布上报按**正文内容去重**，`legacy-editor-state` 也只在 dirty 真的变了才发（`editor-status.ts`）；
+  - 壳层幂等：上报正文与当前持有的一致就不是编辑，直接返回，不写库、不排自动保存、不回灌
+    （`editor-host.ts`）。
+  复测：静置与平移中的顶层消息 **86.3 / 120.4 条/秒 → 0 条/秒**；同一 6s 采样里
+  `HandlePostMessage` 0.9 ms / 3 次、trace 事件 28135 → 210 个。回归用例
+  `tests/canvas-dirty-dedupe.test.cjs` 与 `tests/document-mirror-edits.test.cjs`。
+- **滚轮缩放与框选很卡：网格背景把视口变量写在了整棵 SVG 的祖先上**。`--canvas-grid-size/-pan-x/-pan-y`
+  原来由渲染入口在每次视口变化时写进 `#canvas-wrap`（`canvas/render/render-entry.ts`），而自定义属性
+  会被后代继承——`#canvas-wrap` 正是 `#graph` 的父节点，于是每写一次就让整棵画布子树重新计算样式。
+  真实文档实测（`workflows/御魂副本.owf`，101 节点 / 1580 个 SVG 元素，隐藏基准窗口 + CDP 探针）：
+  写祖先 **11.5 ms/帧**、写叶子元素 0.6 ms；`render({viewport})` 之后强制一次样式/布局从 **10.3 ms 降到
+  1.3 ms**，而控制器自身的 JS 只占 0.4 ms。滚轮缩放（`canvas/editor.ts` 的 wheel → `zoomAt()`）与框选
+  （`interactions/pointer.ts` 每个 pointermove 走同步 `renderWith`）逐帧走这条路，120 Hz 下等于每帧白扔
+  半个以上预算。现在网格是独立图层 `#canvas-grid`（`src/renderer/canvas.html` 里 `#graph` 的前一个兄弟，
+  样式在 `public/legacy/workflow-editor.css` 与 `public/theme/theme.css` 的深浅两套主题里一起改）：
+  `#canvas-wrap` 只保留容器背景并靠 `z-index: 0` 自成立层叠上下文，网格用 `z-index: -1` 落在容器背景之上、
+  SVG 之下；变量写在它身上（没有后代，失效不外溢），网格照旧跟随平移与缩放。图层缺失（旧 HTML、
+  测试替身）时退回容器，正确性不变。护栏：`tests/canvas-render-entry.test.cjs` 新增三条（变量只写独立
+  图层、缺图层时的退路、CSS/HTML 结构不得把网格放回祖先）。
+- **注释框右上角的删除按钮太小、点不中**：以前它只是一个 14px 的「×」字形，命中区就是那几个
+  笔画。现在是一个真正的方形按钮：透明命中区（24–32px，随标题字号一起长）+ 放大的字形
+  （16–22px），悬停时整块亮一下、字形转成危险色；标题的可用宽度改由 `removeButtonSize()`
+  算出来（右边不再写死 30px），文字不会钻到按钮底下。运行期实测（隐藏窗口读真实画布页）：
+  默认字号下命中区 24×24、字形 18px，按钮中心的 `elementFromPoint` 就是命中区，点下去框被删掉
+  （`canvas/comments.ts`、`public/legacy/workflow-editor.css`）。
+- **注释框新增「透明度」**：详情面板给一根滑块（10%–100%，步进 5%）+ 百分比数字 + 「100%」复位。
+  - 文档新增可选字段 `opacity`（`(0, 1]`，缺省 1——回到 1 时字段直接删掉，不留冗余），
+    整框（框线 / 标题栏 / 文字）一起透，落成 SVG 组上的 `opacity`；不透明时不写这个属性；
+  - 下限留 10%：再低框就彻底看不见、也点不着了；越界值夹回区间，认不出的值按不透明渲染；
+  - 拖动时只更新百分比数字，**松手才写文档**（一次拖动 = 一条历史，不会刷一屏撤销）；
+  - 校验新增 `graph-comment-opacity`，`.owf` 往返有用例（`canvas/comments.ts`、
+    `inspector/comment-inspector.ts`、`shared/workflow/graph-document.ts`）。
+- **详情面板里改注释框「没反应」（改颜色 / 改字号都不生效）**：可见的详情面板是镜像画布，
+  它的改动要经「改镜像副本 → `documentStateChanged` → 壳层 `replaceDocument` 回真画布」生效，
+  而这条通道**从磁盘格式换成 `.owf` 那天起就断了**：壳层转发的是 `emitRuntimeDocument()` 产出的
+  **`.owf` 文本**（`state/document-text.ts`），真画布的 `history.replaceDocument` 却只做
+  `JSON.parse` —— 解析失败就静默 `return`，于是镜像里的每一次改动（注释颜色、字号、乃至节点参数）
+  都在这一步被丢掉。现在 `replaceDocument` 两种形态都认：先按 JSON 试（内部快照/撤销恢复），
+  不行就当 `.owf` 解析成图文档再 `toCanvasDocument()` 转成编辑形态。
+  （`canvas/state/history.ts`；回归用例 `tests/comment-inspector-mirror.test.cjs`
+  用 `emitRuntimeDocument` 造正文，断言 fontSize / tint 能落回真画布。）
+- **注释框颜色改成自由取色**：以前只有 默认/黄/红/绿/蓝 五个预设。现在详情面板给
+  `<input type="color">` 取色器 +「默认」按钮，常用色仍留作快捷色块；
+  - 文档里 `tint` 支持两种形态：色名（`warning` / `danger` / `success` / `info`，老文档与快捷块
+    继续用，走 CSS class）与直接的颜色（`#rgb` / `#rrggbb`，落在框体自己的内联 `--card-tint` 上，
+    框线、标题栏照旧读这个变量）；认不出的值按默认色渲染；
+  - 取色器写回的就是 `#rrggbb`，`.owf` 里会自动加引号（`#` 在那门语法里是注释符），读回不变；
+  - 色名 → 颜色的映射与新样式在 `canvas/comments.ts`、`inspector/comment-inspector.ts`、
+    `public/legacy/inspector.css`。
+- **注释框的「详细信息」面板一直是空的**：可见的详情面板其实是壳层里的**镜像画布**——
+  `index.html` 里 `<iframe id="details-frame" src="./canvas.html?mode=details">`，而文档画布
+  自己的 `#inspector` 在 `desktop-canvas-mode` 下是 `display: none !important`（见
+  `public/legacy/editor-frame.css`）。之前注释框只把选中态写进自己那份 `state`，
+  从没投影给镜像，所以面板永远停在「选择一个节点」——即使框体已经高亮成选中色。
+  现在整条链子补齐：
+  - 画布侧 `currentInspectorSelection()` 增加 `{kind:'comment', commentId}`，选中注释框时
+    像节点 / 连线那样 `postMessage({type:'inspectorRequested'})`（`comments.setSelected`）；
+  - 镜像侧 `setInspectorSelection` 认得 `comment` 这一档，从自己的文档副本里取该注释渲染面板；
+    镜像里的改动照旧走「改镜像副本 → `documentStateChanged` → 壳层转 `replaceDocument` 回真画布」；
+  - 删除注释框、点画布空白（新增 `pointer.notifyInspector`）都会把「现在没选中东西」告诉镜像；
+    文档整体替换时若选中的注释已不存在，也会退回节点档（`state/history.ts`）。
+  - 验证：隐藏窗口里加载真实画布页与真实镜像页（`canvas.html?mode=details`，与
+    `scripts/canvas-benchmark.cjs` 同一套机制，不模拟系统鼠标、不截图）：页内派发 pointerdown
+    后读到画布上报 `{kind:'comment',commentId:'comment_1'}`，镜像面板渲染出
+    「注释框 / 标题 / 颜色 / 字号 / 位置与尺寸 / 删除注释框」；再点空白收到 `{kind:'none'}`、面板清空
+    （`tests/comment-inspector-mirror.test.cjs`）。
+- **布尔判断卡右操作数被卡片底边切掉**：卡片高度按「基准高 + 参数行数」算，而布尔判断的
+  两个操作数格钉在说明区的固定 y 上（左 64 / 右 88，见 `exec-ports.expressionInputOffset`），
+  行数里算不到它们——比较形态的右操作数（底边 y=97）就压在了 96 的卡片底边上，格子像被裁了一刀。
+  现在卡片高度取「行数推导值」与「固定行需要的值」中的较大者
+  （`exec-ports.fixedRowCardHeight`：右操作数 + 半格 + 14px 收尾空隙 = 111）：
+  比较形态的卡片高 111、操作数格下方留出与顶部相称的空隙；单行绑定形态（y=64）与判断节点
+  本来就在基准高之内，尺寸不变（`canvas/model/exec-ports.ts`、`canvas/editor.ts`）。
+- **注释框标题横着跑出框外**：SVG 的 `<text>` 不会自己换行，注释里写一句长话就画到框外面去了
+  （实测框右边界 1018px、文字画到 1566px）。现在按框宽自动折行：
+  - 折行算法在新模块 `canvas/text-wrap.ts`：中文按字断、标点悬挂（「，」不会跑到行首）、
+    拉丁词优先在空格处断、超长串硬断、显式换行（`\n`）与空行都保留；
+  - 宽度测量优先用 canvas 2D 按字符量真实字体（按字符 + 按文字双层缓存，拖动重绘不重复量），
+    没有 DOM 的环境（node 测试）退化成固定估算表；
+  - 行数决定标题栏高度（每行 16px），整块文字裁在框体里；框太矮时只画放得下的整行，
+    末尾补省略号，不会把一行裁成半个字；
+  - 就地编辑改成 `textarea`：回车换行、`Ctrl/Cmd + 回车` 提交、Esc 取消、失焦提交，
+    浮层的高度与字号跟着缩放和行数走。多行文字写盘是安全的（`.owf` 里写在注释头行、
+    以转义形式出现，读回一字不差）。
+- **注释框没法像卡片那样拖（拖不动 / 点一下就一直跟着鼠标走）**：根因是事件体系用串了。
+  注释框（以及手工折点）在 `pointerdown` 里起手，起手那一下 `preventDefault()` 会让 Chromium
+  **整段交互都不再派发兼容 mouse 事件**——实测只剩 `pointerdown` / `pointermove` / `pointerup`，
+  `mousedown` / `mousemove` / `mouseup` 一个都没有。而画布的拖拽一直由 mouse 事件驱动：
+  - 只挂 `mouseup` 收尾 → 抬手事件永远不来，`state.drag` 清不掉，之后每次 `mousemove`
+    都还在拖它 → 「点一下注释框，它就一直跟着鼠标走」；
+  - 指望 `mousemove` 跟手 → 按住拖动时一个 `mousemove` 都收不到 → 「拖不动」。
+
+  现在这类拖拽标记 `fromPointer`，由 `graph` 与 `window` 的 `pointermove` / `pointerup` 驱动
+  （与连线拖拽同一条路）；卡片 / 框选 / 平移是在 `mousedown` 里起手的，照旧走 mouse 事件，
+  两套互不重叠，`autoPan` 这种逐事件累加的动作也不会跑两遍。`pointercancel` 同样给拖拽收尾，
+  `onPointerMove` 再加一道兜底：指针在动却没按下任何键（`buttons === 0`）就按松手处理，
+  抬手事件在窗口外丢掉也不会把拖拽卡住。
+- **注释框右下角改尺寸很难点中**：把手只有 1.5px 描边，照着角去点差两三像素就落到框体上、
+  变成整体移动。把手下面加了一条 16px 宽、透明、`pointer-events: stroke` 的命中带。
+- **拖动注释框时框体不跟手**：注释框画在控制器之外的独立图层（`.comments`），刷新只挂在
+  同步 `render()` 上；而拖拽走的是「合并到本帧」的高频路径（`coalesce()`），它只跑控制器
+  内部的增量重绘——于是移动与改尺寸期间框体停在原地，抬手才跳到新位置。现在帧尾贴合
+  （HTML 浮层 + 注释框图层）在同步帧与合并帧里都会跑（`render-entry` 的 `coalesce` 补齐帧尾）。
+  顺带修掉同类的一处：注释框「就地改文字」的输入框贴合原来写在内容签名的早退分支之后，
+  平移/缩放（内容没变）时输入框会原地不动，现在每帧重新贴合。
 - **布尔判断卡片的表达式形态与卡面不符**：卡面一直按「二元比较」画——左侧两个操作数格
   （值缺失就显示 `0`）、中间一个从键名直接拿来的运算符文本。于是 `{and: [0, 0]}` 这种卡片看起来
   像 `0 and 0`，点那个并不存在的操作数还会在卡外弹出一个行内输入框；`{ref: ...}`（整卡绑一个

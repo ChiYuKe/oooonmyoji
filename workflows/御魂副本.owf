@@ -1,0 +1,846 @@
+workflow souls_party_loop
+  version: 5.2.0
+  description: 御魂副本组队循环：恢复到御魂选层页后创建协战队伍并邀请好友，按运行轮数循环开战、结算与续邀，直到打满轮数。
+  resolution: [1920, 1080]
+  root: root
+  inputs:
+    运行轮数:
+      type: integer
+      default: 99
+      min: 1
+      description: 组队战斗循环轮数（安全上限）。
+    邀请目标:
+      type: asset
+      editor: asset
+      display_name: 邀请目标
+      description: 好友列表里要邀请的好友条目模板图（默认鱼不鲤窝，可换成其他好友）。
+      default: assets/templates/souls/party/member-invite-target.png
+    队友标记:
+      type: asset
+      editor: asset
+      display_name: 队友标记
+      description: 协战房间里队友昵称条的模板图，用于确认队友在队。
+      default: assets/templates/souls/party/member-present.png
+    入队超时_秒:
+      type: duration
+      min: 1
+      display_name: 入队超时（秒）
+      description: "等待队友接受邀请进入房间的最长时间，超时后仍会尝试开战，默认 120 秒。"
+      default: 120
+    战斗超时_秒:
+      type: duration
+      min: 1
+      display_name: 战斗超时（秒）
+      description: "单场组队战斗等待结算的最长时间，默认 240 秒。"
+      default: 240
+  variables: {}
+  _inputParams: {}
+  node root root 御魂副本入口
+    at: [10116, 0]
+  node main sequence 御魂组队循环主流程
+    at: [10116, 208]
+  node recover_to_floor selector 恢复到御魂选层页
+    at: [975, 416]
+  node at_floor sequence 已在御魂选层页
+    at: [0, 684]
+  node detect_floor task 快速检测组队按钮
+    at: [0, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-party-button.png
+      present: true
+      timeout_seconds: 2
+      roi: [1350, 820, 300, 240]
+      threshold: 0.9
+  node from_courtyard sequence 从庭院进入御魂选层页
+    at: [1951, 684]
+  node ensure_explore_visible selector 确认庭院探索入口可见
+    at: [581, 892]
+  node detect_explore task 快速检测探索入口
+    at: [332, 1370]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/courtyard-explore/mumu-0.png
+      present: true
+      timeout_seconds: 1
+      roi: [250, 100, 1000, 250]
+      threshold: 0.58
+  node wake_courtyard sequence 唤醒并确认庭院界面
+    at: [830, 1370]
+  node wake_ui task 点击唤醒隐藏界面
+    at: [664, 1758]
+    action: input.tap
+    params:
+      x: 1300
+      y: 800
+      random_offset: 3
+      random_interval: [0.2, 0.4]
+  node detect_explore_after_wake task 确认唤醒后的探索入口
+    at: [996, 1758]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/courtyard-explore/mumu-0.png
+      present: true
+      timeout_seconds: 5
+      roi: [250, 100, 1000, 250]
+      threshold: 0.58
+  node wait_explore task 等待庭院探索入口
+    at: [1328, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/courtyard-explore/mumu-0.png
+      present: true
+      timeout_seconds: 5
+      roi: [250, 100, 1000, 250]
+      threshold: 0.58
+  node tap_explore task 点击探索入口
+    at: [1660, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_map_souls task 等待地图御魂入口
+    at: [1992, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/map-souls.png
+      present: true
+      timeout_seconds: 20
+      roi: [150, 850, 250, 230]
+      threshold: 0.88
+  node tap_map_souls task 点击地图御魂入口
+    at: [2324, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_orochi task 等待八岐大蛇入口
+    at: [2656, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-orochi.png
+      present: true
+      timeout_seconds: 20
+      roi: [0, 80, 600, 850]
+      threshold: 0.88
+  node tap_orochi task 进入八岐大蛇
+    at: [2988, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_floor_page task 等待御魂选层页
+    at: [3320, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-party-button.png
+      present: true
+      timeout_seconds: 20
+      roi: [1350, 820, 300, 240]
+      threshold: 0.9
+  node from_souls_type sequence 从御魂类型页进入选层
+    at: [7304, 1758]
+  node detect_orochi_type task 快速检测八岐大蛇入口
+    at: [7304, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-orochi.png
+      present: true
+      timeout_seconds: 1
+      roi: [0, 80, 600, 850]
+      threshold: 0.88
+  node tap_orochi_type task 进入八岐大蛇
+    at: [7470, 2236]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_floor_from_type task 等待御魂选层页
+    at: [7636, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-party-button.png
+      present: true
+      timeout_seconds: 20
+      roi: [1350, 820, 300, 240]
+      threshold: 0.9
+  node from_explore_map sequence 从探索地图进入选层
+    at: [8466, 1758]
+  node detect_map_souls task 快速检测地图御魂入口
+    at: [8466, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/map-souls.png
+      present: true
+      timeout_seconds: 1
+      roi: [150, 850, 250, 230]
+      threshold: 0.88
+  node tap_map_entry task 点击地图御魂入口
+    at: [8632, 2236]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_orochi_entry task 等待八岐大蛇入口
+    at: [8798, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-orochi.png
+      present: true
+      timeout_seconds: 20
+      roi: [0, 80, 600, 850]
+      threshold: 0.88
+  node tap_orochi_entry task 进入八岐大蛇
+    at: [8964, 2236]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_floor_from_map task 等待御魂选层页
+    at: [9130, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-party-button.png
+      present: true
+      timeout_seconds: 20
+      roi: [1350, 820, 300, 240]
+      threshold: 0.9
+  node ensure_party_room selector 恢复或创建协战房间
+    at: [4192, 416]
+  node already_in_room sequence 已在协战房间
+    at: [3652, 684]
+  node detect_lobby task 快速检测协战房间
+    at: [3652, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 2
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node create_party sequence 创建或恢复协战队伍
+    at: [4731, 684]
+  node wait_party_button task 等待组队按钮
+    at: [3984, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-party-button.png
+      present: true
+      timeout_seconds: 10
+      roi: [1350, 820, 300, 240]
+      threshold: 0.9
+  node tap_party_button task 打开组队面板
+    at: [4316, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node open_or_existing selector 已有队伍或新建队伍
+    at: [5478, 892]
+  node already_team sequence 已有协战队伍
+    at: [4648, 1370]
+  node detect_lobby_in_panel task 检测面板中的协战房间
+    at: [4648, 1758]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 3
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node create_new_team sequence 新建协战队伍
+    at: [6308, 1370]
+  node wait_create_team task 等待创建队伍按钮
+    at: [4980, 1758]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/create-team-button.png
+      present: true
+      timeout_seconds: 20
+      roi: [1400, 840, 400, 180]
+      threshold: 0.9
+  node tap_create_team task 打开创建队伍弹窗
+    at: [5312, 1758]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node open_create_dialog selector 弹窗未打开则重试
+    at: [5893, 1758]
+  node dialog_open sequence 弹窗已打开
+    at: [5644, 2236]
+  node wait_create_confirm task 快速检测创建确认按钮
+    at: [5644, 2714]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/create-confirm-button.png
+      present: true
+      timeout_seconds: 3
+      roi: [1150, 780, 350, 220]
+      threshold: 0.9
+  node retry_tap sequence 重试点击创建队伍
+    at: [6142, 2236]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.5
+  node tap_create_team_again task 再次点击创建队伍
+    at: [5976, 2714]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_create_confirm_retry task 确认弹窗已打开
+    at: [6308, 2714]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/create-confirm-button.png
+      present: true
+      timeout_seconds: 3
+      roi: [1150, 780, 350, 220]
+      threshold: 0.9
+  node tap_private_permission task 选择仅邀请权限
+    at: [6640, 1758]
+    action: input.tap
+    params:
+      x: 1148
+      y: 765
+      random_offset: 3
+      random_interval: [0.2, 0.5]
+  node confirm_create sequence 确认创建队伍
+    at: [7138, 1758]
+  node wait_create_confirm_final task 等待创建确认按钮
+    at: [6972, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/create-confirm-button.png
+      present: true
+      timeout_seconds: 5
+      roi: [1150, 780, 350, 220]
+      threshold: 0.9
+  node tap_create_confirm task 确认创建队伍
+    at: [7304, 2236]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node wait_lobby_after_create task 等待协战房间
+    at: [7636, 1758]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 30
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node invite_member selector 确认队友在队或发出邀请
+    at: [8466, 416]
+  node member_in_room sequence 队友已在房间
+    at: [7968, 684]
+  node detect_member task 快速检测队友昵称条
+    at: [7968, 892]
+    action: vision.wait_template
+    params:
+      present: true
+      timeout_seconds: 3
+      roi: [650, 80, 550, 220]
+      threshold: 0.8
+  node send_invite sequence 邀请好友加入队伍
+    at: [8964, 684]
+  node tap_empty_slot task 打开好友邀请列表
+    at: [8300, 892]
+    action: input.tap
+    params:
+      x: 970
+      y: 385
+      random_offset: 5
+      random_interval: [0.2, 0.6]
+  node wait_invite_target task 等待好友条目
+    at: [8632, 892]
+    action: vision.wait_template
+    params:
+      present: true
+      timeout_seconds: 30
+      roi: [500, 220, 500, 230]
+      threshold: 0.9
+  node tap_invite_target task 选择要邀请的好友
+    at: [8964, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.5]
+  node wait_invite_button task 等待邀请按钮
+    at: [9296, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/invite-button.png
+      present: true
+      timeout_seconds: 10
+      roi: [950, 760, 400, 220]
+      threshold: 0.9
+  node tap_invite_button task 发送组队邀请
+    at: [9628, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 4
+      random_interval: [0.2, 0.6]
+  node rounds sequence 按运行轮数循环
+    at: [12761, 416]
+    decorator repeat
+  node round sequence 单轮组队战斗
+    at: [12761, 684]
+  node wait_member_join selector 等待队友入队或超时强开
+    at: [9960, 892]
+  node wait_member_present task 等待队友昵称条出现
+    at: [9877, 1086]
+    action: vision.wait_template
+    params:
+      present: true
+      roi: [650, 80, 550, 220]
+      threshold: 0.8
+  node log_force_start task 记录超时强制开战
+    at: [10043, 1086]
+    action: core.log
+    params:
+      message: 等待队友入队超时，直接尝试开战
+  node tap_party_challenge task 队长点击挑战
+    at: [10292, 892]
+    action: input.tap
+    params:
+      x: 1840
+      y: 930
+      random_offset: 5
+      random_interval: [0.2, 0.6]
+  node prepare_lineup selector 未锁定阵容时点击准备
+    at: [11122, 892]
+  node lineup_locked task 检测阵容已锁定
+    at: [10624, 1370]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/formation-locked.png
+      present: true
+      timeout_seconds: 2
+      roi: [130, 930, 140, 100]
+      threshold: 0.4
+  node do_prepare sequence 等待并点击准备
+    at: [11122, 1370]
+  node wait_ready task 等待准备按钮
+    at: [10956, 1758]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-ready.png
+      present: true
+      timeout_seconds: 10
+      roi: [1500, 700, 420, 380]
+      threshold: 0.88
+  node tap_ready task 点击准备开始战斗
+    at: [11288, 1758]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 5
+      random_interval: [0.2, 0.6]
+  node assume_auto_started task 记录按已开战处理
+    at: [11620, 1370]
+    action: core.log
+    params:
+      message: 未识别到阵容锁定或准备按钮，按已自动开战继续等待结算
+  node wait_settlement task 等待战斗结算
+    at: [11952, 892]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/souls-victory-continue.png
+      present: true
+      roi: [650, 900, 650, 180]
+      threshold: 0.86
+  node tap_settlement task 点击结算页继续
+    at: [12284, 892]
+    action: input.tap_match
+    params:
+      revalidate: true
+      random_offset: 8
+      random_interval: [0.2, 0.6]
+    decorator retry
+      attempts: 5
+      delay_seconds: 1
+  node settle_to_lobby selector 关闭奖励并确认回到协战房间
+    at: [15563, 892]
+  node direct sequence 直达处理（等待弹窗或房间）
+    at: [13363, 1370]
+  node wait_direct selector 等待续邀弹窗或协战房间
+    at: [12782, 1758]
+  node wait_prompt_direct task 等待续邀弹窗
+    at: [12616, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/continue-confirm-button.png
+      present: true
+      timeout_seconds: 4
+      roi: [900, 520, 450, 260]
+      threshold: 0.9
+  node wait_lobby_direct task 等待协战房间
+    at: [12948, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 10
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node act_direct selector 弹窗出现则确认续邀
+    at: [13944, 1758]
+  node confirm_direct condition 弹窗已出现
+    at: [13612, 2236]
+    expression: exists nodes.wait_prompt_direct.output.0
+  node confirm_direct_seq sequence 确认续邀并等待房间
+    at: [13612, 2714]
+  node wait_prompt_recheck task 复查续邀弹窗
+    at: [13280, 3192]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/continue-confirm-button.png
+      present: true
+      timeout_seconds: 3
+      roi: [900, 520, 450, 260]
+      threshold: 0.9
+  node tap_prompt_direct task 点击确定继续邀请
+    at: [13612, 3192]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 8
+      random_interval: [0.2, 0.5]
+  node wait_lobby_after_direct task 等待协战房间
+    at: [13944, 3192]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 30
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node back_to_lobby sequence 已直接回到房间
+    at: [14276, 2236]
+  node wait_lobby_confirmed task 确认协战房间在屏
+    at: [14276, 2714]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 15
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node one_tap sequence 关闭一层奖励后处理
+    at: [15438, 1370]
+  node tap_reward_one task 关闭奖励层
+    at: [14608, 1758]
+    action: input.tap
+    params:
+      x: 1500
+      y: 850
+      random_offset: 12
+      random_interval: [0.2, 0.5]
+  node wait_one selector 等待续邀弹窗或协战房间
+    at: [15106, 1758]
+  node wait_prompt_one task 等待续邀弹窗
+    at: [14940, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/continue-confirm-button.png
+      present: true
+      timeout_seconds: 6
+      roi: [900, 520, 450, 260]
+      threshold: 0.9
+  node wait_lobby_one task 等待协战房间
+    at: [15272, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 10
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node act_one selector 弹窗出现则确认续邀
+    at: [16268, 1758]
+  node confirm_one condition 弹窗已出现
+    at: [15936, 2236]
+    expression: exists nodes.wait_prompt_one.output.0
+  node confirm_one_seq sequence 确认续邀并等待房间
+    at: [15936, 2714]
+  node wait_prompt_recheck_one task 复查续邀弹窗
+    at: [15604, 3192]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/continue-confirm-button.png
+      present: true
+      timeout_seconds: 3
+      roi: [900, 520, 450, 260]
+      threshold: 0.9
+  node tap_prompt_one task 点击确定继续邀请
+    at: [15936, 3192]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 8
+      random_interval: [0.2, 0.5]
+  node wait_lobby_after_one task 等待协战房间
+    at: [16268, 3192]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 30
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node back_to_lobby_one sequence 已直接回到房间
+    at: [16600, 2236]
+  node wait_lobby_confirmed_one task 确认协战房间在屏
+    at: [16600, 2714]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 15
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node two_taps sequence 再关闭一层奖励并等待房间
+    at: [17762, 1370]
+  node tap_reward_two task 再次关闭奖励层
+    at: [16932, 1758]
+    action: input.tap
+    params:
+      x: 1500
+      y: 850
+      random_offset: 12
+      random_interval: [0.2, 0.5]
+  node wait_two selector 等待续邀弹窗或协战房间
+    at: [17430, 1758]
+  node wait_prompt_two task 等待续邀弹窗
+    at: [17264, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/continue-confirm-button.png
+      present: true
+      timeout_seconds: 8
+      roi: [900, 520, 450, 260]
+      threshold: 0.9
+  node wait_lobby_two task 等待协战房间
+    at: [17596, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 10
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node act_two selector 弹窗出现则确认续邀
+    at: [18592, 1758]
+  node confirm_two condition 弹窗已出现
+    at: [18260, 2236]
+    expression: exists nodes.wait_prompt_two.output.0
+  node confirm_two_seq sequence 确认续邀并等待房间
+    at: [18260, 2714]
+  node wait_prompt_recheck_two task 复查续邀弹窗
+    at: [17928, 3192]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/continue-confirm-button.png
+      present: true
+      timeout_seconds: 3
+      roi: [900, 520, 450, 260]
+      threshold: 0.9
+  node tap_prompt_two task 点击确定继续邀请
+    at: [18260, 3192]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 8
+      random_offset: 8
+      random_interval: [0.2, 0.5]
+  node wait_lobby_after_two task 等待协战房间
+    at: [18592, 3192]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 30
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node wait_lobby_final task 等待协战房间
+    at: [18924, 2236]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/lobby-title.png
+      present: true
+      timeout_seconds: 30
+      roi: [80, 0, 350, 120]
+      threshold: 0.88
+  node log_finished task 记录已完成全部轮数
+    at: [19256, 416]
+    action: core.log
+    params:
+      message: 御魂副本：已按运行轮数完成全部组队战斗
+  var inputs.运行轮数
+    at: [12536, 384]
+  var inputs.邀请目标
+    at: [5592, 2384]
+  var inputs.队友标记
+    at: [8168, 1296]
+  var inputs.入队超时_秒
+    at: [6576, 2384]
+  var inputs.战斗超时_秒
+    at: [11728, 1008]
+  edges:
+    wait_explore:out.0 -> tap_explore:match
+    wait_map_souls:out.0 -> tap_map_souls:match
+    wait_orochi:out.0 -> tap_orochi:match
+    detect_orochi_type:out.0 -> tap_orochi_type:match
+    detect_map_souls:out.0 -> tap_map_entry:match
+    wait_orochi_entry:out.0 -> tap_orochi_entry:match
+    wait_party_button:out.0 -> tap_party_button:match
+    wait_create_team:out.0 -> tap_create_team:match
+    wait_create_team:out.0 -> tap_create_team_again:match
+    wait_create_confirm_final:out.0 -> tap_create_confirm:match
+    var__inputs__队友标记:out -> detect_member:template
+    var__inputs__邀请目标:out -> wait_invite_target:template
+    wait_invite_target:out.0 -> tap_invite_target:match
+    wait_invite_button:out.0 -> tap_invite_button:match
+    var__inputs__运行轮数:out -> rounds:decorators.0.count
+    var__inputs__队友标记:out -> wait_member_present:template
+    var__inputs__入队超时_秒:out -> wait_member_present:timeout_seconds
+    wait_ready:out.0 -> tap_ready:match
+    var__inputs__战斗超时_秒:out -> wait_settlement:timeout_seconds
+    wait_settlement:out.0 -> tap_settlement:match
+    wait_prompt_recheck:out.0 -> tap_prompt_direct:match
+    wait_prompt_recheck_one:out.0 -> tap_prompt_one:match
+    wait_prompt_recheck_two:out.0 -> tap_prompt_two:match
+    root -> main
+    main -> recover_to_floor
+    main:then.1 -> ensure_party_room
+    main:then.2 -> invite_member
+    main:then.3 -> rounds
+    main:then.4 -> log_finished
+    recover_to_floor -> at_floor
+    recover_to_floor:then.1 -> from_souls_type
+    recover_to_floor:then.2 -> from_explore_map
+    recover_to_floor:then.3 -> from_courtyard
+    at_floor -> detect_floor
+    from_souls_type -> detect_orochi_type
+    from_souls_type:then.1 -> tap_orochi_type
+    from_souls_type:then.2 -> wait_floor_from_type
+    from_explore_map -> detect_map_souls
+    from_explore_map:then.1 -> tap_map_entry
+    from_explore_map:then.2 -> wait_orochi_entry
+    from_explore_map:then.3 -> tap_orochi_entry
+    from_explore_map:then.4 -> wait_floor_from_map
+    from_courtyard -> ensure_explore_visible
+    from_courtyard:then.1 -> wait_explore
+    from_courtyard:then.2 -> tap_explore
+    from_courtyard:then.3 -> wait_map_souls
+    from_courtyard:then.4 -> tap_map_souls
+    from_courtyard:then.5 -> wait_orochi
+    from_courtyard:then.6 -> tap_orochi
+    from_courtyard:then.7 -> wait_floor_page
+    ensure_explore_visible -> detect_explore
+    ensure_explore_visible:then.1 -> wake_courtyard
+    wake_courtyard -> wake_ui
+    wake_courtyard:then.1 -> detect_explore_after_wake
+    ensure_party_room -> already_in_room
+    ensure_party_room:then.1 -> create_party
+    already_in_room -> detect_lobby
+    create_party -> wait_party_button
+    create_party:then.1 -> tap_party_button
+    create_party:then.2 -> open_or_existing
+    open_or_existing -> already_team
+    open_or_existing:then.1 -> create_new_team
+    already_team -> detect_lobby_in_panel
+    create_new_team -> wait_create_team
+    create_new_team:then.1 -> tap_create_team
+    create_new_team:then.2 -> open_create_dialog
+    create_new_team:then.3 -> tap_private_permission
+    create_new_team:then.4 -> confirm_create
+    create_new_team:then.5 -> wait_lobby_after_create
+    open_create_dialog -> dialog_open
+    open_create_dialog:then.1 -> retry_tap
+    dialog_open -> wait_create_confirm
+    retry_tap -> tap_create_team_again
+    retry_tap:then.1 -> wait_create_confirm_retry
+    confirm_create -> wait_create_confirm_final
+    confirm_create:then.1 -> tap_create_confirm
+    invite_member -> member_in_room
+    invite_member:then.1 -> send_invite
+    member_in_room -> detect_member
+    send_invite -> tap_empty_slot
+    send_invite:then.1 -> wait_invite_target
+    send_invite:then.2 -> tap_invite_target
+    send_invite:then.3 -> wait_invite_button
+    send_invite:then.4 -> tap_invite_button
+    rounds -> round
+    round -> wait_member_join
+    wait_member_join -> wait_member_present
+    wait_member_join:then.1 -> log_force_start
+    round:then.1 -> tap_party_challenge
+    round:then.2 -> prepare_lineup
+    round:then.3 -> wait_settlement
+    round:then.4 -> tap_settlement
+    round:then.5 -> settle_to_lobby
+    prepare_lineup -> lineup_locked
+    prepare_lineup:then.1 -> do_prepare
+    prepare_lineup:then.2 -> assume_auto_started
+    do_prepare -> wait_ready
+    do_prepare:then.1 -> tap_ready
+    settle_to_lobby -> direct
+    settle_to_lobby:then.1 -> one_tap
+    settle_to_lobby:then.2 -> two_taps
+    direct -> wait_direct
+    direct:then.1 -> act_direct
+    wait_direct -> wait_prompt_direct
+    wait_direct:then.1 -> wait_lobby_direct
+    act_direct -> confirm_direct
+    act_direct:then.1 -> back_to_lobby
+    confirm_direct:true -> confirm_direct_seq
+    confirm_direct_seq -> wait_prompt_recheck
+    confirm_direct_seq:then.1 -> tap_prompt_direct
+    confirm_direct_seq:then.2 -> wait_lobby_after_direct
+    back_to_lobby -> wait_lobby_confirmed
+    one_tap -> tap_reward_one
+    one_tap:then.1 -> wait_one
+    one_tap:then.2 -> act_one
+    wait_one -> wait_prompt_one
+    wait_one:then.1 -> wait_lobby_one
+    act_one -> confirm_one
+    act_one:then.1 -> back_to_lobby_one
+    confirm_one:true -> confirm_one_seq
+    confirm_one_seq -> wait_prompt_recheck_one
+    confirm_one_seq:then.1 -> tap_prompt_one
+    confirm_one_seq:then.2 -> wait_lobby_after_one
+    back_to_lobby_one -> wait_lobby_confirmed_one
+    two_taps -> tap_reward_two
+    two_taps:then.1 -> wait_two
+    two_taps:then.2 -> act_two
+    wait_two -> wait_prompt_two
+    wait_two:then.1 -> wait_lobby_two
+    act_two -> confirm_two
+    act_two:then.1 -> wait_lobby_final
+    confirm_two:true -> confirm_two_seq
+    confirm_two_seq -> wait_prompt_recheck_two
+    confirm_two_seq:then.1 -> tap_prompt_two
+    confirm_two_seq:then.2 -> wait_lobby_after_two

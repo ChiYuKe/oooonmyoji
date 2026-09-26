@@ -55,6 +55,8 @@ test('画布剪贴板边界：版本与节点数组必需，缺字段补齐、�
   assert.equal(parsed.nodes.length, 2);
   assert.deepEqual(parsed.layout, {a: {x: 1, y: 2}});
   assert.deepEqual(parsed.variables, [{scope: 'inputs', name: '运行轮次', definition: {type: 'integer'}}]);
+  assert.equal(parsed.keepEdges, false, '缺字段按「粘贴不带连线」处理');
+  assert.equal(parseCanvasClipboard({version: 1, nodes: [{id: 'a'}], keepEdges: true}).keepEdges, true, '剪切过来的剪贴板保留连线');
   assert.deepEqual(parsed.cards, [{scope: 'inputs', name: '运行轮次', x: 10, y: 20}], '名字为空/坐标非数字的卡片丢掉');
 
   // 缺 layout / sourceUri / 变量时补成空集合，画布不用自己兜底。

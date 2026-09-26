@@ -281,6 +281,15 @@ export interface CanvasClipboardPayload {
   variables: CanvasClipboardVariable[];
   /** 这些变量在源画布上的卡片。 */
   cards: CanvasClipboardCard[];
+  /**
+   * 粘贴时是否重建节点之间的执行连线。
+   *
+   * **复制**为 false：粘出来的是一张张干净的卡片（参数、变量绑定与节点输出引用照旧），
+   * 连线自己接——否则复制一次就等于凭空多出一份连在一起的子图。
+   * **剪切**为 true：剪切 + 粘贴是「搬走这一段」，子树内部的连线要跟着回来
+   * （对外的父连线在剪切时已经断掉，本来就不在剪贴板里）。
+   */
+  keepEdges: boolean;
 }
 
 /** 画布 → 壳层：把刚复制的卡片交给壳层保管（并广播给其他画布）。 */
@@ -409,5 +418,7 @@ export function parseCanvasClipboard(value: unknown): CanvasClipboardPayload | u
     layout,
     variables: Array.isArray(record.variables) ? record.variables.filter(isClipboardVariable) : [],
     cards: Array.isArray(record.cards) ? record.cards.filter(isClipboardCard) : [],
+    // 缺字段按「不带连线」处理：来源不同版本时也符合「粘贴只带节点」的预期。
+    keepEdges: record.keepEdges === true,
   };
 }

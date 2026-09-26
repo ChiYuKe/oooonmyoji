@@ -19,6 +19,11 @@ from ..exceptions import ConfigError
 #: 不在执行树里、按需求值的纯数据节点类型。
 PURE_DATA_NODE_TYPES = frozenset({"bool_judge", "break"})
 
+#: 折叠图（编辑器里的节点组）边界卡：真实的执行流隧道，运行时按单子透传容器执行。
+#: 它们和 `root` 一样只是把执行点往下传，所以「可用输出」推导必须把它们当透明，
+#: 否则透传节点后面（或作为 sequence 兄弟时）的合法绑定会被误报成不可用。
+GROUP_BOUNDARY_NODE_TYPES = frozenset({"group_entry", "group_exit"})
+
 
 def _node_index(nodes: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
     node_map = {str(node.get("id")): node for node in nodes if isinstance(node.get("id"), str)}
@@ -55,6 +60,9 @@ def guaranteed_output_node_ids(
         return set()
     nested = visiting | {node_id}
     if node_type == "root" and len(children) == 1:
+        return guaranteed_output_node_ids(str(children[0]), node_map, nested)
+    # 折叠图边界卡：单子透传，输出可用性与它唯一的子节点完全一致。
+    if node_type in GROUP_BOUNDARY_NODE_TYPES and len(children) == 1:
         return guaranteed_output_node_ids(str(children[0]), node_map, nested)
     if node_type == "sequence":
         result: set[str] = set()

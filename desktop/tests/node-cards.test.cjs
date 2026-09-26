@@ -294,6 +294,21 @@ test('值卡片（布尔判断 / 拆分）不画顶部的执行流入口，普�
   assert.equal(byClass(seq,'port-in').length,1,'普通节点保留顶部执行入口');
   assert.equal(byClass(seq,'port-glyph-exec').length>=1,true,'入口箭头仍然画出来');
 });
+test('折叠图卡片按入口数排顶部输入口：两个入口就两个口，不再挤在中点',()=>{
+  const {ctx,Element}=harness();
+  const render=(node)=>{const layer=new Element('g');ctx.renderNode(layer,node);return layer.children[0];};
+  // 组外进来两条执行边（判断的真/假各一张入口卡）：顶边两个输入口，位置与连线落点同源。
+  const two=render({id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:12,_groupPins:[],_hasReferenceOutput:false,_groupEntryCount:2});
+  const ports=byClass(two,'port-in');
+  assert.equal(ports.length,2,'两个入口 → 顶边两个输入口');
+  assert.equal(ports[0].attrs.cx, String(260/3), '左口在三分之一处');
+  assert.equal(ports[1].attrs.cx, String(260*2/3), '右口在三分之二处');
+  assert.equal(byClass(two,'port-glyph-exec').length>=2,true,'两个口都画箭头');
+  // 只有一个入口时仍然只有一个口、落在中点（与普通卡片一致）。
+  const one=render({id:'group1',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:3,_groupPins:[],_hasReferenceOutput:false,_groupEntryCount:1});
+  assert.equal(byClass(one,'port-in').length,1);
+  assert.equal(byClass(one,'port-in')[0].attrs.cx,'130','单入口落在中点');
+});
 test('值卡片不显示用户自定义名称：Break / 运算符标题保持 UE 风格',()=>{
   const {ctx,Element}=harness();
   ctx.nodeHeight=()=>112;
@@ -501,7 +516,7 @@ test('运行态组卡右键提供直接定位真实成员的入口',()=>{
   ctx.renderNode(layer,{id:'group',type:'node_group',name:'节点组',children:[],_nodeGroup:true,_nodeCount:2,_groupPins:[],_hasReferenceOutput:false});
   const card=layer.children[0];
   card.events.contextmenu[0]({preventDefault(){},stopPropagation(){},clientX:10,clientY:20});
-  assert.deepEqual(menu.map(item=>item.label),['定位异常节点','进入节点组','解散节点组']);
+  assert.deepEqual(menu.map(item=>item.label),['定位异常节点','进入折叠图','展开折叠图']);
   menu[0].run();
   assert.deepEqual(opened,[['group','failed-task']]);
 });

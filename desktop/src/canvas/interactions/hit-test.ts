@@ -6,7 +6,7 @@
  * 纯几何 + 类型兼容计算，不修改状态；变量连线与节点输出引用拖拽的悬停目标由这里给出。
  */
 import type { CanvasState } from '../state/canvas-state';
-import { isGroupBoundaryPin } from '../model/node-groups';
+import { isGroupBoundaryPin, isGroupCardNode, isGroupInterfaceNode, isGroupOutputInterfaceNode } from '../model/node-groups';
 import {
   CONDITION_INPUT_X, CONDITION_INPUT_Y, CONDITION_PORT_ORDER, conditionPortOffset, expressionInputOffset, isBooleanInputNode, isBooleanInputPin, isValueCardNode, nearestConditionPort, type ConditionPort,
 } from '../model/exec-ports';
@@ -77,6 +77,11 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
     return position(node).y + baseHeight + index * height + height / 2;
   }
 
+  function distributedExecOffsets(count: number): number[] {
+    const total = Math.max(0, Math.floor(count));
+    return Array.from({ length: total }, (_, index) => nodeWidth * (index + 1) / (total + 1));
+  }
+
   function connectionTargetAt(event: { clientX: number; clientY: number } | null | undefined): string | null {
     if (!state.connect || !event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
     const point = worldPoint(event);
@@ -87,7 +92,9 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       const wantsOutput = state.connect.direction === 'from-input';
       // Task / 值卡片（布尔判断、拆分）都是叶子：没有执行流输出口，不能作为别人的父节点被命中。
       if (wantsOutput && (node.type === 'task' || isValueCardNode(node))) continue;
+      if (wantsOutput && isGroupOutputInterfaceNode(node)) continue;
       if (!wantsOutput && node.type === 'root') continue;
+      if (!wantsOutput && isGroupInterfaceNode(node)) continue;
       if ((wantsOutput && node.id === state.connect.child) || (!wantsOutput && node.id === state.connect.parent)) continue;
       const pos = position(node);
       const y = wantsOutput ? pos.y + nodeHeight(node) : pos.y;
@@ -95,6 +102,14 @@ export function createCanvasHitTest(deps: HitTestDeps): CanvasHitTest {
       // 落点才能确定接的是哪一支（口位由 execPortAt 再读一次）。
       const offsets = wantsOutput && node.type === 'condition'
         ? CONDITION_PORT_ORDER.map((port) => conditionPortOffset(nodeWidth, port))
+        : wantsOutput && isGroupCardNode(node)
+          ? distributedExecOffsets(Number(node._execOutputCount || 0))
+        : wantsOutput && isGroupInterfaceNode(node)
+          ? distributedExecOffsets(Number(node._execOutputCount || 0))
+        : !wantsOutput && isGroupCardNode(node)
+            ? distributedExecOffsets(Number(node._groupEntryCount || 0))
+          : !wantsOutput && isGroupOutputInterfaceNode(node)
+            ? distributedExecOffsets(Number(node._execInputCount || 0))
         : [nodeWidth / 2];
       for (const offset of offsets) {
         const distance = Math.hypot(point.x - (pos.x + offset), point.y - y);

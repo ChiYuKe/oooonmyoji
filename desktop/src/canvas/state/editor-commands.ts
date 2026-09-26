@@ -273,6 +273,8 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
     simple_parallel: ['children', 'finish_mode'],
     parallel: ['children', 'wait_for', 'cancel_on_failure'],
     root: ['children'], selector: ['children'], sequence: ['children'],
+    // 折叠图边界卡是单子透传容器：结构上只有 children（与 sequence 同形）。
+    group_entry: ['children'], group_exit: ['children'],
   };
 
   /**

@@ -1,6 +1,8 @@
 import type { CanvasState } from '../state/canvas-state';
 import type { MenuEntry } from '../ui/overlays';
 import { groupCardPosition, groupVariableCardIds } from '../canvas/card-follow-layout';
+import { GROUP_ENTRY_TYPE, GROUP_EXIT_TYPE } from '../../shared/workflow/types';
+import { conditionPortsOf } from './exec-ports';
 import { summarizeNodeGroupRun } from './node-group-runtime';
 
 export interface NodeGroupRecord {
@@ -9,6 +11,8 @@ export interface NodeGroupRecord {
   nodeIds: string[];
   /** 用户主动暴露或打组时为保留既有跨组连接而固化的成员参数。 */
   pins: Array<{ nodeId: string; param: string }>;
+  execInputs: string[];
+  execOutputs: string[];
 }
 
 export interface NodeGroupsDeps {
@@ -65,6 +69,23 @@ export interface ProjectedGroupCardNode {
   _groupPins: GroupBoundaryPin[];
   _hasReferenceOutput: boolean;
   _referenceOutputs?: Array<{ nodeId: string; field: string; ref: string }>;
+  _execOutputCount?: number;
+  _execOutputNames?: string[];
+  /** 组外进来几条执行边（= 几张组入口卡）：组卡顶边按这个数排输入口。 */
+  _groupEntryCount?: number;
+  _groupEntryNames?: string[];
+}
+
+/**
+ * 折叠图卡片执行口的横向位置：`count` 个口平分卡片宽度（口间距相同、两端留半格），
+ * 单个口落在顶边/底边中点。输入侧（组入口）与输出侧（组出口）共用这一份排法，
+ * 于是判断的真/假不会挤在中点，而是各落各的口——与线本身的位置一致。
+ */
+export function groupPortOffset(nodeWidth: number, index: number, count: number): number {
+  const total = Math.max(1, count);
+  if (total === 1) return nodeWidth / 2;
+  const safe = Math.max(0, Math.min(index, total - 1));
+  return (nodeWidth * (safe + 1)) / (total + 1);
 }
 
 /** 组内顶部的执行接口卡：组内成员从它进入。 */
@@ -76,6 +97,21 @@ export interface ProjectedGroupInterfaceNode {
   _nodeGroupInterface: true;
   _nodeGroupId: string;
   _groupPins: GroupBoundaryPin[];
+  _execOutputCount: number;
+  _execOutputNames?: string[];
+  _nodeGroupPosition: { x: number; y: number };
+}
+
+/** 组内统一的执行出口卡：成员的多条组外出边都投影到这一个节点上。 */
+export interface ProjectedGroupOutputNode {
+  id: string;
+  type: 'node_group_output';
+  name: string;
+  children: string[];
+  _nodeGroupOutput: true;
+  _nodeGroupId: string;
+  _execInputCount: number;
+  _execInputNames?: string[];
   _nodeGroupPosition: { x: number; y: number };
 }
 
@@ -95,6 +131,7 @@ export interface ProjectedGroupVariablesNode {
 export type ProjectedGroupNode =
   | ProjectedGroupCardNode
   | ProjectedGroupInterfaceNode
+  | ProjectedGroupOutputNode
   | ProjectedGroupVariablesNode;
 
 /** 进入组内后按当前可见成员重新投影的真实节点。 */
@@ -106,7 +143,7 @@ export interface ProjectedGroupMemberNode {
 }
 
 export function isProjectedGroupNode(node: any): node is ProjectedGroupNode {
-  return Boolean(node && (node._nodeGroup || node._nodeGroupInterface || node._nodeGroupVariables));
+  return Boolean(node && (node._nodeGroup || node._nodeGroupInterface || node._nodeGroupOutput || node._nodeGroupVariables));
 }
 
 export function isGroupCardNode(node: any): node is ProjectedGroupCardNode {
@@ -115,6 +152,10 @@ export function isGroupCardNode(node: any): node is ProjectedGroupCardNode {
 
 export function isGroupInterfaceNode(node: any): node is ProjectedGroupInterfaceNode {
   return Boolean(node && node._nodeGroupInterface === true);
+}
+
+export function isGroupOutputInterfaceNode(node: any): node is ProjectedGroupOutputNode {
+  return Boolean(node && node._nodeGroupOutput === true);
 }
 
 export function isGroupVariablesNode(node: any): node is ProjectedGroupVariablesNode {
@@ -135,8 +176,37 @@ const INTERFACE_GAP = 80;
 const VARIABLES_GAP = 96;
 
 /**
+ * 折叠图边界卡：**真实的执行流隧道节点**（UE 的 Collapsed Graph Tunnel）。
+ *
+ * 折叠图不是「视图上的一个框」——跨边界的执行边真的经过这两类卡：
+ * `组外父 → group_entry → 组内子`、`组内父 → group_exit → 组外子`。
+ * 每条跨组边各得一张卡（UE 一个连接一个隧道），组卡只把这些真实边投影成自己的端口；
+ * 运行时把它们当透传容器（等价于只有一个子节点的 sequence），执行语义零变化。
+ *
+ * 因此组内视图里判断卡的真/否不再是悬空箭头：它们真的接在组出口卡上，
+ * 而组出口卡的另一侧就是组外的真实目标（展开折叠图时这两条边直接相接）。
+ */
+export { GROUP_ENTRY_TYPE, GROUP_EXIT_TYPE };
+
+export function isGroupEntryNode(node: any): boolean {
+  return Boolean(node) && node.type === GROUP_ENTRY_TYPE;
+}
+
+export function isGroupExitNode(node: any): boolean {
+  return Boolean(node) && node.type === GROUP_EXIT_TYPE;
+}
+
+/** 折叠图边界卡（组入口 / 组出口）。 */
+export function isGroupBoundaryNode(node: any): boolean {
+  return isGroupEntryNode(node) || isGroupExitNode(node);
+}
+
+/**
  * 可折叠节点组只属于编辑器视图，不改变运行时节点与父子关系。
  * 数据保存在 `_nodeGroups`，运行器会像其它 `_` 前缀编辑器元数据一样忽略它。
+ *
+ * 例外是**边界卡**：它们是文档里的真实节点（`group_entry` / `group_exit`），
+ * 真的参与执行流（见上面的注释），所以打组/展开折叠图会改写 `children`。
  */
 export function createNodeGroups(deps: NodeGroupsDeps) {
   const {
@@ -145,6 +215,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
   } = deps;
 
   const interfaceId = (groupId: string): string => `__node_group_interface__:${groupId}`;
+  const outputInterfaceId = (groupId: string): string => `__node_group_output__:${groupId}`;
   const variablesId = (groupId: string): string => `__node_group_variables__:${groupId}`;
 
   /** 读取 `{ref: 'nodes.<id>.output...'}` 里的源节点 id；没有则返回空串。 */
@@ -296,7 +367,31 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
         seenPins.add(key);
         return [{ nodeId, param }];
       });
-      return [{ id, name: String(value.name || '节点组'), nodeIds, pins }];
+      // 旧文档的折叠图只有元数据、没有边界卡：在这里补齐一次真实的入口/出口卡。
+      // 补齐后「成员里没有边界卡」不再成立，所以不会重复迁移；改写结果要落盘。
+      const boundary = migrateBoundaryCards(id, nodeIds);
+      if (boundary.length) {
+        nodeIds.push(...boundary);
+        migrated = true;
+      }
+      const inputCount = nodeIds.filter((nodeId) => isGroupEntryNode(nodeById(nodeId))).length;
+      const outputCount = nodeIds.filter((nodeId) => isGroupExitNode(nodeById(nodeId))).length;
+      const normalizeExecPins = (rawPins: unknown, count: number, base: string): string[] => {
+        const result = Array.isArray(rawPins) ? rawPins.map((item) => String(item || '').trim()) : [];
+        while (result.length < count) result.push(result.length === 0 ? base : `${base}${result.length + 1}`);
+        return result;
+      };
+      const execInputs = normalizeExecPins(value.execInputs, inputCount, 'execute');
+      const execOutputs = normalizeExecPins(value.execOutputs, outputCount, 'then');
+      // 执行引脚名是**画布侧派生**字段：图文档与 `.owf` 都不持久化它
+      // （`shared/workflow/graph-document.ts` 的 groups 转换只搬 nodeIds / pins / pinPolicy），
+      // 所以「它不是数组」在每次重新解析后都成立。这里只把补齐结果写回旁表供本次会话使用，
+      // **绝不能**因此把文档标脏：一旦标脏就会上报整份正文，壳层回灌 replaceDocument →
+      // 文档版本 +1 → 组缓存失效 → 再次迁移标脏 —— 静置状态下的死循环（实测 40~180 条/秒，
+      // 主线程 90% 以上耗在 postMessage，整个应用被压到 ~9 fps）。
+      value.execInputs = execInputs;
+      value.execOutputs = execOutputs;
+      return [{ id, name: String(value.name || '节点组'), nodeIds, pins, execInputs, execOutputs }];
     });
     groupsVersion = version;
     groupsRaw = source;
@@ -369,40 +464,284 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     return result;
   }
 
+  /**
+   * 投影一个节点的 children。
+   *
+   * **外层（折叠视图）保留每一条真实边**：同一个父节点的两条跨组边（判断的真/假各接一张
+   * 入口卡）必须各画一条代理线；去重会让其中一口看起来根本没接线。保留后投影 children 与
+   * 真实 `ports` 仍然逐位对齐，端口徽标（真/假）不会串位。
+   *
+   * 内层（组内视图）只画组内的那一侧：组外目标不画，同一张卡也不会重复出现。
+   */
   function projectedChildren(node: any, visible: Set<string>, memberOf: Map<string, string>, scopeId = ''): string[] {
     const result: string[] = [];
     for (const child of Array.isArray(node?.children) ? node.children : []) {
-      const target = scopeId ? (visible.has(child) ? child : '') : (memberOf.get(child) || child);
-      if (target && target !== node.id && !result.includes(target)) result.push(target);
+      const target = scopeId
+        ? visible.has(child) ? child : ''
+        : (memberOf.get(child) || child);
+      if (!target || target === node.id) continue;
+      if (scopeId && result.includes(target)) continue;
+      result.push(target);
     }
     return result;
   }
 
+  /**
+   * 边界卡与成员卡之间的纵向净空：入口卡排在成员上方、出口卡排在下方各留这么远，
+   * 展开折叠图后一眼能看出「这一侧是外面」。
+   */
+  const BOUNDARY_GAP = 176;
+
+  const snapToGrid = (value: number): number => (Number.isFinite(value) ? Math.round(value / 8) * 8 : 0);
+
+  /** 跨组入边：组外父 → 组内子。每条边都会得到一张真实的组入口卡。 */
+  function incomingCrossings(members: Set<string>): Array<{ parent: any; childId: string; index: number }> {
+    const result: Array<{ parent: any; childId: string; index: number }> = [];
+    for (const node of nodes()) {
+      if (members.has(String(node.id))) continue;
+      const children: string[] = Array.isArray(node.children) ? node.children : [];
+      children.forEach((child, index) => {
+        // 已经经过入口卡的边不再算跨组边，否则每归一化一次就会再叠一张卡。
+        if (isGroupEntryNode(nodeById(child))) return;
+        if (members.has(String(child))) result.push({ parent: node, childId: String(child), index });
+      });
+    }
+    return result;
+  }
+
+  /** 跨组出边：组内父 → 组外子。每条边都会得到一张真实的组出口卡。 */
+  function outgoingCrossings(members: Set<string>): Array<{ parent: any; childId: string; index: number }> {
+    const result: Array<{ parent: any; childId: string; index: number }> = [];
+    for (const node of nodes()) {
+      if (!members.has(String(node.id))) continue;
+      // 出口卡的下游就是隧道目标本身，不能把「出口卡 → 组外目标」再当成一条新的跨组边，
+      // 否则每归一化一次就会在出口卡下面再叠一张出口卡。
+      if (isGroupExitNode(node)) continue;
+      const children: string[] = Array.isArray(node.children) ? node.children : [];
+      children.forEach((child, index) => {
+        // 已经经过出口卡的边不再算跨组边。
+        if (isGroupExitNode(nodeById(child))) return;
+        if (!members.has(String(child))) result.push({ parent: node, childId: String(child), index });
+      });
+    }
+    return result;
+  }
+
+  /**
+   * 把跨组执行边换成真实的边界卡：`组外父 → 入口 → 组内子`、`组内父 → 出口 → 组外子`。
+   *
+   * 就地改写父节点的 children 槽位（数组长度不变，所以 `condition` 的 `ports` 保持对齐），
+   * 新卡按「入口在成员上方、出口在成员下方、纵向对齐各自的成员」落位并写进 `_layout`。
+   * 返回创建出来的节点，由调用方登记进组的 `nodeIds`。
+   */
+  function materializeBoundaryCards(
+    memberIds: string[],
+    entries: Array<{ parent: any; childId: string; index: number }>,
+    exits: Array<{ parent: any; childId: string; index: number }>,
+  ): any[] {
+    if (!entries.length && !exits.length) return [];
+    const used = new Set(nodes().map((node) => String(node.id)));
+    const created: any[] = [];
+    const nextBoundaryId = (type: string): string => {
+      let index = 1;
+      while (used.has(`${type}_${index}`)) index += 1;
+      const id = `${type}_${index}`;
+      used.add(id);
+      return id;
+    };
+    const rows = memberIds
+      .map((id) => ({ node: nodeById(id), at: layout()[id] }))
+      .filter((row) => row.node && row.at && Number.isFinite(row.at.x) && Number.isFinite(row.at.y));
+    const top = rows.length ? Math.min(...rows.map((row) => row.at.y)) : 0;
+    const bottom = rows.length
+      ? Math.max(...rows.map((row) => row.at.y + Math.max(baseHeight, Number(nodeHeight(row.node)) || baseHeight)))
+      : 0;
+    // 同一行里两张卡不叠在一起：列被占了就往右挪一列。
+    const columns = new Set<number>();
+    const column = (value: number): number => {
+      let x = snapToGrid(value);
+      while (columns.has(x)) x += nodeWidth + 32;
+      columns.add(x);
+      return x;
+    };
+    for (const crossing of entries) {
+      const anchor = layout()[crossing.childId] || layout()[crossing.parent.id];
+      const node = { id: nextBoundaryId(GROUP_ENTRY_TYPE), type: GROUP_ENTRY_TYPE, children: [crossing.childId] };
+      layout()[node.id] = { x: column(anchor ? anchor.x : 0), y: snapToGrid(top - BOUNDARY_GAP) };
+      crossing.parent.children[crossing.index] = node.id;
+      created.push(node);
+    }
+    columns.clear();
+    for (const crossing of exits) {
+      const anchor = layout()[crossing.parent.id] || layout()[crossing.childId];
+      const node = { id: nextBoundaryId(GROUP_EXIT_TYPE), type: GROUP_EXIT_TYPE, children: [crossing.childId] };
+      layout()[node.id] = { x: column(anchor ? anchor.x : 0), y: snapToGrid(bottom + BOUNDARY_GAP) };
+      crossing.parent.children[crossing.index] = node.id;
+      created.push(node);
+    }
+    nodes().push(...created);
+    return created;
+  }
+
+  /**
+   * 展开折叠图：边界卡内联回两侧的真实边，卡本身从 `nodes` 与 `_layout` 里消失。
+   * 边界卡只有一条真实边（入口接组内首节点、出口接组外目标），所以还原是逐槽替换。
+   */
+  function collapseBoundaryCards(memberIds: string[]): void {
+    const raw = nodes();
+    const members = new Set(memberIds);
+    const boundary = raw.filter((node) => members.has(String(node.id)) && isGroupBoundaryNode(node));
+    if (!boundary.length) return;
+    const boundaryIds = new Set(boundary.map((node) => String(node.id)));
+    for (const node of boundary) {
+      const children: string[] = (Array.isArray(node.children) ? node.children : [])
+        .map((child: any) => String(child))
+        .filter((child: string) => !boundaryIds.has(child));
+      const parent = raw.find((candidate) => !boundaryIds.has(String(candidate.id))
+        && Array.isArray(candidate.children) && candidate.children.includes(String(node.id)));
+      if (!parent) continue;
+      const index = parent.children.indexOf(String(node.id));
+      if (parent.type === 'condition') {
+        // 判断节点的口位与 children 对齐：替换槽位时把口位一起带过去。
+        const ports = conditionPortsOf(parent);
+        const slot = ports[index] || 'true';
+        parent.children.splice(index, 1, ...children);
+        ports.splice(index, 1, ...children.map((_: string, offset: number) => (offset === 0 ? slot : (slot === 'true' ? 'false' : 'true'))));
+        if (ports.length) parent.ports = ports; else delete parent.ports;
+      } else {
+        parent.children.splice(index, 1, ...children);
+      }
+    }
+    for (let index = raw.length - 1; index >= 0; index -= 1) {
+      if (boundaryIds.has(String(raw[index].id))) raw.splice(index, 1);
+    }
+    for (const node of boundary) delete layout()[String(node.id)];
+  }
+
+  /**
+   * 旧文档的折叠图只有元数据（打组只写 `_nodeGroups`、不改 `children`）：在这里补齐边界卡，
+   * 把跨组执行边真的接上。补齐后「成员里没有边界卡」不再成立，所以是幂等的；
+   * 返回新建的卡 id，调用方负责写进组的 `nodeIds` 并把文档标成待保存。
+   *
+   * 只在 `groups()` 内部调用：它不能回头调 `groups()`（缓存还没写好，会递归）。
+   * 交互命令走 `normalizeBoundaryCards`。
+   */
+  function migrateBoundaryCards(groupId: string, nodeIds: string[]): string[] {
+    if (nodeIds.some((id) => isGroupBoundaryNode(nodeById(id)))) return [];
+    const members = new Set(nodeIds);
+    const entries = incomingCrossings(members);
+    const exits = outgoingCrossings(members);
+    if (!entries.length && !exits.length) return [];
+    const created = materializeBoundaryCards(nodeIds, entries, exits).map((node) => String(node.id));
+    const record = table()[groupId];
+    if (record && typeof record === 'object') record.nodeIds = [...nodeIds, ...created];
+    return created;
+  }
+
+  /** 边界卡在 `nodes` 里的直接执行父节点（边界卡只有一个父）；找不到返回 null。 */
+  function boundaryParent(nodeId: string): any | null {
+    for (const node of nodes()) {
+      if (Array.isArray(node.children) && node.children.includes(String(nodeId))) return node;
+    }
+    return null;
+  }
+
+  /**
+   * 折叠图的真实入口（组外父 → 组入口卡）。数量决定组卡顶边画几个输入口：
+   * 判断留在组外、真/假都折进来时，这里就是两张卡 → 顶边两个口。
+   * 入口卡自己没有入边（悬空）时不计入，因为它外面并没有线。
+   */
+  function groupEntryCardIds(group: NodeGroupRecord): string[] {
+    const members = new Set(group.nodeIds);
+    const result: string[] = [];
+    for (const id of group.nodeIds) {
+      if (!isGroupEntryNode(nodeById(id))) continue;
+      const parent = boundaryParent(String(id));
+      if (parent && !members.has(String(parent.id))) result.push(String(id));
+    }
+    return result;
+  }
+
+  /**
+   * 把折叠图的边界卡调回自洽状态：先内联「已经不跨边界」的卡（成员变了、卡的另一侧被删了），
+   * 再为剩下的跨组边补齐缺失的卡。打组、加入成员、删除成员都走这一趟，
+   * 「每条跨组执行边都经过一张真实的边界卡」这条不变量由它兜住。
+   *
+   * 调用方必须处于同一次 `mutate` 内；返回值供调用方更新提示文案。
+   */
+  function normalizeBoundaryCards(groupId: string): { added: string[]; removed: string[] } {
+    const group = groupById(groupId);
+    if (!group) return { added: [], removed: [] };
+    const members = new Set(group.nodeIds);
+    const stale: string[] = [];
+    for (const id of group.nodeIds) {
+      const node = nodeById(id);
+      if (!isGroupBoundaryNode(node)) continue;
+      const children: string[] = (Array.isArray(node.children) ? node.children : []).map((child: any) => String(child));
+      // 入口的子必须在组内、出口的子必须在组外；空卡（另一侧被删了）也算失效。
+      const childOk = children.length > 0 && children.every((child: string) => (isGroupEntryNode(node) ? members.has(child) : !members.has(child)));
+      // 入口的父必须在组外、出口的父必须在组内；父节点没了（成员被删）同样失效。
+      const parent = boundaryParent(String(id));
+      const parentOk = parent !== null && (isGroupEntryNode(node) ? !members.has(String(parent.id)) : members.has(String(parent.id)));
+      if (!childOk || !parentOk) stale.push(String(id));
+    }
+    if (stale.length) collapseBoundaryCards(stale);
+    const record = table()[groupId];
+    if (!record || typeof record !== 'object') return { added: [], removed: stale };
+    const kept: string[] = (Array.isArray(record.nodeIds) ? record.nodeIds : [])
+      .map((id: any) => String(id))
+      .filter((id: string) => !stale.includes(id));
+    const remaining = new Set<string>(kept);
+    const created = materializeBoundaryCards(kept, incomingCrossings(remaining), outgoingCrossings(remaining))
+      .map((node) => String(node.id));
+    record.nodeIds = [...kept, ...created];
+    return { added: created, removed: stale };
+  }
+
   function synthetic(group: NodeGroupRecord, memberOf: Map<string, string>): ProjectedGroupCardNode {
+    // 组卡的执行出口就是组出口卡的真实下游：出口卡本身是成员，它的 children 指向组外目标，
+    // 于是每条跨组出边在组卡上各得一个边界 pin（UE Collapse Graph 的排法）。
+    // 组入口卡的 children 是组内节点、会被 memberOf 折回组 id，因此不会在这里冒出来。
     const targets: string[] = [];
     for (const id of group.nodeIds) {
       const node = nodeById(id);
       for (const child of Array.isArray(node?.children) ? node.children : []) {
         const target = memberOf.get(child) || child;
-        if (target !== group.id && !targets.includes(target)) targets.push(target);
+        if (target !== group.id) targets.push(target);
       }
     }
+    const execOutputCount = Math.max(targets.length, group.execOutputs.length);
+    // 卡上的「N 个节点」只数真实成员：边界卡是折叠图自己造的，不该混进用户的节点数。
+    const memberCount = group.nodeIds.filter((id) => !isGroupBoundaryNode(nodeById(id))).length;
     return {
       id: group.id,
       type: 'node_group',
       name: group.name,
       children: targets,
       _nodeGroup: true,
-      _nodeCount: group.nodeIds.length,
+      _nodeCount: memberCount,
       _groupPins: boundaryPins(group),
       _hasReferenceOutput: hasExternalReferenceOutput(group),
       _referenceOutputs: externalReferenceOutputs(group),
+      _execOutputCount: execOutputCount,
+      _execOutputNames: group.execOutputs,
+      // 顶边按组外进来的执行边数排输入口：判断留在组外、真/假都折进来时就是两个口。
+      _groupEntryCount: Math.max(group.execInputs.length, groupEntryCardIds(group).length),
+      _groupEntryNames: group.execInputs,
     };
   }
 
+  /** 组内统一的执行入口卡：每条真实入口隧道投影成它的一个输出引脚。 */
   function syntheticInterface(group: NodeGroupRecord): ProjectedGroupInterfaceNode {
-    const entries = entryNodeIds(group);
-    const memberPositions = group.nodeIds.map((id) => layout()[id]).filter(Boolean);
+    const entries = group.nodeIds.flatMap((id) => {
+      const node = nodeById(id);
+      if (!isGroupEntryNode(node)) return [];
+      const child = Array.isArray(node.children) ? node.children.find((childId: string) => group.nodeIds.includes(String(childId)) && !isGroupBoundaryNode(nodeById(String(childId)))) : null;
+      return child ? [String(child)] : [];
+    });
+    const memberPositions = group.nodeIds
+      .filter((id) => !isGroupBoundaryNode(nodeById(id)))
+      .map((id) => layout()[id]).filter(Boolean);
     const centerX = memberPositions.length
       ? (Math.min(...memberPositions.map((pos) => pos.x)) + Math.max(...memberPositions.map((pos) => pos.x + nodeWidth))) / 2
       : nodeWidth / 2;
@@ -410,11 +749,13 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     return {
       id: interfaceId(group.id),
       type: 'node_group_interface',
-      name: `${group.name} 接口`,
+      name: '输入',
       children: entries,
       _nodeGroupInterface: true,
       _nodeGroupId: group.id,
       _groupPins: [],
+      _execOutputCount: Math.max(entries.length, group.execInputs.length),
+      _execOutputNames: group.execInputs,
       _nodeGroupPosition: {
         x: Math.round((centerX - nodeWidth / 2) / 8) * 8,
         // 接口卡自身高度 = baseHeight，底边落在成员顶部上方 INTERFACE_GAP 处。
@@ -423,12 +764,42 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     };
   }
 
+  function syntheticOutputInterface(group: NodeGroupRecord): ProjectedGroupOutputNode {
+    const memberPositions = group.nodeIds
+      .filter((id) => !isGroupBoundaryNode(nodeById(id)))
+      .map((id) => ({ node: nodeById(id), at: layout()[id] }))
+      .filter((item) => item.node && item.at);
+    const centerX = memberPositions.length
+      ? (Math.min(...memberPositions.map((item) => item.at.x)) + Math.max(...memberPositions.map((item) => item.at.x + nodeWidth))) / 2
+      : nodeWidth / 2;
+    const bottom = memberPositions.length
+      ? Math.max(...memberPositions.map((item) => item.at.y + nodeHeight(item.node)))
+      : 0;
+    const exitCount = group.nodeIds.filter((id) => isGroupExitNode(nodeById(id))).length;
+    return {
+      id: outputInterfaceId(group.id),
+      type: 'node_group_output',
+      name: '输出',
+      children: [],
+      _nodeGroupOutput: true,
+      _nodeGroupId: group.id,
+      _execInputCount: Math.max(exitCount, group.execOutputs.length),
+      _execInputNames: group.execOutputs,
+      _nodeGroupPosition: {
+        x: Math.round((centerX - nodeWidth / 2) / 8) * 8,
+        y: Math.round((bottom + BOUNDARY_GAP) / 8) * 8,
+      },
+    };
+  }
+
   /** 组内左侧的数据边界卡：与顶部执行入口分离，让数据线保持从左向右流动。 */
   function syntheticVariables(group: NodeGroupRecord): ProjectedGroupVariablesNode {
     const pins = boundaryPins(group);
+    // 数据边界卡量的是真实成员的区域：入口/出口卡是执行隧道，没有参数端点，
+    // 把它们算进包围盒会把变量卡撑高（入口在上、出口在下各让 176px）。
     const members = group.nodeIds
       .map((id) => ({ node: nodeById(id), pos: layout()[id] }))
-      .filter((item) => item.node && item.pos);
+      .filter((item) => item.node && item.pos && !isGroupBoundaryNode(item.node));
     const minX = members.length ? Math.min(...members.map((item) => item.pos.x)) : 0;
     const minY = members.length ? Math.min(...members.map((item) => item.pos.y)) : 0;
     const maxY = members.length
@@ -466,13 +837,15 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     let result: any[];
     if (scope) {
       const visible = new Set(scope.nodeIds);
+      // 入口/出口现在是文档里的真实隧道节点，组内直接展示真实节点。
+      // 旧实现额外注入合成的 input/output 卡，会让同一边界出现两次，也使重命名误改合成卡。
       const members = nodes().filter((node) => visible.has(node.id)).map((node) => ({
         ...node,
         _nodeGroupMember: true,
         ...(Array.isArray(node.children) ? { children: projectedChildren(node, visible, new Map(), scope.id) } : {}),
       }));
       const variables = syntheticVariables(scope);
-      result = [syntheticInterface(scope), variables, ...members];
+      result = [variables, ...members];
     } else {
       const memberOf = membership();
       const visibleReal = nodes().filter((node) => !memberOf.has(node.id));
@@ -505,11 +878,30 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
   /**
    * 折叠组的执行边只是视觉代理，运行事件仍以真实节点 id 上报。
    * 返回一条可见边实际指向的节点，供连线继承运行态并在事件到达时局部刷新。
+   *
+   * `order` 是这条代理边在投影 `children` 里的下标：同一个父节点可能有多条代理边指向
+   * 同一张折叠图（判断的真/假各接一张入口卡），给了下标就只认那一条真实边，
+   * 免得真口被假口的运行态点亮。
    */
-  function viewEdgeRunTargetIds(parentId: string, childId: string): string[] {
-    if (currentGroup()) return [childId];
+  function viewEdgeRunTargetIds(parentId: string, childId: string, order?: number): string[] {
+    const scope = currentGroup();
+    if (scope) {
+      if (childId === outputInterfaceId(scope.id) && typeof order === 'number' && order >= 0) {
+        const parent = nodeById(parentId);
+        const realChild = Array.isArray(parent?.children) ? parent.children[order] : undefined;
+        if (isGroupExitNode(nodeById(String(realChild || '')))) return [String(realChild)];
+      }
+      return [childId];
+    }
     const memberOf = membership();
     const sourceGroup = groupById(parentId);
+    if (typeof order === 'number' && order >= 0 && !sourceGroup) {
+      const source = nodeById(parentId);
+      const realChild = Array.isArray(source?.children) ? source.children[order] : undefined;
+      if (realChild !== undefined && (memberOf.get(String(realChild)) || String(realChild)) === childId) {
+        return [String(realChild)];
+      }
+    }
     const sourceIds = sourceGroup ? sourceGroup.nodeIds : [parentId];
     const targets: string[] = [];
     for (const sourceId of sourceIds) {
@@ -548,7 +940,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
 
   function groupSelection(): boolean {
     if (currentGroup()) {
-      toast('暂不支持在节点组内继续嵌套打组', true);
+      toast('暂不支持在折叠图内继续嵌套折叠图', true);
       return false;
     }
     const memberOf = membership();
@@ -557,7 +949,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
       return node && node.type !== 'root' && !memberOf.has(id);
     });
     if (ids.length < 2) {
-      toast('请至少选择两个尚未打组的节点', true);
+      toast('请至少选择两个尚未折叠的节点', true);
       return false;
     }
     const id = nextId();
@@ -568,16 +960,24 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
       nodeWidth,
     ) ?? { x: 0, y: 0 };
     const pins = connectedBoundaryPinSpecs(ids);
+    let boundaryCount = 0;
     mutate(() => {
       table(true)[id] = { name: `节点组 ${groups().length + 1}`, nodeIds: ids, pins, pinPolicy: 'explicit-v1' };
       invalidate();
+      // 打组的核心动作：跨组执行边换成真实的边界卡（组外父 → 入口 → 组内子、
+      // 组内父 → 出口 → 组外子），展开时再内联回去，所以运行时的执行关系一个字都不变。
+      normalizeBoundaryCards(id);
+      const members = Array.isArray(table()[id]?.nodeIds) ? table()[id].nodeIds : [];
+      boundaryCount = members.filter((nodeId: string) => isGroupBoundaryNode(nodeById(nodeId))).length;
       layout()[id] = at;
       state.selected = new Set([id]);
       state.selectedEdge = null;
       state.selectedRun = null;
     }, { render: false });
     refreshView();
-    toast(`已将 ${ids.length} 个节点打组`);
+    toast(boundaryCount
+      ? `已将 ${ids.length} 个节点折叠为折叠图（${boundaryCount} 张边界卡接住了跨组执行边）`
+      : `已将 ${ids.length} 个节点折叠为折叠图`);
     return true;
   }
 
@@ -609,16 +1009,23 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     const group = groupById(id);
     if (!group) return false;
     mutate(() => {
+      // 展开折叠图 = 边界卡内联回两侧的真实边：组外父 → 组内子、组内父 → 组外子。
+      // 边界卡只活在折叠图的边界上，展开后它们不该再留在图里。
+      collapseBoundaryCards(group.nodeIds);
       delete table()[id];
       invalidate();
       delete layout()[id];
       delete layout()[interfaceId(id)];
+      delete layout()[outputInterfaceId(id)];
       delete layout()[variablesId(id)];
       if (state.nodeGroupId === id) state.nodeGroupId = '';
-      state.selected = new Set(group.nodeIds.filter((nodeId) => nodeById(nodeId)));
+      state.selected = new Set(group.nodeIds.filter((nodeId) => {
+        const node = nodeById(nodeId);
+        return node && !isGroupBoundaryNode(node);
+      }));
     }, { render: false });
     refreshView(true);
-    toast('节点组已解散，节点和执行关系保持不变');
+    toast('折叠图已展开，节点与执行关系回到折叠前');
     return true;
   }
 
@@ -630,6 +1037,65 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     if (String(value.name || '') === next) return true;
     mutate(() => {
       value.name = next;
+      invalidate();
+    }, { render: false });
+    refreshView();
+    return true;
+  }
+
+  function execPinNames(groupId: string, side: 'inputs' | 'outputs'): string[] {
+    const group = groupById(groupId);
+    return group ? [...(side === 'inputs' ? group.execInputs : group.execOutputs)] : [];
+  }
+
+  function addExecPin(groupId: string, side: 'inputs' | 'outputs'): boolean {
+    const value = table()[groupId];
+    const group = groupById(groupId);
+    if (!value || !group) return false;
+    const key = side === 'inputs' ? 'execInputs' : 'execOutputs';
+    const names = Array.isArray(value[key]) ? [...value[key]] : [...(side === 'inputs' ? group.execInputs : group.execOutputs)];
+    const base = side === 'inputs' ? 'execute' : 'then';
+    mutate(() => {
+      names.push(names.length ? `${base}${names.length + 1}` : base);
+      value[key] = names;
+      invalidate();
+    }, { render: false });
+    refreshView();
+    return true;
+  }
+
+  function renameExecPin(groupId: string, side: 'inputs' | 'outputs', index: number, name: string): boolean {
+    const value = table()[groupId];
+    const group = groupById(groupId);
+    if (!value || !group) return false;
+    const key = side === 'inputs' ? 'execInputs' : 'execOutputs';
+    const names = Array.isArray(value[key]) ? [...value[key]] : [...(side === 'inputs' ? group.execInputs : group.execOutputs)];
+    if (index < 0 || index >= names.length) return false;
+    const next = String(name || '').trim();
+    if (!next || names[index] === next) return true;
+    mutate(() => {
+      names[index] = next;
+      value[key] = names;
+      invalidate();
+    }, { render: false });
+    refreshView();
+    return true;
+  }
+
+  function removeExecPin(groupId: string, side: 'inputs' | 'outputs', index: number): boolean {
+    const value = table()[groupId];
+    const group = groupById(groupId);
+    if (!value || !group) return false;
+    const key = side === 'inputs' ? 'execInputs' : 'execOutputs';
+    const names = Array.isArray(value[key]) ? [...value[key]] : [...(side === 'inputs' ? group.execInputs : group.execOutputs)];
+    const linkedCount = side === 'inputs' ? groupEntryCardIds(group).length : group.nodeIds.filter((id) => isGroupExitNode(nodeById(id))).length;
+    if (index < linkedCount || index < 0 || index >= names.length) {
+      toast('已连接的执行引脚不能直接删除，请先断开对应连线', true);
+      return false;
+    }
+    mutate(() => {
+      names.splice(index, 1);
+      value[key] = names;
       invalidate();
     }, { render: false });
     refreshView();
@@ -649,17 +1115,25 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
       value.nodeIds = nextIds;
       value.pins = [...rawPins, ...connected];
       invalidate();
+      // 成员变了，边界也跟着变：新成员跨边界的执行边要接上边界卡，
+      // 已经被并进来的那一侧（例如原来的组外目标）要把旧卡内联掉。
+      normalizeBoundaryCards(group.id);
     }
   }
 
   /**
    * 删除/剪切节点后原子清理组元数据：从成员与端点里移除这些节点，
    * 没有剩余成员的组整组删除（含它的布局残留）。调用方必须处于同一次 mutate 内。
+   *
+   * 边界卡只有一条真实边（入口接组内首节点、出口接组外目标）：那条边的另一端被删掉，
+   * 这张卡就成了死卡——`normalizeBoundaryCards` 会把它内联掉并从图里移除，
+   * 画布上不会留下指向空节点的边界卡。
    */
   function removeMembers(ids: string[]): void {
     const removed = new Set(ids.map(String));
     if (!removed.size) return;
     const source = table();
+    const affected: string[] = [];
     for (const [id, value] of Object.entries(source)) {
       if (!value || typeof value !== 'object') continue;
       const nextIds = (Array.isArray(value.nodeIds) ? value.nodeIds : []).filter((nodeId: any) => !removed.has(String(nodeId)));
@@ -668,14 +1142,59 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
         value.pins = value.pins.filter((pin: any) => !removed.has(String(pin?.nodeId)));
       }
       if (!nextIds.length) {
+        // 连边界卡都不剩：整组连同布局残留一起删除。
         delete source[id];
         delete layout()[id];
         delete layout()[interfaceId(id)];
+        delete layout()[outputInterfaceId(id)];
         delete layout()[variablesId(id)];
         if (state.nodeGroupId === id) state.nodeGroupId = '';
+      } else {
+        // 最后一个真实成员被删时，剩下的边界卡失去意义：内联回去再整组删除，
+        // 否则画布上会留下一个只剩入口/出口、没有任何业务节点的空折叠图。
+        const realMembers = nextIds.filter((nodeId: any) => !isGroupBoundaryNode(nodeById(nodeId)));
+        if (!realMembers.length) {
+          collapseBoundaryCards(nextIds);
+          delete source[id];
+          delete layout()[id];
+          delete layout()[interfaceId(id)];
+          delete layout()[outputInterfaceId(id)];
+          delete layout()[variablesId(id)];
+          if (state.nodeGroupId === id) state.nodeGroupId = '';
+        } else {
+          affected.push(id);
+        }
       }
     }
     invalidate();
+    // 边界卡离开成员表后没有任何归属，留在图上就是非法节点（校验会报「必须属于某个折叠图」）：
+    // 直接从图与布局里摘掉，父节点对它的引用同步清掉（判断节点同步口位）。
+    // 真实成员由调用方（deleteSelection / cutSelection）负责，这里只收拾边界卡。
+    const raw = nodes();
+    for (let index = raw.length - 1; index >= 0; index -= 1) {
+      const node = raw[index];
+      if (isGroupBoundaryNode(node) && removed.has(String(node.id))) {
+        delete layout()[String(node.id)];
+        raw.splice(index, 1);
+      }
+    }
+    for (const node of raw) {
+      if (!Array.isArray(node.children)) continue;
+      const doomed = [...node.children].filter((child: string) => removed.has(String(child)) && isGroupBoundaryNode(nodeById(child)));
+      if (!doomed.length) continue;
+      if (node.type === 'condition') {
+        const ports = conditionPortsOf(node);
+        const kept = node.children
+          .map((child: string, index: number) => ({ child, port: ports[index] }))
+          .filter((item: any) => !doomed.includes(String(item.child)));
+        node.children = kept.map((item: any) => String(item.child));
+        const nextPorts = kept.map((item: any) => item.port || 'true');
+        if (nextPorts.length) node.ports = nextPorts; else delete node.ports;
+      } else {
+        node.children = node.children.filter((child: string) => !doomed.includes(String(child)));
+      }
+    }
+    for (const id of affected) normalizeBoundaryCards(id);
   }
 
   /** 当前组内的某个成员参数是否已经被用户暴露到组接口；组外返回 null。 */
@@ -762,7 +1281,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
 
   return {
     groups, groupById, currentGroup, runSummary, viewNodes, viewNodeById, viewReferenceSourceById, viewEdgeRunTargetIds, adjacentEdges,
-    groupSelection, enterGroup, leaveGroup, ungroup, renameGroup, addToCurrentGroup, removeMembers,
+    groupSelection, enterGroup, leaveGroup, ungroup, renameGroup, execPinNames, addExecPin, renameExecPin, removeExecPin, addToCurrentGroup, removeMembers,
     pinExposure, pinCandidates, setPinExposed, pinMenuEntry, candidateMenu, boundaryVariableRefs, visibleVariableCardIds,
   };
 }

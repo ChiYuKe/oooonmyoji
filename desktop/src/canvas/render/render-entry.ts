@@ -131,15 +131,19 @@ export function createRenderEntry(deps: RenderEntryDeps) {
   /** 控制器维护的「节点 id → 元素」索引：拖拽补丁构造期就要能引用。 */
   const nodeElements = new Map<string, any>();
 
-  function structuralEdges(): Array<{ id: string; kind: 'structural'; parentId: string; childId: string }> {
-    const list: Array<{ id: string; kind: 'structural'; parentId: string; childId: string }> = [];
+  /**
+   * 结构边清单。`id` 带口位下标：折叠视图里同一个父节点可能有多条代理边指向同一张
+   * 折叠图（判断的真/假各接一张入口卡），只有 (父, 子, 口位) 才能唯一标识一条边。
+   */
+  function structuralEdges(): Array<{ id: string; kind: 'structural'; parentId: string; childId: string; order: number }> {
+    const list: Array<{ id: string; kind: 'structural'; parentId: string; childId: string; order: number }> = [];
     for (const parent of nodes()) {
       const children = Array.isArray(parent.children) ? parent.children : [];
-      for (const childId of children) {
+      children.forEach((childId: any, order: number) => {
         const child = nodeById(String(childId));
-        if ((parent.type === 'bool_judge' || parent.type === 'break') || (child && (child.type === 'bool_judge' || child.type === 'break'))) continue;
-        list.push({ id: `${parent.id}->${childId}`, kind: 'structural', parentId: parent.id, childId: String(childId) });
-      }
+        if ((parent.type === 'bool_judge' || parent.type === 'break') || (child && (child.type === 'bool_judge' || child.type === 'break'))) return;
+        list.push({ id: `${parent.id}->${childId}#${order}`, kind: 'structural', parentId: parent.id, childId: String(childId), order });
+      });
     }
     return list;
   }

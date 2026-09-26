@@ -64,6 +64,10 @@ export function derivedNodeTitle(node: any, deps: NodeTitleDeps = {}): string {
   if (!node || typeof node !== 'object') return '';
   if (node.type === 'bool_judge') return boolJudgeTitle(node.expression);
   if (node.type === 'break') return breakTitle(node, deps);
+  // 折叠图边界卡：UE 的 Collapsed Graph Tunnel。标题只说它站在哪一侧，
+  // 具体接的是谁由卡片摘要行（`入口 → 识别当前页面`）说清楚。
+  if (node.type === 'group_entry') return '折叠图入口';
+  if (node.type === 'group_exit') return '折叠图出口';
   return '';
 }
 

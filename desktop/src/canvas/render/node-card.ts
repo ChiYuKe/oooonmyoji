@@ -17,7 +17,7 @@ import {
 } from '../model/exec-ports';
 import { appendSelectionOutline } from './selection-outline';
 import { FULL_DETAIL_MIN_ZOOM } from './zoom-level';
-import { isGroupBoundaryPin, isGroupInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from '../model/node-groups';
+import { groupPortOffset, isGroupBoundaryPin, isGroupInterfaceNode, isGroupOutputInterfaceNode, isGroupVariablesNode, isProjectedGroupNode } from '../model/node-groups';
 import { nodeDisplayTitle } from '../model/node-title';
 
 export interface NodePreviewInfo {
@@ -294,13 +294,14 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     const pins = nodeVariablePins(node);
     const height = nodeHeight(node);
     const isInterface = isGroupInterfaceNode(node);
+    const isOutputInterface = isGroupOutputInterfaceNode(node);
     const isVariables = isGroupVariablesNode(node);
-    const isCollapsedGroup = !isInterface && !isVariables;
+    const isCollapsedGroup = !isInterface && !isOutputInterface && !isVariables;
     const runtime = isCollapsedGroup ? groupPresentation(node) : null;
     const selected = state.selected.has(node.id) ? ' selected' : '';
     const runClass = runtime?.status ? ` run-${runtime.status}` : '';
     const group = svgEl('g', {
-      class: `node studio-card type-node_group category-control${selected}${runClass}`,
+      class: `node studio-card type-node_group category-control${isInterface ? ' node-group-interface-card' : isOutputInterface ? ' node-group-interface-card node-group-output-card' : isVariables ? ' node-group-variables-card' : ' node-group-collapsed-card'}${selected}${runClass}`,
       transform: `translate(${pos.x},${pos.y})`,
       'data-id': node.id,
     }, layer);
@@ -310,7 +311,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     svgEl('rect', { class: 'node-accent card-accent node-group-accent', x: 1, y: 3, width: 4, height: 27, rx: 2 }, group);
     svgEl('line', { class: 'node-header-rule', x1: 1, y1: 33, x2: nodeWidth - 1, y2: 33 }, group);
     const iconPlate = svgEl('rect', { class: 'node-icon-plate', x: 10, y: 7, width: 20, height: 20, rx: 4 }, group);
-    svgEl('text', { class: 'node-icon node-group-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = isInterface ? '⇄' : isVariables ? '◆' : '▦';
+    svgEl('text', { class: 'node-icon node-group-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = isInterface ? '⇄' : isOutputInterface ? '⇄' : isVariables ? '◆' : '▦';
     nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: node.name || '节点组', width: nodeWidth - (isVariables ? 80 : 53), size: 12 });
     if (isVariables) {
       const add = svgEl('g', { class: 'node-group-add', role: 'button', tabindex: 0 }, group);
@@ -331,7 +332,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         showMenu(at.x + nodeWidth, at.y + 28, nodeGroupVariableMenuItems?.(String(node._nodeGroupId || '')) || []);
       });
     }
-    nodeCards.text(group, { className: 'node-type card-kicker', x: 22, y: 50, value: isInterface ? '执行入口' : isVariables ? '组变量' : '节点组', width: 100, size: 10 });
+    nodeCards.text(group, { className: 'node-type card-kicker', x: 22, y: 50, value: isInterface ? '执行入口' : isOutputInterface ? '执行出口' : isVariables ? '组变量' : '节点组', width: 100, size: 10 });
     if (isCollapsedGroup) {
       svgEl('circle', { class: 'run-dot node-group-run-dot', cx: nodeWidth - 74, cy: 46, r: 3, visibility: runtime?.status ? 'visible' : 'hidden' }, group);
       nodeCards.text(group, {
@@ -341,12 +342,12 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     }
     nodeCards.text(group, {
       className: `node-subtitle card-description${isCollapsedGroup ? ' node-group-progress' : ''}`, x: 22, y: 70,
-      value: isInterface ? '连接组内入口节点' : isVariables ? `${pins.length} 个跨组数据端点` : (runtime?.progressLabel || `${Number(node._nodeCount || 0)} 个节点`),
+      value: isInterface ? `${Number(node._execOutputCount || 0)} 个执行引脚` : isOutputInterface ? `${Number(node._execInputCount || 0)} 个执行引脚` : isVariables ? `${pins.length} 个跨组数据端点` : (runtime?.progressLabel || `${Number(node._nodeCount || 0)} 个节点`),
       width: nodeWidth - 44, size: 11,
     });
     nodeCards.text(group, {
       className: `node-meta card-meta${isCollapsedGroup ? ' node-group-runtime-detail' : ''}`, x: 22, y: 87,
-      value: isInterface ? '执行流从这里进入' : isVariables ? '连接真实成员参数' : (runtime?.detailLabel || '双击进入组内编辑'),
+      value: isInterface ? '连接组内入口节点' : isOutputInterface ? '连接组内出口节点' : isVariables ? '连接真实成员参数' : (runtime?.detailLabel || '双击进入组内编辑'),
       width: nodeWidth - 44, size: 10,
     });
     if (isCollapsedGroup) svgEl('title', { class: 'node-group-runtime-title' }, group).textContent = `${node.name || '节点组'}\n${runtime?.title || ''}`;
@@ -423,13 +424,33 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         showMenu(event.clientX, event.clientY, nodeVariablePinMenuItems(targetNodeId, { ...pin, param: targetParam }, point));
       });
     });
-    if (!isVariables) {
-      svgEl('circle', { class: 'port port-in node-group-port', cx: nodeWidth / 2, cy: 0, r: portRadius }, group);
-      svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, 0, portRadius) }, group);
+    if (!isVariables && !isInterface) {
+      // 顶边输入口按组外进来的执行边数排，与连线落点共用 `groupPortOffset`。
+      const entryCount = isOutputInterface
+        ? Math.max(0, Number(node._execInputCount || 0))
+        : Math.max(1, Number(node._groupEntryCount || 1));
+      for (let slot = 0; slot < entryCount; slot += 1) {
+        const x = groupPortOffset(nodeWidth, slot, entryCount);
+        const input = svgEl('circle', { class: 'port port-in node-group-port', cx: x, cy: 0, r: portRadius }, group);
+        svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(x, 0, portRadius) }, group);
+        const inputName = isOutputInterface ? node._execInputNames?.[slot] : node._groupEntryNames?.[slot];
+        svgEl('title', {}, input).textContent = inputName || `组执行入口 ${slot + 1}`;
+      }
     }
-    if (Array.isArray(node.children) && node.children.length) {
-      svgEl('circle', { class: 'port port-out node-group-port', cx: nodeWidth / 2, cy: height, r: portRadius }, group);
-      svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, height, portRadius) }, group);
+    // 折叠图接口卡是一个执行入口：它只有一个出口，不能按组内入口节点数量复制端点。
+    // 组卡本身才按组外真实目标数量展示多个出口。
+    const execOutputCount = isInterface
+      ? Math.max(0, Number(node._execOutputCount || 0))
+      : isOutputInterface ? 0
+      : Number(node._execOutputCount || (Array.isArray(node.children) ? node.children.length : 0));
+    if (execOutputCount > 0) {
+      for (let index = 0; index < execOutputCount; index += 1) {
+        const x = execOutputCount === 1 ? nodeWidth / 2 : (nodeWidth * (index + 1)) / (execOutputCount + 1);
+        const output = svgEl('circle', { class: 'port port-out node-group-port', cx: x, cy: height, r: portRadius }, group);
+        svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(x, height, portRadius) }, group);
+        const outputName = node._execOutputNames?.[index];
+        svgEl('title', {}, output).textContent = outputName || `组执行输出 ${index + 1}`;
+      }
     }
     if (node._hasReferenceOutput && Array.isArray(node._referenceOutputs) && node._referenceOutputs.length) {
       const outputs = node._referenceOutputs;
@@ -438,7 +459,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         const ref = String(item.ref || `nodes.${node._nodeGroupId || node.id}.output`);
         const tone = dataToneColor(ref);
         const output = svgEl('circle', {
-          class: 'port port-out port-out-reference node-group-port connected',
+          class: 'port port-out port-out-reference node-group-reference-port connected',
           style: `--data-tone:${tone}`,
           cx: referencePortX, cy: y, r: portRadius - 2.5,
           'data-field': item.field || '',
@@ -448,13 +469,22 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
           d: dataPinArrow(referencePortX, y, portRadius - 2.5),
         }, group);
         svgEl('title', {}, output).textContent = `组内节点输出引用：${ref}`;
+        output.addEventListener('pointerdown', (event: any) => {
+          event.stopPropagation();
+          startReferenceConnection?.(event, item.nodeId, undefined, item.field || '');
+        });
+        output.addEventListener('contextmenu', (event: any) => {
+          const point = openPortContextMenu(event);
+          if (!point) return;
+          showMenu(event.clientX, event.clientY, nodeReferencePortMenuItems ? nodeReferencePortMenuItems(item.nodeId, point) : []);
+        });
       });
     }
     const press = (event: any): void => {
       if (event.button !== 0) return;
       // 组内两张合成卡也编辑同一个组名；详情镜像只需要认识真实 group id。
       requestInspector({ kind: 'node', nodeId: String(node._nodeGroupId || node.id) });
-      if (isInterface || isVariables) {
+      if (isInterface || isOutputInterface || isVariables) {
         startNodeDrag(event, node.id);
         return;
       }
@@ -472,7 +502,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       event.preventDefault();
       event.stopPropagation();
       if (contextMenuSuppressedByPan()) return;
-      if (isInterface || isVariables) return;
+      if (isInterface || isOutputInterface || isVariables) return;
       state.selected = new Set([node.id]);
       state.selectedEdge = null;
       state.selectedRun = null;
@@ -480,8 +510,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
       const runtimeFocus = groupRuntimeFocus(node);
       showMenu(event.clientX, event.clientY, [
         ...(runtimeFocus ? [{ label: runtimeFocus.label, run: () => enterNodeGroup?.(node.id, runtimeFocus.id) }] : []),
-        { label: '进入节点组', run: () => enterNodeGroup?.(node.id) },
-        { label: '解散节点组', run: () => ungroupNodeGroup?.(node.id) },
+        { label: '进入折叠图', run: () => enterNodeGroup?.(node.id) },
+        { label: '展开折叠图', run: () => ungroupNodeGroup?.(node.id) },
       ]);
     });
     appendSelectionOutline(group, svgEl, nodeWidth, height, 7);
@@ -1104,7 +1134,8 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     // 值卡片（布尔判断 / 拆分）只有数据端点：顶部不画执行流入口箭头。
     // 它们的值通过右侧输出引用口被别的节点取用，一条悬空的入口箭头只会让人
     // 去找那条并不存在的父连线（父节点的线仍可拖到卡片顶边接上）。
-    if (node.type !== 'root' && !isValueCardNode(node)) {
+    // 折叠图入口卡同理：它就是「从外面进来」这件事本身，上面不该再有一个入口。
+    if (node.type !== 'root' && node.type !== 'group_entry' && !isValueCardNode(node)) {
       const input = svgEl('circle', { class: 'port port-in', cx: nodeWidth / 2, cy: 0, r: portRadius, 'data-node': node.id }, group);
       // 箭头紧跟端口圆点：圆点只做几何与命中，可见形状交给它后面的箭头（CSS 用 `+` 做悬停联动）。
       svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, 0, portRadius) }, group);
@@ -1223,7 +1254,9 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
           showMenu(event.clientX, event.clientY, nodeOutputPortMenuItems(node.id, point, port));
         });
       }
-    } else {
+    } else if (node.type !== 'group_exit') {
+      // 折叠图出口卡是执行流的终点：它就是「从这里出去」这件事本身，
+      // 真正的下游在组外（组卡上按出口卡各给一个边界 pin），卡底不该再有一个出口。
       const output = svgEl('circle', { class: 'port port-out', cx: nodeWidth / 2, cy: height, r: portRadius, 'data-node': node.id }, group);
       svgEl('path', { class: 'port-glyph port-glyph-exec', d: execPinArrow(nodeWidth / 2, height, portRadius) }, group);
       output.addEventListener('pointerdown', (event: any) => startConnection(event, node.id));
@@ -1267,7 +1300,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         showMenu(event.clientX, event.clientY, [
           { label: '进入子工作流视图', run: () => requestOpenSubWorkflow(node.id) },
           'separator',
-          ...(state.selected.size >= 2 && groupSelection ? [{ label: '将所选节点打组', run: () => groupSelection() }, 'separator'] : []),
+          ...(state.selected.size >= 2 && groupSelection ? [{ label: '折叠所选节点', run: () => groupSelection() }, 'separator'] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           { label: '删除节点', danger: true, run: () => deleteSelection() },

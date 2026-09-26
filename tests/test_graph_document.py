@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from src.oooonmyoji.actions import Action, ActionRegistry, ActionSpec
+from src.oooonmyoji.actions import Action, ActionResult, ActionRegistry, ActionSpec, ActionStatus
 from src.oooonmyoji.actions.manifest import ActionDefinition
 from src.oooonmyoji.exceptions import ConfigError
 from src.oooonmyoji.workflows.dsl import parse_document
+from src.oooonmyoji.workflows.engine import WorkflowEngine
 from src.oooonmyoji.workflows.graph_compile import compile_graph, decompile_workflow
 from src.oooonmyoji.workflows.graph_schema import is_graph_document
 from src.oooonmyoji.workflows.loader import WorkflowLoader
@@ -906,3 +908,244 @@ def test_python_matches_shared_graph_rules(case: dict[str, Any]) -> None:
     expected = case.get("python_error")
     if expected:
         assert re.search(expected, str(error.value)), str(error.value)
+
+
+# --------------------------------------------------------------------------- 折叠图边界卡
+
+
+class _BoundaryEchoAction(Action):
+    name = "test.echo"
+
+    def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
+        return ActionResult.succeeded({"value": arguments.get("value")})
+
+
+class _BoundaryContext:
+    def __init__(self) -> None:
+        self.cancelled = threading.Event()
+
+    def check_cancelled(self) -> None:
+        pass
+
+    def begin_action(self) -> threading.Event:
+        return threading.Event()
+
+    def bind_action(self, token: threading.Event) -> None:
+        pass
+
+    def end_action(self, token: threading.Event) -> None:
+        pass
+
+    def request_action_cancel(self, token: threading.Event | None = None) -> None:
+        pass
+
+
+def _echo_registry() -> ActionRegistry:
+    registry = ActionRegistry()
+    registry.register(
+        ActionSpec(
+            ActionDefinition(
+                name="test.echo",
+                version="1.0.0",
+                entry="test:test.echo",
+                description="",
+                parameters={},
+                output_schema={"type": "object"},
+                retry="safe",
+                side_effect=False,
+                input_schema={"type": "object"},
+            ),
+            _BoundaryEchoAction(),
+        )
+    )
+    return registry
+
+
+def _boundary_doc(edges: list[dict[str, Any]], members: list[str]) -> dict[str, Any]:
+    """一组折叠图的文档骨架：组内是 `seq → a, b`，组外有 `c`。
+
+    边界卡只在它登记进 `members` 时才出现在文档里（卡必须是某个组的成员，否则无从归属）。
+    """
+
+    nodes: list[dict[str, Any]] = [
+        {"id": "root", "type": "root", "at": {"x": 0, "y": 0}},
+        {"id": "seq", "type": "sequence", "at": {"x": 0, "y": 100}},
+        {"id": "a", "type": "task", "action": "test.echo", "params": {}, "at": {"x": 0, "y": 200}},
+        {"id": "b", "type": "task", "action": "test.echo", "params": {}, "at": {"x": 0, "y": 300}},
+        {"id": "c", "type": "task", "action": "test.echo", "params": {}, "at": {"x": 0, "y": 500}},
+    ]
+    for boundary_id, boundary_type in (("entry", "group_entry"), ("exit", "group_exit")):
+        if boundary_id in members:
+            nodes.append({"id": boundary_id, "type": boundary_type, "at": {"x": 0, "y": 400}})
+    return graph(
+        nodes,
+        edges,
+        groups=[{"id": "g1", "nodeIds": members, "pins": [], "pinPolicy": "explicit-v1"}],
+    )
+
+
+def test_group_boundary_cards_compile_to_pass_through_runtime() -> None:
+    """折叠图边界卡是真实节点：编译后留在运行时文档里，引擎按单子透传执行。
+
+    单子透传等价于「只有一个子节点的 sequence」：步骤顺序与展开折叠图后完全一致，
+    边界卡自己只上报一条成功事件、不产生额外输出。
+    """
+
+    document = _boundary_doc(
+        [
+            edge("root", "then.0", "entry"),
+            edge("entry", "then.0", "seq"),
+            edge("seq", "then.0", "a"),
+            edge("seq", "then.1", "b"),
+            edge("seq", "then.2", "exit"),
+            edge("exit", "then.0", "c"),
+        ],
+        ["entry", "seq", "a", "b", "exit"],
+    )
+    compiled = compile_graph(document)
+    assert "groups" not in compiled, "运行时文档里没有折叠图元数据"
+    by_id = {node["id"]: node for node in compiled["nodes"]}
+    assert by_id["entry"]["type"] == "group_entry"
+    assert by_id["exit"]["type"] == "group_exit"
+    assert by_id["root"]["children"] == ["entry"]
+    assert by_id["entry"]["children"] == ["seq"]
+    assert by_id["seq"]["children"] == ["a", "b", "exit"]
+    assert by_id["exit"]["children"] == ["c"]
+
+    # 边界卡在运行时文档里，加载链路（compile → validate → engine）照常跑通。
+    registry = _echo_registry()
+    spec = validate_workflow(compiled, Path("grouped.owf"), registry, project_root=PROJECT_ROOT)
+    result = WorkflowEngine(spec, registry, _BoundaryContext(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    # 业务步骤顺序与展开折叠图后完全一致（边界卡不改变执行顺序）。
+    assert [step["step_id"] for step in result.step_history if step["node_type"] == "task"] == ["a", "b", "c"]
+    # 边界卡自己也是真实节点：它们照常上报 step 事件（画布上的代理线靠它点亮），
+    # 但语义只是单子透传，所以状态是成功而不产生额外输出。
+    by_step = {step["step_id"]: step for step in result.step_history}
+    assert by_step["entry"]["node_type"] == "group_entry"
+    assert by_step["exit"]["node_type"] == "group_exit"
+    assert by_step["entry"]["status"] == "succeeded"
+    assert by_step["exit"]["status"] == "succeeded"
+
+
+def test_group_boundary_cards_are_validated() -> None:
+    """边界卡不变量：恰好属于一个组、入口的父在组外/子在组内、出口的父在组内/子在组外。"""
+
+    chain = [
+        edge("root", "then.0", "entry"),
+        edge("entry", "then.0", "seq"),
+        edge("seq", "then.0", "a"),
+        edge("seq", "then.1", "b"),
+        edge("seq", "then.2", "exit"),
+        edge("exit", "then.0", "c"),
+    ]
+
+    # 入口卡必须由组外父节点连入（这里是组内的 seq 在喂它）。
+    fed_from_inside = _boundary_doc(
+        [edge("root", "then.0", "seq"), edge("seq", "then.0", "entry"), edge("entry", "then.0", "a"),
+         edge("seq", "then.1", "exit"), edge("exit", "then.0", "c")],
+        ["entry", "seq", "a", "exit"],
+    )
+    with pytest.raises(ConfigError, match="entry.*must be fed from outside group g1"):
+        compile_graph(fed_from_inside)
+
+    # 入口卡的子节点必须在组内。
+    child_outside = _boundary_doc(
+        [edge("root", "then.0", "entry"), edge("entry", "then.0", "c")],
+        ["entry", "seq", "a", "b"],
+    )
+    with pytest.raises(ConfigError, match="entry.*must lead into group g1"):
+        compile_graph(child_outside)
+
+    # 出口卡必须由组内父节点连入。
+    exit_fed_outside = _boundary_doc(
+        [edge("root", "then.0", "entry"), edge("entry", "then.0", "seq"), edge("seq", "then.0", "a"),
+         edge("seq", "then.1", "b"), edge("root", "then.1", "exit"), edge("exit", "then.0", "c")],
+        ["entry", "seq", "a", "b", "exit"],
+    )
+    with pytest.raises(ConfigError, match="exit.*must be fed from inside group g1"):
+        compile_graph(exit_fed_outside)
+
+    # 出口卡的子节点必须在组外。
+    exit_child_inside = _boundary_doc(
+        [edge("root", "then.0", "entry"), edge("entry", "then.0", "seq"), edge("seq", "then.0", "a"),
+         edge("seq", "then.1", "exit"), edge("exit", "then.0", "b")],
+        ["entry", "seq", "a", "b", "exit"],
+    )
+    with pytest.raises(ConfigError, match="exit.*must lead out of group g1"):
+        compile_graph(exit_child_inside)
+
+    # 边界卡必须恰好属于一个折叠图。
+    orphan = _boundary_doc(chain, ["entry", "seq", "a", "b", "exit"])
+    orphan["groups"][0]["nodeIds"] = ["entry", "seq", "a", "b"]
+    with pytest.raises(ConfigError, match="exit.*must belong to exactly one group"):
+        compile_graph(orphan)
+
+    # 已经有边界卡时，残留的裸跨组边会被点名（不能再绕过隧道直连）。
+    # 这里只有出口卡、没有入口卡：root → seq 这条入边绕过了隧道。
+    raw_crossing = _boundary_doc(
+        [edge("root", "then.0", "seq"), edge("seq", "then.0", "a"), edge("seq", "then.1", "b"),
+         edge("seq", "then.2", "exit"), edge("exit", "then.0", "c")],
+        ["seq", "a", "b", "exit"],
+    )
+    with pytest.raises(ConfigError, match="edges\\[0\\].*enters group g1"):
+        compile_graph(raw_crossing)
+
+    # 旧文档只有元数据、一条边界卡都没有时照常编译：检查只在边界卡存在时才生效。
+    legacy = _boundary_doc(
+        [edge("root", "then.0", "seq"), edge("seq", "then.0", "a"), edge("seq", "then.1", "b"),
+         edge("seq", "then.2", "c")],
+        ["seq", "a", "b"],
+    )
+    compiled = compile_graph(legacy)
+    assert {node["id"] for node in compiled["nodes"]} == {"root", "seq", "a", "b", "c"}
+    assert not [node for node in compiled["nodes"] if node.get("type") in {"group_entry", "group_exit"}]
+    # 裸跨组边在没有边界卡的旧文档里照旧编译成直接边（编辑器加载时才会补卡）。
+    assert {node["id"]: node for node in compiled["nodes"]}["seq"]["children"] == ["a", "b", "c"]
+
+
+def test_group_with_two_entries_from_one_condition_compiles_and_runs() -> None:
+    """判断留在组外、真/假各接一张入口卡折进同一张折叠图：合法，且只跑命中的那一条。
+
+    这是编辑器里「选中两条分支折起来、判断留在外面」的常见形状：折叠图有两个入口，
+    但运行时每个入口只是一条单子透传，真/假互斥的语义不变。
+    """
+
+    document = graph(
+        [
+            {"id": "root", "type": "root", "at": {"x": 0, "y": 0}},
+            {"id": "judge", "type": "condition", "expression": False, "at": {"x": 0, "y": 100}},
+            {"id": "entry_true", "type": "group_entry", "at": {"x": 0, "y": 200}},
+            {"id": "entry_false", "type": "group_entry", "at": {"x": 0, "y": 300}},
+            {"id": "a", "type": "task", "action": "test.echo", "params": {}, "at": {"x": 0, "y": 400}},
+            {"id": "b", "type": "task", "action": "test.echo", "params": {}, "at": {"x": 0, "y": 500}},
+        ],
+        [
+            edge("root", "then.0", "judge"),
+            {"from": {"node": "judge", "pin": "true"}, "to": {"node": "entry_true", "pin": "in"}},
+            {"from": {"node": "judge", "pin": "false"}, "to": {"node": "entry_false", "pin": "in"}},
+            edge("entry_true", "then.0", "a"),
+            edge("entry_false", "then.0", "b"),
+        ],
+        groups=[
+            {
+                "id": "g1",
+                "name": "组",
+                "nodeIds": ["entry_true", "entry_false", "a", "b"],
+                "pins": [],
+                "pinPolicy": "explicit-v1",
+            }
+        ],
+    )
+    compiled = compile_graph(document)
+    by_id = {node["id"]: node for node in compiled["nodes"]}
+    assert by_id["judge"]["children"] == ["entry_true", "entry_false"], "真/假各得一张入口卡"
+    assert by_id["judge"]["ports"] == ["true", "false"], "口位与 children 逐位对齐"
+    assert by_id["entry_true"]["children"] == ["a"]
+    assert by_id["entry_false"]["children"] == ["b"]
+
+    registry = _echo_registry()
+    spec = validate_workflow(compiled, Path("two_entry.owf"), registry, project_root=PROJECT_ROOT)
+    result = WorkflowEngine(spec, registry, _BoundaryContext(), {}).run()
+    assert result.status == ActionStatus.SUCCEEDED
+    assert [step["step_id"] for step in result.step_history if step["node_type"] == "task"] == ["b"], "条件为假只跑假分支"

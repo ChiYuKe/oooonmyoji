@@ -97,6 +97,50 @@ test('判断节点的连线从各自的口出线，徽标写「真 / 假」而�
   assert.equal(h.state.connect.oldChild, 'on_false');
 });
 
+test('同一父节点折进同一张折叠图的两条代理线各从自己的口出线，局部更新互不干扰', () => {
+  // 折叠视图的投影：判断的真/假两条跨组边都指向同一张组卡（入口卡在组内）。
+  const h = harness([
+    {id: 'root', type: 'root', children: ['judge']},
+    {id: 'judge', type: 'condition', expression: true, children: ['node_group_1', 'node_group_1'], ports: ['true', 'false']},
+    {id: 'node_group_1', type: 'node_group', _nodeGroup: true, children: ['outside'], _nodeCount: 3},
+    {id: 'outside', type: 'task'},
+  ], {positions: {judge: {x: 0, y: 200}, node_group_1: {x: 0, y: 500}, outside: {x: 0, y: 700}}});
+  const judge = h.state.raw.nodes.find((node) => node.id === 'judge');
+
+  h.edges.renderEdge(h.layer, judge, 'node_group_1', 0);
+  h.edges.renderEdge(h.layer, judge, 'node_group_1', 1);
+  const [first, second] = h.layer.children;
+  const pathOf = (edge) => edge.children.find((child) => child.attrs.class === 'edge-hit').attrs.d;
+  const badgeOf = (edge) => edge.children.find((child) => child.attrs.class === 'edge-order').textContent;
+  const startOf = (edge) => Number(/^M ([\d.]+) /.exec(pathOf(edge))[1]);
+  const landingOf = (edge) => Number(/C ([\d.]+) /.exec(pathOf(edge))[1]);
+  assert.equal(startOf(first), 78, '第一条从真口出线');
+  assert.equal(badgeOf(first), '真');
+  assert.equal(startOf(second), 182, '第二条从假口出线（不是都挤在真口）');
+  assert.equal(badgeOf(second), '假');
+  // 两条线各落自己的输入口：左口 / 右口，不汇到顶边中点（中点 = 130）。
+  assert.ok(landingOf(first) < 130 && landingOf(second) > 130, `两条线分落左右口：${landingOf(first)} / ${landingOf(second)}`);
+  assert.equal(landingOf(first) + landingOf(second), 260, '左右两个口对称平分顶边');
+
+  // 拖拽局部更新按口位定位：补第二条不会把第一条一起改掉（两条边的 key 必须不同）。
+  const beforeFirst = pathOf(first);
+  const beforeSecond = pathOf(second);
+  h.edges.patchEdge(judge, 'node_group_1', 1);
+  assert.equal(pathOf(first), beforeFirst, '补假口那条不碰真口那条');
+  assert.notEqual(pathOf(second), beforeSecond, '假口那条自己更新了');
+});
+
+test('组卡只有一个入口时输入线仍落在顶边中点', () => {
+  const h = harness([
+    {id: 'root', type: 'root', children: ['group']},
+    {id: 'group', type: 'node_group', _nodeGroup: true, children: ['outside'], _nodeCount: 2, _groupEntryCount: 1},
+    {id: 'outside', type: 'task'},
+  ], {positions: {root: {x: 0, y: 0}, group: {x: 0, y: 300}, outside: {x: 0, y: 600}}});
+  h.edges.renderEdge(h.layer, h.state.raw.nodes[0], 'group', 0);
+  const path = h.layer.children[0].children.find((child) => child.attrs.class === 'edge-hit').attrs.d;
+  assert.equal(path, 'M 130 96 C 130 300', '单入口仍旧落在中点（与普通卡片一致）');
+});
+
 test('renderEdge 绘制选中状态、运行状态与顺序号并支持重连和断开', () => {  const h = harness([
     {id: 'root', type: 'root', children: ['a']},
     {id: 'a', type: 'task'},
@@ -371,10 +415,10 @@ test('节点组接口端点代理真实成员参数，不重复直连成员卡',
   assert.deepEqual(h.calls.disconnectedPins, [['inside', 'count']], '在组接口断线必须作用于真实成员参数');
 });
 
-test('组边界映射线不再使用虚线样式（与变量线标准一致）', () => {
+test('组边界映射线保持实线数据线样式，用线宽与普通变量线区分', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'public/legacy/workflow-editor.css'), 'utf8');
   assert.doesNotMatch(css, /\.group-interface-edge\s*\{[^}]*stroke-dasharray/, '组边界映射线不得声明虚线');
-  assert.doesNotMatch(css, /\.group-interface-edge\s*\{[^}]*stroke-width/, '线宽交给 .variable-edge 的数据线标准');
+  assert.match(css, /\.group-interface-edge\s*\{[^}]*stroke-width/, '组边界映射线用微调线宽与普通变量线区分');
   const light = fs.readFileSync(path.join(__dirname, '..', 'public/theme/editor-light.css'), 'utf8');
   assert.doesNotMatch(light, /data-theme="light"\]\s*\.group-interface-edge\s*\{[^}]*#696969/, '浅色主题里也不再有灰色映射线');
 });
@@ -575,7 +619,7 @@ test('引用源折叠在组内时从组卡输出口连到组外参数', () => {
   h.edges.renderReferenceEdges(h.layer);
 
   const visible = h.layer.children.find((child) => child.attrs.class.includes('reference-edge data-tone-'));
-  assert.match(visible.attrs.d, /^M 248 16 /, '隐藏的真实来源由组卡右侧输出口代理');
+  assert.match(visible.attrs.d, /^M 248 108 /, '隐藏的真实来源由组卡右侧输出口代理（输出口在边界行中心）');
   assert.match(visible.attrs.d, /, 410 308$/);
 });
 

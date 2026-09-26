@@ -284,7 +284,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     $('btn-more').addEventListener('click', () => {
       const rect = $('btn-more').getBoundingClientRect();
       showMenu(rect.right, rect.bottom + 4, [
-        { label: '将所选节点打组', run: () => deps.groupSelection?.() },
+        { label: '折叠所选节点', run: () => deps.groupSelection?.() },
         'separator',
         // 问题导航：画布上的红标记走到哪都能一键跳到下一个（F8 / Shift+F8 同一条命令）。
         { label: '下一个问题 (F8)', run: () => deps.gotoIssue?.(1) },

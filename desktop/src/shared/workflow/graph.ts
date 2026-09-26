@@ -94,6 +94,11 @@ function guaranteedOutputNodeIds(
   if (node.type === 'root' && node.children.length === 1) {
     return guaranteedOutputNodeIds(node.children[0], nodeMap, nested);
   }
+  // 折叠图边界卡：单子透传，输出可用性与它唯一的子节点完全一致
+  // （与 Python `workflows/graph.py` 的 `GROUP_BOUNDARY_NODE_TYPES` 分支同名同义）。
+  if ((node.type === 'group_entry' || node.type === 'group_exit') && node.children.length === 1) {
+    return guaranteedOutputNodeIds(node.children[0], nodeMap, nested);
+  }
   if (node.type === 'sequence') {
     const result = new Set<string>();
     for (const child of node.children) {

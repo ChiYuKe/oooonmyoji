@@ -5,11 +5,18 @@
  */
 import type { ParameterInfo } from './parameters';
 
-export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task'] as const;
+export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task', 'group_entry', 'group_exit'] as const;
 export const DECORATOR_TYPES = ['cooldown', 'timeout', 'retry', 'repeat', 'do_once'] as const;
 export const PARALLEL_FINISH_MODES = ['abort_background', 'wait_for_background'] as const;
 export const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'] as const;
 export const INSTANCE_PARALLEL_WAIT_MODES = ['all', 'any'] as const;
+
+/**
+ * 折叠图（编辑器里的节点组）边界卡：真实的执行流隧道节点，对应 UE 的 Collapsed Graph Tunnel。
+ * 画布用它做折叠/展开的投影，图文档与 Python 编译期用它做组边界校验——两处必须同名。
+ */
+export const GROUP_ENTRY_TYPE = 'group_entry';
+export const GROUP_EXIT_TYPE = 'group_exit';
 
 /**
  * 布尔判断卡片（`bool_judge`）的输出形状：引用写作 `nodes.<id>.output.value`。

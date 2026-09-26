@@ -25,6 +25,8 @@ export interface GraphEdgeGeometry {
   kind: 'structural' | 'instance';
   parentId: string;
   childId: string;
+  /** 子节点下标（口位）：同一个父节点可能有多条代理边指向同一张折叠图。 */
+  order: number;
 }
 
 export interface EdgePoint {
@@ -889,9 +891,11 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
       if (!visibleStructuralEdges.has(edge.id)) continue;
       const parent = context.nodeById(edge.parentId);
       if (!parent) continue;
-      const order = Array.isArray(parent.children) ? parent.children.indexOf(edge.childId) : 0;
-      const rendered = context.renderEdge(wires, parent, edge.childId, Math.max(0, order));
-      edges.set(`edge:${edge.parentId}:${edge.childId}`, {
+      // 口位来自清单本身：同一个父节点可能有两条代理边指向同一张折叠图，
+      // `indexOf` 会把它们都算成第一条。
+      const order = Number.isFinite(edge.order) ? Math.max(0, edge.order) : 0;
+      const rendered = context.renderEdge(wires, parent, edge.childId, order);
+      edges.set(`edge:${edge.parentId}:${edge.childId}:${order}`, {
         element: rendered, kind: 'structural', parentId: edge.parentId, childId: edge.childId,
       });
       rebuilt += 1;

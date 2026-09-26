@@ -34,6 +34,10 @@ export interface InspectorPanelDeps {
   typeLabels: Record<string, string>;
   renameNode(nodeId: string, value: string): void;
   renameNodeGroup(groupId: string, value: string): void;
+  execPinNames(groupId: string, side: 'inputs' | 'outputs'): string[];
+  addExecPin(groupId: string, side: 'inputs' | 'outputs'): boolean;
+  renameExecPin(groupId: string, side: 'inputs' | 'outputs', index: number, value: string): boolean;
+  removeExecPin(groupId: string, side: 'inputs' | 'outputs', index: number): boolean;
   changeNodeType(node: any, value: string): void;
   mutate(fn: () => void): void;
   deleteSelection(): void;
@@ -55,7 +59,7 @@ export interface InspectorPanel {
 export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
   const {
     state, UI, $, el, nodeById, hideAssetPathPreview, types, typeNames, typeLabels,
-    renameNode, renameNodeGroup, changeNodeType, mutate, deleteSelection, renderers,
+    renameNode, renameNodeGroup, execPinNames, addExecPin, renameExecPin, removeExecPin, changeNodeType, mutate, deleteSelection, renderers,
   } = deps;
 
   function clearInspector(title: string): HTMLElement {
@@ -186,12 +190,30 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     if (!node) return;
     const body = clearInspector(node.name || node.id);
     if (node._nodeGroup) {
-      section(body, '节点组');
+      section(body, '折叠图');
       const nameRow = field(body, '名称');
       const nameInput = textInput(node.name || '', (value) => renameNodeGroup(node.id, value)) as HTMLInputElement;
       // 与普通节点共用 F2 聚焦约定，宿主无需区分目标类型。
       nameInput.id = 'inspector-node-name';
       nameRow.appendChild(nameInput);
+      for (const [side, title] of [['inputs', '输入'], ['outputs', '输出']] as const) {
+        const add = el('button', 'icon-button', '+') as HTMLButtonElement;
+        add.type = 'button';
+        add.title = `新增${title}引脚`;
+        add.addEventListener('click', () => addExecPin(node.id, side));
+        section(body, title, add);
+        execPinNames(node.id, side).forEach((pinName, index) => {
+          const row = el('div', 'field');
+          row.appendChild(el('span', 'field-label', `${title} ${index + 1}`));
+          body.appendChild(row);
+          row.appendChild(textInput(pinName, (value) => renameExecPin(node.id, side, index, value)));
+          const remove = el('button', 'icon-button danger', '×') as HTMLButtonElement;
+          remove.type = 'button';
+          remove.title = `删除${title}引脚`;
+          remove.addEventListener('click', () => removeExecPin(node.id, side, index));
+          row.appendChild(remove);
+        });
+      }
       return;
     }
     section(body, '节点');

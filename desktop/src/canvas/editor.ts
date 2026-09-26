@@ -188,9 +188,9 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const TASK_OUTPUT_PORT_X = NODE_W - 12;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
   const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task'];
-  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', condition: 'CONDITION', bool_judge: 'BOOL JUDGE', break: 'BREAK', task: 'TASK' };
-  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', instance_parallel: '实例并行', condition: '判断', bool_judge: '布尔判断', break: '拆分' };
-  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', condition: '◇', bool_judge: '◈', break: '⋔', task: '▣' };
+  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', condition: 'CONDITION', bool_judge: 'BOOL JUDGE', break: 'BREAK', task: 'TASK', group_entry: 'GRAPH ENTRY', group_exit: 'GRAPH EXIT' };
+  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', instance_parallel: '实例并行', condition: '判断', bool_judge: '布尔判断', break: '拆分', group_entry: '折叠图入口', group_exit: '折叠图出口' };
+  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', condition: '◇', bool_judge: '◈', break: '⋔', task: '▣', group_entry: '⇥', group_exit: '⇤' };
   const RUN_LABEL = {
     running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
     failed: '失败', cancelled: '已取消', branch_miss: '分支跳过',
@@ -325,6 +325,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const {
     currentGroup, runSummary: nodeGroupRunSummary, viewNodes, viewNodeById, viewReferenceSourceById, adjacentEdges, groupSelection, enterGroup, leaveGroup, ungroup, renameGroup, addToCurrentGroup, removeMembers,
     setPinExposed, pinMenuEntry, candidateMenu, boundaryVariableRefs, visibleVariableCardIds,
+    execPinNames, addExecPin, renameExecPin, removeExecPin,
   } = NodeGroups;
   /**
    * 画布上该画哪些变量卡片。
@@ -455,15 +456,17 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   };
   const viewPosition = (node: any) => {
     // 只有组内两张合成卡（接口卡/变量卡）有投影位置；组卡位置直接存布局。
-    if (!isGroupInterfaceNode(node) && !isGroupVariablesNode(node)) return position(node);
+    if (!isGroupInterfaceNode(node) && !isGroupOutputInterfaceNode(node) && !isGroupVariablesNode(node)) return position(node);
     const saved = layout()[node.id];
     return saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? saved : node._nodeGroupPosition;
   };
-  const viewNodeVariablePins = (node: any) => isProjectedGroupNode(node) ? node._groupPins : nodeVariablePins(node);
+  const viewNodeVariablePins = (node: any) => isProjectedGroupNode(node)
+    ? (Array.isArray((node as any)._groupPins) ? (node as any)._groupPins : [])
+    : nodeVariablePins(node);
   const viewNodeHeight = (node: any) => {
     // 变量卡高度由成员跨度与端点行数决定；其余合成卡按「基准高 + 行数 × 行高」推导。
     if (isGroupVariablesNode(node) && Number.isFinite(node._nodeGroupHeight)) return Number(node._nodeGroupHeight);
-    if (isProjectedGroupNode(node)) return BASE_H + node._groupPins.length * RUN_VARIABLE_H;
+    if (isProjectedGroupNode(node)) return BASE_H + (Array.isArray((node as any)._groupPins) ? (node as any)._groupPins.length : 0) * RUN_VARIABLE_H;
     return nodeHeight(node);
   };
   // 缩放分级只隐藏卡内元素、不改卡片尺寸：连线锚点直接用真实布局高度。

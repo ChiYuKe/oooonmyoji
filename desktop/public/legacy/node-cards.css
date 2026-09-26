@@ -39,6 +39,8 @@
  * 灰蓝的执行流卡片分开——它们没有执行流端点，配色也不该看起来像流程节点。 */
 .studio-card.type-bool_judge { --card-tint: #5b9dc4; }
 .studio-card.type-break { --card-tint: #bd7f9f; }
+/* 折叠图边界卡（真实的执行流隧道）：与折叠图卡同一族的灰蓝，一眼看出它属于折叠图。 */
+.studio-card:is(.type-group_entry, .type-group_exit) { --card-tint: #8ea9cc; }
 .studio-card.variable-card { --card-tint: #9fbe8a; }
 .studio-card {
   --card-selected-head: color-mix(in srgb, var(--card-tint) 26%, var(--card-head));

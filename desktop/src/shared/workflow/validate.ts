@@ -354,6 +354,12 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
       if (node.type === 'repeat_until' && node.children.length !== 1) issues.push(issue([...path, 'children'], 'Repeat Until 必须恰好有一个子节点', 'repeat-child-count'));
       if (node.type === 'branch' && (!Array.isArray(rawNode.conditions) || rawNode.conditions.length !== node.children.length)) issues.push(issue([...path, 'conditions'], 'Branch 的 conditions 数量必须与 children 一致', 'branch-condition-count'));
       if (node.type === 'switch' && (!Array.isArray(rawNode.cases) || rawNode.cases.length < 1)) issues.push(issue([...path, 'cases'], 'Switch 至少需要一个 case', 'switch-case-count'));
+      // 折叠图边界卡是单子透传容器：一条边进、一条边出（UE Collapsed Graph Tunnel）。
+      // 组归属与「跨组边必须经过边界卡」由文档级的组检查负责（画布侧 graphGroupIssues /
+      // Python 侧 graph_compile._check_groups）——v4 校验看不到 groups。
+      if ((node.type === 'group_entry' || node.type === 'group_exit') && node.children.length !== 1) {
+        issues.push(issue([...path, 'children'], `${node.type === 'group_entry' ? '折叠图入口' : '折叠图出口'}卡必须恰好连接一个子节点`, 'boundary-child-count'));
+      }
       if (node.type === 'simple_parallel') {
         if (node.children.length !== 2) issues.push(issue([...path, 'children'], 'Simple Parallel 必须恰好有两个子节点', 'parallel-child-count'));
         if (node.children[0] && nodeMap.get(node.children[0])?.type !== 'task') issues.push(issue([...path, 'children', 0], 'Simple Parallel 的第一个子节点必须是主 Task', 'parallel-main-task'));

@@ -14,7 +14,7 @@ from typing import Any, Callable
 from ..actions import ActionRegistry, ActionResult, ActionStatus
 from ..exceptions import AutomationError, CancelledError, WorkflowError, WorkflowTimeoutError
 from .compiler import CompiledWorkflow, compile_workflow
-from .graph import PURE_DATA_NODE_TYPES
+from .graph import GROUP_BOUNDARY_NODE_TYPES, PURE_DATA_NODE_TYPES
 from .model import BehaviorDecorator, WorkflowNode, WorkflowSpec
 from .resolver import ReferenceResolver
 
@@ -472,6 +472,12 @@ class WorkflowEngine:
         if node.type == "task":
             return self._run_task(node, deadline, branch_cancel)
         if node.type == "root":
+            return self._run_node(node.children[0], deadline, branch_cancel)
+        if node.type in GROUP_BOUNDARY_NODE_TYPES:
+            # 折叠图边界卡（编辑器里的节点组隧道）：单子透传，等价于只有一个子节点的
+            # sequence，执行语义与「展开折叠图后 A→子节点 直接相连」完全一致。
+            if len(node.children) != 1:
+                raise WorkflowError(f"fold graph boundary node {node.id} must contain exactly one child")
             return self._run_node(node.children[0], deadline, branch_cancel)
         if node.type == "selector":
             last = _Outcome(ActionStatus.FAILED, error="all selector children failed", category="behavior")

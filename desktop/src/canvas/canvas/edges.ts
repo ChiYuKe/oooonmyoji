@@ -9,9 +9,10 @@ import type { CanvasState } from '../state/canvas-state';
 import {
   CONDITION_INPUT_X, CONDITION_INPUT_Y, CONDITION_PORT_LABELS,
   conditionPortOfChild, conditionPortOffset, expressionInputOffset, isBooleanInputNode, isBooleanInputPin, nearestConditionPort,
+  type ConditionPort,
 } from '../model/exec-ports';
 import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from './data-tones';
-import { isGroupBoundaryPin, isGroupCardNode, isGroupInterfaceNode, isGroupMemberNode, isGroupVariablesNode } from '../model/node-groups';
+import { isGroupBoundaryPin, isGroupCardNode, isGroupInterfaceNode, isGroupMemberNode, isGroupOutputInterfaceNode, isGroupVariablesNode, groupPortOffset } from '../model/node-groups';
 import { aggregateNodeRunStatus } from '../model/node-group-runtime';
 
 export interface EdgePoint {
@@ -54,7 +55,7 @@ export interface EdgesDeps {
   /** 折叠节点组时，把隐藏的真实引用源解析成可见的组卡。 */
   referenceSourceById?(id: string): EdgeNode | null;
   /** 折叠组的代理执行边实际指向哪些真实节点（运行事件仍使用真实节点 id）。 */
-  edgeRunTargetIds?(parentId: string, childId: string): string[];
+  edgeRunTargetIds?(parentId: string, childId: string, order?: number): string[];
   /** 这条连线上的校验问题（空/缺省表示没问题）：连线涂红并给出悬停说明。 */
   edgeIssues?(parentId: string, childId: string): any[];
   /** 这条执行边上的手工折点（UE Knot）；缺省表示不支持手工走线。 */
@@ -186,15 +187,77 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     return patched;
   }
 
-  /** 执行连线的出线口 X：判断节点分左右两个口（真/假），其余节点居中。 */
-  function execPinX(parent: EdgeNode, childId: string): number {
-    if (!parent || parent.type !== 'condition') return nodeWidth / 2;
-    return conditionPortOffset(nodeWidth, conditionPortOfChild(parent, childId) || 'true');
+  /**
+   * 执行连线的出线口 X：判断节点分左右两个口（真/假），其余节点居中。
+   *
+   * `order` 是子节点在 `children` 里的下标（判断节点的口位就按它对齐）。折叠视图里同一个
+   * 父节点可能有多条代理边指向同一张折叠图（真/假各一条），用下标而不是 `indexOf` 才能
+   * 让两条线分别从各自的口出来。
+   */
+  function execPinX(parent: EdgeNode, childId: string, order = -1): number {
+    if (!parent) return nodeWidth / 2;
+    if (parent.type === 'condition') {
+      const ports: any[] = Array.isArray((parent as any).ports) ? (parent as any).ports : [];
+      const port = order >= 0 ? ports[order] : undefined;
+      return conditionPortOffset(nodeWidth, port === 'false' ? 'false' : port === 'true' ? 'true' : (conditionPortOfChild(parent, childId) || 'true'));
+    }
+    if (parent.type === 'node_group') {
+      const children = Array.isArray(parent.children) ? parent.children : [];
+      const count = Math.max(1, Number(parent._execOutputCount || children.length));
+      const index = order >= 0 && order < count ? order : Math.max(0, children.indexOf(childId));
+      return count === 1 ? nodeWidth / 2 : (nodeWidth * (index + 1)) / (count + 1);
+    }
+    if (isGroupInterfaceNode(parent)) {
+      const count = Math.max(1, Number(parent._execOutputCount || parent.children?.length || 1));
+      return count === 1 ? nodeWidth / 2 : (nodeWidth * (Math.max(0, Math.min(order, count - 1)) + 1)) / (count + 1);
+    }
+    return nodeWidth / 2;
+  }
+
+  /**
+   * 连线落到子节点顶边的 X。普通卡片是顶边中点；折叠图卡片按「组外进来的第几条边」
+   * 排到自己的顶边输入口上——判断的真/假各接一张入口卡时就是左口/右口，
+   * 不会两条线汇到同一个点上（位置公式与卡片画输入口时共用 `groupPortOffset`）。
+   */
+  let groupInputRanks: { source: unknown; ranks: Map<string, string[]> } | null = null;
+  function groupInputRankMap(): Map<string, string[]> {
+    const list = nodes();
+    if (groupInputRanks && groupInputRanks.source === list) return groupInputRanks.ranks;
+    const ranks = new Map<string, string[]>();
+    for (const node of list) {
+      const children = Array.isArray(node.children) ? node.children : [];
+      children.forEach((childId: string, order: number) => {
+        const child = nodeById(String(childId));
+        if (!child || (!isGroupCardNode(child) && !isGroupOutputInterfaceNode(child))) return;
+        const key = `${node.id}\u0000${order}`;
+        const bucket = ranks.get(String(childId));
+        if (bucket) bucket.push(key);
+        else ranks.set(String(childId), [key]);
+      });
+    }
+    groupInputRanks = { source: list, ranks };
+    return ranks;
+  }
+
+  function execChildPinX(parent: EdgeNode | null, child: EdgeNode, childId: string, order: number): number {
+    if (!child || (!isGroupCardNode(child) && !isGroupOutputInterfaceNode(child))) return nodeWidth / 2;
+    const bucket = groupInputRankMap().get(String(childId)) || [];
+    const count = isGroupOutputInterfaceNode(child)
+      ? Math.max(bucket.length, Number(child._execInputCount || 0))
+      : Math.max(bucket.length, Number(child._groupEntryCount || 0));
+    if (count <= 1) return nodeWidth / 2;
+    const rank = bucket.indexOf(`${parent ? parent.id : ''}\u0000${order}`);
+    return groupPortOffset(nodeWidth, rank < 0 ? 0 : rank, count);
   }
 
   /** 连线中点徽标：判断节点写「真/假」（口位），其余写 1/2/3… 的优先级序号。 */
   function edgeOrderText(parent: EdgeNode, childId: string, order: number): string {
-    const port = parent && parent.type === 'condition' ? conditionPortOfChild(parent, childId) : null;
+    let port: ConditionPort | null = null;
+    if (parent && parent.type === 'condition') {
+      const ports: any[] = Array.isArray((parent as any).ports) ? (parent as any).ports : [];
+      const slot = order >= 0 ? ports[order] : undefined;
+      port = slot === 'false' ? 'false' : slot === 'true' ? 'true' : conditionPortOfChild(parent, childId);
+    }
     return port ? CONDITION_PORT_LABELS[port] : String(order + 1);
   }
 
@@ -202,7 +265,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     const selected = state.selectedEdge && state.selectedEdge.parent === parentId && state.selectedEdge.child === childId;
     // 多条真实边折叠成一条代理边时，与组卡使用完全相同的状态优先级。
     const runStatus = aggregateNodeRunStatus(runTargetIds, state.run);
-    const collapsed = Boolean(isGroupCardNode(nodeById(parentId)) || isGroupCardNode(nodeById(childId)));
+    const collapsed = Boolean(isGroupCardNode(nodeById(parentId)) || isGroupCardNode(nodeById(childId)) || isGroupInterfaceNode(nodeById(parentId)) || isGroupOutputInterfaceNode(nodeById(childId)));
     return `edge${selected ? ' selected' : ''}${runStatus ? ` run-${runStatus}` : ''}${collapsed ? ' edge-collapsed-group' : ''}`;
   }
 
@@ -425,14 +488,15 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
   function renderEdge(layer: any, parent: EdgeNode, childId: string, order: number): void {
     const child = nodeById(childId);
     if (!child) return;
-    const collapsed = Boolean((parent as any)._nodeGroup || (child as any)._nodeGroup);
+    const collapsed = Boolean((parent as any)._nodeGroup || (child as any)._nodeGroup
+      || isGroupInterfaceNode(parent) || isGroupOutputInterfaceNode(child));
     const from = position(parent);
     const to = position(child);
-    const x1 = from.x + execPinX(parent, childId);
+    const x1 = from.x + execPinX(parent, childId, order);
     const y1 = from.y + nodeHeight(parent);
-    const x2 = to.x + nodeWidth / 2;
+    const x2 = to.x + execChildPinX(parent, child, childId, order);
     const y2 = to.y;
-    const runTargetIds = deps.edgeRunTargetIds?.(parent.id, childId) ?? [childId];
+    const runTargetIds = deps.edgeRunTargetIds?.(parent.id, childId, order) ?? [childId];
     // 连线上的校验问题：这条边自身不合法，或它牵涉的节点有结构问题（成环、父节点数量不对…）。
     const edgeIssues = deps.edgeIssues?.(parent.id, childId) ?? [];
     const classes = [structuralEdgeClass(parent.id, childId, runTargetIds)];
@@ -446,7 +510,7 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     }
     // 没有折点时仍走注入的 `bezier`（老路径，逐字不变）；有折点时才用按折点走线的几何。
     const waypoints = deps.structuralWaypoints?.(parent.id, childId) ?? [];
-    const routed = waypoints.length ? structuralPath(parent, childId) : null;
+    const routed = waypoints.length ? structuralPath(parent, childId, order) : null;
     const edgePath = routed ? routed.d : bezier(x1, y1, x2, y2);
     const path = svgEl('path', { class: 'edge-hit', d: edgePath }, group);
     const line = svgEl('path', { class: 'edge-line', d: edgePath }, group);
@@ -459,7 +523,8 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
     orderText.textContent = edgeOrderText(parent, childId, order);
     const rewire = svgEl('circle', { class: 'edge-rewire', cx: x2, cy: y2 - 18, r: 6, title: '拖动以重新连接' }, group);
     // 局部更新用的元素索引：拖拽时只改这些属性的 `d` / 位置。
-    edgeRegistry.set(`${parent.id}\u0000${childId}`, {
+    // key 带上口位下标：同一个父节点可能有多条代理边指向同一张折叠图（真/假各一条）。
+    edgeRegistry.set(`${parent.id}\u0000${childId}\u0000${order}`, {
       group, parentId: parent.id, childId, runTargetIds, paths: [path, line, flow], order: orderText, orderBg, rewire, knots,
     });
     edgeBounds.set(`${parent.id}\u0000${childId}`, routed
@@ -548,7 +613,9 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
           const hoverPos = position(hover);
           const portX = hover.type === 'condition'
             ? conditionPortOffset(nodeWidth, nearestConditionPort(nodeWidth, connect.x - hoverPos.x))
-            : nodeWidth / 2;
+            : hover.type === 'node_group'
+              ? execPinX(hover, connect.child, -1)
+              : nodeWidth / 2;
           endX = hoverPos.x + portX;
           endY = hoverPos.y + nodeHeight(hover);
         }
@@ -568,7 +635,8 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
       const hover = nodeById(connect.hover);
       if (hover) {
         const hoverPos = position(hover);
-        endX = hoverPos.x + nodeWidth / 2;
+        const inputX = hover.type === 'node_group' ? execChildPinX(parent, hover, hover.id, -1) : nodeWidth / 2;
+        endX = hoverPos.x + inputX;
         endY = hoverPos.y;
       }
     }
@@ -675,14 +743,14 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
    * 没有折点时**逐字返回**原来的单段三次贝塞尔（老文档的观感与几何完全不变）；
    * 有折点时按 `起点 → 折点… → 终点` 串成多段，每段保持竖直切线（往下流的执行流语言）。
    */
-  function structuralPath(parent: EdgeNode, childId: string): { d: string; box: { x: number; y: number; width: number; height: number } } | null {
+  function structuralPath(parent: EdgeNode, childId: string, order = -1): { d: string; box: { x: number; y: number; width: number; height: number } } | null {
     const child = nodeById(childId);
     if (!child) return null;
     const from = position(parent);
     const to = position(child);
-    const x1 = from.x + execPinX(parent, childId);
+    const x1 = from.x + execPinX(parent, childId, order);
     const y1 = from.y + nodeHeight(parent);
-    const x2 = to.x + nodeWidth / 2;
+    const x2 = to.x + execChildPinX(parent, child, childId, order);
     const y2 = to.y;
     const bend = Math.max(48, Math.abs(y2 - y1) * 0.48);
     const waypoints = deps.structuralWaypoints?.(parent.id, childId) ?? [];
@@ -738,9 +806,9 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
    * 元素引用在 renderEdge 时登记，所以拖拽期间不需要查询 DOM，也不会重建元素。
    */
   function patchEdge(parent: EdgeNode, childId: string, order: number): boolean {
-    const entry = edgeRegistry.get(`${parent.id}\u0000${childId}`);
+    const entry = edgeRegistry.get(`${parent.id}\u0000${childId}\u0000${order}`);
     if (!entry) return false;
-    const geometry = structuralPath(parent, childId);
+    const geometry = structuralPath(parent, childId, order);
     if (!geometry) return false;
     for (const path of entry.paths) path.setAttribute('d', geometry.d);
     const midX = geometry.box.x + geometry.box.width / 2;

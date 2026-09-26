@@ -101,29 +101,43 @@ test('节点组运行汇总不写入文档，且投影缓存不会冻结即时�
   assert.equal(JSON.stringify(h.state.raw._nodeGroups), before, '运行态不得污染持久化分组数据');
 });
 
-test('打组只折叠编辑器视图，不改运行节点与真实 children', () => {
+test('打组会真的改写执行边：跨组边经过真实边界卡，展开后恢复原样', () => {
   const h = harness();
   assert.strictEqual(h.groups.viewNodes(), h.model.nodes(), '没有分组时必须零克隆走原节点数组');
   assert.strictEqual(h.groups.viewNodeById('a'), h.model.nodeById('a'));
   h.state.selected = new Set(['a', 'b']);
   assert.equal(h.groups.groupSelection(), true);
   const group = h.groups.groups()[0];
-  assert.deepEqual(group.nodeIds, ['a', 'b']);
-  assert.deepEqual(h.model.nodeById('root').children, ['a'], '真实运行边保持不变');
-  assert.deepEqual(h.model.nodeById('a').children, ['b'], '组内真实边保持不变');
+  assert.deepEqual(group.nodeIds, ['a', 'b', 'group_entry_1', 'group_exit_1'], '打组把边界卡登记成成员');
+  // 真实的执行边现在真的经过边界卡（A→入口→B、B→出口→C），不是视图上的代理。
+  assert.deepEqual(h.model.nodeById('root').children, ['group_entry_1']);
+  assert.deepEqual(h.model.nodeById('group_entry_1').children, ['a']);
+  assert.deepEqual(h.model.nodeById('a').children, ['b']);
+  assert.deepEqual(h.model.nodeById('b').children, ['group_exit_1']);
+  assert.deepEqual(h.model.nodeById('group_exit_1').children, ['c']);
 
   const outer = h.groups.viewNodes();
   assert.deepEqual(new Set(outer.map((node) => node.id)), new Set(['root', 'c', group.id]));
   assert.deepEqual(outer.find((node) => node.id === 'root').children, [group.id], '进入组的边折叠到组卡');
   assert.deepEqual(outer.find((node) => node.id === group.id).children, ['c'], '离开组的边从组卡连出');
-  assert.equal(outer.find((node) => node.id === group.id)._nodeCount, 2);
+  assert.equal(outer.find((node) => node.id === group.id)._nodeCount, 2, '边界卡不混进“N 个节点”');
   assert.equal(outer.find((node) => node.id === group.id)._groupPins.length, 0, '新建节点组不自动暴露成员变量端点');
   assert.deepEqual(h.groups.adjacentEdges(group.id).map((edge) => [edge.parent.id, edge.childId]), [
     ['root', group.id],
     [group.id, 'c'],
   ], '组卡拖动时能同时找到进入与离开组的两侧折叠线');
-  assert.deepEqual(h.groups.viewEdgeRunTargetIds('root', group.id), ['a'], '组入口代理线映射到真实入口节点');
+  assert.deepEqual(h.groups.viewEdgeRunTargetIds('root', group.id), ['group_entry_1'], '组入口代理线映射到真实的组入口卡');
   assert.deepEqual(h.groups.viewEdgeRunTargetIds(group.id, 'c'), ['c'], '离开组的线仍以可见真实子节点为运行目标');
+
+  // 展开折叠图：边界卡内联回去，执行关系回到打组前（可逆）。
+  assert.equal(h.groups.ungroup(group.id), true);
+  assert.deepEqual(h.model.nodeById('root').children, ['a']);
+  assert.deepEqual(h.model.nodeById('a').children, ['b']);
+  assert.deepEqual(h.model.nodeById('b').children, ['c']);
+  assert.equal(h.model.nodeById('group_entry_1'), null, '入口卡展开后不再留在图里');
+  assert.equal(h.model.nodeById('group_exit_1'), null, '出口卡展开后不再留在图里');
+  assert.equal(h.model.layout().group_entry_1, undefined);
+  assert.equal(h.model.layout().group_exit_1, undefined);
 });
 
 test('组到组和多入口代理边映射全部真实目标，不把合成组 id 当运行节点', () => {
@@ -138,12 +152,22 @@ test('组到组和多入口代理边映射全部真实目标，不把合成组 i
     target_group: {name: '目标组', nodeIds: ['right-a', 'right-b'], pins: [], pinPolicy: 'explicit-v1'},
   };
   h.state.docVersion += 1;
-  assert.deepEqual(h.groups.viewEdgeRunTargetIds('source_group', 'target_group'), ['right-a', 'right-b']);
+  // 旧文档加载时补齐边界卡：left → 出口卡 → 入口卡 → right-*（先触发一次迁移）。
+  h.groups.groups();
+  assert.deepEqual(h.model.nodeById('left').children, ['group_exit_1', 'group_exit_2']);
+  assert.deepEqual(h.model.nodeById('group_exit_1').children, ['group_entry_1']);
+  assert.deepEqual(h.model.nodeById('group_exit_2').children, ['group_entry_2']);
+  assert.deepEqual(h.model.nodeById('group_entry_1').children, ['right-a']);
+  assert.deepEqual(h.model.nodeById('group_entry_2').children, ['right-b']);
+  assert.deepEqual(h.groups.viewEdgeRunTargetIds('source_group', 'target_group'), ['group_entry_1', 'group_entry_2'],
+    '组到组的代理线映射到目标组真实入口卡');
 
-  // 旧文档缺少可追溯的直接边时，回退到真实入口，不能返回不会收到 step 事件的 target_group。
+  // 缺少可追溯的直接边时，回退到目标组真实入口卡，不能返回不会收到 step 事件的 target_group。
   h.model.nodeById('left').children = [];
+  h.model.nodeById('group_exit_1').children = [];
+  h.model.nodeById('group_exit_2').children = [];
   h.state.docVersion += 1;
-  assert.deepEqual(h.groups.viewEdgeRunTargetIds('source_group', 'target_group'), ['right-a', 'right-b']);
+  assert.deepEqual(h.groups.viewEdgeRunTargetIds('source_group', 'target_group'), ['group_entry_1', 'group_entry_2']);
 });
 
 test('打组会固化已有的跨组变量连接，只为实际连接创建必要端点', () => {
@@ -205,11 +229,9 @@ test('双击进入语义对应的组内投影只显示成员，返回后恢复�
   const group = h.groups.groups()[0];
   assert.equal(h.groups.enterGroup(group.id), true);
   const inside = h.groups.viewNodes();
-  const boundary = inside[0];
-  assert.equal(boundary._nodeGroupInterface, true, '组内顶部生成编辑器专用接口卡');
-  assert.deepEqual(boundary.children, ['a'], '接口卡连到组内执行入口');
-  assert.equal(boundary._groupPins.length, 0, '组接口初始为空');
-  assert.equal(inside[1]._nodeGroupVariables, true, '即使尚无端点也显示可创建变量的组变量卡');
+  assert.equal(inside.some((node) => node._nodeGroupInterface), false, '组内不注入虚假的接口合成卡');
+  const boundary = inside.find((node) => node._nodeGroupVariables);
+  assert.ok(boundary, '组内保留可创建数据边界端点的变量卡');
   assert.equal(h.groups.pinCandidates(group.id).length, 1, '变量卡可以从尚未公开的成员参数创建接口变量');
   assert.equal(h.groups.pinExposure('b', 'count'), false);
   assert.equal(h.groups.setPinExposed('b', 'count', true), true);
@@ -224,9 +246,12 @@ test('双击进入语义对应的组内投影只显示成员，返回后恢复�
   assert.equal(h.groups.pinCandidates(group.id).length, 0, '已存在的接口变量不重复列入创建菜单');
   assert.equal(h.groups.setPinExposed('b', 'count', false), true);
   assert.equal(h.groups.viewNodes().find((node) => node._nodeGroupVariables)._groupPins.length, 0, '移除最后一个端点后保留空变量卡用于继续创建');
-  assert.deepEqual(inside.filter((node) => node._nodeGroupMember).map((node) => node.id), ['a', 'b']);
+  assert.deepEqual(inside.filter((node) => node._nodeGroupMember).map((node) => node.id), ['a', 'b', 'group_entry_1', 'group_exit_1'],
+    '组内视图显示真实成员和边界卡（入口在上、出口在下）');
   assert.deepEqual(inside.find((node) => node.id === 'a').children, ['b']);
-  assert.deepEqual(inside.find((node) => node.id === 'b').children, [], '跨出组外的边在组内隐藏');
+  assert.deepEqual(inside.find((node) => node.id === 'group_entry_1').children, ['a'], '入口卡在组内把执行流交给首节点');
+  assert.deepEqual(inside.find((node) => node.id === 'b').children, ['group_exit_1'], '成员指向组外的那一侧真的接在组出口卡上');
+  assert.deepEqual(inside.find((node) => node.id === 'group_exit_1').children, [], '出口卡的组外下游在组内不可见（它的输出就是折叠图边界）');
   assert.equal(h.groups.leaveGroup(), true);
   assert.equal(h.state.nodeGroupId, '');
   assert.deepEqual([...h.state.selected], [group.id]);
@@ -264,7 +289,7 @@ test('节点组重命名同步外层组卡与组内两张接口卡，不改成�
 
   h.groups.enterGroup(group.id);
   const synthetic = h.groups.viewNodes().filter((node) => node._nodeGroupInterface || node._nodeGroupVariables);
-  assert.deepEqual(synthetic.map((node) => node.name), ['战斗循环 接口', '战斗循环 变量']);
+  assert.deepEqual(synthetic.map((node) => node.name), ['战斗循环 变量']);
   assert.equal(h.groups.renameGroup(group.id, '   '), false, '空名称不覆盖原组名');
   assert.equal(h.state.raw._nodeGroups[group.id].name, '战斗循环');
 });
@@ -366,17 +391,24 @@ test('删除成员原子清理组元数据：失效成员与端点移除，空�
   h.groups.setPinExposed('b', 'count', true);
 
   // 删除组内部分成员：仅清理对应成员与端点，组保留。
+  // b 离开组后，a → b 成了新的跨组出边：出口卡被重新接在 a 下面（不再是 b → c 那张）。
   h.groups.removeMembers(['b']);
-  assert.deepEqual(h.state.raw._nodeGroups[group.id].nodeIds, ['a']);
+  assert.deepEqual(h.state.raw._nodeGroups[group.id].nodeIds, ['a', 'group_entry_1', 'group_exit_1']);
   assert.deepEqual(h.state.raw._nodeGroups[group.id].pins, []);
   assert.equal(h.groups.pinExposure('b', 'count'), null, '组内不存在的成员不再有暴露状态');
+  assert.deepEqual(h.model.nodeById('a').children, ['group_exit_1'], '出口卡接住 a → b 这条新跨组边');
+  assert.deepEqual(h.model.nodeById('group_exit_1').children, ['b']);
+  assert.deepEqual(h.model.nodeById('b').children, ['c'], 'b 与 c 都在组外，恢复直连');
 
-  // 删除最后一个成员：整组连同布局残留一起删除。
+  // 删除最后一个成员：整组连同布局残留一起删除（剩下的边界卡内联回去）。
   h.groups.removeMembers(['a']);
   assert.equal(h.state.raw._nodeGroups[group.id], undefined);
   assert.equal(h.model.layout()[group.id], undefined);
   assert.equal(h.state.nodeGroupId, '');
   assert.equal(h.groups.groups().length, 0);
+  assert.equal(h.model.nodeById('group_entry_1'), null, '边界卡随空折叠图一起消失');
+  assert.deepEqual(h.model.nodeById('root').children, ['a'], '入口卡内联后根节点重新直连原首节点');
+  assert.deepEqual(h.model.nodeById('b').children, ['c'], '出口卡内联后成员重新直连组外目标');
 });
 
 test('deleteSelection 经 onNodesRemoved 原子清理节点组元数据', () => {
@@ -403,17 +435,19 @@ test('deleteSelection 经 onNodesRemoved 原子清理节点组元数据', () => 
     onNodesRemoved: (ids) => h.groups.removeMembers(ids),
   });
 
-  // 删除组成员 b：成员与端点同步移除，组保留。
+  // 删除组成员 b：成员与端点同步移除，组保留；出口卡失去父节点后跟着清理。
   h.state.selected = new Set(['b']);
   commands.deleteSelection();
-  assert.deepEqual(h.state.raw._nodeGroups[group.id].nodeIds, ['a']);
+  assert.deepEqual(h.state.raw._nodeGroups[group.id].nodeIds, ['a', 'group_entry_1']);
   assert.deepEqual(h.state.raw._nodeGroups[group.id].pins, []);
+  assert.equal(h.model.nodeById('group_exit_1'), null, '出口卡的父节点被删后不再留在画布上');
 
   // 删除最后一个成员 a：整组删除。
   h.state.selected = new Set(['a']);
   commands.deleteSelection();
   assert.equal(h.state.raw._nodeGroups[group.id], undefined);
   assert.equal(h.groups.groups().length, 0);
+  assert.deepEqual(h.model.nodeById('root').children, [], '成员全删后入口卡内联为空，根节点不再指向已删除的卡');
 });
 
 test('组接口菜单统一走同一组命令：端口右键项与变量卡「＋」菜单共用', () => {
@@ -463,8 +497,8 @@ test('组变量卡高度与位置由 baseHeight/runVariableHeight 计算，与�
   const variables = h.groups.viewNodes().find((node) => node._nodeGroupVariables);
   assert.equal(variables._nodeGroupHeight, 120 + 1 * 30, '端点行按 runVariableHeight 累加');
 
-  const iface = h.groups.viewNodes().find((node) => node._nodeGroupInterface);
-  assert.equal(iface._nodeGroupPosition.y, Math.round((160 - 120 - 80) / 8) * 8, '接口卡基准高度跟随 baseHeight');
+  const iface = h.groups.viewNodes().find((node) => node._nodeGroupVariables);
+  assert.ok(iface, '组内只保留数据边界卡');
 });
 
 test('组边界已经代表的变量：组内视图里不再重复画同名变量卡', () => {
@@ -556,4 +590,106 @@ test('组成员端点绑定的变量：卡片归属在组外也照画（右键�
   pinsForB = [];
   h.state.docVersion = (h.state.docVersion || 0) + 1;
   assert.equal(h.groups.visibleVariableCardIds().size, 0, '成员不再引用这个变量后，组外卡片退出组内视图');
+});
+
+test('同一个父节点折进同一张折叠图的两条边各画一条代理线，真/假口位不丢', () => {
+  const h = harness();
+  // 判断的真/假分别接两个节点，两个节点都折进同一张折叠图：
+  // 跨组边有两条 → 两张入口卡；折叠视图里必须画两条代理线，不能去重成一条。
+  h.state.raw.nodes = [
+    {id: 'root', type: 'root', children: ['judge']},
+    {id: 'judge', type: 'condition', expression: true, children: ['a', 'b'], ports: ['true', 'false']},
+    {id: 'a', type: 'task', children: []},
+    {id: 'b', type: 'task', children: []},
+  ];
+  h.state.docVersion += 1;
+  h.state.selected = new Set(['a', 'b']);
+  assert.equal(h.groups.groupSelection(), true);
+  const group = h.groups.groups()[0];
+  assert.deepEqual(h.model.nodeById('judge').children, ['group_entry_1', 'group_entry_2'], '真/假各得一张入口卡');
+
+  const judge = h.groups.viewNodes().find((node) => node.id === 'judge');
+  assert.deepEqual(judge.children, [group.id, group.id], '两条跨组边各画一条代理线（不去重）');
+  assert.deepEqual(judge.ports, ['true', 'false'], '投影后口位仍与 children 逐位对齐');
+  assert.equal(h.groups.viewNodeById(group.id)._groupEntryCount, 2, '组卡顶边按入口数排两个输入口');
+  assert.deepEqual(h.groups.viewEdgeRunTargetIds('judge', group.id, 0), ['group_entry_1'], '真口那条线只认自己的入口卡');
+  assert.deepEqual(h.groups.viewEdgeRunTargetIds('judge', group.id, 1), ['group_entry_2'], '假口那条线只认自己的入口卡');
+  assert.deepEqual(h.groups.adjacentEdges(group.id).map((edge) => [edge.parent.id, edge.childId, edge.order]), [
+    ['judge', group.id, 0],
+    ['judge', group.id, 1],
+  ], '拖组卡时要同时补这两条代理线');
+});
+
+test('旧文档加载时补齐真实边界卡并标脏，补齐后不再重复迁移', () => {
+  let dirty = 0;
+  const h = harness({markDirty: () => { dirty += 1; }});
+  h.state.raw._nodeGroups = {
+    legacy_group: {name: '旧折叠图', nodeIds: ['a', 'b'], pins: []},
+  };
+  const group = h.groups.groups()[0];
+  assert.deepEqual(group.nodeIds, ['a', 'b', 'group_entry_1', 'group_exit_1'], '旧组读入即补齐边界卡');
+  assert.deepEqual(h.model.nodeById('root').children, ['group_entry_1']);
+  assert.deepEqual(h.model.nodeById('b').children, ['group_exit_1']);
+  assert.deepEqual(h.model.nodeById('group_entry_1').children, ['a']);
+  assert.deepEqual(h.model.nodeById('group_exit_1').children, ['c']);
+  assert.equal(dirty, 1, '迁移结果进入下一次保存');
+
+  // 补齐后再读：成员里已有边界卡，不再重复迁移（dirty 不再增长）。
+  h.state.docVersion += 1;
+  assert.deepEqual(h.groups.groups()[0].nodeIds, ['a', 'b', 'group_entry_1', 'group_exit_1']);
+  assert.equal(dirty, 1);
+});
+
+test('组卡执行出口 = 组出口卡的真实下游，每条跨组出边一个出口', () => {
+  const h = harness();
+  // b 有两个组外子节点：两条真实跨组出边 → 两张出口卡、两个组卡出口。
+  h.model.nodeById('b').children = ['c', 'd'];
+  h.state.raw.nodes.push({id: 'd', type: 'task', children: []});
+  h.state.selected = new Set(['a', 'b']);
+  assert.equal(h.groups.groupSelection(), true);
+  const group = h.groups.groups()[0];
+  assert.deepEqual(group.nodeIds.filter((id) => id.startsWith('group_exit_')), ['group_exit_1', 'group_exit_2'],
+    '每条跨组出边各得一张出口卡');
+  assert.deepEqual(h.model.nodeById('b').children, ['group_exit_1', 'group_exit_2']);
+  const collapsed = h.groups.viewNodeById(group.id);
+  assert.deepEqual(collapsed.children, ['c', 'd'], '组卡按出口卡投影出两个执行出口');
+  assert.equal(collapsed._execOutputCount, 2);
+});
+
+test('边界卡参与画布连线规则：出口是终点、入口只进本组、边界卡只接一个子节点', () => {
+  const h = harness();
+  h.state.selected = new Set(['a', 'b']);
+  h.groups.groupSelection();
+  const group = h.groups.groups()[0];
+  h.groups.enterGroup(group.id);
+  const commands = createCanvasCommands({
+    state: h.state,
+    nodes: h.model.nodes,
+    nodeById: h.model.nodeById,
+    layout: h.model.layout,
+    mutate: (fn) => fn(),
+    clone: (value) => JSON.parse(JSON.stringify(value)),
+    toast: () => {},
+    worldPoint: (event) => ({x: event.clientX, y: event.clientY}),
+    wrap: {clientWidth: 400, clientHeight: 300},
+    nodeWidth: 260,
+    baseHeight: 96,
+  });
+
+  assert.equal(commands.canConnectNodes(h.model.nodeById('group_entry_1'), h.model.nodeById('a')), null,
+    '入口卡接组内首节点是它的本职（重复连接是 no-op）');
+  assert.match(commands.canConnectNodes(h.model.nodeById('group_entry_1'), h.model.nodeById('b')) ?? '', /边界卡只接一个子节点/,
+    '入口卡已有一个子节点时先断开再连');
+  assert.match(commands.canConnectNodes(h.model.nodeById('group_entry_1'), h.model.nodeById('c')) ?? '', /折叠图入口只能接本折叠图内的节点/,
+    '入口卡的子节点必须在组内');
+  assert.equal(commands.canConnectNodes(h.model.nodeById('root'), h.model.nodeById('group_entry_1')), null,
+    '组外父连入口卡是合法路径（root 重复连接是 no-op）');
+  assert.match(commands.canConnectNodes(h.model.nodeById('root'), h.model.nodeById('group_exit_1')) ?? '', /折叠图出口卡只能由本折叠图内的节点连入/,
+    '组外节点不能直接连出口卡');
+  assert.equal(commands.canConnectNodes(h.model.nodeById('a'), h.model.nodeById('group_exit_1')), null,
+    '组内成员连出口卡是正常路径（把执行流交给折叠图边界）');
+  assert.match(commands.canConnectNodes(h.model.nodeById('group_exit_1'), h.model.nodeById('c')) ?? '', /没有子节点出口/,
+    '出口卡没有子节点出口（它的下游在折叠图外）');
+  assert.match(commands.canConnectNodes(h.model.nodeById('root'), h.model.nodeById('a')) ?? '', /跨折叠图的执行边必须经过折叠图入口卡/,
+    '组外父直接连组内成员会被打回，必须走入口卡');
 });

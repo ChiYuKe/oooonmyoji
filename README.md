@@ -284,6 +284,11 @@ MuMu DLL 会自行处理内部旋转，不需要额外转换坐标。
 [节点图文档 v5](docs/graph-document-v5.md)，目录与入口约定见
 [workflows/README.md](workflows/README.md)。下面这份 `.owf` 查找模板并点击匹配结果：
 
+> 节点组（编辑器里的折叠图）采用 UE Collapse Graph 语义：跨组执行边真的经过
+> `group_entry` / `group_exit` 边界卡（`组外父 → 入口 → 组内子`、`组内父 → 出口 → 组外子`），
+> 运行时把它们当单子透传，展开折叠图后执行关系逐字节还原；旧文档首次加载自动补齐边界卡。
+> 详见[节点图文档 v5 · 节点组](docs/graph-document-v5.md)。
+
 ```owf
 workflow my_workflow
   version: 3.0.0

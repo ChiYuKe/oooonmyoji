@@ -11,6 +11,7 @@ import { reconcileVariableLinks } from '../model/variable-links';
 import {
   CONDITION_PORT_LABELS, conditionChildOf, conditionPortsOf, isConditionPort, type ConditionPort,
 } from '../model/exec-ports';
+import { isGroupBoundaryNode } from '../model/node-groups';
 import { NODE_TYPES } from '../../shared/workflow/types';
 
 export interface PointerPoint {
@@ -87,6 +88,17 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return out;
   }
 
+  /** 节点所属的折叠图 id（一个节点最多属于一个折叠图）；不属于任何折叠图返回空串。 */
+  function groupIdOf(nodeId: string): string {
+    const raw: any = state.raw;
+    const table = raw && typeof raw === 'object' ? raw._nodeGroups : null;
+    if (!table || typeof table !== 'object') return '';
+    for (const [id, value] of Object.entries<any>(table)) {
+      if (value && Array.isArray(value.nodeIds) && value.nodeIds.map(String).includes(String(nodeId))) return id;
+    }
+    return '';
+  }
+
   /**
    * 节点对象版连接校验：`buildNode` 刚造出来的节点还没有入图，
    * 按 id 查询会一律命中「节点不存在」，只能拿对象本身判断。
@@ -104,6 +116,39 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     const parentId = String(parent.id);
     const childId = String(child.id);
     if (parentId === childId || descendants(childId).has(parentId)) return '连接会形成环';
+    // 折叠图边界卡是真实的执行流隧道：方向由折叠图的边界定义——
+    // 入口的父在组外、子在组内；出口的父在组内、子在组外。边界卡自己只接一条边。
+    if (parent.type === 'group_exit') return '折叠图出口卡没有子节点出口（它的下游在折叠图外）';
+    if (parent.type === 'group_entry' || child.type === 'group_entry' || child.type === 'group_exit') {
+      if (child.type === 'group_entry') {
+        const entryGroup = groupIdOf(childId);
+        if (!entryGroup) return '折叠图入口卡必须属于某个折叠图（展开折叠图时它会自动消失）';
+        if (groupIdOf(parentId) === entryGroup) return '折叠图入口卡只能由本折叠图外的节点连入';
+      }
+      if (parent.type === 'group_entry') {
+        const entryGroup = groupIdOf(parentId);
+        if (!entryGroup) return '折叠图入口卡必须属于某个折叠图（展开折叠图时它会自动消失）';
+        if (groupIdOf(childId) !== entryGroup) return '折叠图入口只能接本折叠图内的节点';
+      }
+      if (child.type === 'group_exit') {
+        const exitGroup = groupIdOf(childId);
+        if (!exitGroup) return '折叠图出口卡必须属于某个折叠图（展开折叠图时它会自动消失）';
+        if (groupIdOf(parentId) !== exitGroup) return '折叠图出口卡只能由本折叠图内的节点连入';
+      }
+    }
+    if (parent.type === 'group_entry' || parent.type === 'group_exit') {
+      const children = Array.isArray(parent.children) ? parent.children : [];
+      if (children.length >= 1 && !children.includes(childId)) return '折叠图边界卡只接一个子节点，先断开再连';
+    }
+    // 跨折叠图的执行边必须经过边界卡（UE Collapse Graph 里隧道是显式的）：
+    // 一边在组内一边在组外的直连会被打回，请先在折叠图里接上入口/出口卡。
+    const parentGroup = groupIdOf(parentId);
+    const childGroup = groupIdOf(childId);
+    if (parentGroup !== childGroup && !isGroupBoundaryNode(parent) && !isGroupBoundaryNode(child)) {
+      if (parentGroup && !childGroup) return '跨折叠图的执行边必须经过折叠图出口卡';
+      if (!parentGroup && childGroup) return '跨折叠图的执行边必须经过折叠图入口卡';
+      if (parentGroup && childGroup && parentGroup !== childGroup) return '跨折叠图的执行边必须经过折叠图出口卡（到目标折叠图再接入口卡）';
+    }
     if (parent.type === 'condition') {
       const children = Array.isArray(parent.children) ? parent.children : [];
       if (!children.includes(childId) && children.length >= 2) return '判断节点最多两条分支（真口 / 假口）';

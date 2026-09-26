@@ -15,7 +15,7 @@
  * 引脚命名与 Python 侧完全一致：`then.<下标>` / `true` / `false` / `case.<下标>` / `default`。
  */
 import type { ValidationIssue } from './types';
-import { NODE_TYPES } from './types';
+import { GROUP_ENTRY_TYPE, GROUP_EXIT_TYPE, NODE_TYPES } from './types';
 
 export const GRAPH_SCHEMA_VERSION = 6;
 
@@ -160,9 +160,110 @@ function isPosition(value: unknown): value is { x: number; y: number } {
   return isRecord(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
 }
 
-/** 节点组的问题：成员与端点必须存在且自洽（运行时不认识组，但文档里写了就要说清楚）。 */
-export function graphGroupIssues(raw: unknown): ValidationIssue[] {
+/** 图文档里的执行边（`to.pin` 为 `in` 的边；数据边不走执行流）。 */
+function execEdgesOf(document: Record<string, any>): Array<{ parent: string; child: string; index: number }> {
+  const result: Array<{ parent: string; child: string; index: number }> = [];
+  const edges: any[] = Array.isArray(document.edges) ? document.edges : [];
+  edges.forEach((edge, index) => {
+    const parent = edge?.from?.node;
+    const child = edge?.to?.node;
+    if (edge?.to?.pin !== 'in' || typeof parent !== 'string' || typeof child !== 'string') return;
+    result.push({ parent, child, index });
+  });
+  return result;
+}
+
+/** 成员节点 id → 它所属的折叠图 id 列表（文档里写了 groups 才有值）。 */
+function groupMembership(document: Record<string, any>): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  const groups: any[] = Array.isArray(document.groups) ? document.groups : [];
+  for (const group of groups) {
+    if (!isRecord(group) || typeof group.id !== 'string') continue;
+    for (const member of Array.isArray(group.nodeIds) ? group.nodeIds : []) {
+      if (typeof member !== 'string') continue;
+      const list = result.get(member) || [];
+      list.push(group.id);
+      result.set(member, list);
+    }
+  }
+  return result;
+}
+
+/**
+ * 折叠图边界卡（`group_entry` / `group_exit`）的文档级检查。
+ *
+ * 这两类卡是**真实的执行流隧道**：跨折叠图边界的执行边必须经过它们，方向也由边界定死
+ * （入口的父在组外、子在组内；出口的父在组内、子在组外）。运行时不认识组，
+ * 所以这些规则只能在这里说——Python 侧的对等实现在 `graph_compile._check_groups`，
+ * 两边报的是同一批问题（画布看这里的文案，`.owf` 装载看 Python 的）。
+ */
+export function graphBoundaryIssues(raw: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  if (!isGraphDocument(raw)) return issues;
+  const document = raw as Record<string, any>;
+  const nodes: any[] = Array.isArray(document.nodes) ? document.nodes : [];
+  const byId = new Map<string, any>();
+  for (const node of nodes) if (typeof node?.id === 'string') byId.set(node.id, node);
+  const boundary = nodes.filter((node) => node?.type === GROUP_ENTRY_TYPE || node?.type === GROUP_EXIT_TYPE);
+  if (!boundary.length) return issues;
+  const groups: any[] = Array.isArray(document.groups) ? document.groups : [];
+  const membership = groupMembership(document);
+  const edges = execEdgesOf(document);
+  const parentOf = new Map<string, string>();
+  for (const edge of edges) if (!parentOf.has(edge.child)) parentOf.set(edge.child, edge.parent);
+  for (const node of boundary) {
+    const id = String(node.id);
+    const isEntry = node.type === GROUP_ENTRY_TYPE;
+    const label = isEntry ? '折叠图入口' : '折叠图出口';
+    const owned = membership.get(id) || [];
+    if (owned.length !== 1) {
+      issues.push(issue(
+        ['nodes', id],
+        `${label}卡 ${id} 必须恰好属于一个折叠图${owned.length ? `（现在属于 ${owned.join(' / ')}）` : '（它没有写进任何 group 的 nodeIds）'}`,
+        'graph-boundary-group',
+      ));
+      continue;
+    }
+    const groupId = owned[0];
+    const group = groups.find((item) => item?.id === groupId);
+    const members = new Set<string>((Array.isArray(group?.nodeIds) ? group.nodeIds : []).filter((item: unknown): item is string => typeof item === 'string'));
+    const parent = parentOf.get(id);
+    if (typeof parent !== 'string') {
+      issues.push(issue(['nodes', id], `${label}卡 ${id} 没有被任何节点连入`, 'graph-boundary-parent'));
+    } else if (isEntry ? members.has(parent) : !members.has(parent)) {
+      issues.push(issue(['nodes', id], isEntry
+        ? `折叠图入口卡 ${id} 的父节点 ${parent} 必须在折叠图 ${groupId} 外`
+        : `折叠图出口卡 ${id} 的父节点 ${parent} 必须在折叠图 ${groupId} 内`, 'graph-boundary-side'));
+    }
+    const child = edges.find((edge) => edge.parent === id)?.child;
+    if (typeof child !== 'string') {
+      issues.push(issue(['nodes', id], `${label}卡 ${id} 没有子节点`, 'graph-boundary-child'));
+    } else if (isEntry ? !members.has(child) : members.has(child)) {
+      issues.push(issue(['nodes', id], isEntry
+        ? `折叠图入口卡 ${id} 的子节点 ${child} 必须在折叠图 ${groupId} 内`
+        : `折叠图出口卡 ${id} 的子节点 ${child} 必须在折叠图 ${groupId} 外`, 'graph-boundary-side'));
+    }
+  }
+  // 每条跨边界的执行边都必须经过边界卡：少了卡，折叠视图里就会出现悬空箭头，
+  // 展开折叠图后也说不清这条边到底算组内还是组外。
+  for (const edge of edges) {
+    const parentGroup = (membership.get(edge.parent) || [])[0] || '';
+    const childGroup = (membership.get(edge.child) || [])[0] || '';
+    if (parentGroup === childGroup) continue;
+    const parentType = byId.get(edge.parent)?.type;
+    const childType = byId.get(edge.child)?.type;
+    if (parentGroup && !childGroup && parentType !== GROUP_EXIT_TYPE && childType !== GROUP_EXIT_TYPE) {
+      issues.push(issue(['edges', edge.index, 'to', 'node'], `折叠图 ${parentGroup} 内的 ${edge.parent} 连到组外的 ${edge.child} 必须经过折叠图出口卡`, 'graph-boundary-crossing'));
+    }
+    if (!parentGroup && childGroup && parentType !== GROUP_ENTRY_TYPE && childType !== GROUP_ENTRY_TYPE) {
+      issues.push(issue(['edges', edge.index, 'to', 'node'], `折叠图 ${childGroup} 外的 ${edge.parent} 连到组内的 ${edge.child} 必须经过折叠图入口卡`, 'graph-boundary-crossing'));
+    }
+  }
+  return issues;
+}
+
+/** 节点组的问题：成员与端点必须存在且自洽（运行时不认识组，但文档里写了就要说清楚）。 */
+export function graphGroupIssues(raw: unknown): ValidationIssue[] {  const issues: ValidationIssue[] = [];
   if (!isGraphDocument(raw) || !Array.isArray((raw as any).groups)) return issues;
   const nodeIds = new Set(
     (Array.isArray((raw as any).nodes) ? (raw as any).nodes : [])
@@ -515,6 +616,7 @@ export function graphDocumentIssues(raw: unknown): ValidationIssue[] {
   issues.push(
     ...graphNodeTypeIssues(document),
     ...graphGroupIssues(document),
+    ...graphBoundaryIssues(document),
     ...graphCommentIssues(document),
     ...graphWaypointIssues(document),
   );

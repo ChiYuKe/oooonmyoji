@@ -309,6 +309,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .data-tone-9 { --data-tone: #e47e9e; --edge-tone: var(--data-tone); }
 /* 变量线：实线（不再点线）、比执行连线（.edge-line 2px）细；命中交给下面那条透明加粗线。 */
 .variable-edge { fill: none; stroke: var(--edge-tone, #5aa9df); stroke-width: 1.8; opacity: 0.92; pointer-events: none; vector-effect: non-scaling-stroke; }
+.group-interface-edge { stroke-width: 1.65; opacity: .76; }
+.reference-edge.group-interface-edge { stroke-width: 2; opacity: .9; }
 /* 组接口 / 组变量卡到真实成员参数的映射线**也是变量线**：沿用上面 `.variable-edge` 的
  * 数据线样式（实线、按身份取色、1.8px、悬停提亮、带 14px 命中线）。
  * `group-interface-edge` 只作为语义标记保留，不再单独声明虚线样式——
@@ -349,6 +351,8 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 /* 拆分卡片是值卡片家族（bool_judge / break）：用低饱和的玫瑰色，与蓝/青绿区分。 */
 .node.type-break .node-accent { fill: #c989a8; }
 .node.type-node_group .node-accent { fill: #8ea9cc; }
+/* 折叠图边界卡（真实的执行流隧道）：与折叠图卡同色，展开时仍能看出它属于哪张图。 */
+.node.type-group_entry .node-accent, .node.type-group_exit .node-accent { fill: #8ea9cc; }
 .node.type-root .node-icon-plate { fill: #413137; stroke: #704953; }
 .node.type-selector .node-icon-plate { fill: #2d4038; stroke: #456c59; }
 .node.type-sequence .node-icon-plate { fill: #413a2a; stroke: #6b5a35; }
@@ -360,9 +364,22 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 .node.type-bool_judge .node-icon-plate { fill: #263a46; stroke: #41697a; }
 .node.type-break .node-icon-plate { fill: #403038; stroke: #6f4757; }
 .node.type-node_group .node-icon-plate { fill: #303c4b; stroke: #526b89; }
-.node.type-node_group .node-box { fill: #232a33; stroke: #596b82; stroke-dasharray: 5 3; }
+.node.type-group_entry .node-icon-plate, .node.type-group_exit .node-icon-plate { fill: #303c4b; stroke: #526b89; }
+.node.type-node_group .node-box { fill: #232a33; stroke: #596b82; stroke-width: 1.25; stroke-dasharray: none; filter: drop-shadow(0 5px 12px rgba(0,0,0,.28)); }
 .node.type-node_group .node-head { fill: #2d3846; }
+.node.type-node_group .node-header-rule { stroke: color-mix(in srgb, #8ea9cc 28%, var(--card-line)); }
+.node.type-node_group .node-group-icon { fill: #c7d7eb; font-size: 14px; }
+.node.type-node_group .node-subtitle { fill: #c3cfdd; }
+.node.type-node_group .node-meta { fill: #8998aa; }
+.node.type-node_group.node-group-collapsed-card .node-head { fill: color-mix(in srgb, #58779e 58%, var(--card-head)); }
+.node.type-node_group.node-group-interface-card .node-head { fill: color-mix(in srgb, #8c9aaa 48%, var(--card-head)); }
+.node.type-node_group.node-group-variables-card .node-head { fill: color-mix(in srgb, #6f8198 48%, var(--card-head)); }
 .node.type-node_group .node-group-port { pointer-events: none; }
+.node.type-node_group .node-group-reference-port { pointer-events: all; cursor: crosshair; }
+.node.type-node_group .port-out-reference { stroke-width: 2; }
+.node.type-node_group .node-group-add-bg { fill: color-mix(in srgb, #8ea9cc 35%, var(--card-field)); stroke: #8ea9cc; }
+.node.type-node_group .node-group-add-icon { fill: #e4edf7; }
+.node.type-node_group .node-group-add:hover .node-group-add-bg { fill: color-mix(in srgb, #8ea9cc 55%, var(--card-field)); }
 .node-group-add { cursor: pointer; }
 .node-group-add-bg { fill: color-mix(in srgb, var(--card-head) 72%, #ffffff 8%); stroke: var(--card-line); stroke-width: 1; }
 .node-group-add-icon { fill: var(--card-text); font-size: 16px; font-weight: 600; pointer-events: none; }

@@ -7,7 +7,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "condition", "bool_judge", "break", "task")
+NODE_TYPES = ("root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "condition", "bool_judge", "break", "task", "group_entry", "group_exit")
 DECORATOR_TYPES = ("cooldown", "timeout", "retry", "repeat", "do_once")
 PARALLEL_FINISH_MODES = ("abort_background", "wait_for_background")
 INSTANCE_PARALLEL_WAIT_MODES = ("all", "any")

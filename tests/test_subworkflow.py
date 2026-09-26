@@ -216,6 +216,66 @@ def test_subworkflow_action_failure_is_reported_to_parent(tmp_path: Path, monkey
     assert child_step["workflow_id"] == "child_fail"
     assert child_step["workflow_path"] == ["parent_child_fail", "child_fail"]
     assert child_step["workflow_depth"] == 1
+    # 失败定位：子脚本里的失败节点单独一条路径，父工作流侧也能看出失败落在哪个节点。
+    assert child_step["node_path"] == ["root", "reject"]
+    assert child_step["error_breadcrumb"] == "root → reject"
+    assert record.failed_node_id == "reject"
+    assert record.failed_node_breadcrumb == "root → reject"
+
+
+def test_run_record_keeps_the_failed_node_position(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """多节点工作流失败时，运行记录给出去重后的失败节点与「根 → … → 失败节点」面包屑。"""
+
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    _write_workflow(tmp_path, "long_chain", [
+        {"id": "warmup", "action": "core.capture"},
+        {"id": "reject", "action": "core.assert", "params": {"value": False, "message": "第三步就失败"}},
+    ])
+
+    record = _run(config, "long_chain")
+
+    assert record.status.value == "failed"
+    assert record.failed_node_id == "reject"
+    # 路径只出现一次节点，不会因为父子节点各自报错而重复。
+    assert record.failed_node_breadcrumb.count("reject") == 1
+    assert record.failed_node_breadcrumb.endswith("reject")
+
+
+def test_run_record_ignores_selector_recovered_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """被 Selector 回收的失败不算失败位置，运行记录仍然指向真正冒泡上来的节点。"""
+
+    config = load_config(_write_config(tmp_path))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    parent = {
+        "schema_version": 4,
+        "id": "parent_recovered",
+        "version": "3.0.0",
+        "resolution": [1920, 1080],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+            {"id": "root", "type": "root", "children": ["choose"]},
+            {"id": "choose", "type": "selector", "children": ["miss", "boom"]},
+            {"id": "miss", "type": "task", "action": "core.assert", "params": {"value": False, "message": "被回收"}},
+            {"id": "boom", "type": "task", "action": "core.assert", "params": {"value": False, "message": "真失败"}},
+        ],
+    }
+    write_workflow(tmp_path / "workflows" / "parent_recovered.owf", parent)
+
+    record = _run(config, "parent_recovered")
+
+    assert record.status.value == "failed"
+    assert record.failed_node_id == "boom"
+    assert record.failed_node_breadcrumb is not None and record.failed_node_breadcrumb.endswith("boom")
+    assert "miss" not in record.failed_node_breadcrumb
 
 
 def test_selector_recovery_reclassifies_failed_subworkflow_descendants(

@@ -59,6 +59,36 @@ test('selector 之前的兄弟输出只作为可能存在，exists 检查可用'
   assert.deepEqual([...possiblyAvailableOutputNodeIds(info, 'second')], ['first']);
 });
 
+test('折叠图边界卡按单子透传：组内保证的输出在组之后依然可用', () => {
+  // A → 入口卡 → B ≡ A → B：边界卡只是隧道，可用性推导必须穿过它。
+  const withEntry = {
+    schema_version: 4, id: 'grouped', version: '4.0.0', resolution: [1920, 1080], root: 'root',
+    inputs: {}, variables: {},
+    nodes: [
+      { id: 'root', type: 'root', children: ['seq'] },
+      { id: 'seq', type: 'sequence', children: ['entry', 'second'] },
+      { id: 'entry', type: 'group_entry', children: ['first'] },
+      { id: 'first', type: 'task', action: 'vision.capture', params: {} },
+      { id: 'second', type: 'task', action: 'input.tap', params: {} },
+    ],
+  };
+  assert.deepEqual([...availableOutputNodeIds(parseWorkflow(withEntry), 'second')], ['first']);
+
+  const withExit = {
+    ...withEntry,
+    nodes: [
+      { id: 'root', type: 'root', children: ['seq'] },
+      { id: 'seq', type: 'sequence', children: ['exit', 'second'] },
+      { id: 'exit', type: 'group_exit', children: ['first'] },
+      { id: 'first', type: 'task', action: 'vision.capture', params: {} },
+      { id: 'second', type: 'task', action: 'input.tap', params: {} },
+    ],
+  };
+  assert.deepEqual([...availableOutputNodeIds(parseWorkflow(withExit), 'second')], ['first']);
+  // 入口/出口卡本身不产出输出，也不会被当成可用来源。
+  assert.deepEqual([...availableOutputNodeIds(parseWorkflow(withEntry), 'entry')], []);
+});
+
 test('引用建议按期望类型过滤，并受目标节点可用性限制', () => {
   const info = parseWorkflow(workflow());
   const suggestions = collectRefSuggestions(info, catalog, 'second', { type: 'string' });

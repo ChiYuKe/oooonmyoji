@@ -147,6 +147,10 @@ workflow activity_loop
       timeout_seconds: 15
       roi: [1621, 791, 299, 289]
       threshold: 0.88
+  node group_entry_1 group_entry
+    at: [1328, 696]
+  node group_entry_2 group_entry
+    at: [168, 384]
   var variables.v_10a5b9e6f0724cae9fddae2b177a86af
   var variables.v_b8337c03141146eda766b65ef80e0243
     at: [-224, 880]
@@ -165,21 +169,23 @@ workflow activity_loop
     start_round_cond:true -> start_round
     start_round -> tap_challenge
     start_round:then.1 -> wait_battle_end
-    start_round:then.2 -> finish_started_round
+    start_round:then.2 -> group_entry_2
     finish_started_round -> tap_exit_after_battle
     finish_started_round:then.1 -> wait_challenge_after_battle
-    continue_round_cond:true -> continue_round
+    continue_round_cond:true -> group_entry_1
     continue_round -> tap_exit_from_settlement
     continue_round:then.1 -> wait_challenge_after_settlement
+    group_entry_1 -> continue_round
+    group_entry_2 -> finish_started_round
   group node_group_1 "节点组 1"
-    nodeIds: [continue_round, tap_exit_from_settlement, wait_challenge_after_settlement]
+    nodeIds: [continue_round, tap_exit_from_settlement, wait_challenge_after_settlement, group_entry_1]
     pins:
       - nodeId: tap_exit_from_settlement
         param: match
     pinPolicy: explicit-v1
     at: [1328, 1160]
   group node_group_2 "节点组 2"
-    nodeIds: [finish_started_round, tap_exit_after_battle, wait_challenge_after_battle]
+    nodeIds: [finish_started_round, tap_exit_after_battle, wait_challenge_after_battle, group_entry_2]
     pins:
       - nodeId: tap_exit_after_battle
         param: match

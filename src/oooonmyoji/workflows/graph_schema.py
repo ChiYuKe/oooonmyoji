@@ -183,6 +183,9 @@ def _graph_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                 },
                 "tint": {"type": "string", "minLength": 1},
+                # 桌面端编辑器会写这两个显示字段（graph-comment-font-size / graph-comment-opacity）。
+                "fontSize": {"type": "number", "exclusiveMinimum": 0},
+                "opacity": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
             },
             "additionalProperties": False,
         },

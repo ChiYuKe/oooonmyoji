@@ -283,6 +283,9 @@
 :root[data-theme="light"] .node.type-node_group .node-accent {
     fill: #4f5e71
 }
+:root[data-theme="light"] .node.type-group_entry .node-accent, :root[data-theme="light"] .node.type-group_exit .node-accent {
+    fill: #4f5e71
+}
 :root[data-theme="light"] .node.type-root .node-icon-plate {
     fill: #e5e5e5;
     stroke: #696969
@@ -325,12 +328,47 @@
     fill: #e2e2e2;
     stroke: #495f79
 }
+:root[data-theme="light"] .node.type-group_entry .node-icon-plate, :root[data-theme="light"] .node.type-group_exit .node-icon-plate {
+    fill: #e2e2e2;
+    stroke: #495f79
+}
 :root[data-theme="light"] .node.type-node_group .node-box {
     fill: #eaeaea;
     stroke: #696969
 }
 :root[data-theme="light"] .node.type-node_group .node-head {
     fill: #e4e4e4
+}
+:root[data-theme="light"] .node.type-node_group .node-header-rule {
+    stroke: color-mix(in srgb, #4f5e71 28%, var(--card-line))
+}
+:root[data-theme="light"] .node.type-node_group .node-group-icon {
+    fill: #2e2e2e
+}
+:root[data-theme="light"] .node.type-node_group .node-subtitle {
+    fill: #363636
+}
+:root[data-theme="light"] .node.type-node_group .node-meta {
+    fill: #696969
+}
+:root[data-theme="light"] .node.type-node_group.node-group-collapsed-card .node-head {
+    fill: color-mix(in srgb, #e8ecf1 58%, var(--card-head))
+}
+:root[data-theme="light"] .node.type-node_group.node-group-interface-card .node-head {
+    fill: color-mix(in srgb, #cccccc 48%, var(--card-head))
+}
+:root[data-theme="light"] .node.type-node_group.node-group-variables-card .node-head {
+    fill: color-mix(in srgb, #cccccc 48%, var(--card-head))
+}
+:root[data-theme="light"] .node.type-node_group .node-group-add-bg {
+    fill: color-mix(in srgb, #4f5e71 35%, var(--card-field));
+    stroke: #4f5e71
+}
+:root[data-theme="light"] .node.type-node_group .node-group-add-icon {
+    fill: #232323
+}
+:root[data-theme="light"] .node.type-node_group .node-group-add:hover .node-group-add-bg {
+    fill: color-mix(in srgb, #4f5e71 55%, var(--card-field))
 }
 :root[data-theme="light"] .node-group-add-bg {
     fill: color-mix(in srgb, var(--card-head) 72%, #232323 8%)

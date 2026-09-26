@@ -3384,6 +3384,169 @@
       "desktop_codes": [
         "graph-switch-unwired-case"
       ]
+    },
+    {
+      "name": "折叠图边界卡编译成真实的透传链",
+      "valid": true,
+      "graph": {
+        "schema_version": 6,
+        "id": "group_boundary",
+        "version": "5.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "at": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "entry",
+            "type": "group_entry",
+            "at": {
+              "x": 0,
+              "y": 80
+            }
+          },
+          {
+            "id": "seq",
+            "type": "sequence",
+            "at": {
+              "x": 0,
+              "y": 160
+            }
+          },
+          {
+            "id": "a",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 240
+            }
+          },
+          {
+            "id": "exit",
+            "type": "group_exit",
+            "at": {
+              "x": 0,
+              "y": 320
+            }
+          },
+          {
+            "id": "b",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 400
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": {
+              "node": "root",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "entry",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "entry",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "seq",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "seq",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "a",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "seq",
+              "pin": "then.1"
+            },
+            "to": {
+              "node": "exit",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "exit",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "b",
+              "pin": "in"
+            }
+          }
+        ],
+        "groups": [
+          {
+            "id": "g1",
+            "name": "组",
+            "nodeIds": [
+              "entry",
+              "seq",
+              "a",
+              "exit"
+            ],
+            "pins": [],
+            "pinPolicy": "explicit-v1",
+            "at": {
+              "x": 100,
+              "y": 200
+            }
+          }
+        ]
+      },
+      "expect_nodes": {
+        "root": {
+          "children": [
+            "entry"
+          ]
+        },
+        "entry": {
+          "children": [
+            "seq"
+          ]
+        },
+        "seq": {
+          "children": [
+            "a",
+            "exit"
+          ]
+        },
+        "exit": {
+          "children": [
+            "b"
+          ]
+        }
+      }
     }
   ]
 }

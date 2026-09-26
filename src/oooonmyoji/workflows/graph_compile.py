@@ -102,11 +102,20 @@ def _legal_exec_out_pins(node: dict[str, Any]) -> str:
     return "then.<下标>"
 
 
-def _check_groups(raw: dict[str, Any], node_ids: set[str]) -> None:
+#: 折叠图（编辑器里的节点组）边界卡：真实的执行流隧道，跨组执行边必须经过它们。
+#: 与 `graph.py` 的 `GROUP_BOUNDARY_NODE_TYPES` 同名同义，这里只用来做组边界校验。
+_GROUP_BOUNDARY_TYPES = frozenset({"group_entry", "group_exit"})
+
+
+def _check_groups(raw: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> None:
     """节点组是编辑期概念，但既然写进了文档就要说清楚：成员与端点必须存在。
 
     运行时不认识组，所以**不校验**它也不会跑错；但一个指向已删除节点的组会让编辑器
     在读入时静默剪掉成员（用户以为组还在），不如在编译期直接点名。
+
+    折叠图边界卡（`group_entry` / `group_exit`）是**真实**的执行流隧道：跨组执行边必须
+    经过它们，方向也由边界定死（入口的父在组外、子在组内；出口的父在组内、子在组外）。
+    少了卡，折叠视图里就会出现悬空箭头，展开折叠图后也说不清这条边算组内还是组外。
     """
 
     groups = raw.get("groups")
@@ -114,6 +123,7 @@ def _check_groups(raw: dict[str, Any], node_ids: set[str]) -> None:
         return
     if not isinstance(groups, list):
         raise ConfigError("workflow graph groups must be an array")
+    node_ids = set(nodes)
     seen: set[str] = set()
     for index, group in enumerate(groups):
         if not isinstance(group, dict):
@@ -148,6 +158,112 @@ def _check_groups(raw: dict[str, Any], node_ids: set[str]) -> None:
                 )
             if not isinstance(pin.get("param"), str) or not pin.get("param"):
                 raise ConfigError(f"group {group_id} pins[{pin_index}] must define a non-empty param")
+    _check_group_boundaries(raw, nodes, groups)
+
+
+def _check_group_boundaries(
+    raw: dict[str, Any],
+    nodes: dict[str, dict[str, Any]],
+    groups: list[dict[str, Any]],
+) -> None:
+    """折叠图边界卡的自洽检查（见 `_check_groups` 的说明）。"""
+
+    boundary = [node for node in nodes.values() if str(node.get("type")) in _GROUP_BOUNDARY_TYPES]
+    if not boundary:
+        return
+    membership: dict[str, list[str]] = {}
+    for group in groups:
+        group_id = group.get("id")
+        members = group.get("nodeIds")
+        if not isinstance(group_id, str) or not isinstance(members, list):
+            continue
+        for member in members:
+            if isinstance(member, str):
+                membership.setdefault(member, []).append(group_id)
+    exec_edges: list[tuple[int, str, str]] = []
+    edges = raw.get("edges")
+    if isinstance(edges, list):
+        for index, edge in enumerate(edges):
+            if not isinstance(edge, dict):
+                continue
+            source = edge.get("from")
+            target = edge.get("to")
+            if not isinstance(source, dict) or not isinstance(target, dict):
+                continue
+            parent = source.get("node")
+            child = target.get("node")
+            if not isinstance(parent, str) or not isinstance(child, str):
+                continue
+            if target.get("pin") != EXEC_IN_PIN:
+                continue
+            exec_edges.append((index, parent, child))
+    parent_of: dict[str, str] = {}
+    for _index, parent, child in exec_edges:
+        parent_of.setdefault(child, parent)
+    for node in boundary:
+        node_id = str(node["id"])
+        node_type = str(node.get("type"))
+        is_entry = node_type == "group_entry"
+        label = "fold graph entry" if is_entry else "fold graph exit"
+        owned = membership.get(node_id)
+        if owned is None or len(owned) != 1:
+            detail = "" if owned is None else f" (belongs to {', '.join(owned)})"
+            raise ConfigError(f"node {node_id} ({label}) must belong to exactly one group{detail}")
+        group_id = owned[0]
+        group_record: dict[str, Any] | None = None
+        for item in groups:
+            if item.get("id") == group_id:
+                group_record = item
+                break
+        member_ids = set(group_record.get("nodeIds", [])) if group_record is not None else set()
+        parent = parent_of.get(node_id)
+        if parent is None:
+            raise ConfigError(f"node {node_id} ({label}) has no incoming execution edge")
+        if is_entry and parent in member_ids:
+            raise ConfigError(
+                f"node {node_id} (fold graph entry) must be fed from outside group {group_id}, "
+                f"but its parent {parent} is inside"
+            )
+        if not is_entry and parent not in member_ids:
+            raise ConfigError(
+                f"node {node_id} (fold graph exit) must be fed from inside group {group_id}, "
+                f"but its parent {parent} is outside"
+            )
+        children = [child for _index, parent_id, child in exec_edges if parent_id == node_id]
+        if len(children) != 1:
+            raise ConfigError(f"node {node_id} ({label}) must have exactly one child")
+        child = children[0]
+        if is_entry and child not in member_ids:
+            raise ConfigError(
+                f"node {node_id} (fold graph entry) must lead into group {group_id}, "
+                f"but its child {child} is outside"
+            )
+        if not is_entry and child in member_ids:
+            raise ConfigError(
+                f"node {node_id} (fold graph exit) must lead out of group {group_id}, "
+                f"but its child {child} is inside"
+            )
+    for index, parent, child in exec_edges:
+        parent_members = membership.get(parent)
+        child_members = membership.get(child)
+        parent_group = parent_members[0] if parent_members else None
+        child_group = child_members[0] if child_members else None
+        if parent_group == child_group:
+            continue
+        parent_type = str(nodes.get(parent, {}).get("type", ""))
+        child_type = str(nodes.get(child, {}).get("type", ""))
+        if parent_group is not None and child_group is None:
+            if parent_type != "group_exit" and child_type != "group_exit":
+                raise ConfigError(
+                    f"edges[{index}] leaves group {parent_group}: node {parent} must connect to "
+                    f"{child} through a fold graph exit"
+                )
+        if parent_group is None and child_group is not None:
+            if parent_type != "group_entry" and child_type != "group_entry":
+                raise ConfigError(
+                    f"edges[{index}] enters group {child_group}: node {parent} must connect to "
+                    f"{child} through a fold graph entry"
+                )
 
 
 def _check_waypoints(raw: dict[str, Any]) -> None:
@@ -408,7 +524,7 @@ def compile_graph(raw: dict[str, Any]) -> dict[str, Any]:
         raise ConfigError("workflow graph nodes must all be objects")
     nodes = _node_map(resolved_raw, source="workflow graph")
     # 组与注释框是编辑期概念（运行时不认识），但文档里写了就要自洽；折点只要坐标合法。
-    _check_groups(raw, set(nodes))
+    _check_groups(raw, nodes)
     _check_comments(raw)
     _check_waypoints(raw)
     outgoing, data_edges = _collect_edges(raw, nodes)

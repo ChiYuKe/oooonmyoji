@@ -18,6 +18,7 @@
         "properties": {
           "name": { "type": "string", "required": true, "min_length": 1 },
           "template": { "type": "asset" },
+          "templates": { "type": "array", "items": { "type": "asset", "min_length": 1 }, "min_items": 1, "description": "该状态的多个模板，任一命中即算这个状态" },
           "roi": { "type": "rect" },
           "threshold": { "type": "number", "default": 0.85, "min": 0, "max": 1 },
           "scale_search": { "type": "boolean", "default": false },

@@ -416,6 +416,8 @@ class TaskRunner:
                     instance_id=instance.id,
                     reward_stats_submitter=submit_reward_statistics if event_queue is not None else None,
                     live_view=live_view,
+                    # 跨实例信号目录按 artifact_dir 共享：同一配置下的多个实例都能读到对方的信号。
+                    signals_dir=self.config.artifact_dir / "signals",
                 )
                 debug_recorder = (
                     DebugStepRecorder(

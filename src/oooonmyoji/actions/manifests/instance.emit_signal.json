@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "name": "instance.emit_signal",
+  "version": "1.0.0",
+  "entry": "builtin:EmitSignalAction",
+  "description": "给目标实例写一条信号文件（invite_expected 等），对方用 instance.wait_signal 轮询收到。信号只是提示，不替代屏幕检测。",
+  "parameters": {
+    "signal": {
+      "type": "string",
+      "required": true,
+      "min_length": 1,
+      "max_length": 64,
+      "description": "信号名，如 invite_expected"
+    },
+    "target_instance": {
+      "type": "string",
+      "required": true,
+      "min_length": 1,
+      "max_length": 64,
+      "description": "接收信号的实例 id（如 mumu-1）"
+    },
+    "payload": {
+      "type": "object",
+      "default": {},
+      "description": "随信号附加的数据（可选）"
+    }
+  },
+  "card": {
+    "rows": [
+      { "param": "signal", "label": "信号名" },
+      { "param": "target_instance", "label": "目标实例" },
+      { "param": "payload", "label": "附加数据" }
+    ]
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "signal": { "type": "string" },
+      "target_instance": { "type": "string" },
+      "source_instance": { "type": "string" },
+      "emitted": { "type": "boolean" },
+      "path": { "type": ["string", "null"] }
+    },
+    "required": ["signal", "target_instance", "source_instance", "emitted", "path"],
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

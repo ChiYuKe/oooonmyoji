@@ -9,12 +9,14 @@ from .input import TapAction, SwipeAction, KeyAction, TypeTextAction
 from .stateflow import TapMatchAction, DismissTemplateUntilTextAction, RecoverStateAction
 from .subworkflow import RunWorkflowAction, SelectWorkflowAction, SequenceWorkflowAction
 from .text_wait import WaitTextAction, WaitAnyTextAction
+from .signal import EmitSignalAction, WaitSignalAction
 
 __all__ = [
     "AssertAction",
     "CaptureAction",
     "DetectStateAction",
     "DismissTemplateUntilTextAction",
+    "EmitSignalAction",
     "KeyAction",
     "LogAction",
     "MatchTemplateAction",
@@ -31,6 +33,7 @@ __all__ = [
     "TypeTextAction",
     "WaitAnyAction",
     "WaitAnyTextAction",
+    "WaitSignalAction",
     "WaitTemplateAction",
     "WaitTextAction",
 ]

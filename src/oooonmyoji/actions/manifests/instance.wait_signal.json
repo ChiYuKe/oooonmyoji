@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "name": "instance.wait_signal",
+  "version": "1.0.0",
+  "entry": "builtin:WaitSignalAction",
+  "description": "等待本实例收到指定信号文件（收到即消费删除）。超时按 timeout 失败，调用方可回退到屏幕轮询。",
+  "parameters": {
+    "signal": {
+      "type": "string",
+      "required": true,
+      "min_length": 1,
+      "max_length": 64,
+      "description": "信号名，如 invite_expected"
+    },
+    "timeout_seconds": {
+      "type": "duration",
+      "default": 60,
+      "min": 0,
+      "description": "等待超时秒数，默认 60"
+    },
+    "poll_interval": {
+      "type": "number",
+      "default": 0.2,
+      "min": 0.05,
+      "description": "轮询间隔秒数，默认 0.2"
+    },
+    "max_age_seconds": {
+      "type": "duration",
+      "default": 300,
+      "min": 0,
+      "description": "信号新鲜度上限；超过该秒数的旧信号按不存在处理，默认 300"
+    }
+  },
+  "card": {
+    "rows": [
+      { "param": "signal", "label": "信号名" },
+      { "param": "timeout_seconds", "label": "超时（秒）" },
+      { "param": "poll_interval", "label": "轮询间隔（秒）" },
+      { "param": "max_age_seconds", "label": "信号新鲜度（秒）" }
+    ]
+  },
+  "outputs": {
+    "type": "object",
+    "properties": {
+      "received": { "const": true },
+      "signal": { "type": "string" },
+      "source_instance": { "type": "string" },
+      "emitted_at": { "type": ["number", "null"] },
+      "payload": { "type": "object" }
+    },
+    "required": ["received", "signal", "source_instance", "emitted_at", "payload"],
+    "additionalProperties": false
+  },
+  "effects": { "side_effect": true, "retry": "unsafe" }
+}

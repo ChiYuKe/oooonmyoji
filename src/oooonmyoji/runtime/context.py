@@ -39,6 +39,7 @@ class TaskContextImpl:
         instance_id: str | None = None,
         reward_stats_submitter: Callable[[dict[str, Any]], None] | None = None,
         live_view: Any | None = None,
+        signals_dir: Path | None = None,
     ) -> None:
         self.device = device
         self.mapper = mapper
@@ -56,6 +57,8 @@ class TaskContextImpl:
         self.run_id = run_id
         self.instance_id = instance_id
         self.reward_stats_submitter = reward_stats_submitter
+        # 跨实例信号目录：两个实例共享同一份配置的 artifact_dir，信号文件按实例 id 分区。
+        self.signals_dir = signals_dir
         # 实时视觉监视：只在桌面端打开观看窗口时真正写盘（见 runtime/live_view.py）。
         self.live_view = live_view
         self._last_frame: DeviceFrame | None = None

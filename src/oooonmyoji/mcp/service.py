@@ -11,6 +11,7 @@ import sys
 import tempfile
 from base64 import b64encode
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from ..config.loader import load_config
 from ..devices.factory import connect_at_task_boundary
 from ..exceptions import ConfigError
 from ..runtime.instances import ensure_runtime_instance, expand_runtime_instances
+from ..runtime.one_shot import ActionRunResult, run_single_action
 from ..vision.image import frame_to_bgr
 from ..workflows.dsl import WORKFLOW_SUFFIX, emit_runtime_document
 from ..workflows.loader import WorkflowLoader
@@ -29,8 +31,8 @@ from ..workflows.validator import WORKFLOW_SCHEMA, validate_workflow
 
 PROJECT_GUIDE = """# AutoFlow Studio MCP 模板工厂
 
-当前阶段提供项目上下文、只读设备截图、ROI 图片模板生成、工作流校验和受控保存。
-截图只读取当前画面，不执行点击、滑动、输入或工作流运行。
+本服务提供项目上下文、只读设备截图、ROI 图片模板生成、工作流校验与受控保存，
+并在**用户当场批准**的前提下执行设备操作、读取项目文件与改写项目文件。
 
 工作流必须使用 Behavior Tree schema v4。生成工作流前应先查询 Action 清单、
 已有工作流和图片资源；需要新图片时先调用 capture_screen，再用 select_roi 打开项目
@@ -42,8 +44,34 @@ PROJECT_GUIDE = """# AutoFlow Studio MCP 模板工厂
 生成模板的目标目录：workflows/generated/
 新增图片模板的目标目录：assets/templates/generated/
 
-当前可用能力：读取项目说明、Action manifest、工作流 JSON 和图片资源清单，
-读取指定实例截图，按 ROI 保存图片模板，校验工作流，并将有效工作流保存到受控目录。
+## 需要用户批准的操作
+
+以下工具会先在用户本机弹出确认窗口，窗口只有用户能回答，批准前不会执行任何动作：
+
+- 执行类（execute）：run_action、tap、swipe、press_key、type_text、run_workflow
+- 读取类（read）：read_project_file、list_artifacts、tail_log
+- 写入类（write）：write_project_file
+- 删除类（delete）：delete_project_file
+
+规则：
+1. 未获批准时工具返回 `{"ok": false, "code": "approval_required"}`；不要反复重试，
+   应当把「需要用户在弹窗里确认」这件事告诉用户，等用户明确同意后再调用一次。
+2. 用户可以选择「本会话都允许此类」，此后同一工具+同一风险等级不再弹窗。
+3. 超时、关闭窗口、无法弹出窗口都按拒绝处理（失败即关闭）。
+4. 写入与删除前会把原文件复制到 artifacts/mcp-backups/；`.git/`、`.venv/` 与
+   artifacts/mcp-approvals/ 一律拒绝写入，因此在受控范围内出错都可以回退。
+5. 每次批准与拒绝都会记入 artifacts/mcp-approvals/audit.jsonl。
+
+## 验证工作流
+
+run_action 只能执行单个 Action，且不支持依赖 OCR 的 Action（vision.ocr、
+vision.wait_text、vision.wait_any_text）与 workflow.run。要验证整条工作流是否能跑通，
+请用 run_workflow：它走项目自己的 CLI（监督器 + 工作进程 + OCR 池），会写运行记录与
+事件文件，并返回失败节点、失败路径与最后几步事件。
+
+当前可用能力：读取项目说明、Action manifest、工作流 JSON、图片资源清单与项目文件，
+读取指定实例截图，按 ROI 保存图片模板，校验并保存工作流，在用户批准后执行单个 Action、
+运行完整工作流、以及受控地读写删除项目文件。
 """
 
 MAX_WORKFLOW_BYTES = 512 * 1024
@@ -53,6 +81,65 @@ MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 MAX_CAPTURE_CACHE = 4
 MAX_TEMPLATE_BYTES = 8 * 1024 * 1024
 ROI_EDITOR_TIMEOUT_SECONDS = 10 * 60
+RUN_WORKFLOW_DEFAULT_TIMEOUT = 30 * 60.0
+RUN_WORKFLOW_MAX_TIMEOUT = 6 * 60 * 60.0
+# 事件字段里可能塞着整张截图的 base64，回传前按长度丢弃。
+_EVENT_VALUE_LIMIT = 600
+
+
+def _parse_cli_payload(stdout: str | None) -> dict[str, Any] | None:
+    """Extract the CLI's JSON object from captured stdout."""
+
+    if not stdout:
+        return None
+    text = stdout.strip()
+    if not text:
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start < 0:
+            return None
+        try:
+            value, _ = json.JSONDecoder().raw_decode(text[start:])
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def _compact_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Drop oversized values so run events stay readable in a tool result."""
+
+    compact: dict[str, Any] = {}
+    for key, value in event.items():
+        if isinstance(value, str) and len(value) > _EVENT_VALUE_LIMIT:
+            compact[key] = f"<{len(value)} chars omitted>"
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            compact[key] = value
+        elif isinstance(value, list) and len(value) <= 20 and all(isinstance(item, (str, int, float, bool)) for item in value):
+            compact[key] = value
+    return compact
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    """Stop a timed-out run and its worker children."""
+
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
 
 
 class ProjectContextService:
@@ -807,6 +894,188 @@ class ProjectContextService:
             "workflow_id": candidate.get("id"),
             "version": candidate.get("version"),
             "validation": validation,
+        }
+
+    # ---- gated execution ------------------------------------------------
+
+    def run_action(
+        self,
+        action_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        instance_id: str = "mumu-0",
+        reference_resolution: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Execute one Action against one instance and report the outcome."""
+
+        if reference_resolution is not None:
+            if not isinstance(reference_resolution, (list, tuple)) or len(reference_resolution) != 2:
+                raise ValueError("reference_resolution must contain width and height")
+            resolution = (int(reference_resolution[0]), int(reference_resolution[1]))
+        else:
+            resolution = None
+        result: ActionRunResult = run_single_action(
+            self.config,
+            instance_id=instance_id,
+            action_name=action_name,
+            params=params,
+            reference_resolution=resolution,
+            registry=self.registry,
+        )
+        return result.as_payload()
+
+    def run_workflow(
+        self,
+        workflow: str,
+        *,
+        instance_id: str = "mumu-0",
+        inputs: dict[str, Any] | None = None,
+        timeout_seconds: float = RUN_WORKFLOW_DEFAULT_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Run an existing workflow through the project CLI and report the record.
+
+        The CLI is used on purpose: it builds the supervisor, the worker and the
+        shared OCR pool exactly like a scheduled run, so a workflow verified here
+        behaves the same way later.  Its stdout is captured by this process, which
+        keeps the MCP stdio channel clean.
+        """
+
+        if not isinstance(workflow, str) or not workflow.strip():
+            raise ValueError("workflow must be a non-empty string")
+        timeout = float(timeout_seconds)
+        if not 30.0 <= timeout <= RUN_WORKFLOW_MAX_TIMEOUT:
+            raise ValueError(f"timeout_seconds must be between 30 and {int(RUN_WORKFLOW_MAX_TIMEOUT)}")
+
+        run_dir = (self.config.artifact_dir / "mcp-runs").resolve()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        events_file = run_dir / f"events-{stamp}-{secrets.token_hex(4)}.jsonl"
+        command = [
+            sys.executable,
+            "-m",
+            "src.oooonmyoji.cli",
+            "--config",
+            str(self.config_path),
+            "run-workflow",
+            workflow,
+            "--instance",
+            instance_id,
+            "--events-file",
+            str(events_file),
+        ]
+        inputs_path: Path | None = None
+        try:
+            if inputs:
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    encoding="utf-8",
+                    suffix=".json",
+                    prefix="mcp-inputs-",
+                    delete=False,
+                ) as handle:
+                    json.dump(inputs, handle, ensure_ascii=False, indent=2)
+                    inputs_path = Path(handle.name)
+                command += ["--inputs", str(inputs_path)]
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _terminate_process_tree(process)
+                stdout, stderr = process.communicate()
+                return {
+                    "ok": False,
+                    "code": "run_timeout",
+                    "workflow": workflow,
+                    "instance": instance_id,
+                    "timeout_seconds": timeout,
+                    "events_file": self._relative(events_file),
+                    "stdout_tail": (stdout or "")[-1500:],
+                    "stderr_tail": (stderr or "")[-1500:],
+                }
+        finally:
+            if inputs_path is not None:
+                inputs_path.unlink(missing_ok=True)
+
+        payload = _parse_cli_payload(stdout)
+        status = payload.get("status") if isinstance(payload, dict) else None
+        response: dict[str, Any] = {
+            "ok": process.returncode == 0 and status == "succeeded",
+            "workflow": workflow,
+            "instance": instance_id,
+            "status": status,
+            "exit_code": process.returncode,
+            "events_file": self._relative(events_file),
+        }
+        if isinstance(payload, dict):
+            for key in ("run_id", "group_id", "error", "error_category", "failed_node", "failed_path", "runs"):
+                if key in payload:
+                    response[key] = payload[key]
+        if not isinstance(payload, dict) or process.returncode != 0:
+            response["stderr_tail"] = (stderr or "")[-1500:]
+        run_id = response.get("run_id")
+        if isinstance(run_id, str):
+            record = self._run_record(run_id)
+            if record is not None:
+                response["run_record"] = record
+        response["steps_tail"] = self._tail_events(events_file)
+        return response
+
+    def _tail_events(self, events_file: Path, *, limit: int = 6) -> list[dict[str, Any]]:
+        """Return the last few run events so a failure can be located."""
+
+        if not events_file.is_file():
+            return []
+        try:
+            lines = events_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return []
+        events: list[dict[str, Any]] = []
+        for line in lines[-60:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                events.append(_compact_event(parsed))
+        return events[-limit:]
+
+    def _run_record(self, run_id: str) -> dict[str, Any] | None:
+        path = (self.config.artifact_dir / "runs" / f"{run_id}.json").resolve()
+        if not path.is_file():
+            return None
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(record, dict):
+            return None
+        history = record.get("step_history")
+        steps = [_compact_event(step) for step in history[-8:]] if isinstance(history, list) else []
+        return {
+            "run_id": run_id,
+            "status": record.get("status"),
+            "workflow_id": record.get("workflow_id"),
+            "instance_id": record.get("instance_id"),
+            "started_at": record.get("started_at"),
+            "finished_at": record.get("finished_at"),
+            "error": record.get("error"),
+            "error_category": record.get("error_category"),
+            "failed_node_id": record.get("failed_node_id"),
+            "failed_node_breadcrumb": record.get("failed_node_breadcrumb"),
+            "step_count": len(history) if isinstance(history, list) else 0,
+            "steps_tail": steps,
+            "record_path": self._relative(path),
         }
 
 

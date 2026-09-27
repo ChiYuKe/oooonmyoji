@@ -1,0 +1,305 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OWF Workflow",
+  "scopeName": "source.owf",
+  "comment": "oooonmyoji 工作流文本格式 v6（.owf）。权威语法见 docs/workflow-dsl-v6.md：2 空格缩进、`#` 注释、`|` 长文本块、顶层 edges 连线表、中缀表达式。",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#document-head" },
+    { "include": "#edge-table" },
+    { "include": "#node-block" },
+    { "include": "#var-block" },
+    { "include": "#group-block" },
+    { "include": "#comment-block" },
+    { "include": "#generic" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "(^|\\s)#.*$",
+      "name": "comment.line.number-sign.owf"
+    },
+
+    "document-head": {
+      "patterns": [
+        {
+          "comment": "头行：`workflow <id>`",
+          "match": "^(workflow)\\s+(\\S+)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.workflow.owf" },
+            "2": { "name": "entity.name.type.workflow.owf" }
+          }
+        },
+        {
+          "comment": "文档级键",
+          "match": "^\\s*(version|description|resolution|root|retry_safe|limits)(?=\\s*:)",
+          "name": "keyword.other.document-key.owf"
+        }
+      ]
+    },
+
+    "edge-table": {
+      "patterns": [
+        {
+          "comment": "顶层边表：`源[:引脚] -> 目标[:引脚]`；源引脚省略即 then.0、目标引脚省略即 in",
+          "match": "^\\s*(?:(?:[\\w\\u4e00-\\u9fff.\\-]+|(?:\")(?:[^\"\\\\]|\\\\.)*(?:\"))(?::[\\w.\\-]+)?)\\s*(->)\\s*(?:[\\w\\u4e00-\\u9fff.\\-]+|(?:\")(?:[^\"\\\\]|\\\\.)*(?:\"))(?::[\\w.\\-]+)?\\s*$",
+          "captures": {
+            "1": { "name": "keyword.operator.edge.owf" }
+          },
+          "name": "meta.edge.owf"
+        },
+        {
+          "comment": "紧凑写法（行内还有折点等）",
+          "match": "(->)",
+          "name": "keyword.operator.edge.owf"
+        },
+        {
+          "comment": "边表关键字",
+          "match": "^\\s*(edges|waypoints)(?=\\s*:)",
+          "name": "keyword.other.edge-key.owf"
+        }
+      ]
+    },
+
+    "node-block": {
+      "patterns": [
+        {
+          "comment": "节点头行：`node <id> <type> [\"显示名\"]`",
+          "match": "^\\s*(node)\\s+(\\S+)\\s+(\\S+)(?:\\s+(\"(?:[^\"\\\\]|\\\\.)*\"))?\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.node.owf" },
+            "2": { "name": "entity.name.function.node.owf" },
+            "3": { "name": "support.type.node.owf" },
+            "4": { "name": "string.quoted.double.node-name.owf" }
+          }
+        }
+      ]
+    },
+
+    "var-block": {
+      "patterns": [
+        {
+          "comment": "变量节点：`var <scope>.<key>`（id 由作用域与键派生）",
+          "match": "^\\s*(var)\\s+(inputs|variables)\\.(\\S+)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.var.owf" },
+            "2": { "name": "support.constant.scope.owf" },
+            "3": { "name": "entity.name.variable.owf" }
+          }
+        }
+      ]
+    },
+
+    "group-block": {
+      "patterns": [
+        {
+          "comment": "`group <id> [\"标题\"]` / `comment <id> [\"标题\"]`",
+          "match": "^\\s*(group|comment)\\s+(\\S+)(?:\\s+(\"(?:[^\"\\\\]|\\\\.)*\"))?\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.group.owf" },
+            "2": { "name": "entity.name.function.group.owf" },
+            "3": { "name": "string.quoted.double.group-title.owf" }
+          }
+        }
+      ]
+    },
+
+    "comment-block": {
+      "patterns": [
+        {
+          "comment": "装饰器：`decorator <type>`",
+          "match": "^\\s*(decorator)\\s+(\\S+)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.decorator.owf" },
+            "2": { "name": "support.type.decorator.owf" }
+          }
+        }
+      ]
+    },
+
+    "generic": {
+      "patterns": [
+        { "include": "#key" },
+        { "include": "#list-item" },
+        { "include": "#value" }
+      ]
+    },
+
+    "key": {
+      "patterns": [
+        {
+          "comment": "字符串键（含空格/中文时加引号）",
+          "match": "^\\s*(\"(?:[^\"\\\\]|\\\\.)*\")(?=\\s*:(?!:))",
+          "captures": {
+            "1": { "name": "support.type.property-name.owf" }
+          }
+        },
+        {
+          "comment": "基础块关键字",
+          "match": "^\\s*(action|params|expression|condition|conditions|cases|decorator|decorators|runs|wait_for|cancel_on_failure|finish_mode|max_iterations|ref|fields|value|instance|workflow|inputs|variables|nodeTypes|at|size|locked|comment|interfaceAt|variablesAt|nodeIds|pinPolicy|pins|nodeId|param|tint|label|scope|name|type|default|min|max|step|options|display_name|initial_from|description|_inputParams|_variableCards|_autoPublished|base|title|children)(?=\\s*:(?!:))",
+          "name": "support.type.property-name.owf"
+        },
+        {
+          "comment": "未知/自定义键（通用块允许任意键，最终由 schema 报错）",
+          "match": "^\\s*([^\\s#\"':,\\[\\]{}|]+)(?=\\s*:(?!:))",
+          "captures": {
+            "1": { "name": "support.type.property-name.owf" }
+          }
+        }
+      ]
+    },
+
+    "list-item": {
+      "match": "^\\s*(-)(?=\\s)",
+      "captures": {
+        "1": { "name": "punctuation.definition.list.owf" }
+      }
+    },
+
+    "value": {
+      "patterns": [
+        {
+          "comment": "`|` 长文本块（整块由 begin/end 规则处理）",
+          "match": ":\\s*(\\|)\\s*$",
+          "captures": {
+            "1": { "name": "punctuation.definition.block.owf" }
+          }
+        },
+        { "include": "#expression" },
+        { "include": "#position" },
+        { "include": "#inline-list" },
+        { "include": "#number" },
+        { "include": "#literal" },
+        { "include": "#quoted-string" },
+        { "include": "#reference" },
+        {
+          "comment": "裸词值：动作名、模板路径、状态名等",
+          "match": "(?<=:\\s)([^\\s#\"',\\[\\]{}|]+)",
+          "captures": {
+            "1": { "name": "string.unquoted.owf" }
+          }
+        },
+        {
+          "comment": "行内列表（`[a, b, c]`）里的裸词元素",
+          "match": "(?<=[\\[,]\\s?)([^\\s#\"',\\[\\]{}|]+)",
+          "captures": {
+            "1": { "name": "string.unquoted.owf" }
+          }
+        }
+      ]
+    },
+
+    "position": {
+      "comment": "坐标与尺寸：`at` / `size` / `interfaceAt` / `variablesAt` / `waypoints` 的值一律是数对",
+      "begin": "^\\s*(at|size|interfaceAt|variablesAt|waypoints)(\\s*:\\s*)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "support.type.property-name.owf" }
+      },
+      "name": "meta.position.owf",
+      "patterns": [
+        { "include": "#number" },
+        {
+          "match": "[\\[\\]{}]",
+          "name": "punctuation.definition.position.owf"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.list.owf"
+        }
+      ]
+    },
+
+    "inline-list": {
+      "comment": "行内列表 `[a, b, c]`",
+      "match": "\\[([^\\[\\]]*)\\]",
+      "name": "meta.inline-list.owf",
+      "patterns": [
+        { "include": "#number" },
+        { "include": "#literal" },
+        { "include": "#quoted-string" },
+        { "include": "#reference" },
+        {
+          "match": ",",
+          "name": "punctuation.separator.list.owf"
+        }
+      ]
+    },
+
+    "expression": {
+      "comment": "中缀表达式：出现在 `expression:` / `condition:` / `conditions:` 的行内值上",
+      "patterns": [
+        {
+          "begin": "(?<=^\\s{2,}(?:expression|condition|conditions)\\s*:\\s)",
+          "end": "$",
+          "name": "meta.expression.owf",
+          "patterns": [
+            {
+              "match": "\\b(and|or|not|contains|exists)\\b",
+              "name": "keyword.operator.logical.owf"
+            },
+            {
+              "match": "(==|!=|>=|<=|>|<)",
+              "name": "keyword.operator.comparison.owf"
+            },
+            { "include": "#reference" },
+            { "include": "#literal" },
+            { "include": "#number" },
+            { "include": "#quoted-string" }
+          ]
+        },
+        {
+          "comment": "条件列表的块形式：`- <表达式>`",
+          "begin": "^\\s*-\\s(?=[^\\s])",
+          "end": "$",
+          "name": "meta.expression.owf",
+          "patterns": [
+            {
+              "match": "\\b(and|or|not|contains|exists)\\b",
+              "name": "keyword.operator.logical.owf"
+            },
+            {
+              "match": "(==|!=|>=|<=|>|<)",
+              "name": "keyword.operator.comparison.owf"
+            },
+            { "include": "#reference" },
+            { "include": "#literal" },
+            { "include": "#number" },
+            { "include": "#quoted-string" }
+          ]
+        }
+      ]
+    },
+
+    "reference": {
+      "comment": "引用：`nodes.…` / `inputs.…` / `variables.…`（要当字符串就加引号）",
+      "match": "\\b(?:nodes|inputs|variables)\\.[\\w\\u4e00-\\u9fff.\\-]+",
+      "name": "variable.other.reference.owf"
+    },
+
+    "number": {
+      "match": "-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?",
+      "name": "constant.numeric.owf"
+    },
+
+    "literal": {
+      "match": "\\b(?:true|false|null)\\b",
+      "name": "constant.language.owf"
+    },
+
+    "quoted-string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.owf",
+      "patterns": [
+        {
+          "match": "\\\\[nt\"\\\\]",
+          "name": "constant.character.escape.owf"
+        },
+        {
+          "match": "\\\\.",
+          "name": "invalid.illegal.escape.owf"
+        }
+      ]
+    }
+  }
+}

@@ -13,13 +13,13 @@ config/runtime-*.json
 .vscode/
 # Local coding-agent plans and scratch
 .zcode/
+.zcodeignore
 # Local toolchain downloads (portable Node.js etc.)
 /tools/
 *.vsix
 
-# VS Code extension
-vscode-onmyoji-workflow/node_modules/
-vscode-onmyoji-workflow/out/
+# VS Code extension（`lib/graph-dsl.cjs` 是构建产物但**要提交**：装扩展不该要求 Node）
+extensions/vscode-owf/node_modules/
 
 # Desktop application build output
 desktop/node_modules/

@@ -1,0 +1,109 @@
+{
+  "name": "owf-workflow",
+  "displayName": "OWF 工作流",
+  "description": "oooonmyoji 工作流文本格式（.owf v6）的语言支持：语义着色、解析诊断、结构大纲、节点跳转与结构树预览。",
+  "version": "0.1.0",
+  "publisher": "oooonmyoji",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "owf",
+    "oooonmyoji",
+    "workflow",
+    "工作流"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:owf"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "owf",
+        "aliases": [
+          "OWF Workflow",
+          "owf",
+          "工作流"
+        ],
+        "extensions": [
+          ".owf"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "owf",
+        "scopeName": "source.owf",
+        "path": "./syntaxes/owf.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "owf.showStructureTree",
+        "title": "OWF: 显示工作流结构树",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "owf.copyCanvasLayout",
+        "title": "OWF: 复制画布布局（节点坐标 JSON）"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "owf.showStructureTree",
+          "when": "editorLangId == owf"
+        },
+        {
+          "command": "owf.copyCanvasLayout",
+          "when": "editorLangId == owf"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "owf.showStructureTree",
+          "when": "editorLangId == owf",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "OWF 工作流",
+      "properties": {
+        "owf.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "用与桌面端/CLI 同一份解析器校验 .owf，并把语法错误标在编辑器里。"
+        },
+        "owf.diagnostics.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "输入后延迟多少毫秒再跑解析（避免大文件每次按键都全量解析）。"
+        },
+        "owf.outline.showVariables": {
+          "type": "boolean",
+          "default": true,
+          "description": "在大纲里同时列出 inputs / variables / 自定义节点类型 / 分组 / 注释框。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:parser": "node scripts/build-parser.mjs",
+    "check:parser": "node scripts/build-parser.mjs --check",
+    "test": "node --test --test-reporter=spec \"tests/*.test.cjs\"",
+    "verify": "npm run check:parser && npm run test"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

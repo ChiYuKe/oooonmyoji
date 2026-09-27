@@ -1,0 +1,9 @@
+# 打包时排除的内容：产物只需要 src / lib / syntaxes / language-configuration.json。
+# node_modules 是构建期依赖（esbuild / vsce），运行时用不到——`lib/graph-dsl.cjs` 已经
+# 是零依赖的打包产物，所以安装后的扩展不依赖任何 Node 包。
+node_modules/
+.vscode/
+*.vsix
+npm-debug.log
+tests/
+debug-*.cjs

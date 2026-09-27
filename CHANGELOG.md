@@ -6,6 +6,27 @@
 ## [Unreleased]
 
 ### 新增
+- **跨实例信号动作（`instance.emit_signal` / `instance.wait_signal`）**：多开时两个实例
+  （队长 / 队员）之间本来没有任何通信，队员只能盲轮询屏幕 170 秒等邀请，错过队长那一次邀请
+  就整轮失败。现在队长点完「发送组队邀请」写一条信号文件，队员**先等信号**、收到后再开一个
+  集中检测窗口，超时才回退到原来的全量轮询。
+  - **信号是提示，不是事实来源**：收到信号仍要回屏幕做模板匹配才算数；写信号失败只记日志
+    不中断工作流（信号丢了最多退回轮询），没配信号目录时发信号是空操作、等信号直接按超时失败。
+  - 信号文件落在 `artifact_dir/signals/<信号名>/<实例 id>.json`，刻意**不**放 per-run 的
+    `artifact_dir/<run_id>` 下——两个实例的 run_id 不同，放那里互相读不到。队员**收到即删除**
+    （消费语义，下一轮必须队长重新发出），另有 300 秒新鲜度保护，崩溃重启后残留的上一轮
+    信号不会被当成新邀请。
+  - 接线：`御魂副本.owf` 新增输入 `队友实例`，`send_invite` 与 `reinvite_sequence` 各发一次；
+    `御魂副本_队员.owf` 新增输入 `信号等待_秒`（默认 60）与 `信号后检测_秒`（默认 30），
+    `wait_invite` 改成「信号优先 → 超时回退轮询」选择器（快速检测节点是复制出来的，因为一个
+    节点只能有一个执行父节点），`accept_route` 的两个条件改成 OR 快慢两条检测路径。
+  - 文件：`src/oooonmyoji/actions/builtin/signal.py`、
+    `src/oooonmyoji/actions/manifests/instance.emit_signal.json` /
+    `instance.wait_signal.json`、`runtime/context.py`（新增 `signals_dir`）、
+    `runtime/runner.py`、`runtime/one_shot.py`、`workflows/御魂副本.owf` /
+    `workflows/御魂副本_队员.owf`；用例 `tests/test_signal_actions.py`（12 例：写入 / 覆盖 /
+    消费删除 / 过期残留 / 目标隔离 / 超时回退 / 路径安全 / 无目录降级），并把两份御魂工作流
+    加进 `tests/test_graph_document.py` 的真实清单编译与图回程覆盖。
 - **工作流失败定位（执行路径面包屑）**：节点一多，运行失败时光看「停在哪个节点」看不出它在
   「根 → … → 失败节点」这条链路里的位置，现在每条步骤事件都带路径。
   - 步骤事件新增 `node_path`（节点 id 序列）、`node_path_names`（带显示名）与拼好的
@@ -525,6 +546,31 @@
     可对备份/其它副本重跑；与编辑器里那份升级规则一致）。
 
 ### 变更
+- **队长工作流的主循环从「脚本」改成「每轮先观察画面、再按状态派发」（绞杀式改造）**。
+  原来恢复链只在**开局**跑一次，之后每轮都假设「上一轮结束在我以为的地方」；实测的失败几乎
+  都是「不在我以为的地方」（结算后落到探索地图/庭院，而 `ensure_party_room` 只有「已在房间 /
+  创建队伍」两条路，于是开始盲目等待）。现在每轮开头先做一次状态观察，再派发到对应的恢复分支。
+  - **原有 9 条恢复分支的节点体一行未改**，只是从选择器的第 N 个子节点变成 `switch` 的第 N 个
+    分支；`round` 仍是 `<repeat>` 计数（**轮数语义不变**），收敛节点插在 `round` 开头，
+    后面 9 步原样下移。开局那次 `recover_to_floor` 因此取消（每轮都做，不必开局单独做）。
+  - **「我在哪一屏」从 9 次顺序探测变成一帧一次判定**：新增 `observe_state`
+    （`vision.detect_state`，9 个状态、`states` 顺序严格照抄原分支顺序以保留优先级）+
+    `route_state`（`switch` on `observe_state.output.state`，`default` 落到「未识别」日志）。
+    原 `at_floor`/`detect_floor` 两个节点删除——观察者的 `floor` 状态已经承担了它，顺带省掉
+    每轮那次约 2 秒的选层页探测。
+  - **认不出画面时降级继续，不再终止整轮**：收敛包在 `recover_route` 选择器里，
+    `converge_route` 带 `<retry attempts=2 delay_seconds=0.5>`，兜底分支 `route_give_up` 只记日志。
+    （原来 9 条分支全失败会让开局恢复选择器失败，进而终止整轮任务。）
+  - **三个踩过的引擎语义**（写进 `docs/御魂组队实战与迭代记录.md` 备查，因为都是静默坑）：
+    ① `engine.py:640` 的 `self.outputs[node_id] = output` **只在成功时执行**，所以 `switch`
+    必须紧跟在刚成功的观察者之后读 `state`；若改用 `repeat_until(condition: state == 选层页)`
+    收敛，未识别那一次会读到**上一轮残留的旧状态**并静默错误派发，因此收敛用 `retry` 重跑整段。
+    ② `sequence` 遇失败即中断、`rounds` 没有 retry，所以会失败的观察者必须包一层永不失败的
+    选择器兜底。③ `detect_state` 多状态命中按 `states` 列表顺序取第一个（列表顺序 = 优先级）；
+    且 `vision.wait_any` 只有一个 `roi`/`threshold`，无法同时服务「选层页 0.9」与「房间 0.88」。
+  - 验证：`.owf` ⇄ 图形态往返稳定、`compile_graph` 通过、加载链路与 527 项测试全绿；
+    **真机时序尚未验证**。队员侧尚未改造——它没有任何导航分支，要状态机化必须先补
+    「地图/庭院/选层页 → 等邀请面板」的导航节点，那需要真机标定点击。
 - **复制粘贴只带节点，不带连线**：粘贴出来的卡片之间不再自动接上原来的执行边（`children` /
   `ports`，以及 `switch` 的 `cases.child` / `default_child`），参数里**指向别的节点**的引用
   （`{ref: 'nodes.…'}`）也一并摘掉——以前复制一次就等于凭空多出一份连在一起的子图，
@@ -857,6 +903,45 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **新增动作在动作下拉里只显示裸 id，跟旁边的动作样式不统一**。`instance.emit_signal` /
+  `instance.wait_signal` 没写进 `ACTION_LABELS`，而动作下拉是
+  `label: actionLabel(name)` + `detail: ACTION_LABELS[name] ? name : ''`——查不到译名时不仅标题
+  退回裸 `instance.emit_signal`，连那一行**等宽动作名也被吞掉**，于是列表里出现两行没有中文名的
+  条目（旁边是「点击匹配项 / input.tap_match」两行样式）。
+  - 补上这两个动作的中文名，并补齐它们的新参数（`signal` / `target_instance` / `payload` /
+    `poll_interval` / `max_age_seconds`）与输出字段译名；卡片行标签改成与详情栏字段名同一套说法
+    （`超时（秒）` / `轮询间隔（秒）` / `信号新鲜度（秒）`），免得同一个参数两处两个名字。
+  - 顺带补齐此前一直缺中文名的输出字段（21 个新译名，覆盖 37 处字段，如 `origin_x` /
+    `interval_seconds` / `error_category` / `attempts`）——这些字段在引用提示
+    （`节点名 › 字段名`）里原本显示原始英文键名。
+  - **节点卡片分类**：`instance.*` 原本落到 `custom`，那是**第三方插件**的身份色；改为与
+    `workflow.*` 同族（编排色，`node-cards.css` 里 `instance_parallel` 就是这个色）。
+  - 回归：新增 `desktop/tests/action-labels.test.cjs`，扫描全部内置清单断言每个动作、
+    每个参数、每个输出字段都能解析出中文名（`fieldLabel`/`outputFieldLabel` 解析结果不许等于
+    原始键名），并给 `desktop/tests/node-cards.test.cjs` 的分类样例补上这两个动作——
+    这类缺失以前是**静默**退化成裸 id，没有测试就只会在下拉里被肉眼发现。
+- **深色调色板下面包屑变成一条不透明的实心黑条**。桌面模式的面包屑是悬浮在画布上方的层
+  （`public/legacy/editor-frame.css`：`top: 0` / 30px / `z-index: 5`），本来就该半透明、
+  透出底下的网格与卡片；浅色主题与旧版基线都写着 72% 透明度，但
+  `:root[data-theme="dark"][data-palette] #workflow-breadcrumb { background: var(--ui-bg) }`
+  直接用了不透明色——画布顶那一条被整块盖死（实测：不透明版计算值就是纯 `#1c1c1c`，
+  改后是 `color(srgb .109804 .109804 .109804 / 0.72)`）。现在调色板分支改成
+  `color-mix(in srgb, var(--ui-bg) 72%, transparent)`，深色基线的 `rgba(28,28,28,.92)`
+  也一并收到 `.72`，四处主题（旧基线 / 深色 / 深色调色板 / 浅色）统一。回归：
+  `tests/ui-library.test.cjs` 扫描各主题里 `#workflow-breadcrumb` 的 `background`，
+  断言都必须带透明度；`scripts/verify-arrange-preview-bar.cjs` 在渲染页里读计算值确认
+  alpha 为 0.72。
+- **排列预览确认条被悬浮的面包屑压住：上边框看不见、「应用排列 / 取消」上半截点不到**。
+  桌面模式下 `#workflow-breadcrumb` 在 `public/legacy/editor-frame.css` 里被提成悬浮层
+  （`position: absolute`、`top: 0`、`min-height: 30px`、`z-index: 5`），而确认条写在画布里：
+  `#canvas-wrap` 自己是 `z-index: 0` 的层叠上下文，画布内的浮层因此永远排在面包屑之下。
+  确认条沿用旧 `top: 12px` 时整条上沿（含 30px 高按钮的上沿）落进那 30px 里——上边框看不见，
+  点按钮上半截命中的其实是面包屑，什么也不会发生。现在桌面画布模式下确认条跟
+  `#external-banner` 走同一条规矩，让到面包屑下面（`top: 38px`）；旧编辑器布局面包屑还在
+  文档流里，`top: 12px` 原样不动。回归：`tests/editor-frame-layout.test.cjs` 断言确认条
+  `top` 落在面包屑高度之下（并保留旧布局的 12px），`scripts/verify-arrange-preview-bar.cjs`
+  在无头 Chrome 里做真实命中测试——修复后按钮上沿与中心都命中按钮本身、CDP 真鼠标点击能进
+  按钮监听器，而把确认条塞回 `top: 12px` 后同一坐标命中 `workflow-breadcrumb`（复现原症状）。
 - **画布/整个工作台卡到 ~9 fps：画布与壳层之间的「脏正文上报 → replaceDocument 回灌」自转环**。
   链路：`model/node-groups.ts` 在读路径上补齐节点组的执行引脚名（`execInputs` / `execOutputs`），
   而这两个字段是**画布侧派生**的——图文档与 `.owf` 都不持久化它们（`shared/workflow/graph-document.ts`

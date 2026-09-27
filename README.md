@@ -18,11 +18,15 @@
   - `entrypoints/`：可直接运行的入口工作流（不随仓库提交，编辑器新建时按需生成）。
   - `generated/`：编辑器与工具生成的临时工作流。
   - 根目录：当前活动副本循环 `活动副本.owf`（工作流 ID `activity_loop`）。
+- `desktop/`：独立的 Electron 桌面端（AutoFlow Studio）——工作流编辑器、脚本概览、运行日志
+  与画面工具，见 [desktop/README.md](desktop/README.md)。
 - `assets/templates/`：按功能和实例分组的游戏模板图。
 - `config/`：示例配置和本机运行配置。
 - `plugins/actions/`：可选的可信本地 Action。
 - `tests/`：单元测试、集成测试和设备测试工具。
 - `scripts/`：本地维护脚本，默认先预览再执行。
+- `extensions/vscode-owf/`：`.owf` 的 VS Code 语言支持扩展（着色 / 诊断 / 大纲 / 跳转 / 补全），
+  解析器复用桌面端实现，详见 [它的 README](extensions/vscode-owf/README.md)。
 - `docs/`：工作流规范、设计研究和实现记录。
 - `artifacts/`、`logs/`：本地运行产物，已被 Git 忽略。
 
@@ -54,12 +58,16 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 实例 ID 和回退端口的显式覆盖；后续三开、四开不需要继续增加配置。运行
 下面的 `list-instances` 命令可查看当前解析结果。
 
-## VS Code 运行
+## 桌面端运行
 
-日常使用统一从 VS Code 左侧活动栏的 **AutoFlow Studio** 页面操作：
+日常使用统一从独立的 **AutoFlow Studio** 桌面端（`desktop/`，Electron）操作。它直接读取项目
+根目录的 `workflows/`、`assets/`、`config/` 和 Python 引擎，不依赖 VS Code 或旧插件；双击
+`desktop/start-desktop.bat`，或在 `desktop/` 下执行 `npm install` 后 `npm start`
+（开发模式 `npm run dev`），细节见 [desktop/README.md](desktop/README.md)。
+
 - **停止**：协作取消当前运行。
 - **运行日志**：查看步骤和奖励统计。
-- **脚本概览**：桌面端在“工作流编辑器”旁提供全部工作流卡片；每张卡片可单独配置输入参数，按勾选顺序建立队列、调整先后并连续执行，某项失败或手动停止时不再启动剩余项。
+- **脚本概览**：在“工作流编辑器”旁提供全部工作流卡片；每张卡片可单独配置输入参数，按勾选顺序建立队列、调整先后并连续执行，某项失败或手动停止时不再启动剩余项。
 - **任务卡片**：画布上的任务节点按 Action 清单的 `card.rows` 固定显示端点（如「等待模板」固定为 模板 / 超时 / 存在性 / 识别区域 / 匹配阈值 / 多尺度搜索），上行是端点名，下行是可见的输入框/控件，点一下就在原位改值。
 - **校验错误直接标在卡片上**：画布自己跑工作流校验（按文档版本缓存，改一次算一次），出错的参数那一行当场标红——标签、引脚、值框一起红，悬停给出校验原文；节点级错误（例如 Task 没定义 Action）把卡片描边点红并在标题旁点一个红点。填上值/改好之后红色立刻消失，顶部「N 个问题」徽标同步（宿主推送的问题与画布本地的取较大值）。
 - **节点输出引用**：任务卡右侧有一个输出口（Task 在 Behavior Tree 里是叶子，没有执行流输出，这个口是数据口）。把它拖到别的节点的参数端点上即可写入只读引用 `{"ref": "nodes.<节点id>.output.<字段>"}`，画成金色虚线引用边；参数行显示 `← <源节点名>.<字段>`。落点按**行带**判定——光标压在哪一行就绑哪一行，拖拽中目标卡片和落点行会实时亮起。输出是数组时（如 `vision.wait_template` 的匹配数组）会给「整体输出」和「第 1–4 项（含每项字段）」候选，所以数组输出也能喂给只收单个对象/数值的参数（写成 `nodes.<id>.output.0`、`nodes.<id>.output.0.confidence`），落点有多个候选就弹菜单让你挑。类型实在不兼容时会明确提示「某参数不接受某节点的输出类型」。右键输出口可以复制字段引用、从这里开始连线、一次性断开全部引用；Alt 点击引用边（或参数行右键 → 断开引用）可解绑。
@@ -67,8 +75,24 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 - 工作流编辑器标题栏的播放按钮可运行当前打开的工作流；编辑器自身读写的就是磁盘上的
   `.owf` 文本（保存即规范形式，引用改写走结构级改写）。
 
-插件默认使用项目的 `.venv/Scripts/python.exe` 和 `config/config.json`，无需 BAT
-或单独打开终端。
+桌面端默认使用项目的 `.venv/Scripts/python.exe` 和 `config/config.json`，不需要另外填写
+解释器路径，也不需要单独打开终端。
+
+## `.owf` 的 VS Code 文本扩展
+
+`extensions/vscode-owf/` 是一个独立的 VS Code 扩展，给 `.owf` 做**文本侧**支持（不提供画布，
+画布是上面的桌面端编辑器）：语义着色、解析诊断、结构大纲、引用跳转与悬停、
+引脚补全，以及把边表按执行顺序摊开的结构树命令。它的解析器不是重写的——`lib/graph-dsl.cjs`
+是桌面端 `desktop/src/shared/workflow/graph-dsl.ts` 的 esbuild 打包产物，所以报错文案与
+行列号跟 CLI、桌面端**逐字一致**，安装后也不需要 Node 或 `npm install`：
+
+```powershell
+cd extensions/vscode-owf
+npx vsce package --allow-missing-repository --skip-license
+code --install-extension owf-workflow-0.1.0.vsix
+```
+
+细节与验收方式见 [extensions/vscode-owf/README.md](extensions/vscode-owf/README.md)。
 
 ## CLI
 
@@ -417,8 +441,7 @@ Action 代码属于可信本地扩展；更新代码后需要重启监督器，�
 ## MCP 模板工厂
 
 项目提供一个可选的 MCP 服务，让 AI 查询 Action、工作流和图片资源，读取设备截图，
-按 ROI 生成图片模板，生成并校验工作流，再将有效模板保存到受控目录。MCP 不会
-执行点击、滑动、输入或启动工作流。
+按 ROI 生成图片模板，生成并校验工作流，再将有效模板保存到受控目录。
 
 MCP 依赖独立于运行时依赖：
 
@@ -444,7 +467,41 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 `capture_id`，再调用 `select_roi(capture_id)` 打开项目自带的 ROI 框选窗口；用户确认
 后，调用 `create_template_asset(capture_id, roi, name)` 保存到
 `assets/templates/generated/`。这些工具只做设备读取、打开本地框选窗口和图片文件写入，
-不发送任何设备输入事件；工作流执行能力仍保持关闭。
+不发送任何设备输入事件。
+
+### 受审批门控的工具
+
+超出「只读 + 写 generated/」范围的操作需要**用户在本机弹窗中当场批准**：
+执行设备操作（`run_action`、`tap`、`swipe`、`press_key`、`type_text`、`run_workflow`）、
+读取项目文件（`read_project_file`、`list_artifacts`、`tail_log`）、
+写入（`write_project_file`）与删除（`delete_project_file`）。
+
+- 弹窗优先复用**桌面端自己的确认弹窗**（`impact-confirm`），不再另画一套界面：正在运行的
+  AutoFlow Studio 每 2 秒写一次心跳 `artifacts/mcp-approvals/desktop.json`，MCP 服务把请求写进
+  `artifacts/mcp-approvals/pending/<请求号>.request.json`，应用弹出确认框后把
+  `<请求号>.result.json` 写回。约定见 [approval.py](src/oooonmyoji/mcp/approval.py) 与
+  [desktop/src/main/mcpApproval.ts](desktop/src/main/mcpApproval.ts)。
+- 应用没在运行时（心跳过期）自动退回 MCP 自带的独立窗口
+  （[approval_dialog.py](src/oooonmyoji/mcp/approval_dialog.py)，颜色取自
+  [ui/theme.py](src/oooonmyoji/ui/theme.py)），因此不开编辑器也能审批。用
+  `--approval-channel auto|desktop|window` 可以固定通道（默认 `auto`）。
+- 两条通道都只有人能回答：MCP 工具面里没有任何「批准」接口，而存放答复的
+  `artifacts/mcp-approvals/` 在 `files.PROTECTED_DIRS` 里——**模型无法写它**，所以答复只可能
+  来自弹窗或你本人。
+- 未获批准（含超时、关闭窗口、无桌面环境）一律按拒绝处理，工具返回
+  `{"ok": false, "code": "approval_required"}`，此时不会连接设备、不会读写任何文件。
+- 弹窗里可以选「本会话都允许此类」：同一工具 + 同一风险等级在本会话内不再询问。
+- 启动参数：`--approval ask|deny|allow`（默认 `ask`；`deny` 适合无人值守，`allow` 仅限本机可信
+  场景）、`--approval-timeout` 等待秒数（默认 120）。
+- 写入与删除前会把原文件复制到 `artifacts/mcp-backups/<时间戳>/`；`.git/`、`.venv/`
+  与 `artifacts/mcp-approvals/` 一律拒绝写入，因此在受控范围内出错都能回退。
+- 每次批准与拒绝都记入 `artifacts/mcp-approvals/audit.jsonl`（含载荷指纹与决定），
+  可用 `server_info` 查看当前模式、会话授权与审计路径。
+
+`run_action` 只能执行单个 Action，且不支持依赖 OCR 的 Action（`vision.ocr`、
+`vision.wait_text`、`vision.wait_any_text`）与 `workflow.run`。要验证整条工作流能否跑通
+请用 `run_workflow`：它走项目自己的 CLI（监督器 + 工作进程 + OCR 池），会写运行记录与
+事件文件，并返回失败节点、失败路径与最后几步事件。
 
 ## 调度和故障产物
 

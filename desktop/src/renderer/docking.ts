@@ -177,6 +177,27 @@ const PANEL_DEFINITIONS: Record<DockPanelId, DockPanelDefinition> = {
 };
 
 const DEFAULT_PANEL_ORDER: DockPanelId[] = ['structure', 'palette', 'variables', 'runtime', 'contentBrowser', 'details'];
+const EMPTY_CANVAS_PANEL = 'empty-workflow-canvas';
+
+class EmptyWorkflowCanvasRenderer implements IContentRenderer {
+  readonly element = document.createElement('section');
+
+  constructor() {
+    this.element.className = 'dock-module editor-surface empty-workflow-canvas';
+    this.element.setAttribute('aria-label', '空工作流画布');
+  }
+
+  init(): void {}
+}
+
+class EmptyWorkflowCanvasTab implements ITabRenderer {
+  readonly element = document.createElement('div');
+
+  init(): void {
+    this.element.className = 'dv-default-tab';
+    this.element.textContent = '工作流画布';
+  }
+}
 
 const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition> = {
   workflow: {
@@ -388,13 +409,15 @@ export function createDockingWorkspace(
     createRightHeaderActionComponent: () => new PopoutHeaderAction(() => true),
     createComponent: ({ name }) => name === DOCUMENT_COMPONENT
       ? new WorkflowCanvasRenderer(documentHooks)
-      : new ExistingModuleRenderer(modules, moduleStore),
+      : name === EMPTY_CANVAS_PANEL
+        ? new EmptyWorkflowCanvasRenderer()
+        : new ExistingModuleRenderer(modules, moduleStore),
     createTabComponent: ({ name }) => name === DOCUMENT_TAB_COMPONENT
       ? new WorkflowDocumentTab((panelId) => {
         const uri = documentUriFromPanelId(panelId);
         if (uri) documentHooks.onCloseRequested(uri);
       })
-      : undefined,
+      : name === EMPTY_CANVAS_PANEL ? new EmptyWorkflowCanvasTab() : undefined,
   });
 
   let suspendPersistence = true;
@@ -406,12 +429,33 @@ export function createDockingWorkspace(
 
   /** 文档面板始终作为同一组的标签加入，保证打开新工作流时复用标签栏。 */
   const anchorDocumentPanel = (): IDockviewPanel | undefined => documentPanels()[0]
-    ?? api.panels[0];
+    ?? api.getPanel(EMPTY_CANVAS_PANEL);
+
+  const ensureEmptyCanvas = (reference?: IDockviewPanel): void => {
+    if (api.getPanel(EMPTY_CANVAS_PANEL)) return;
+    const center = reference ?? api.getPanel('contentBrowser') ?? api.getPanel('runtime');
+    const side = api.getPanel('structure') ?? api.getPanel('variables');
+    api.addPanel({
+      id: EMPTY_CANVAS_PANEL,
+      title: '工作流画布',
+      component: EMPTY_CANVAS_PANEL,
+      tabComponent: EMPTY_CANVAS_PANEL,
+      minimumWidth: 420,
+      minimumHeight: 260,
+      position: center
+        ? { referencePanel: center, direction: reference ? 'within' : 'above' }
+        : side
+          ? { referencePanel: side, direction: 'right' }
+          : api.getPanel('details')
+            ? { referencePanel: api.getPanel('details')!, direction: 'left' }
+            : undefined,
+    });
+  };
 
   /** “editor” 是占位引用，实际落在第一个打开的文档面板上。 */
   const resolveReference = (reference?: PanelReference): IDockviewPanel | undefined => {
     if (!reference) return undefined;
-    if (reference === 'editor') return documentPanels()[0];
+    if (reference === 'editor') return documentPanels()[0] ?? api.getPanel(EMPTY_CANVAS_PANEL);
     return api.getPanel(reference) ?? undefined;
   };
 
@@ -445,6 +489,7 @@ export function createDockingWorkspace(
 
   const openDocument = (uri: string, title: string): void => {
     if (!uri) return;
+    if (documentPanels().length === 0) ensureEmptyCanvas();
     const panelId = documentPanelId(uri);
     const existing = api.getPanel(panelId);
     if (existing) {
@@ -463,10 +508,15 @@ export function createDockingWorkspace(
       minimumHeight: 260,
       position: anchor ? { referencePanel: anchor, direction: 'within' } : undefined,
     });
+    api.getPanel(EMPTY_CANVAS_PANEL)?.api.close();
   };
 
   const closeDocument = (uri: string): void => {
-    api.getPanel(documentPanelId(uri))?.api.close();
+    const panel = api.getPanel(documentPanelId(uri));
+    if (!panel) return;
+    // 先占住最后一个文档的分组，避免关闭后其他面板吞掉画布空间。
+    if (documentPanels().length === 1) ensureEmptyCanvas(panel);
+    panel.api.close();
   };
 
   const focusDocument = (uri: string): boolean => {
@@ -507,9 +557,9 @@ export function createDockingWorkspace(
     suspendPersistence = true;
     if (documentPanels().length === 0 && fallbackDocument) openDocument(fallbackDocument.uri, fallbackDocument.title);
     if (documentPanels().length === 0) {
-      suspendPersistence = false;
-      saveLayout();
-      return;
+      ensureEmptyCanvas();
+    } else {
+      api.getPanel(EMPTY_CANVAS_PANEL)?.api.close();
     }
     const hadScaffolding = DEFAULT_PANEL_ORDER.some((panelId) => api.getPanel(panelId));
     // 只有「没有可恢复的布局」（首次运行、布局被清掉）才铺默认脚手架：用户关掉的
@@ -534,6 +584,7 @@ export function createDockingWorkspace(
     suspendPersistence = true;
     api.clear();
     if (document) openDocument(document.uri, document.title);
+    else ensureEmptyCanvas();
     DEFAULT_PANEL_ORDER.forEach(addPanel);
     restoredLayout = true;
     suspendPersistence = false;

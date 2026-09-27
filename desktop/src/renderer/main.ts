@@ -86,6 +86,7 @@ import {
 import { createReferenceViewer } from './reference-viewer';
 import { createVariableReferences } from './variable-references';
 import { createImpactConfirm } from './impact-confirm';
+import { registerMcpApproval } from './mcp-approval';
 import { createRecoveryStore } from './recovery-store';
 import { contentName, createContentBrowser, relativeToProject, type ContentBrowser, type ContentBrowserItem } from './content-browser';
 import { createOverview } from './overview';
@@ -228,6 +229,8 @@ const impactConfirm = createImpactConfirm(
   impactConfirmModal, impactConfirmTitle, impactConfirmSubtitle, impactConfirmBody,
   impactConfirmOk, impactConfirmCancel, impactConfirmClose, impactConfirmExtra,
 );
+// MCP 门控操作的确认走同一个弹窗；答案由主进程写回 artifacts/mcp-approvals。
+registerMcpApproval(api, impactConfirm);
 
 /**
  * 崩溃恢复副本：画布每次改动留一份档（localStorage），刷新/崩溃后还能捡回未保存内容。

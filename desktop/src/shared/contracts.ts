@@ -103,6 +103,33 @@ export interface RuntimeOutputEvent {
   timestamp: number;
 }
 
+/**
+ * 一次 MCP 审批请求的内容，直接交给渲染层的 `createImpactConfirm`。
+ *
+ * 标题、措辞与影响清单由 Python 侧的 `mcp/approval.py` 成形——风险分类住在那里；
+ * 应用只负责用自己的确认弹窗把它显示出来，再把用户的答案写回文件。
+ */
+export interface McpApprovalDialog {
+  title: string;
+  summary: string;
+  items?: Array<{ label: string; detail?: string }>;
+  preview?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  /** 第三个动作（「本会话都允许此类」）；为空时弹窗不显示它。 */
+  extraLabel?: string | null;
+  danger?: boolean;
+}
+
+/** `allow` = 允许一次，`allow_session` = 本会话内同类都允许，`deny` = 拒绝。 */
+export type McpApprovalDecision = 'allow' | 'allow_session' | 'deny';
+
+export interface McpApprovalRequest {
+  /** 与 Python 侧的请求号一致；回答时原样带回。 */
+  id: string;
+  dialog: McpApprovalDialog;
+}
+
 export interface RuntimeStateEvent {
   state: 'idle' | 'running' | 'stopping' | 'succeeded' | 'failed';
   label: string;
@@ -457,4 +484,8 @@ export interface OnmyojiDesktopApi {
   onRuntimeState(listener: (event: RuntimeStateEvent) => void): () => void;
   onRunEvent(listener: (event: Record<string, unknown>) => void): () => void;
   onWindowMaximized(listener: (maximized: boolean) => void): () => void;
+  /** MCP 门控操作请求用户确认：应用用自己的确认弹窗提问。 */
+  onMcpApprovalRequest(listener: (request: McpApprovalRequest) => void): () => void;
+  /** 把用户在弹窗里的选择写回审批通道；每个请求恰好回答一次。 */
+  answerMcpApproval(id: string, decision: McpApprovalDecision): void;
 }

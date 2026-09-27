@@ -1,6 +1,8 @@
 import type { AppearanceTheme } from '../shared/appearance';
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  McpApprovalDecision,
+  McpApprovalRequest,
   OnmyojiDesktopApi,
   RoiCaptureRequest,
   RunWorkflowRequest,
@@ -31,6 +33,12 @@ const api: OnmyojiDesktopApi = {
     ipcRenderer.on('appearance:changed', handler);
     return () => ipcRenderer.removeListener('appearance:changed', handler);
   },
+  onMcpApprovalRequest: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: McpApprovalRequest) => listener(request);
+    ipcRenderer.on('mcp:approval-request', handler);
+    return () => ipcRenderer.removeListener('mcp:approval-request', handler);
+  },
+  answerMcpApproval: (id: string, decision: McpApprovalDecision) => ipcRenderer.send('mcp:approval-answer', id, decision),
   writeLayout: (key, value) => ipcRenderer.send('layout:write', key, value),
   getRuntimeResourceStatus: () => ipcRenderer.invoke('resources:status'),
   installRuntimeResources: (variant: RuntimeResourceVariantId) => ipcRenderer.invoke('resources:install', variant),

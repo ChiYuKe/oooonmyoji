@@ -17,6 +17,8 @@ import {
 } from 'electron';
 import type {
   LiveViewPollResult,
+  McpApprovalDecision,
+  McpApprovalRequest,
   RoiCaptureRequest,
   RunWorkflowRequest,
   RuntimeDebugSettings,
@@ -35,6 +37,7 @@ import {
   LiveViewRequest,
   readLiveViewFrame,
 } from './liveView';
+import { MCP_APPROVAL_DIRNAME, McpApprovalBridge } from './mcpApproval';
 import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
 import { RuntimeResourceManager } from './runtimeResources';
@@ -73,6 +76,10 @@ let liveViewWatching = false;
 let liveViewSeq = -1;
 let liveViewIntervalMs = LIVE_VIEW_DEFAULT_INTERVAL_MS;
 let isQuitting = false;
+/** MCP 审批通道：轮询 Python 写下的请求，并把用户的选择写回。 */
+let mcpApprovalBridge: McpApprovalBridge | undefined;
+/** 请求号 → 等待用户答复的 resolver。 */
+const approvalAnswers = new Map<string, (decision: McpApprovalDecision) => void>();
 let resourceManager: RuntimeResourceManager | undefined;
 let runtimeInitialized = false;
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
@@ -311,6 +318,15 @@ function registerIpc(): void {
   });
   ipcMain.on('layout:write', (_event, key: unknown, value: unknown) => {
     writeLayout(key, value);
+  });
+  // 用户在 MCP 确认弹窗里的选择：只应答一次，未知请求号直接忽略。
+  ipcMain.on('mcp:approval-answer', (_event, requestId: unknown, decision: unknown) => {
+    if (typeof requestId !== 'string') return;
+    if (decision !== 'allow' && decision !== 'allow_session' && decision !== 'deny') return;
+    const resolve = approvalAnswers.get(requestId);
+    if (!resolve) return;
+    approvalAnswers.delete(requestId);
+    resolve(decision);
   });
 
   ipcMain.handle('project:bootstrap', async () => project.bootstrap(await runtime.listInstances()));
@@ -618,6 +634,40 @@ async function initializeRuntimeServices(projectRoot: string): Promise<void> {
   runtime.on('output', (event) => mainWindow?.webContents.send('runtime:output', event));
   runtime.on('state', (event) => mainWindow?.webContents.send('runtime:state', event));
   runtime.on('runEvent', (event) => mainWindow?.webContents.send('runtime:run-event', event));
+  startMcpApprovalBridge(projectRoot);
+}
+
+/**
+ * MCP 门控操作的确认弹窗：Python 侧把请求写进 `artifacts/mcp-approvals/pending/`，
+ * 这里把它交给渲染层已有的确认弹窗，再把用户的答案写回文件。
+ *
+ * 回答集合按请求号保存，`mcp:approval-answer` 只应答一次；窗口没了就按拒绝回答，
+ * 免得 Python 侧一直等到超时。
+ */
+function startMcpApprovalBridge(projectRoot: string): void {
+  if (mcpApprovalBridge) return;
+  mcpApprovalBridge = new McpApprovalBridge({
+    directory: path.join(projectRoot, 'artifacts', MCP_APPROVAL_DIRNAME),
+    ask: (request) => askRendererForApproval(request),
+  });
+  mcpApprovalBridge.start();
+}
+
+function askRendererForApproval(request: McpApprovalRequest): Promise<McpApprovalDecision> {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return Promise.resolve('deny');
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  // 任务栏闪一下：弹窗在后台窗口里，用户不一定马上看到。
+  window.flashFrame(true);
+  return new Promise<McpApprovalDecision>((resolve) => {
+    approvalAnswers.set(request.id, (decision) => {
+      if (!window.isDestroyed()) window.flashFrame(false);
+      resolve(decision);
+    });
+    window.webContents.send('mcp:approval-request', request);
+  });
 }
 
 function registerResourceIpc(projectRoot: string): void {
@@ -712,6 +762,12 @@ app.on('before-quit', (event) => {
     } finally {
       stopVisionTestStream();
       liveViewRequest?.stop();
+      mcpApprovalBridge?.stop();
+      // 还没答复的审批请求一律按拒绝收尾，避免 Python 侧等到超时。
+      for (const [requestId, resolve] of approvalAnswers) {
+        approvalAnswers.delete(requestId);
+        resolve('deny');
+      }
       rendererServer?.close();
       rendererServer = undefined;
       app.quit();

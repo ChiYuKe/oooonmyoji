@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from ..actions import ActionRegistry
+from ..actions.builtin.detection import _state_candidates
 from ..actions.manifest import apply_parameter_defaults
 from ..config.loader import _validate_json_schema
 from ..exceptions import ConfigError
-from .bindings import CONDITION_OPERATORS, binding_aware_parameter_schema, break_target_schema, schema_at_path, schema_types, validate_value
+from .bindings import CONDITION_OPERATORS, allow_binding, binding_aware_parameter_schema, break_target_schema, schema_at_path, schema_types, validate_value
 from .graph import (
     PURE_DATA_NODE_TYPES,
     available_output_node_ids,
@@ -28,7 +29,7 @@ from .graph import (
     possibly_available_output_node_ids,
     pure_data_guard,
 )
-from .model import INSTANCE_PARALLEL_WAIT_MODES, InstanceParallelRun, WorkflowNode, WorkflowSpec
+from .model import DEFAULT_STATE_ACTION, INSTANCE_PARALLEL_WAIT_MODES, STATE_CANDIDATES_SCHEMA, InstanceParallelRun, WorkflowNode, WorkflowSpec
 from .node_rules import (
     build_output_schemas,
     node_label,
@@ -197,6 +198,107 @@ def validate_workflow(
                     raise ConfigError(f"{node_label(index, item)}.fields.{field_name}: path '{field_path}' does not exist in the target output schema")
             params = {}
             action = None
+        elif node_type == "state_machine":
+            # 状态机卡片：`states` 只声明一次识别配置，`case.<下标>` 边把每个状态接到它的
+            # 处理子图（图文档里的下标 = `states` 的下标）。识别语义与 `vision.detect_state`
+            # 完全一致，所以状态载荷直接复用 Action 层那份候选校验，避免两套规则各自漂移。
+            label = node_label(index, item)
+            forbidden = set(item) & {"action", "params", "finish_mode"}
+            if forbidden:
+                raise ConfigError(f"{label} state_machine cannot define {sorted(forbidden)}")
+            states_raw = item.get("states")
+            if not isinstance(states_raw, list) or not states_raw:
+                raise ConfigError(f"{label} state_machine requires a non-empty states array")
+            validate_value(
+                states_raw,
+                node_ids=node_id_set,
+                reference_schema=reference_schema,
+                output_schemas=output_schemas,
+                available_node_ids=available_node_ids,
+                possibly_available_node_ids=possibly_available_node_ids,
+                path=f"{label}.states",
+                expected_schema=STATE_CANDIDATES_SCHEMA,
+            )
+            _validate_json_schema(states_raw, allow_binding(STATE_CANDIDATES_SCHEMA), f"{label}.states")
+            try:
+                candidates = _state_candidates(states_raw, allow_bindings=True)
+            except ValueError as exc:
+                raise ConfigError(f"{label}.states: {exc}") from exc
+            state_names = [str(candidate["name"]) for candidate in candidates]
+            terminal_raw = item.get("terminal_states", [])
+            if not isinstance(terminal_raw, list) or any(not isinstance(name, str) or not name for name in terminal_raw):
+                raise ConfigError(f"{label}.terminal_states must be an array of non-empty strings")
+            if len(set(terminal_raw)) != len(terminal_raw):
+                raise ConfigError(f"{label}.terminal_states contains duplicates")
+            unknown_terminal = sorted(set(terminal_raw) - set(state_names))
+            if unknown_terminal:
+                raise ConfigError(f"{label}.terminal_states must reference declared states: {', '.join(unknown_terminal)}")
+            if not isinstance(item.get("allow_ocr", True), bool):
+                raise ConfigError(f"{label}.allow_ocr must be a boolean")
+            state_timeout = item.get("state_timeout_seconds", 0.0)
+            if (
+                isinstance(state_timeout, bool)
+                or not isinstance(state_timeout, (int, float))
+                or float(state_timeout) < 0
+            ):
+                raise ConfigError(f"{label}.state_timeout_seconds must be a non-negative number")
+            # 「判断当前画面」这一步是可替换的角色：显式写了 `state_action` 就按分类器契约校验
+            # （存在、声明必需的 states 参数、输出里有 state）；不写就用内置默认实现。
+            state_action = item.get("state_action")
+            if state_action is not None:
+                if not isinstance(state_action, str) or not state_action:
+                    raise ConfigError(f"{label}.state_action must be a non-empty action name")
+                try:
+                    classifier = registry.get(state_action)
+                except ConfigError as exc:
+                    raise ConfigError(f"{label}.state_action is not a registered Action: {state_action}") from exc
+                if "states" not in classifier.definition.parameters:
+                    raise ConfigError(
+                        f"{label}.state_action must accept a 'states' parameter: {state_action}"
+                    )
+                classifier_outputs = classifier.output_schema or {}
+                if isinstance(classifier_outputs.get("properties"), dict) and "state" not in classifier_outputs["properties"]:
+                    raise ConfigError(
+                        f"{label}.state_action must return a 'state' field: {state_action}"
+                    )
+            max_iterations = item.get("max_iterations", 100)
+            if is_binding(max_iterations):
+                # 轮数预算允许绑到输入（`运行轮数`）：类型必须是整数，运行时解析后才用。
+                validate_value(
+                    max_iterations,
+                    node_ids=node_id_set,
+                    reference_schema=reference_schema,
+                    output_schemas=output_schemas,
+                    available_node_ids=available_node_ids,
+                    possibly_available_node_ids=possibly_available_node_ids,
+                    path=f"{label}.max_iterations",
+                    expected_schema={"type": "integer"},
+                )
+            elif isinstance(max_iterations, bool) or not isinstance(max_iterations, int) or max_iterations < 1:
+                raise ConfigError(f"{label}.max_iterations must be a positive integer or an integer input reference")
+            cases_raw = item.get("cases", [])
+            if not isinstance(cases_raw, list):
+                raise ConfigError(f"{label}.cases must be an array")
+            handled_states: set[str] = set()
+            for case_index, case in enumerate(cases_raw):
+                if not isinstance(case, dict) or not isinstance(case.get("child"), str) or "value" not in case:
+                    raise ConfigError(f"{label}.cases[{case_index}] must define value and child")
+                case_state = case["value"]
+                if not isinstance(case_state, str) or case_state not in state_names:
+                    raise ConfigError(f"{label}.cases[{case_index}].value must name a declared state")
+                if case_state in handled_states:
+                    raise ConfigError(f"{label}.cases[{case_index}] wires state {case_state} twice")
+                if case_state in terminal_raw:
+                    raise ConfigError(
+                        f"{label}.cases[{case_index}] wires terminal state {case_state}: "
+                        "terminal states end the machine and take no handler"
+                    )
+                handled_states.add(case_state)
+            missing_handlers = [name for name in state_names if name not in handled_states and name not in terminal_raw]
+            if missing_handlers:
+                raise ConfigError(f"{label} has no handler for state(s): {', '.join(missing_handlers)}")
+            params = {}
+            action = None
         else:
             forbidden = set(item) & {"action", "params"}
             if forbidden:
@@ -248,11 +350,12 @@ def validate_workflow(
         if node_type != "instance_parallel" and any(field in item for field in ("runs", "wait_for", "cancel_on_failure")):
             if node_type != "parallel":
                 raise ConfigError(f"{node_label(index, item)} instance_parallel fields are only valid for instance_parallel")
-        node_fields = {"condition", "max_iterations", "conditions", "expression", "cases", "default_child", "ports", "ref", "fields"}
+        node_fields = {"condition", "max_iterations", "conditions", "expression", "cases", "default_child", "ports", "ref", "fields", "states", "terminal_states", "allow_ocr", "state_timeout_seconds", "state_action"}
         allowed_fields = {
             "repeat_until": {"condition", "max_iterations"},
             "branch": {"conditions"},
             "switch": {"expression", "cases", "default_child"},
+            "state_machine": {"states", "terminal_states", "allow_ocr", "state_timeout_seconds", "state_action", "max_iterations", "cases", "default_child"},
             "condition": {"expression", "ports"},
             "bool_judge": {"expression"},
             "break": {"ref", "fields"},
@@ -288,13 +391,18 @@ def validate_workflow(
             cancel_on_failure=bool(item.get("cancel_on_failure", True)),
             condition=deepcopy(item.get("condition")),
             conditions=tuple(deepcopy(item.get("conditions", []))),
-            max_iterations=int(item.get("max_iterations", 100)),
+            max_iterations=deepcopy(item["max_iterations"]) if "max_iterations" in item else 100,
             expression=deepcopy(item.get("expression")),
             ref=deepcopy(item.get("ref")),
             fields=dict(deepcopy(item["fields"])) if isinstance(item.get("fields"), dict) else {},
             cases=tuple((deepcopy(case.get("value")), str(case["child"])) for case in item.get("cases", []) if isinstance(case, dict) and "child" in case),
             default_child=str(item["default_child"]) if isinstance(item.get("default_child"), str) else None,
             ports=node_ports,
+            states=tuple(deepcopy(item["states"])) if node_type == "state_machine" and isinstance(item.get("states"), list) else (),
+            terminal_states=tuple(str(name) for name in item["terminal_states"]) if node_type == "state_machine" and isinstance(item.get("terminal_states"), list) else (),
+            allow_ocr=bool(item.get("allow_ocr", True)),
+            state_timeout_seconds=float(item.get("state_timeout_seconds", 0.0)),
+            state_action=str(item.get("state_action") or DEFAULT_STATE_ACTION),
         ))
 
     root = validate_graph_structure(parsed, raw, node_id_set)

@@ -55,6 +55,9 @@ def guaranteed_output_node_ids(
     # 值卡片：求值成功就一定产出输出（布尔判断 `nodes.<id>.output.value`、拆分 `nodes.<id>.output.<字段>`）。
     if node_type in {"bool_judge", "break"}:
         return {node_id}
+    # 状态机成功时一定登记自己的输出（最后一次识别结果 + 计数），所以跟任务一样是「保证可用」。
+    if node_type == "state_machine":
+        return {node_id}
     children = node.get("children")
     if not isinstance(children, list):
         return set()
@@ -210,6 +213,11 @@ def available_output_node_ids(
                 current_index = 0
             for sibling in children[:current_index]:
                 result.update(guaranteed_output_node_ids(str(sibling), node_map))
+        # 状态机的处理子图在自己这一轮里能读到「刚判断出来的是什么」：识别成功后状态机
+        # 会立刻把观察结果登记成自己的输出。兜底子图（`default_child`）不行——那一轮
+        # 压根没判断成功，读它只会拿到上一轮的旧值。
+        if parent.get("type") == "state_machine" and parent.get("default_child") != current:
+            result.add(str(parent["id"]))
         current = str(parent["id"])
     return _with_lazy_pure_nodes(nodes, result)
 
@@ -233,6 +241,9 @@ def possible_output_node_ids_in_subtree(
         return set()
     nested = visiting | {node_id}
     result: set[str] = set()
+    # 状态机自己会登记输出（最后一次识别结果），处理子图也可能产出输出。
+    if node.get("type") == "state_machine":
+        result.add(node_id)
     for child in children:
         result.update(possible_output_node_ids_in_subtree(str(child), node_map, nested))
     return result
@@ -255,7 +266,7 @@ def possibly_available_output_node_ids(
         if parent is None:
             break
         children = parent.get("children")
-        if parent.get("type") in {"sequence", "selector", "branch", "switch"} and isinstance(children, list):
+        if parent.get("type") in {"sequence", "selector", "branch", "switch", "state_machine"} and isinstance(children, list):
             try:
                 current_index = children.index(current)
             except ValueError:

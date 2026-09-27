@@ -43,6 +43,10 @@ class _ExecutionLimit(WorkflowError):
     pass
 
 
+#: 状态机等待画面时的固定轮询间隔（秒）：等待预算按它折算成轮询次数。
+_STATE_POLL_SECONDS = 0.1
+
+
 def _json_safe(value: Any) -> Any:
     try:
         json.dumps(value, ensure_ascii=False, allow_nan=False)
@@ -538,7 +542,195 @@ class WorkflowEngine:
             if node.default_child is not None:
                 return self._run_node(node.default_child, deadline, branch_cancel)
             return _Outcome(ActionStatus.FAILED, error="no switch case matched", category="condition")
+        if node.type == "state_machine":
+            return self._run_state_machine(node, deadline, branch_cancel)
         raise WorkflowError(f"unsupported Behavior Tree node type: {node.type}")
+
+    def _state_machine_output(
+        self,
+        detected: dict[str, Any],
+        iterations: int,
+        terminal: bool,
+        started: float,
+    ) -> dict[str, Any]:
+        """一次识别的观察结果：既作为状态机自己的输出，也作为处理子图能读到的「当前判断」。"""
+
+        match = detected.get("match")
+        return {
+            "state": str(detected.get("state", "")),
+            "source": str(detected.get("source", "")),
+            "confidence": float(detected.get("confidence", 0.0)),
+            "match": match if isinstance(match, dict) else {},
+            "iterations": iterations,
+            "terminal": terminal,
+            "elapsed_seconds": round(time.monotonic() - started, 6),
+        }
+
+    def _run_state_machine(
+        self,
+        node: WorkflowNode,
+        deadline: float,
+        branch_cancel: threading.Event | None,
+    ) -> _Outcome:
+        """状态机卡片：判断当前画面 → 运行该状态的处理子图 → 重新判断，直到终止状态或轮数用尽。
+
+        每个状态的处理子图就是一个普通子图（"函数"）；切换是隐式的——处理子图把画面推进到
+        别的状态后，下一轮判断自然分发到新的处理子图。
+
+        「判断画面」这一步由卡片上的 `state_action` 指定（默认 `vision.detect_state`），并且走
+        **真正的 Action 调用**：判断语义只有一处实现，步骤历史/插件覆盖/测试替换都沿用同一条
+        入口。判断成功后立刻把这一轮的观察结果登记成状态机的输出，处理子图据此就能拿到
+        `nodes.<状态机>.output.match`——识别与点击因而不会各自漂移。
+        """
+
+        started = time.monotonic()
+        try:
+            detection = self.registry.get(node.state_action)
+        except AutomationError as exc:
+            return _Outcome(
+                ActionStatus.FAILED,
+                error=f"state_machine node {node.id} needs the {node.state_action} action: {exc}",
+                category="workflow",
+            )
+        with self._lock:
+            resolver = self._resolver()
+        try:
+            states = resolver.value([dict(state) for state in node.states])
+            # 轮数预算可以绑到输入（迁移后的 `运行轮数` 就是这么传的），解析后必须是正整数。
+            resolved_max = resolver.value(node.max_iterations)
+            if isinstance(resolved_max, bool) or not isinstance(resolved_max, int) or resolved_max < 1:
+                raise ValueError(f"max_iterations must resolve to a positive integer, got {resolved_max!r}")
+        except Exception as exc:
+            return _Outcome(
+                ActionStatus.FAILED,
+                error=f"state_machine node {node.id} is invalid: {exc}",
+                category="workflow",
+            )
+        # 同一轮里先等一个可识别的画面：页面正在切换/加载时不该直接判失败或吃掉轮数。
+        # 等待预算按固定轮询间隔折算成次数（确定性，且不依赖真实墙钟），`_sleep` 负责节奏。
+        state_timeout = float(node.state_timeout_seconds or 0.0)
+        max_polls = 1 if state_timeout <= 0 else max(1, int(round(state_timeout / _STATE_POLL_SECONDS)))
+        dispatch = {str(value): child for value, child in node.cases}
+        terminal = set(node.terminal_states)
+        iterations = 0
+        last: dict[str, Any] = {}
+        for index in range(resolved_max):
+            detected: dict[str, Any] | None = None
+            for poll in range(max_polls):
+                self._ensure_running(deadline, branch_cancel)
+                outcome, detected = self._detect_state(detection, states, node, deadline, branch_cancel)
+                if outcome is not None:
+                    return outcome
+                if detected is not None or poll + 1 >= max_polls:
+                    break
+                self._sleep(_STATE_POLL_SECONDS, deadline, branch_cancel)
+            iterations = index + 1
+            if detected is None:
+                # 一个候选状态都没识别到：有 default 子图就交给它兜底，否则整机失败。
+                if node.default_child is None:
+                    return _Outcome(
+                        ActionStatus.FAILED,
+                        error=f"state_machine {node.id} matched none of the configured states",
+                        category="not_matched",
+                    )
+                outcome = self._run_node(node.default_child, deadline, branch_cancel)
+                if outcome.status != ActionStatus.SUCCEEDED:
+                    # 兜底子图失败时把「一个状态都没识别到」也写进错误：根因常常在这里，
+                    # 只报兜底子图的失败会让人以为是它自己坏了。
+                    return _Outcome(
+                        outcome.status,
+                        output=outcome.output,
+                        error=(
+                            f"state_machine {node.id} matched none of the configured states and its "
+                            f"default handler failed: {outcome.error}"
+                        ),
+                        category=outcome.category,
+                        fatal=outcome.fatal,
+                    )
+                continue
+            last = detected
+            state = str(detected["state"])
+            # 判断结果立刻登记成状态机的输出：处理子图（以及它们里面的动作）可以直接引用
+            # `nodes.<状态机>.output.match` 把「命中在哪」交给点击，不必把模板参数抄一遍。
+            observation = self._state_machine_output(detected, iterations, False, started)
+            with self._lock:
+                self.outputs[node.id] = observation
+            if state in terminal:
+                observation["terminal"] = True
+                return _Outcome(ActionStatus.SUCCEEDED, output=observation)
+            child = dispatch.get(state) or node.default_child
+            if child is None:
+                return _Outcome(
+                    ActionStatus.FAILED,
+                    error=f"state_machine {node.id} has no handler for state: {state}",
+                    category="workflow",
+                )
+            outcome = self._run_node(child, deadline, branch_cancel)
+            if outcome.status != ActionStatus.SUCCEEDED:
+                # 失败即停：某个状态的函数失败就整机失败（需要重试的场合由该子图自己带 retry）。
+                # 报错里带上状态名与判断结果，否则「哪个画面上的哪一步坏了」看不出来。
+                return _Outcome(
+                    outcome.status,
+                    output=outcome.output,
+                    error=(
+                        f"state_machine {node.id}: handler for state '{state}' "
+                        f"(iterations={iterations}, confidence={observation['confidence']}) failed: {outcome.error}"
+                    ),
+                    category=outcome.category,
+                    fatal=outcome.fatal,
+                )
+        # 轮数预算用完 = 正常收工（`运行轮数` 的语义），不是错误：终止状态才是「提前结束」。
+        output = self._state_machine_output(last, iterations, False, started)
+        with self._lock:
+            self.outputs[node.id] = output
+        return _Outcome(ActionStatus.SUCCEEDED, output=output)
+
+    def _detect_state(
+        self,
+        detection: Any,
+        states: Any,
+        node: WorkflowNode,
+        deadline: float,
+        branch_cancel: threading.Event | None,
+    ) -> tuple[_Outcome | None, dict[str, Any] | None]:
+        """跑一次分类动作（默认 `vision.detect_state`）：返回（致命结果, 识别结果）。
+
+        只有「一个状态都没命中」是可等待的（``None`` + ``None``）；设备/识别层面的硬错误
+        直接作为整机失败返回，免得把真实故障冒充成「画面不认识」。
+        """
+
+        arguments = {"states": states, "allow_ocr": node.allow_ocr}
+        try:
+            self._validate_action_input(detection.input_schema, arguments, node.id)
+            result = self._execute(detection, arguments, deadline, branch_cancel)
+        except CancelledError:
+            raise
+        except AutomationError as exc:
+            return _Outcome(ActionStatus.FAILED, error=str(exc), category=getattr(exc.category, "value", "vision")), None
+        except Exception as exc:
+            return _Outcome(ActionStatus.FAILED, error=str(exc), category="internal"), None
+        if result.status == ActionStatus.SUCCEEDED:
+            try:
+                detected = _json_safe(result.output)
+            except AutomationError as exc:
+                return _Outcome(ActionStatus.FAILED, error=str(exc), category="workflow"), None
+            if not isinstance(detected, dict):
+                return _Outcome(
+                    ActionStatus.FAILED,
+                    error=f"state_machine {node.id} state detection output must be an object",
+                    category="workflow",
+                ), None
+            return None, detected
+        if result.error_category == "not_matched":
+            return None, None
+        return (
+            _Outcome(
+                ActionStatus.FAILED,
+                error=result.error or f"state_machine {node.id} state detection failed",
+                category=result.error_category or "vision",
+            ),
+            None,
+        )
 
     def _run_parallel(self, node: WorkflowNode, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
         cancel = threading.Event()

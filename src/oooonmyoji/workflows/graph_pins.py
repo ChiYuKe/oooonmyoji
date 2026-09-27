@@ -60,6 +60,13 @@ def pin_to_path(node: dict[str, Any], pin: str) -> list[Any] | None:
         return ["condition"]
     if node_type == "switch" and pin == "expression":
         return ["expression"]
+    if node_type == "state_machine" and (pin == "states" or pin.startswith("states.")):
+        # 状态识别载荷是节点自身的字段（不是 params）：`states.0.template` 这种引脚
+        # 直接落到 `states[0]["template"]`，数字段由 set_at_path 解析成列表下标。
+        return pin.split(".")
+    if node_type == "state_machine" and pin == "max_iterations":
+        # 轮数预算可以绑到输入（`运行轮数`）。
+        return ["max_iterations"]
     if node_type == "break" and pin == "ref":
         return ["ref"]
     if node_type == "bool_judge":
@@ -127,6 +134,11 @@ def path_to_pin(node: dict[str, Any], path: list[Any]) -> str | None:
         return None
     if head == "condition" and node_type == "repeat_until" and len(path) == 1:
         return "condition"
+    if head == "states" and node_type == "state_machine" and len(path) >= 2:
+        # 状态机的状态载荷字段：`states.<下标>.<字段>`。
+        return "states." + ".".join(str(part) for part in path[1:])
+    if head == "max_iterations" and node_type == "state_machine" and len(path) == 1:
+        return "max_iterations"
     if head == "ref" and node_type == "break" and len(path) == 1:
         return "ref"
     if head == "conditions" and node_type == "branch" and len(path) == 2:

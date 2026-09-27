@@ -11,7 +11,7 @@ from ..config.loader import resolve_workflow_path
 from ..exceptions import ConfigError
 from .bindings import ref_schema, schema_at_path, validate_value
 from .dsl import DslError, parse_document
-from .model import BOOL_JUDGE_OUTPUT_SCHEMA, BehaviorDecorator, WorkflowNode
+from .model import BOOL_JUDGE_OUTPUT_SCHEMA, STATE_MACHINE_OUTPUT_SCHEMA, BehaviorDecorator, WorkflowNode
 from .resolver import is_binding
 
 OPTIONAL_DECORATOR_FIELDS = {"retry": {"delay_seconds"}, "do_once": {"reset_on_failure"}}
@@ -209,6 +209,10 @@ def build_output_schemas(
             output_schemas[item["id"]] = action_specs[item["id"]].output_schema
         elif item["type"] == "bool_judge":
             output_schemas[item["id"]] = BOOL_JUDGE_OUTPUT_SCHEMA
+        elif item["type"] == "state_machine":
+            # 状态机卡片执行成功后会登记最后一次识别结果与计数，引用写作
+            # `nodes.<id>.output.state` 等，所以它有固定输出 schema。
+            output_schemas[item["id"]] = STATE_MACHINE_OUTPUT_SCHEMA
         else:
             output_schemas[item["id"]] = None
     # 拆分节点互相可作来源：逐轮推导直到收敛（指向非法/未产出节点的保持 None，交给校验报根因）。
@@ -269,6 +273,21 @@ def validate_graph_structure(
                 expected_children.add(node.default_child)
             if set(node.children) != expected_children:
                 raise ConfigError(f"switch node {node.id} children must list every case/default child exactly once")
+        if node.type == "state_machine":
+            # 状态机：case 子节点是各状态的处理子图，default 子是识别不到任何状态时的兜底。
+            # `children` 必须恰好列出这两者的并集（与 switch 同一条不变量）。
+            if not node.states:
+                raise ConfigError(f"state_machine node {node.id} must declare at least one state")
+            case_children = [child for _, child in node.cases]
+            if any(child not in node_map for child in case_children):
+                raise ConfigError(f"state_machine node {node.id} references an unknown case child")
+            if node.default_child is not None and node.default_child not in node_map:
+                raise ConfigError(f"state_machine node {node.id} references an unknown default child")
+            expected_children = set(case_children)
+            if node.default_child is not None:
+                expected_children.add(node.default_child)
+            if set(node.children) != expected_children:
+                raise ConfigError(f"state_machine node {node.id} children must list every case/default child exactly once")
         if node.type == "instance_parallel":
             if node.children:
                 raise ConfigError(f"instance_parallel node {node.id} cannot contain children")

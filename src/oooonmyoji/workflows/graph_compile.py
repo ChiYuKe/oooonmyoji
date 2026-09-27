@@ -97,7 +97,7 @@ def _legal_exec_out_pins(node: dict[str, Any]) -> str:
     node_type = str(node.get("type"))
     if node_type == "condition":
         return "true / false"
-    if node_type == "switch":
+    if node_type in {"switch", "state_machine"}:
         return "case.<下标> / default"
     return "then.<下标>"
 
@@ -394,11 +394,11 @@ def _collect_edges(
                 f"node {source_id} (condition) has no '{source_pin}' execution pin; "
                 f"its execution pins are {_legal_exec_out_pins(source_node)}"
             )
-        elif source_type == "switch":
+        elif source_type in {"switch", "state_machine"}:
             head, _, _tail = source_pin.partition(".")
             if head != "case" and source_pin != "default":
                 raise ConfigError(
-                    f"node {source_id} (switch) has no '{source_pin}' execution pin; "
+                    f"node {source_id} ({source_type}) has no '{source_pin}' execution pin; "
                     f"its execution pins are {_legal_exec_out_pins(source_node)}"
                 )
             if source_pin == "default":
@@ -593,6 +593,54 @@ def compile_graph(raw: dict[str, Any]) -> dict[str, Any]:
                 raise ConfigError(
                     f"node {node_id} (switch) connects case {stray[0][1]} but only declares {len(case_values)} cases"
                 )
+            payload["cases"] = compiled_cases
+            if default_child is not None:
+                payload["default_child"] = default_child
+            payload["children"] = [case["child"] for case in compiled_cases] + (
+                [default_child] if default_child is not None else []
+            )
+        elif node_type == "state_machine":
+            # 状态机的处理子图挂在 `case.<下标>` 上，下标指向 `states` 数组（不是 cases）：
+            # 状态名只在 `states` 里写一份，编译出来的 `cases[].value` 由它派生，避免两处漂移。
+            if "cases" in node:
+                raise ConfigError(
+                    f"node {node_id} (state_machine) cannot declare cases: handlers are wired with "
+                    "case.<下标> edges, whose index points at the states array"
+                )
+            states = node.get("states")
+            if not isinstance(states, list) or not states:
+                raise ConfigError(f"node {node_id} (state_machine) must declare a non-empty states array")
+            stray = [key for key in pins if isinstance(key, tuple) and key[0] == "case" and key[1] >= len(states)]
+            if stray:
+                raise ConfigError(
+                    f"node {node_id} (state_machine) connects case {stray[0][1]} but only declares "
+                    f"{len(states)} states"
+                )
+            terminal_names = {
+                name for name in (node.get("terminal_states") or []) if isinstance(name, str) and name
+            }
+            compiled_cases: list[dict[str, Any]] = []
+            for index, state in enumerate(states):
+                name = state.get("name") if isinstance(state, dict) else None
+                if not isinstance(name, str) or not name:
+                    raise ConfigError(
+                        f"node {node_id} (state_machine) states[{index}] must define a non-empty name"
+                    )
+                child_id = pins.get(("case", index))
+                if name in terminal_names:
+                    # 终止状态识别到整机就成功结束，给它接处理子图说明作者想错了。
+                    if child_id is not None:
+                        raise ConfigError(
+                            f"node {node_id} (state_machine) terminal state '{name}' cannot have a handler"
+                        )
+                    continue
+                if child_id is None:
+                    raise ConfigError(
+                        f"node {node_id} (state_machine) state '{name}' has no handler: "
+                        "wire it with case.<下标> or mark it as a terminal state"
+                    )
+                compiled_cases.append({"value": name, "child": child_id})
+            default_child = pins.get("default")
             payload["cases"] = compiled_cases
             if default_child is not None:
                 payload["default_child"] = default_child
@@ -794,6 +842,34 @@ def decompile_workflow(raw: dict[str, Any]) -> dict[str, Any]:
                             "to": {"node": child_id, "pin": EXEC_IN_PIN},
                         }
                     )
+            default_child = node.get("default_child")
+            if isinstance(default_child, str):
+                edges.append(
+                    {"from": {"node": node_id, "pin": "default"}, "to": {"node": default_child, "pin": EXEC_IN_PIN}}
+                )
+        elif node_type == "state_machine":
+            # 反编译方向：`cases[].value`（状态名）折回 `states` 的下标，写成 case.<下标> 边；
+            # 图形态里不保留 cases，状态名只由 `states` 承载。
+            states = payload.get("states")
+            state_names = [
+                str(state.get("name"))
+                for state in (states if isinstance(states, list) else [])
+                if isinstance(state, dict) and isinstance(state.get("name"), str)
+            ]
+            payload.pop("cases", None)
+            for case in raw_cases if isinstance(raw_cases, list) else []:
+                if not isinstance(case, dict):
+                    continue
+                child_id = case.get("child")
+                case_state = case.get("value")
+                if not isinstance(child_id, str) or not isinstance(case_state, str) or case_state not in state_names:
+                    continue
+                edges.append(
+                    {
+                        "from": {"node": node_id, "pin": f"case.{state_names.index(case_state)}"},
+                        "to": {"node": child_id, "pin": EXEC_IN_PIN},
+                    }
+                )
             default_child = node.get("default_child")
             if isinstance(default_child, str):
                 edges.append(

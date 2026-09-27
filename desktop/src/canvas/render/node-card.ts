@@ -163,7 +163,9 @@ export function nodeCardCategory(node: { type?: string; action?: string }): stri
   if (action.startsWith('vision.wait')) return 'wait';
   if (action.startsWith('vision.')) return 'vision';
   if (action.startsWith('input.')) return 'input';
-  if (action.startsWith('workflow.')) return 'workflow';
+  // 跨实例协调与子工作流同族：都是「编排」色（node-cards.css 里 instance_parallel 同色）。
+  // 不归到 custom：custom 是第三方插件的身份色，这两个是内置动作。
+  if (action.startsWith('workflow.') || action.startsWith('instance.')) return 'workflow';
   if (action === 'core.sleep') return 'wait';
   if (action.startsWith('core.')) return 'utility';
   return 'custom';

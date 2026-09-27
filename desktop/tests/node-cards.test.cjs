@@ -1248,7 +1248,7 @@ test('识别区域四格完整显示常见四位坐标，不产生省略号',()=
 
 test('task categories have distinct, stable identities and reach the rendered SVG',()=>{
   const {nodeCardCategory}=require('../dist-test-renderer/canvas/render/node-card.js');
-  const examples=[['vision.detect_state','vision'],['vision.match_template','vision'],['vision.wait_template','wait'],['input.tap_match','input'],['workflow.run','workflow'],['core.sleep','wait'],['core.log','utility'],['plugin.custom','custom']];
+  const examples=[['vision.detect_state','vision'],['vision.match_template','vision'],['vision.wait_template','wait'],['input.tap_match','input'],['workflow.run','workflow'],['instance.emit_signal','workflow'],['instance.wait_signal','workflow'],['core.sleep','wait'],['core.log','utility'],['plugin.custom','custom']];
   const {ctx,Element}=harness();
   for(const [action,category] of examples) {
     const node={id:'test',type:'task',action,params:{}};

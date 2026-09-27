@@ -26,6 +26,8 @@ const FIELD_LABELS: Record<string, string> = {
   from: '起始状态', type: '触发方式', expected_states: '预期状态', retry_if_unchanged_seconds: '无变化重试等待（秒）',
   return_action: '返回键操作', required_texts: '校验文字', required_text_roi: '校验文字区域',
   required_text_min_confidence: '校验文字置信度', text_roi: '文字区域',
+  signal: '信号名', target_instance: '目标实例', payload: '附加数据',
+  poll_interval: '轮询间隔（秒）', max_age_seconds: '信号新鲜度（秒）',
 };
 
 const ENUM_LABELS: Record<string, string> = {
@@ -39,6 +41,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'input.dismiss_template_until_text': '点模板关闭至文字出现', 'input.key': '发送按键',
   'input.recover_state': '页面状态恢复', 'input.swipe': '滑动', 'input.tap': '坐标点击',
   'input.tap_match': '点击匹配项', 'input.type_text': '输入文本',
+  'instance.emit_signal': '发出实例信号', 'instance.wait_signal': '等待实例信号',
   'vision.detect_state': '识别页面状态', 'vision.match_template': '模板匹配', 'vision.ocr': '文字识别',
   'vision.wait_any': '等待任一模板', 'vision.wait_any_text': '等待任一文字',
   'vision.wait_template': '等待模板', 'vision.wait_text': '等待文字',
@@ -54,6 +57,14 @@ const OUTPUT_LABELS: Record<string, string> = {
   elapsed_seconds: '耗时（秒）', index: '序号', count: '数量', center: '中心点',
   reference: '参考帧', width: '宽度', height: '高度', failure_frame: '失败现场图',
   return_attempts: '返回次数', overlay_clicks: '覆盖层点击次数', ok: '是否成功', reason: '原因',
+  asserted: '是否通过', click_count: '点击次数', clicks: '点击记录', matched_text: '命中文字',
+  final_state: '结束状态', actions: '执行动作', origin_x: '原始 X', origin_y: '原始 Y',
+  offset_x: '偏移 X', offset_y: '偏移 Y', interval_seconds: '等待间隔（秒）',
+  revalidated: '是否重新校验', skipped: '是否跳过', verified_gone: '是否确认消失',
+  length: '文字长度', timed_out: '是否超时', status: '状态', output: '输出', error: '错误',
+  error_category: '错误类别', attempts: '尝试次数',
+  received: '是否收到', emitted: '是否已发出', emitted_at: '发出时间', path: '信号文件',
+  source_instance: '来源实例',
 };
 
 export const fieldLabel = (name: string): string => FIELD_LABELS[name] || name;

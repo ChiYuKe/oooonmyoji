@@ -19,6 +19,7 @@ from .devices.mumu import discover_mumu_path
 from .exceptions import AutomationError, ConfigError
 from .runtime.control import ControlServer, send_control
 from .runtime.instances import discover_runtime_instances, ensure_runtime_instance, expand_runtime_instances
+from .runtime.one_shot import run_single_action
 from .runtime.records import AtomicJsonStore
 from .runtime.scheduler import Scheduler
 from .runtime.supervisor import Supervisor
@@ -450,6 +451,36 @@ def command_serve(args: argparse.Namespace) -> int:
         supervisor.stop()
 
 
+def command_run_action(args: argparse.Namespace) -> int:
+    """执行单个 Action（供人工排查与 MCP 单步操作复用）。"""
+
+    path = _config_path(args.config)
+    config = expand_runtime_instances(load_config(path))
+    params: dict[str, Any] = {}
+    if args.params is not None:
+        raw = args.params.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ConfigError("--params 文件必须是一个 JSON 对象")
+        params = parsed
+    resolution = None
+    if args.reference_resolution:
+        parts = args.reference_resolution.lower().replace("x", " ").split()
+        if len(parts) != 2 or not all(part.isdigit() for part in parts):
+            raise ConfigError("--reference-resolution 需要形如 1920x1080")
+        resolution = (int(parts[0]), int(parts[1]))
+    result = run_single_action(
+        config,
+        instance_id=args.instance,
+        action_name=args.action_name,
+        params=params,
+        reference_resolution=resolution,
+        registry=build_action_registry(config.action_dir),
+    )
+    _print(result.as_payload())
+    return 0 if result.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构建命令行解析器，注册全部子命令。"""
 
@@ -470,6 +501,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_workflow.add_argument("--inputs", type=Path, help="可选的工作流输入 JSON 文件")
     run_workflow.add_argument("--events-file", type=Path, help="可选的运行事件 JSONL 输出文件（编辑器用它显示步骤缩略图）")
     run_workflow.set_defaults(function=command_run_workflow)
+    run_action = subparsers.add_parser(
+        "run-action",
+        help="执行单个 Action（不写工作流，便于排查与单步操作）",
+    )
+    run_action.add_argument("action_name", help="Action 名称，例如 input.tap")
+    run_action.add_argument("--instance", default="mumu-0", help="实例 ID，默认 mumu-0")
+    run_action.add_argument("--params", type=Path, help="可选的 Action 参数 JSON 文件")
+    run_action.add_argument("--reference-resolution", default=None, help="坐标参考分辨率，默认 1920x1080，可写 1920x1080")
+    run_action.set_defaults(function=command_run_action)
     cancel = subparsers.add_parser("cancel")
     cancel.add_argument("run_id")
     cancel.set_defaults(function=command_cancel)

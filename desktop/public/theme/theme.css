@@ -77,7 +77,9 @@
 :root[data-theme="dark"] :is(.menu-separator, .desktop-more-separator) { background: var(--ui-line); }
 :root[data-theme="dark"] :is(.reference-graph, #canvas-wrap) { background-color: var(--dark-canvas); }
 :root[data-theme="dark"] #canvas-grid { background-image: linear-gradient(var(--canvas-grid) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid) 1px, transparent 1px); }
-:root[data-theme="dark"] #workflow-breadcrumb { background: rgba(28,28,28,.92); color: var(--ui-muted); }
+/* 面包屑在桌面模式是悬浮在画布上方的条：背景保持半透明（与浅色主题、旧版基线的 72% 一致），
+ * 否则它会把画布顶那一条整块盖死，用户看不到底下的网格与卡片。 */
+:root[data-theme="dark"] #workflow-breadcrumb { background: rgba(28,28,28,.72); color: var(--ui-muted); }
 :root[data-theme="dark"] #minimap { background: #1e1e1e; border: 1px solid var(--border); box-shadow: none; }
 :root[data-theme="dark"] .mini-node { fill: #777777; stroke: #aaaaaa; }
 :root[data-theme="dark"] .mini-viewport { fill: rgba(255,255,255,.07); stroke: #bfbfbf; }
@@ -222,7 +224,9 @@
 :root[data-theme="dark"][data-palette] { background: var(--dark-canvas); color: var(--ui-text); --ui-tooltip-bg: var(--ui-surface); --ui-tooltip-text: var(--ui-text); }
 :root[data-theme="dark"][data-palette] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) { --dv-separator-border: var(--dark-canvas); }
 :root[data-theme="dark"][data-palette] #minimap { background: var(--ui-bg); }
-:root[data-theme="dark"][data-palette] #workflow-breadcrumb { background: var(--ui-bg); }
+/* 调色板只换底色，透明度跟其余主题保持一致：`var(--ui-bg)` 是不透明色，直接写会把面包屑
+ * 变成一条实心黑条（旧版 72% 的「透出网格」设计就没了）。 */
+:root[data-theme="dark"][data-palette] #workflow-breadcrumb { background: color-mix(in srgb, var(--ui-bg) 72%, transparent); }
 :root[data-theme="dark"][data-palette] .mini-viewport { stroke: var(--ui-focus); }
 :root[data-theme="dark"][data-palette] .dv-tab.dv-active-tab { color: var(--dark-selection-text); }
 

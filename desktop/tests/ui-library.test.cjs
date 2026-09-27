@@ -155,6 +155,33 @@ test('tooltips share a borderless neutral surface and reduced shadow across rend
   assert(light.includes('--ui-tooltip-shadow: 0 3px 8px rgba(0, 0, 0, .12)'));
 });
 
+test('面包屑在所有主题下都保持半透明，不把画布顶那一条盖死', () => {
+  // 桌面模式下面包屑是悬浮层（见 editor-frame.css），必须透出底下的网格与卡片；
+  // 深色调色板曾经写成不透明的 var(--ui-bg)，整条变成实心黑条。
+  const postcss=require('postcss');
+  const files=[['theme.css','../theme/theme.css'],['editor-light.css','../theme/editor-light.css'],['workflow-editor.css','workflow-editor.css']];
+  const translucent=value=>{
+    if(/transparent/i.test(value)) return true; // color-mix(in srgb, <底色> 72%, transparent)
+    const slash=/\/\s*([\d.]+)\s*\)/.exec(value); // color(srgb … / .72)
+    if(slash) return Number(slash[1])<1;
+    const rgb=/rgba?\(([^)]*)\)/.exec(value);
+    if(!rgb) return false;
+    const parts=rgb[1].split(',').map(part=>part.trim());
+    return parts.length>3 && Number(parts[3])<1;
+  };
+  let checked=0;
+  for(const [label,file] of files){
+    postcss.parse(fs.readFileSync(path.join(root,file),'utf8'),{from:file}).walkRules(rule=>{
+      if(!(rule.selectors||[]).some(selector=>selector.includes('#workflow-breadcrumb'))) return;
+      rule.walkDecls('background',declaration=>{
+        checked++;
+        assert(translucent(declaration.value),`${label} 的面包屑背景 ${declaration.value} 不透明`);
+      });
+    });
+  }
+  assert(checked>=4,`面包屑的背景规则没找全（只找到 ${checked} 条）`);
+});
+
 test('search dropdown supports arrows, skips disabled options and commits with Enter', () => {
   const {UI,doc}=harness(); const changes=[];
   const control=UI.dropdown({value:'a',label:'动作',searchable:true,options:[{value:'a',label:'甲'},{value:'b',label:'乙',disabled:true},{value:'c',label:'丙'}],onChange:value=>changes.push(value)});

@@ -24,6 +24,13 @@
   border-bottom: 0;
 }
 
+/* 排列预览确认条必须让开悬浮的面包屑条：
+ * 桌面模式下 #workflow-breadcrumb 是 top: 0 / 30px 高 / z-index: 5 的悬浮层，而 #canvas-wrap
+ * 是 z-index: 0 的层叠上下文——确认条写在画布里的 top: 12px 整条落在面包屑底下：上边框看不见，
+ * 按钮上沿的点击也落到面包屑上（用户反馈「确认条被挡住、按钮点不到」）。
+ * 与 #external-banner 同一条规矩：画布内的浮层从面包屑下面开始。 */
+.desktop-canvas-mode #arrange-preview-bar { top: 38px; }
+
 .desktop-details-mode #editor-main { height: 100%; min-height: 0; display: block; }
 .desktop-details-mode #canvas-wrap { display: none; }
 .desktop-details-mode #inspector { width: 100%; height: 100%; display: flex !important; border: 0; }

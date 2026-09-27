@@ -419,6 +419,10 @@
 :root[data-theme="light"] .editor-surface {
     background: #f2f2f2
 }
+:root[data-theme="light"] .empty-workflow-canvas {
+    background-color: var(--bg, #f2f2f2);
+    background-image: linear-gradient(var(--canvas-grid, var(--grid, rgba(0, 0, 0, 0.05))) 1px, transparent 1px), linear-gradient(90deg, var(--canvas-grid, var(--grid, rgba(0, 0, 0, 0.05))) 1px, transparent 1px)
+}
 :root[data-theme="light"] .workflow-canvas-frame, :root[data-theme="light"] #details-frame, :root[data-theme="light"] #runtime-log-frame {
     background: #f2f2f2
 }

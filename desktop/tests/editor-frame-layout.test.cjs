@@ -28,6 +28,25 @@ test('desktop canvas always defines one full-height row, including narrow select
   assert.equal(properties('.desktop-canvas-mode #workflow-breadcrumb').position,'absolute');
 });
 
+test('排列预览确认条在桌面画布模式下让开悬浮的面包屑条', () => {
+  // 面包屑在桌面模式是 30px 高、z-index:5 的悬浮层，压住 z-index:0 的 #canvas-wrap 整棵子树；
+  // 确认条若还留在画布内的 top:12px，上边框与按钮上沿的点击都会被它吃掉。
+  const declarations = (root, selector) => {
+    const result = {};
+    root.walkRules(selector, rule => rule.walkDecls(d => {result[d.prop] = d.value;}));
+    return result;
+  };
+  const strip = declarations(postcss.parse(read('workflow-editor.css')), '#workflow-breadcrumb');
+  assert.equal(strip['min-height'], '30px');
+  const bar = properties('.desktop-canvas-mode #arrange-preview-bar');
+  assert(
+    parseFloat(bar.top) > parseFloat(strip['min-height']),
+    `确认条 top 必须落在 ${strip['min-height']} 的面包屑条之下，当前 ${bar.top}`
+  );
+  // 旧编辑器布局里面包屑在文档流里，画布从它下面开始，原位置不用动。
+  assert.equal(declarations(postcss.parse(read('workflow-editor.css')), '#arrange-preview-bar').top, '12px');
+});
+
 test('separate details panel fills its host without reserving a hidden breadcrumb', () => {
   assert.equal(properties('.desktop-details-mode #editor-main').height,'100%');
   assert.equal(properties('.desktop-details-mode #editor-main').display,'block');

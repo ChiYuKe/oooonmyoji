@@ -148,7 +148,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
       items.push('separator', { label: `断开与「${parent.node.name || parent.node.id}」的链接`, danger: true, run: () => { mutate(() => disconnect(parent.node.id, nodeId)); } });
       items.push('separator', {
         label: '在上方插入节点',
-        children: ([['sequence', 'Sequence'], ['selector', 'Selector'], ['simple_parallel', 'Simple Parallel'], ['parallel', 'Parallel'], ['repeat_until', 'Repeat Until'], ['branch', 'Branch'], ['switch', 'Switch']] as Array<[string, string]>)
+        children: ([['sequence', 'Sequence'], ['selector', 'Selector'], ['simple_parallel', 'Simple Parallel'], ['parallel', 'Parallel'], ['repeat_until', 'Repeat Until'], ['branch', 'Branch'], ['switch', 'Switch'], ['state_machine', 'State Machine（状态机）']] as Array<[string, string]>)
           .map(([type, label]) => ({ label, run: () => insertAbove(nodeId, type) })),
       });
     }
@@ -168,7 +168,7 @@ export function createCanvasPortMenu(deps: PortMenuDeps): CanvasPortMenu {
     }
     items.push('separator', {
       label: `创建并连接节点${suffix}`,
-      children: ([['task', 'Task'], ['condition', 'Condition（判断）'], ['bool_judge', 'Bool Judge（布尔判断卡片）'], ['sequence', 'Sequence'], ['selector', 'Selector'], ['simple_parallel', 'Simple Parallel'], ['parallel', 'Parallel'], ['repeat_until', 'Repeat Until'], ['branch', 'Branch'], ['switch', 'Switch'], ['instance_parallel', 'Instance Parallel']] as Array<[string, string]>)
+      children: ([['task', 'Task'], ['condition', 'Condition（判断）'], ['bool_judge', 'Bool Judge（布尔判断卡片）'], ['sequence', 'Sequence'], ['selector', 'Selector'], ['simple_parallel', 'Simple Parallel'], ['parallel', 'Parallel'], ['repeat_until', 'Repeat Until'], ['branch', 'Branch'], ['switch', 'Switch'], ['state_machine', 'State Machine（状态机）'], ['instance_parallel', 'Instance Parallel']] as Array<[string, string]>)
         .map(([type, label]) => ({ label, run: () => addChild(nodeId, type, point, slot) })),
     });
     return items;

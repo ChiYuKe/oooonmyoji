@@ -257,7 +257,7 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
   const STRUCTURAL_FIELDS = [
     'action', 'params', 'children', 'finish_mode', 'runs', 'wait_for', 'cancel_on_failure',
     'condition', 'conditions', 'max_iterations', 'expression', 'cases', 'default_child', 'ports',
-    'ref', 'fields',
+    'ref', 'fields', 'states', 'terminal_states', 'allow_ocr', 'state_timeout_seconds', 'state_action',
   ];
 
   /** 各节点类型合法的结构字段（与 validator/schema 的 allowed_fields 对齐）。 */
@@ -270,6 +270,7 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
     repeat_until: ['children', 'condition', 'max_iterations'],
     branch: ['children', 'conditions'],
     switch: ['children', 'expression', 'cases', 'default_child'],
+    state_machine: ['children', 'states', 'terminal_states', 'allow_ocr', 'state_timeout_seconds', 'state_action', 'max_iterations', 'cases', 'default_child'],
     simple_parallel: ['children', 'finish_mode'],
     parallel: ['children', 'wait_for', 'cancel_on_failure'],
     root: ['children'], selector: ['children'], sequence: ['children'],
@@ -307,6 +308,14 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
         if (type === 'repeat_until') { node.condition = node.condition || { eq: [1, 1] }; node.max_iterations = node.max_iterations || 100; }
         if (type === 'branch') node.conditions = Array.isArray(node.conditions) ? node.conditions : [];
         if (type === 'switch') { node.expression = node.expression ?? 0; node.cases = Array.isArray(node.cases) ? node.cases : []; }
+        if (type === 'state_machine') {
+          node.states = Array.isArray(node.states) ? node.states : [];
+          node.terminal_states = Array.isArray(node.terminal_states) ? node.terminal_states : [];
+          node.cases = Array.isArray(node.cases) ? node.cases : [];
+          node.max_iterations = node.max_iterations || 100;
+          node.allow_ocr = node.allow_ocr !== false;
+          if (typeof node.state_action !== 'string' || !node.state_action) node.state_action = 'vision.detect_state';
+        }
         if (type === 'parallel') { node.wait_for = 'all'; node.cancel_on_failure = true; }
       }
     });

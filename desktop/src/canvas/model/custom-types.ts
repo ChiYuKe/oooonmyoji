@@ -25,6 +25,7 @@ const PRESET_KEYS: Record<string, string[]> = {
   break: ['ref', 'fields'],
   repeat_until: ['condition'],
   switch: ['expression'],
+  state_machine: ['states', 'terminal_states', 'allow_ocr', 'state_timeout_seconds', 'max_iterations'],
   sequence: [],
   selector: [],
   parallel: [],

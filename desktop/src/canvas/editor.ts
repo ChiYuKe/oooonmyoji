@@ -188,10 +188,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
    */
   const TASK_OUTPUT_PORT_X = NODE_W - 12;
   const VARIABLE_DRAG_MIME = 'application/x-onmyoji-variable';
-  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task'];
-  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', instance_parallel: 'INSTANCE PARALLEL', condition: 'CONDITION', bool_judge: 'BOOL JUDGE', break: 'BREAK', task: 'TASK', group_entry: 'GRAPH ENTRY', group_exit: 'GRAPH EXIT' };
-  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', instance_parallel: '实例并行', condition: '判断', bool_judge: '布尔判断', break: '拆分', group_entry: '折叠图入口', group_exit: '折叠图出口' };
-  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', instance_parallel: '⇶', condition: '◇', bool_judge: '◈', break: '⋔', task: '▣', group_entry: '⇥', group_exit: '⇤' };
+  const TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'state_machine', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task'];
+  const TYPE_LABEL = { root: 'ROOT', selector: 'SELECTOR', sequence: 'SEQUENCE', simple_parallel: 'SIMPLE PARALLEL', parallel: 'PARALLEL', repeat_until: 'REPEAT UNTIL', branch: 'BRANCH', switch: 'SWITCH', state_machine: 'STATE MACHINE', instance_parallel: 'INSTANCE PARALLEL', condition: 'CONDITION', bool_judge: 'BOOL JUDGE', break: 'BREAK', task: 'TASK', group_entry: 'GRAPH ENTRY', group_exit: 'GRAPH EXIT' };
+  const TYPE_NAMES = { root: '根节点', task: '任务', selector: '选择器', sequence: '顺序', simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到', branch: '条件分支', switch: '多路开关', state_machine: '状态机', instance_parallel: '实例并行', condition: '判断', bool_judge: '布尔判断', break: '拆分', group_entry: '折叠图入口', group_exit: '折叠图出口' };
+  const TYPE_ICON = { root: '◆', selector: '?', sequence: '→', simple_parallel: '∥', parallel: '⇉', repeat_until: '↻', branch: '⑂', switch: '⎇', state_machine: '⟳', instance_parallel: '⇶', condition: '◇', bool_judge: '◈', break: '⋔', task: '▣', group_entry: '⇥', group_exit: '⇤' };
   const RUN_LABEL = {
     running: '运行中', succeeded: '已完成', matched: '已匹配', not_matched: '未匹配',
     failed: '失败', cancelled: '已取消', branch_miss: '分支跳过',
@@ -1131,6 +1131,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
       { label: '＋ Sequence', run: () => addNode('sequence', point) }, { label: '＋ Simple Parallel', run: () => addNode('simple_parallel', point) },
       { label: '＋ Parallel', run: () => addNode('parallel', point) }, { label: '＋ Repeat Until', run: () => addNode('repeat_until', point) },
       { label: '＋ Branch', run: () => addNode('branch', point) }, { label: '＋ Switch', run: () => addNode('switch', point) },
+      { label: '＋ State Machine（状态机）', run: () => addNode('state_machine', point) },
       { label: '＋ Instance Parallel', run: () => addNode('instance_parallel', point) },
       'separator',
       { label: '＋ 注释框 (Comment)', run: () => { const comment = Comments.create(point.x, point.y); if (comment) Comments.editText(comment.id); } },

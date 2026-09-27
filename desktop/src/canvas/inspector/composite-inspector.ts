@@ -203,6 +203,118 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
         defaultRow.appendChild(selectInput(node.default_child || '', [{ value: '', label: '未设置' }, ...nodeChildrenOptions(node, node.default_child)], (value) => mutate(() => { node.default_child = value || undefined; }), 'full'));
       }
     }
+    if (node.type === 'state_machine') {
+      body.appendChild(el('div', 'description', '每轮识别当前画面状态，运行该状态的处理子图，然后重新识别并切换；命中终止状态即成功结束，处理子图失败即整机失败。'));
+      section(body, '判断当前画面');
+      const classifyRow = field(body, '识别用的动作');
+      const catalogNames = ((state.catalog || []) as Array<{ name: string }>).map((item) => item.name);
+      if (!catalogNames.includes('vision.detect_state')) catalogNames.unshift('vision.detect_state');
+      classifyRow.appendChild(selectInput(node.state_action || 'vision.detect_state', catalogNames.map((name: string) => ({ value: name, label: name })), (value) => mutate(() => { node.state_action = value; }), 'full'));
+      body.appendChild(el('div', 'description', '该动作必须接受 states 参数并返回 state 字段；默认的内置识别按模板匹配、全部未命中才降级 OCR。'));
+      const ocrRow = field(body, '允许 OCR 兜底');
+      ocrRow.appendChild(checkbox(node.allow_ocr !== false, (value) => mutate(() => { node.allow_ocr = value; })));
+      const waitRow = field(body, '等待画面出现（秒）');
+      waitRow.appendChild(textInput(node.state_timeout_seconds ?? 0, (value) => mutate(() => {
+        const seconds = Number(value);
+        node.state_timeout_seconds = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+      }), { type: 'number', min: 0, step: 0.5 }));
+      const maxRow = field(body, '最大轮数');
+      // 轮数可以绑到输入（`运行轮数`）：绑定时这里不再显示数字，避免把引用写成 [object Object]。
+      const boundRounds = Boolean(node.max_iterations) && typeof node.max_iterations === 'object';
+      if (boundRounds) {
+        maxRow.appendChild(el('div', 'description', `已绑定到 ${node.max_iterations.ref}（在连线里换来源）`));
+      } else {
+        const rounds = typeof node.max_iterations === 'number' ? node.max_iterations : 100;
+        maxRow.appendChild(textInput(rounds, (value) => mutate(() => { node.max_iterations = Math.max(1, parseInt(value || '100', 10)); }), { type: 'number', min: 1, step: 1 }));
+      }
+
+      section(body, '状态列表');
+      if (!Array.isArray(node.states)) node.states = [];
+      if (!Array.isArray(node.cases)) node.cases = [];
+      const states: any[] = node.states;
+      const cases: any[] = node.cases;
+      const terminalsOf = (): string[] => (Array.isArray(node.terminal_states) ? node.terminal_states : []);
+      const caseFor = (name: unknown): any => cases.find((item: any) => item && item.value === name);
+      const renderState = (state: any, index: number) => {
+        const card = el('div', 'object-array-card');
+        const head = el('div', 'object-array-head');
+        head.appendChild(el('span', 'object-array-title', `状态 ${index + 1}`));
+        const actions = el('div', 'object-array-actions');
+        actions.appendChild(iconButton('object-array-move', '上移', 'arrow-up', () => mutate(() => { const updated = states.slice(); [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]]; node.states = updated; })));
+        actions.appendChild(iconButton('object-array-move', '下移', 'arrow-down', () => mutate(() => { const updated = states.slice(); [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]]; node.states = updated; })));
+        actions.appendChild(iconButton('object-array-remove', '删除该状态', 'trash', () => mutate(() => {
+          const removed = states[index];
+          node.states = states.filter((_item: any, position: number) => position !== index);
+          if (removed && typeof removed.name === 'string') {
+            node.cases = cases.filter((item: any) => !item || item.value !== removed.name);
+            if (Array.isArray(node.terminal_states)) node.terminal_states = node.terminal_states.filter((name: string) => name !== removed.name);
+          }
+        })));
+        head.appendChild(actions);
+        card.appendChild(head);
+
+        const nameRow = field(card, '状态名');
+        nameRow.appendChild(textInput(state.name || '', (value) => mutate(() => {
+          const previous = state.name;
+          state.name = value;
+          const entry = caseFor(previous);
+          if (entry) entry.value = value;
+          if (Array.isArray(node.terminal_states)) node.terminal_states = node.terminal_states.map((name: string) => (name === previous ? value : name));
+        }), { className: 'full' }));
+
+        const templateRow = field(card, '模板图');
+        templateRow.appendChild(textInput(state.template ?? '', (value) => mutate(() => {
+          if (value) state.template = value;
+          else delete state.template;
+        }), { className: 'full' }));
+
+        const templatesRow = field(card, '模板列表（逗号分隔，任一命中）');
+        templatesRow.appendChild(textInput(Array.isArray(state.templates) ? state.templates.join(', ') : '', (value) => mutate(() => {
+          const items = String(value).split(',').map((item) => item.trim()).filter(Boolean);
+          if (items.length) state.templates = items;
+          else delete state.templates;
+        }), { className: 'full' }));
+
+        const roiRow = field(card, '识别区域 [x, y, w, h]');
+        roiRow.appendChild(textInput(Array.isArray(state.roi) ? state.roi.join(', ') : '', (value) => mutate(() => {
+          const parts = String(value).split(',').map((item) => Number(item.trim()));
+          if (parts.length === 4 && parts.every((item) => Number.isFinite(item))) state.roi = parts.map((item) => Math.round(item));
+        }), { className: 'full' }));
+
+        const thresholdRow = field(card, '匹配阈值');
+        thresholdRow.appendChild(textInput(state.threshold ?? 0.85, (value) => mutate(() => { state.threshold = Number(value); }), { type: 'number', min: 0, step: 0.01 }));
+
+        const terminalRow = field(card, '终止状态（识别到即结束）');
+        terminalRow.appendChild(checkbox(terminalsOf().includes(state.name), (checked) => mutate(() => {
+          const next = terminalsOf().filter((name) => name !== state.name);
+          if (checked && state.name) next.push(state.name);
+          node.terminal_states = next;
+        })));
+
+        const handlerRow = field(card, '处理子节点');
+        const entry = caseFor(state.name);
+        handlerRow.appendChild(selectInput(entry && entry.child || '', nodeChildrenOptions(node, entry && entry.child), (value) => mutate(() => {
+          const current = caseFor(state.name);
+          if (current) current.child = value;
+          else node.cases.push({ value: state.name, child: value });
+          node.children = node.cases.map((item: any) => item && item.child).filter((child: unknown) => typeof child === 'string');
+        }), 'full'));
+        return card;
+      };
+      states.forEach((state: any, index: number) => body.appendChild(renderState(state, index)));
+      body.appendChild(addRowButton('添加状态', () => mutate(() => {
+        const used = new Set(states.map((state: any) => state && state.name));
+        let ordinal = states.length + 1;
+        while (used.has(`状态${ordinal}`)) ordinal += 1;
+        states.push({ name: `状态${ordinal}`, template: '' });
+        node.states = states;
+      })));
+
+      if (nodeChildrenOptions(node, node.default_child).length) {
+        const defaultRow = field(body, '未识别到任何状态时的兜底子节点');
+        defaultRow.appendChild(selectInput(node.default_child || '', [{ value: '', label: '未设置（整机失败）' }, ...nodeChildrenOptions(node, node.default_child)], (value) => mutate(() => { node.default_child = value || undefined; }), 'full'));
+      }
+    }
     if (node.type === 'simple_parallel') {
       body.appendChild(el('div', 'description', '第 1 个子节点是主 Task，第 2 个是后台分支。'));
       const finish = field(body, '结束模式');

@@ -153,6 +153,7 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
     else if (command === 'addRepeatUntil') addNode('repeat_until');
     else if (command === 'addBranch') addNode('branch');
     else if (command === 'addSwitch') addNode('switch');
+    else if (command === 'addStateMachine') addNode('state_machine');
     else if (command === 'addInstanceParallel') addNode('instance_parallel');
     else if (command === 'autoLayout') { autoLayout(); fitView(); }
     else if (command === 'previewArrange') {

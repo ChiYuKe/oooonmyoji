@@ -89,6 +89,8 @@ function guaranteedOutputNodeIds(
   if (node.type === 'bool_judge') return new Set([node.id]);
   // 拆分卡片同为值卡片：总是成功并登记拆分结果。
   if (node.type === 'break') return new Set([node.id]);
+  // 状态机成功时一定登记自己的输出（最后一次识别结果 + 计数），与 Python `workflows/graph.py` 一致。
+  if (node.type === 'state_machine') return new Set([node.id]);
   const nested = new Set(visiting);
   nested.add(nodeId);
   if (node.type === 'root' && node.children.length === 1) {
@@ -168,6 +170,8 @@ function possibleOutputNodeIdsInSubtree(
   const nested = new Set(visiting);
   nested.add(nodeId);
   const result = new Set<string>();
+  // 状态机自己会登记输出（最后一次识别结果），处理子图也可能产出输出。
+  if (node.type === 'state_machine') result.add(nodeId);
   for (const child of node.children) {
     for (const id of possibleOutputNodeIdsInSubtree(child, nodeMap, nested)) result.add(id);
   }
@@ -187,7 +191,7 @@ export function possiblyAvailableOutputNodeIds(info: WorkflowInfo, targetNodeId:
     if (parentIds.length !== 1) break;
     const parent = nodeMap.get(parentIds[0]);
     if (!parent) break;
-    if (parent.type === 'sequence' || parent.type === 'selector') {
+    if (parent.type === 'sequence' || parent.type === 'selector' || parent.type === 'state_machine') {
       const currentIndex = parent.children.indexOf(current);
       for (const sibling of parent.children.slice(0, Math.max(0, currentIndex))) {
         for (const id of possibleOutputNodeIdsInSubtree(sibling, nodeMap)) result.add(id);

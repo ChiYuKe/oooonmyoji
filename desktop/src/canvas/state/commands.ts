@@ -267,6 +267,19 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       if (!Array.isArray(parent.cases)) parent.cases = [];
       if (!parent.cases.some((item: any) => item && item.child === childId)) parent.cases.push({ value: parent.cases.length, child: childId });
     }
+    if (parent.type === 'state_machine') {
+      // 新子节点接到「第一个还没接处理子图的非终止状态」上，避免出现指向空状态名的分支。
+      if (!Array.isArray(parent.cases)) parent.cases = [];
+      if (!parent.cases.some((item: any) => item && item.child === childId)) {
+        const states = Array.isArray(parent.states) ? parent.states : [];
+        const terminals: string[] = Array.isArray(parent.terminal_states) ? parent.terminal_states : [];
+        const used = new Set(parent.cases.map((item: any) => item && item.value));
+        const next = states.find((state: any) => (
+          state && typeof state.name === 'string' && state.name && !terminals.includes(state.name) && !used.has(state.name)
+        ));
+        parent.cases.push({ value: next ? next.name : '', child: childId });
+      }
+    }
     return true;
   }
 
@@ -274,6 +287,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     const parent = nodeById(parentId);
     if (!dropChild(parent, childId)) return;
     if (parent.type === 'switch' && Array.isArray(parent.cases)) parent.cases = parent.cases.filter((item: any) => item && item.child !== childId);
+    if (parent.type === 'state_machine' && Array.isArray(parent.cases)) parent.cases = parent.cases.filter((item: any) => item && item.child !== childId);
   }
 
   /** 按类型构建一个尚未入图的新节点（addNode / 端口右键插入共用）。 */
@@ -342,6 +356,16 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       node.children = [];
       node.expression = 0;
       node.cases = [];
+    } else if (type === 'state_machine') {
+      // 状态机：状态名只在 states 里写一份，cases 由编辑器按状态派生（value = 状态名）。
+      node.children = [];
+      node.states = [];
+      node.terminal_states = [];
+      node.cases = [];
+      node.max_iterations = 100;
+      node.allow_ocr = true;
+      // 「判断当前画面」角色显式写出来：默认就是内置的多状态识别，换分类器只改这个字段。
+      node.state_action = 'vision.detect_state';
     } else if (type === 'parallel') {
       node.children = [];
       node.wait_for = 'all';

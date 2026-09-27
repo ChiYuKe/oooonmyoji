@@ -344,6 +344,11 @@ export function dataPinToPath(node: any, pin: string): (string | number)[] | nul
   if (type === 'condition' && pin === 'condition') return ['expression'];
   if (type === 'repeat_until' && pin === 'condition') return ['condition'];
   if (type === 'switch' && pin === 'expression') return ['expression'];
+  if (type === 'state_machine' && (pin === 'states' || pin.startsWith('states.'))) {
+    // 状态识别载荷是节点自身的字段（不是 params）：`states.0.template` 直接落到 `states[0].template`。
+    return pin.split('.');
+  }
+  if (type === 'state_machine' && pin === 'max_iterations') return ['max_iterations'];
   if (type === 'break' && pin === 'ref') return ['ref'];
   if (type === 'bool_judge') {
     if (pin === 'condition') return ['expression'];
@@ -399,6 +404,8 @@ export function payloadPathToPin(node: any, path: (string | number)[]): string |
     return null;
   }
   if (head === 'condition' && type === 'repeat_until' && path.length === 1) return 'condition';
+  if (head === 'states' && type === 'state_machine' && path.length >= 2) return `states.${path.slice(1).join('.')}`;
+  if (head === 'max_iterations' && type === 'state_machine' && path.length === 1) return 'max_iterations';
   if (head === 'ref' && type === 'break' && path.length === 1) return 'ref';
   if (head === 'conditions' && type === 'branch' && path.length === 2) return `conditions.${path[1]}`;
   if (head === 'runs' && type === 'instance_parallel' && path.length >= 4 && path[2] === 'inputs') {
@@ -521,7 +528,7 @@ function nodeLabel(node: any): string {
 /** 这个类型的执行出口长什么样（只用于报错说明）。 */
 function execPinHint(node: any): string {
   if (node?.type === 'condition') return 'true / false';
-  if (node?.type === 'switch') return 'case.<下标> / default';
+  if (node?.type === 'switch' || node?.type === 'state_machine') return 'case.<下标> / default';
   return 'then.<下标>';
 }
 
@@ -757,13 +764,17 @@ export function graphDocumentIssues(raw: unknown): ValidationIssue[] {
       return;
     } else {
       const [head, tail] = splitPin(sourcePin);
-      const legal = resolvedSource.type === 'switch' ? (head === 'case' || sourcePin === 'default') : head === 'then';
+      const caseTyped = resolvedSource.type === 'switch' || resolvedSource.type === 'state_machine';
+      const legal = caseTyped ? (head === 'case' || sourcePin === 'default') : head === 'then';
       if (!legal || (head !== 'default' && tail !== '' && !/^\d+$/.test(tail))) {
         issues.push(issue(['edges', index, 'from', 'pin'], `${nodeLabel(resolvedSource)} 没有 '${sourcePin}' 出口，它的执行出口是 ${execPinHint(resolvedSource)}`, 'graph-bad-pin'));
         return;
       }
-      const caseLimit = Array.isArray(resolvedSource.cases) ? resolvedSource.cases.length : 0;
-      if (resolvedSource.type === 'switch' && head === 'case' && Number(tail) >= caseLimit) {
+      // switch 的 case.<下标> 指向 `cases`；状态机的指向 `states`（状态名只在 states 里写一份）。
+      const caseLimit = resolvedSource.type === 'state_machine'
+        ? (Array.isArray(resolvedSource.states) ? resolvedSource.states.length : 0)
+        : (Array.isArray(resolvedSource.cases) ? resolvedSource.cases.length : 0);
+      if (caseTyped && head === 'case' && Number(tail) >= caseLimit) {
         issues.push(issue(['edges', index, 'from', 'pin'], `${nodeLabel(resolvedSource)} 只声明了 ${caseLimit} 个分支，接不到 case.${tail}`, 'graph-case-out-of-range'));
         return;
       }
@@ -807,6 +818,61 @@ export function graphDocumentIssues(raw: unknown): ValidationIssue[] {
         ));
       }
     });
+  });
+  // 状态机：每个非终止状态都必须接处理子图；终止状态识别到就结束，接了就说明作者想错了。
+  nodes.forEach((node, index) => {
+    if (node?.type !== 'state_machine') return;
+    const rawStates = node.states;
+    if (!Array.isArray(rawStates) || rawStates.length === 0) {
+      issues.push(issue(['nodes', index, 'states'], `${nodeLabel(node)} 需要至少一个状态`, 'graph-state-machine-states'));
+      return;
+    }
+    const terminals = new Set<string>(
+      (Array.isArray(node.terminal_states) ? node.terminal_states : []).filter(
+        (name: unknown): name is string => typeof name === 'string' && Boolean(name),
+      ),
+    );
+    const names = new Set<string>();
+    const wired = wiredCases.get(node.id);
+    rawStates.forEach((state: any, stateIndex: number) => {
+      const name = typeof state?.name === 'string' ? state.name : '';
+      if (!name) {
+        issues.push(issue(['nodes', index, 'states', stateIndex, 'name'], `${nodeLabel(node)} 的状态 ${stateIndex} 缺少名字`, 'graph-state-machine-state-name'));
+        return;
+      }
+      if (names.has(name)) {
+        issues.push(issue(['nodes', index, 'states', stateIndex, 'name'], `${nodeLabel(node)} 的状态名重复：${name}`, 'graph-state-machine-state-duplicate'));
+        return;
+      }
+      names.add(name);
+      const isWired = Boolean(wired?.has(stateIndex));
+      if (terminals.has(name)) {
+        if (isWired) {
+          issues.push(issue(
+            ['nodes', index, 'states', stateIndex],
+            `${nodeLabel(node)} 的终止状态 ${name} 不能接处理子图：识别到它整机就结束`,
+            'graph-state-machine-terminal-wired',
+          ));
+        }
+        return;
+      }
+      if (!isWired) {
+        issues.push(issue(
+          ['nodes', index, 'states', stateIndex],
+          `${nodeLabel(node)} 的状态 ${name} 没有接处理子图`,
+          'graph-state-machine-unwired-state',
+        ));
+      }
+    });
+    for (const terminal of terminals) {
+      if (!names.has(terminal)) {
+        issues.push(issue(
+          ['nodes', index, 'terminal_states'],
+          `${nodeLabel(node)} 的终止状态 ${terminal} 不在状态列表里`,
+          'graph-state-machine-terminal-unknown',
+        ));
+      }
+    }
   });
   if (document.root !== undefined && typeof document.root === 'string' && !byId.has(document.root)) {
     issues.push(issue(['root'], `root 指向不存在的节点：${document.root}`, 'graph-unknown-root'));
@@ -1015,6 +1081,25 @@ export function toCanvasDocument(raw: unknown): any {
         children.push(fallback);
       }
       if (children.length) node.children = children;
+    } else if (node.type === 'state_machine') {
+      // 状态机：`case.<下标>` 指向 `states`，编译出来的 `cases[].value` 由状态名派生，
+      // 所以图形态里不保留 `cases`，只留 states + 边。
+      const states = Array.isArray(node.states) ? node.states : [];
+      const rebuilt: any[] = [];
+      const children: string[] = [];
+      states.forEach((state: any, index: number) => {
+        const child = bucket.get(`case:${index}`);
+        if (typeof child !== 'string') return;
+        rebuilt.push({ value: isRecord(state) ? state.name : undefined, child });
+        children.push(child);
+      });
+      node.cases = rebuilt;
+      const fallback = bucket.get('default');
+      if (typeof fallback === 'string') {
+        node.default_child = fallback;
+        children.push(fallback);
+      }
+      if (children.length) node.children = children;
     } else {
       const indexes = [...bucket.keys()].filter((key) => typeof key === 'number').sort((a, b) => a - b);
       if (indexes.length) node.children = indexes.map((index) => bucket.get(index));
@@ -1094,7 +1179,7 @@ export function toGraphDocument(raw: unknown): any {
     for (const [key, value] of Object.entries(node || {})) {
       if (NODE_STRUCTURE_KEYS.includes(key)) continue;
       if (key === CUSTOM_TYPE_MARKER) continue;
-      if (key === 'cases' && Array.isArray(value)) {
+      if (key === 'cases' && Array.isArray(value) && node?.type !== 'state_machine') {
         payload.cases = value.map((entry: any) => (isRecord(entry) ? { value: cloneValue(entry.value) } : { value: cloneValue(entry) }));
         continue;
       }
@@ -1209,6 +1294,21 @@ export function toGraphDocument(raw: unknown): any {
       const cases: any[] = Array.isArray(node?.cases) ? node.cases : [];
       cases.forEach((entry, index) => {
         if (isRecord(entry) && typeof entry.child === 'string') link(node?.id, `case.${index}`, entry.child);
+      });
+      if (typeof node?.default_child === 'string') link(node?.id, 'default', node.default_child);
+    } else if (node?.type === 'state_machine') {
+      // 状态名 → `states` 下标：图形态用 case.<状态下标> 表达处理子图，`cases` 不落盘。
+      const states: any[] = Array.isArray(node?.states) ? node.states : [];
+      const indexByName = new Map<string, number>();
+      states.forEach((state, index) => {
+        if (isRecord(state) && typeof state.name === 'string' && state.name) indexByName.set(state.name, index);
+      });
+      const cases: any[] = Array.isArray(node?.cases) ? node.cases : [];
+      cases.forEach((entry) => {
+        if (!isRecord(entry) || typeof entry.child !== 'string') return;
+        const index = typeof entry.value === 'string' ? indexByName.get(entry.value) : undefined;
+        if (index === undefined) return;
+        link(node?.id, `case.${index}`, entry.child);
       });
       if (typeof node?.default_child === 'string') link(node?.id, 'default', node.default_child);
     } else {

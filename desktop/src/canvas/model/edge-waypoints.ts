@@ -132,5 +132,16 @@ export function structuralPinOf(parent: any, childId: string): string {
     if (caseIndex >= 0) return `case.${caseIndex}`;
     if (parent?.default_child === childId) return 'default';
   }
+  if (parent?.type === 'state_machine') {
+    // 状态机的 case.<下标> 指向 `states`（不是 `cases`）：先按 case 找到状态名，再回 states 取下标。
+    const cases = Array.isArray(parent?.cases) ? parent.cases : [];
+    const entry = cases.find((item: any) => isRecord(item) && item.child === childId);
+    if (entry) {
+      const states = Array.isArray(parent?.states) ? parent.states : [];
+      const stateIndex = states.findIndex((state: any) => isRecord(state) && state.name === entry.value);
+      if (stateIndex >= 0) return `case.${stateIndex}`;
+    }
+    if (parent?.default_child === childId) return 'default';
+  }
   return `then.${position}`;
 }

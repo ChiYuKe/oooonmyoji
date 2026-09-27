@@ -354,6 +354,57 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
       if (node.type === 'repeat_until' && node.children.length !== 1) issues.push(issue([...path, 'children'], 'Repeat Until 必须恰好有一个子节点', 'repeat-child-count'));
       if (node.type === 'branch' && (!Array.isArray(rawNode.conditions) || rawNode.conditions.length !== node.children.length)) issues.push(issue([...path, 'conditions'], 'Branch 的 conditions 数量必须与 children 一致', 'branch-condition-count'));
       if (node.type === 'switch' && (!Array.isArray(rawNode.cases) || rawNode.cases.length < 1)) issues.push(issue([...path, 'cases'], 'Switch 至少需要一个 case', 'switch-case-count'));
+      // 状态机：状态名在 `states` 里只写一份，`cases[].value` 是它的派生；终止状态识别到就结束。
+      if (node.type === 'state_machine') {
+        if (rawNode.state_timeout_seconds !== undefined
+          && (typeof rawNode.state_timeout_seconds !== 'number' || !Number.isFinite(rawNode.state_timeout_seconds) || rawNode.state_timeout_seconds < 0)) {
+          issues.push(issue([...path, 'state_timeout_seconds'], '等待画面出现的时间必须是非负数', 'state-machine-state-timeout'));
+        }
+        const states = Array.isArray(rawNode.states) ? rawNode.states : null;
+        if (!states || states.length < 1) {
+          issues.push(issue([...path, 'states'], '状态机至少需要一个状态', 'state-machine-states'));
+        } else {
+          const names: string[] = [];
+          states.forEach((state: unknown, index: number) => {
+            const name = isObject(state) && typeof state.name === 'string' ? state.name : '';
+            if (!name) {
+              issues.push(issue([...path, 'states', index, 'name'], '状态必须有非空名字', 'state-machine-state-name'));
+              return;
+            }
+            if (names.includes(name)) {
+              issues.push(issue([...path, 'states', index, 'name'], `状态名重复：${name}`, 'state-machine-state-duplicate'));
+              return;
+            }
+            names.push(name);
+          });
+          const terminals = (Array.isArray(rawNode.terminal_states) ? rawNode.terminal_states : []).filter(
+            (item: unknown): item is string => typeof item === 'string',
+          );
+          for (const terminal of terminals) {
+            if (!names.includes(terminal)) {
+              issues.push(issue([...path, 'terminal_states'], `终止状态 ${terminal} 不在状态列表里`, 'state-machine-terminal-unknown'));
+            }
+          }
+          const handled = new Set<string>();
+          const cases = Array.isArray(rawNode.cases) ? rawNode.cases : [];
+          cases.forEach((entry: unknown, caseIndex: number) => {
+            const value = isObject(entry) ? entry.value : undefined;
+            if (typeof value !== 'string' || !names.includes(value)) {
+              issues.push(issue([...path, 'cases', caseIndex, 'value'], '分支必须指向已声明的状态', 'state-machine-case-value'));
+              return;
+            }
+            handled.add(value);
+          });
+          for (const name of names) {
+            const isTerminal = terminals.includes(name);
+            if (isTerminal && handled.has(name)) {
+              issues.push(issue([...path, 'cases'], `终止状态 ${name} 不能接处理子图：识别到它整机就结束`, 'state-machine-terminal-wired'));
+            } else if (!isTerminal && !handled.has(name)) {
+              issues.push(issue([...path, 'cases'], `状态 ${name} 没有处理子图`, 'state-machine-unwired-state'));
+            }
+          }
+        }
+      }
       // 折叠图边界卡是单子透传容器：一条边进、一条边出（UE Collapsed Graph Tunnel）。
       // 组归属与「跨组边必须经过边界卡」由文档级的组检查负责（画布侧 graphGroupIssues /
       // Python 侧 graph_compile._check_groups）——v4 校验看不到 groups。
@@ -438,9 +489,14 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalogLi
             },
             wait_for: { enum: [...INSTANCE_PARALLEL_WAIT_MODES] },
             cancel_on_failure: { type: 'boolean' },
-            condition: {}, conditions: { type: 'array' }, max_iterations: { type: 'integer', minimum: 1 },
+            condition: {}, conditions: { type: 'array' }, max_iterations: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'object', required: ['ref'], properties: { ref: { type: 'string', minLength: 1 } }, additionalProperties: false }] },
             expression: {}, cases: { type: 'array' }, default_child: { type: 'string', minLength: 1 },
             ref: {}, fields: { type: 'object' },
+            states: { type: 'array', minItems: 1, items: { type: 'object' } },
+            terminal_states: { type: 'array', items: { type: 'string', minLength: 1 } },
+            allow_ocr: { type: 'boolean' },
+            state_timeout_seconds: { type: 'number', minimum: 0 },
+            state_action: { enum: catalog.names() },
             ports: { type: 'array', items: { enum: ['true', 'false'] }, uniqueItems: true },
           },
           additionalProperties: false,

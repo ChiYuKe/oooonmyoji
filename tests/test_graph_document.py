@@ -28,7 +28,7 @@ from src.oooonmyoji.workflows.validator import validate_workflow
 from tests.workflow_files import write_workflow
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_FILES = ("活动副本.owf", "结界突破_寮突.owf")
+WORKFLOW_FILES = ("活动副本.owf", "结界突破_寮突.owf", "御魂副本.owf", "御魂副本_队员.owf")
 GRAPH_RULES_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "graph-rules" / "cases.json"
 
 

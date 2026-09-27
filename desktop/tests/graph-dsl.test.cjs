@@ -180,7 +180,7 @@ for (const item of CASES) {
 }
 
 test('只有 3 个非法用例写不出来', () => {
-  assert.equal(CASES.length, 41);
+  assert.equal(CASES.length, 46);
   assert.deepStrictEqual(
     [...unwritable].sort(),
     ['变量节点必须有作用域', '变量节点必须有键名', '边指向不存在的节点'].sort(),

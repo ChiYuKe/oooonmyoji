@@ -3547,6 +3547,565 @@
           ]
         }
       }
+    },
+    {
+      "name": "state_machine 的 case 下标指向 states，重建成 cases 与 default_child",
+      "valid": true,
+      "graph": {
+        "schema_version": 6,
+        "id": "state_machine_cases",
+        "version": "5.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "at": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "sm",
+            "type": "state_machine",
+            "states": [
+              {
+                "name": "home",
+                "template": "home.png",
+                "roi": [
+                  0,
+                  0,
+                  10,
+                  10
+                ],
+                "threshold": 0.9
+              },
+              {
+                "name": "battle",
+                "template": "battle.png"
+              },
+              {
+                "name": "done",
+                "template": "done.png"
+              }
+            ],
+            "at": {
+              "x": 0,
+              "y": 100
+            },
+            "terminal_states": [
+              "done"
+            ],
+            "max_iterations": 5,
+            "allow_ocr": false
+          },
+          {
+            "id": "on_home",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 200
+            }
+          },
+          {
+            "id": "on_battle",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 200,
+              "y": 200
+            }
+          },
+          {
+            "id": "otherwise",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 400,
+              "y": 200
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": {
+              "node": "root",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "sm",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.0"
+            },
+            "to": {
+              "node": "on_home",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.1"
+            },
+            "to": {
+              "node": "on_battle",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "default"
+            },
+            "to": {
+              "node": "otherwise",
+              "pin": "in"
+            }
+          }
+        ]
+      },
+      "expect_nodes": {
+        "sm": {
+          "cases": [
+            {
+              "value": "home",
+              "child": "on_home"
+            },
+            {
+              "value": "battle",
+              "child": "on_battle"
+            }
+          ],
+          "children": [
+            "on_home",
+            "on_battle",
+            "otherwise"
+          ],
+          "default_child": "otherwise",
+          "terminal_states": [
+            "done"
+          ],
+          "max_iterations": 5,
+          "allow_ocr": false
+        }
+      }
+    },
+    {
+      "name": "state_machine：终止状态不接处理子图也能编译",
+      "valid": true,
+      "graph": {
+        "schema_version": 6,
+        "id": "state_machine_terminal",
+        "version": "5.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "at": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "sm",
+            "type": "state_machine",
+            "states": [
+              {
+                "name": "home",
+                "template": "home.png",
+                "roi": [
+                  0,
+                  0,
+                  10,
+                  10
+                ],
+                "threshold": 0.9
+              },
+              {
+                "name": "done",
+                "template": "done.png"
+              }
+            ],
+            "at": {
+              "x": 0,
+              "y": 100
+            },
+            "terminal_states": [
+              "done"
+            ]
+          },
+          {
+            "id": "on_home",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 200
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": {
+              "node": "root",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "sm",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.0"
+            },
+            "to": {
+              "node": "on_home",
+              "pin": "in"
+            }
+          }
+        ]
+      },
+      "expect_nodes": {
+        "sm": {
+          "cases": [
+            {
+              "value": "home",
+              "child": "on_home"
+            }
+          ],
+          "children": [
+            "on_home"
+          ],
+          "terminal_states": [
+            "done"
+          ]
+        }
+      }
+    },
+    {
+      "name": "state_machine：非终止状态没有处理子图",
+      "valid": false,
+      "python_error": "has no handler",
+      "desktop_codes": [
+        "graph-state-machine-unwired-state"
+      ],
+      "graph": {
+        "schema_version": 6,
+        "id": "state_machine_unwired",
+        "version": "5.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "at": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "sm",
+            "type": "state_machine",
+            "states": [
+              {
+                "name": "home",
+                "template": "home.png",
+                "roi": [
+                  0,
+                  0,
+                  10,
+                  10
+                ],
+                "threshold": 0.9
+              },
+              {
+                "name": "done",
+                "template": "done.png"
+              }
+            ],
+            "at": {
+              "x": 0,
+              "y": 100
+            },
+            "terminal_states": [
+              "done"
+            ]
+          },
+          {
+            "id": "on_home",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 200
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": {
+              "node": "root",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "sm",
+              "pin": "in"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "state_machine：终止状态接了处理子图",
+      "valid": false,
+      "python_error": "terminal state 'done' cannot have a handler",
+      "desktop_codes": [
+        "graph-state-machine-terminal-wired"
+      ],
+      "graph": {
+        "schema_version": 6,
+        "id": "state_machine_terminal_wired",
+        "version": "5.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "at": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "sm",
+            "type": "state_machine",
+            "states": [
+              {
+                "name": "home",
+                "template": "home.png",
+                "roi": [
+                  0,
+                  0,
+                  10,
+                  10
+                ],
+                "threshold": 0.9
+              },
+              {
+                "name": "done",
+                "template": "done.png"
+              }
+            ],
+            "at": {
+              "x": 0,
+              "y": 100
+            },
+            "terminal_states": [
+              "done"
+            ]
+          },
+          {
+            "id": "on_home",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 200
+            }
+          },
+          {
+            "id": "on_done",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 200,
+              "y": 200
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": {
+              "node": "root",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "sm",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.0"
+            },
+            "to": {
+              "node": "on_home",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.1"
+            },
+            "to": {
+              "node": "on_done",
+              "pin": "in"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "state_machine：case 下标超出 states",
+      "valid": false,
+      "python_error": "only declares 2 states",
+      "desktop_codes": [
+        "graph-case-out-of-range"
+      ],
+      "graph": {
+        "schema_version": 6,
+        "id": "state_machine_out_of_range",
+        "version": "5.0.0",
+        "resolution": [
+          1920,
+          1080
+        ],
+        "root": "root",
+        "inputs": {},
+        "variables": {},
+        "nodes": [
+          {
+            "id": "root",
+            "type": "root",
+            "at": {
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "id": "sm",
+            "type": "state_machine",
+            "states": [
+              {
+                "name": "home",
+                "template": "home.png",
+                "roi": [
+                  0,
+                  0,
+                  10,
+                  10
+                ],
+                "threshold": 0.9
+              },
+              {
+                "name": "done",
+                "template": "done.png"
+              }
+            ],
+            "at": {
+              "x": 0,
+              "y": 100
+            },
+            "terminal_states": [
+              "done"
+            ]
+          },
+          {
+            "id": "on_home",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 0,
+              "y": 200
+            }
+          },
+          {
+            "id": "on_extra",
+            "type": "task",
+            "action": "test.echo",
+            "params": {},
+            "at": {
+              "x": 400,
+              "y": 200
+            }
+          }
+        ],
+        "edges": [
+          {
+            "from": {
+              "node": "root",
+              "pin": "then.0"
+            },
+            "to": {
+              "node": "sm",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.0"
+            },
+            "to": {
+              "node": "on_home",
+              "pin": "in"
+            }
+          },
+          {
+            "from": {
+              "node": "sm",
+              "pin": "case.3"
+            },
+            "to": {
+              "node": "on_extra",
+              "pin": "in"
+            }
+          }
+        ]
+      }
     }
   ]
 }

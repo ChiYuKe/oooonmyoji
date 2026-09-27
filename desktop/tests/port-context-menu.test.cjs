@@ -140,7 +140,7 @@ test('输入端口菜单：连线、断开链接（Break Link），插入节点�
   assert.deepEqual(calls[1], ['disconnect', 'parent_1', 'task_1']);
   assert.equal(items[3], 'separator');
   assert.equal(items[4].label, '在上方插入节点');
-  assert.deepEqual(JSON.parse(JSON.stringify(items[4].children.map((child) => child.label))), ['Sequence', 'Selector', 'Simple Parallel', 'Parallel', 'Repeat Until', 'Branch', 'Switch']);
+  assert.deepEqual(JSON.parse(JSON.stringify(items[4].children.map((child) => child.label))), ['Sequence', 'Selector', 'Simple Parallel', 'Parallel', 'Repeat Until', 'Branch', 'Switch', 'State Machine（状态机）']);
   items[4].children[0].run();
   assert.deepEqual(calls[2], ['insert', 'task_1', 'sequence']);
 });
@@ -176,7 +176,7 @@ test('输出端口菜单：连线、断开全部链接（Break All Links），�
   assert.deepEqual(calls.slice(1, 3), [['disconnect', 'parent_1', 'child_a'], ['disconnect', 'parent_1', 'child_b']]);
   assert.equal(items[3], 'separator');
   assert.equal(items[4].label, '创建并连接节点');
-  assert.deepEqual(JSON.parse(JSON.stringify(items[4].children.map((child) => child.label))), ['Task', 'Condition（判断）', 'Bool Judge（布尔判断卡片）', 'Sequence', 'Selector', 'Simple Parallel', 'Parallel', 'Repeat Until', 'Branch', 'Switch', 'Instance Parallel']);
+  assert.deepEqual(JSON.parse(JSON.stringify(items[4].children.map((child) => child.label))), ['Task', 'Condition（判断）', 'Bool Judge（布尔判断卡片）', 'Sequence', 'Selector', 'Simple Parallel', 'Parallel', 'Repeat Until', 'Branch', 'Switch', 'State Machine（状态机）', 'Instance Parallel']);
   items[4].children[0].run();
   assert.deepEqual(calls[3], ['add-child', 'parent_1', 'task', point]);
 });

@@ -502,7 +502,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const {
     autoLayout, autoLayoutPreview, applyLayoutPositions, ensureLayout, bounds, fitView, zoomAt, worldPoint, bezier,
-    recordViewportSoon, viewportBack, viewportForward, viewportHistoryState,
+    recordViewportSoon, viewportBack, viewportForward,
   } = Viewport;
   fitNodeGroupView = fitView;
 
@@ -749,7 +749,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   } = InspectorPanel;
 
   const StudioToolbar = createEditorToolbar({
-    state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes: viewNodes, nodeTitle: nodeTitleOf, focusNode,
+    state, $, el, UI, vscode, showMenu, setDirty, toast, nodes: viewNodes, nodeTitle: nodeTitleOf, focusNode,
     currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
     // 保存走把关入口（只拦运行时会拒绝的错误）；问题导航与布局重建给「更多」菜单。
     requestSave: () => requestSave(),
@@ -1612,7 +1612,6 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     renderPieces?.render(next);
     Comments.render();
     updateArrangePreviewBar();
-    updateViewportHistoryButtons();
   }
 
   /** 排列预览条：只在有预览时出现，文案给出范围与卡片数。 */
@@ -1628,67 +1627,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     }
   }
 
-  /** 画布前进/后退按钮：到头时置灰，位置历史一眼可见。 */
-  function updateViewportHistoryButtons(): void {
-    const back = $('btn-viewport-back') as HTMLButtonElement | null;
-    const forward = $('btn-viewport-forward') as HTMLButtonElement | null;
-    if (!back && !forward) return;
-    const history = viewportHistoryState();
-    if (back) {
-      back.disabled = !history.canBack;
-      back.classList.toggle('is-disabled', !history.canBack);
-    }
-    if (forward) {
-      forward.disabled = !history.canForward;
-      forward.classList.toggle('is-disabled', !history.canForward);
-    }
-  }
-
-  /** 视口工具条：自动排列（点一下直接进预览）、临时隐藏（状态/类型菜单）、画布前进/后退。 */
+  /** 视口工具条现在只显示缩放比例；排列预览的确认条仍在画布上。 */
   function bindViewportTools(): void {
-    const back = $('btn-viewport-back');
-    if (back) back.addEventListener('click', () => { if (!viewportBack()) toast('已经是最早的位置'); });
-    const forward = $('btn-viewport-forward');
-    if (forward) forward.addEventListener('click', () => { if (!viewportForward()) toast('已经是最新的位置'); });
-    const arrange = $('btn-arrange');
-    // 只保留「全部」一种范围：点一下直接进预览，应用/取消在画布顶部的确认条上。
-    if (arrange) arrange.addEventListener('click', () => previewAutoLayout('all'));
-    const filter = $('btn-filter');
-    if (filter) filter.addEventListener('click', () => {
-      const rect = filter.getBoundingClientRect();
-      // 打开筛选菜单时先清掉已经不在画布上的状态/类型，避免「筛了个空的」。
-      pruneNodeFilter();
-      const statuses: string[] = [];
-      const types: string[] = [];
-      for (const node of viewNodes()) {
-        const status = nodeRunStatusOf(node);
-        if (status && !statuses.includes(status)) statuses.push(status);
-        const type = String(node.type || '');
-        if (type && !types.includes(type)) types.push(type);
-      }
-      const activeStatus = state.filterStatus || [];
-      const activeTypes = state.filterTypes || [];
-      const mark = (list: string[], value: string): string => (list.includes(value) ? '✓ ' : '　');
-      const items: MenuEntry[] = [];
-      if (statuses.length) {
-        items.push({ label: '按状态隐藏', run: () => {} });
-        for (const status of statuses) {
-          items.push({ label: `${mark(activeStatus, status)}${(RUN_LABEL as Record<string, string>)[status] || status}`, run: () => toggleNodeFilterValue('status', status) });
-        }
-      }
-      if (types.length) {
-        if (items.length) items.push('separator');
-        items.push({ label: '按类型隐藏', run: () => {} });
-        for (const type of types) {
-          items.push({ label: `${mark(activeTypes, type)}${(TYPE_NAMES as Record<string, string>)[type] || type}`, run: () => toggleNodeFilterValue('type', type) });
-        }
-      }
-      if (nodeFilterActive()) {
-        items.push('separator', { label: '清除全部隐藏', run: () => clearNodeFilter() });
-      }
-      if (!items.length) items.push({ label: '当前画布没有可筛选的卡片', run: () => {} });
-      showMenu(rect.left, rect.bottom + 4, items);
-    });
     const applyButton = $('btn-arrange-apply');
     if (applyButton) applyButton.addEventListener('click', () => confirmArrangePreview());
     const cancelButton = $('btn-arrange-cancel');

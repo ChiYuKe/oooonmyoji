@@ -83,7 +83,6 @@ export interface ToolbarDeps {
   UI: ToolbarUi;
   vscode: { postMessage(message: unknown): void };
   showMenu(x: number, y: number, entries: ToolbarMenuEntry[], options?: { align?: 'start' | 'end' }): void;
-  zoomAt(factor: number): void;
   setDirty(value: boolean): void;
   toast(message: string, error?: boolean): void;
   nodes(): ToolbarNode[];
@@ -115,7 +114,7 @@ export interface ToolbarController {
 }
 
 export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
-  const { state, $, el, UI, vscode, showMenu, zoomAt, setDirty, toast, nodes, focusNode } = deps;
+  const { state, $, el, UI, vscode, showMenu, setDirty, toast, nodes, focusNode } = deps;
 
   function renderInstancePicker(): void {
     const slot = $('instance-select');
@@ -248,8 +247,6 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
   }
 
   function bindToolbar(): void {
-    $('btn-zoom-in').addEventListener('click', () => zoomAt(1.2));
-    $('btn-zoom-out').addEventListener('click', () => zoomAt(1 / 1.2));
     $('btn-back').addEventListener('click', () => {
       if (deps.currentNodeGroup?.()) {
         deps.leaveNodeGroup?.();

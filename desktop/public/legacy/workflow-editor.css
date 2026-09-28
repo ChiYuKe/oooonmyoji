@@ -239,14 +239,15 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
   bottom: 12px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 30px;
-  padding: 1px;
+  justify-content: center;
+  min-width: 44px;
+  height: 26px;
+  padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
 }
-#zoom-label { width: 46px; text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11px; }
+#zoom-label { text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11px; }
 #minimap {
   position: absolute;
   right: 12px;
@@ -494,7 +495,6 @@ main.inspector-open { grid-template-columns: minmax(0, 1fr) 330px; }
 }
 @media (prefers-reduced-motion: reduce) { #btn-arrange-apply { animation: none; } }
 #btn-arrange-cancel { min-height: 30px; color: var(--ui-text, #dedede); }
-.viewport-tools-separator { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
 .icon-button.is-disabled, .icon-button:disabled { opacity: .45; cursor: default; }
 .node-icon { fill: #edf1f3; font-size: 12px; font-weight: 700; pointer-events: none; }
 .node-name { fill: #f0f2f3; font-size: 12px; font-weight: 650; pointer-events: none; }

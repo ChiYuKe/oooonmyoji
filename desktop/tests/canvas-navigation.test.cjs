@@ -103,25 +103,25 @@ test('画布入口把阶段 5 的命令都接上真实实现', () => {
   assert.match(editor, /mutate\(\(\) => applyLayoutPositions\(positions\)\)/);
 });
 
-test('画布工具条与预览条：按钮、提示与样式都在', () => {
+test('画布底部只显示缩放比例，排列预览确认条仍可用', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/canvas.html'), 'utf8');
-  for (const id of ['btn-viewport-back', 'btn-viewport-forward', 'btn-arrange', 'btn-filter', 'arrange-preview-bar', 'btn-arrange-apply', 'btn-arrange-cancel']) {
+  assert.match(html, /id="zoom-label"/);
+  for (const id of ['btn-viewport-back', 'btn-viewport-forward', 'btn-arrange', 'btn-filter', 'btn-zoom-out', 'btn-zoom-in']) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}"`), `画布底部不再显示 #${id}`);
+  }
+  for (const id of ['arrange-preview-bar', 'btn-arrange-apply', 'btn-arrange-cancel']) {
     assert.match(html, new RegExp(`id="${id}"`), `画布页面要有 #${id}`);
   }
   const editor = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/editor.ts'), 'utf8');
   assert.match(editor, /function bindViewportTools\(\)/);
-  // 排列只保留「全部」一种范围，入口是视口工具条的 ⤢（空白处右键只负责加节点，不再重复排列）。
+  // 底部不再放排列、筛选或位置历史按钮；排列预览确认仍通过预览条完成。
   assert.doesNotMatch(editor, /自动排列（先预览）/, '右键菜单不再重复排列');
   assert.doesNotMatch(editor, /排列全部（预览）/);
   assert.doesNotMatch(editor, /排列选中（预览）/);
   assert.doesNotMatch(editor, /排列当前组（预览）/);
-  assert.match(editor, /arrange\.addEventListener\('click', \(\) => previewAutoLayout\('all'\)\)/);
-  assert.match(editor, /按状态隐藏/);
-  assert.match(editor, /按类型隐藏/);
-  assert.match(editor, /清除全部隐藏/);
   assert.match(editor, /updateArrangePreviewBar\(\)/);
-  assert.match(editor, /updateViewportHistoryButtons\(\)/);
   const css = fs.readFileSync(path.join(__dirname, '..', 'public/legacy/workflow-editor.css'), 'utf8');
+  assert.match(css, /#viewport-tools \{[\s\S]*?justify-content: center;/);
   assert.match(css, /#arrange-preview-bar \{/);
   assert.match(css, /\.arrange-preview-box \{/);
   assert.match(css, /\.node\.node-filtered \{ display: none; \}/);

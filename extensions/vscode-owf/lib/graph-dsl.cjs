@@ -57,7 +57,7 @@ __export(graph_dsl_exports, {
 module.exports = __toCommonJS(graph_dsl_exports);
 
 // ../../desktop/src/shared/workflow/types.ts
-var NODE_TYPES = ["root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "instance_parallel", "condition", "bool_judge", "break", "task", "group_entry", "group_exit"];
+var NODE_TYPES = ["root", "selector", "sequence", "simple_parallel", "parallel", "repeat_until", "branch", "switch", "state_machine", "instance_parallel", "condition", "bool_judge", "break", "task", "group_entry", "group_exit"];
 
 // ../../desktop/src/shared/workflow/graph-document.ts
 var GRAPH_SCHEMA_VERSION = 6;
@@ -143,6 +143,8 @@ function payloadPathToPin(node, path) {
     return null;
   }
   if (head === "condition" && type === "repeat_until" && path.length === 1) return "condition";
+  if (head === "states" && type === "state_machine" && path.length >= 2) return `states.${path.slice(1).join(".")}`;
+  if (head === "max_iterations" && type === "state_machine" && path.length === 1) return "max_iterations";
   if (head === "ref" && type === "break" && path.length === 1) return "ref";
   if (head === "conditions" && type === "branch" && path.length === 2) return `conditions.${path[1]}`;
   if (head === "runs" && type === "instance_parallel" && path.length >= 4 && path[2] === "inputs") {
@@ -220,7 +222,7 @@ function toGraphDocument(raw) {
     for (const [key, value] of Object.entries(node || {})) {
       if (NODE_STRUCTURE_KEYS.includes(key)) continue;
       if (key === CUSTOM_TYPE_MARKER) continue;
-      if (key === "cases" && Array.isArray(value)) {
+      if (key === "cases" && Array.isArray(value) && node?.type !== "state_machine") {
         payload.cases = value.map((entry) => isRecord(entry) ? { value: cloneValue(entry.value) } : { value: cloneValue(entry) });
         continue;
       }
@@ -323,6 +325,20 @@ function toGraphDocument(raw) {
       const cases = Array.isArray(node?.cases) ? node.cases : [];
       cases.forEach((entry, index) => {
         if (isRecord(entry) && typeof entry.child === "string") link(node?.id, `case.${index}`, entry.child);
+      });
+      if (typeof node?.default_child === "string") link(node?.id, "default", node.default_child);
+    } else if (node?.type === "state_machine") {
+      const states = Array.isArray(node?.states) ? node.states : [];
+      const indexByName = /* @__PURE__ */ new Map();
+      states.forEach((state, index) => {
+        if (isRecord(state) && typeof state.name === "string" && state.name) indexByName.set(state.name, index);
+      });
+      const cases = Array.isArray(node?.cases) ? node.cases : [];
+      cases.forEach((entry) => {
+        if (!isRecord(entry) || typeof entry.child !== "string") return;
+        const index = typeof entry.value === "string" ? indexByName.get(entry.value) : void 0;
+        if (index === void 0) return;
+        link(node?.id, `case.${index}`, entry.child);
       });
       if (typeof node?.default_child === "string") link(node?.id, "default", node.default_child);
     } else {
@@ -1644,7 +1660,7 @@ var Parser = class {
   parseDecorator(entry, indent) {
     const rest = pyStrip(entry.body.slice("decorator".length));
     if (!rest) {
-      throw entry.line.error("decorator 后面要写类型（cooldown / timeout / retry / repeat / do_once）", entry.column);
+      throw entry.line.error("decorator 后面要写类型（cooldown / timeout / retry / repeat / do_once / force_success）", entry.column);
     }
     const decorator = {
       type: parseText(rest, entry.line, entry.column + "decorator ".length)

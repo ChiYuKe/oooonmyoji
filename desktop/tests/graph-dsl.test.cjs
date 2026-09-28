@@ -94,7 +94,7 @@ test('kitchen 夹具的关键结构', () => {
   assert.deepEqual(document.groups[0].variablesAt, { x: -448, y: 376 });
 
   // 装饰器、cases、runs 与载荷字段名保持运行时原样
-  assert.deepEqual(nodes.get('rounds').decorators, [{ type: 'repeat', count: 3 }]);
+  assert.deepEqual(nodes.get('rounds').decorators, [{ type: 'repeat', count: 3 }, { type: 'force_success' }]);
   assert.deepEqual(nodes.get('pick').cases, [{ value: 'settlement' }, { value: 2 }]);
   assert.deepEqual(nodes.get('fleet').runs, [
     { instance: 'mumu-0', workflow: 'demo', inputs: { 运行轮数: 2 } },

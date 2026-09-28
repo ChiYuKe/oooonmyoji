@@ -95,6 +95,7 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
     if (decorator.type === 'retry') return `Retry · ${compactValue(decorator.attempts, 22)}${isBindingValue(decorator.attempts) ? '' : ' 次'}`;
     if (decorator.type === 'repeat') return `Repeat · ${compactValue(decorator.count, 22)}${decorator.count && typeof decorator.count === 'object' ? '' : ' 次'}`;
     if (decorator.type === 'do_once') return `Do Once · ${isBindingValue(decorator.reset_on_failure) ? compactValue(decorator.reset_on_failure, 22) : decorator.reset_on_failure ? '成功才锁定' : '整个运行只执行一次'}`;
+    if (decorator.type === 'force_success') return 'Force Success · 失败也算成功';
     return String(decorator.type || 'Decorator');
   }
 

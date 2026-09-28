@@ -29,6 +29,7 @@ workflow kitchen
     at: [0, 100]
     decorator repeat
       count: 3
+    decorator force_success
   node judge bool_judge
     at: [0, 300]
     expression: null == settlement

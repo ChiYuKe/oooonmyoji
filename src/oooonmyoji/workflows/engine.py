@@ -8,7 +8,7 @@ import queue
 import threading
 import time
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from ..actions import ActionRegistry, ActionResult, ActionStatus
@@ -37,6 +37,7 @@ class _Outcome:
     error: str | None = None
     category: str | None = None
     fatal: bool = False
+    node_status: ActionStatus | None = None
 
 
 class _ExecutionLimit(WorkflowError):
@@ -360,6 +361,7 @@ class WorkflowEngine:
         timeout = self._decorator(node, "timeout")
         retry = self._decorator(node, "retry")
         repeat = self._decorator(node, "repeat")
+        force_success = self._decorator(node, "force_success")
         resolved = {}
         decorator_specs: list[tuple[str, BehaviorDecorator | None, tuple[str, ...]]] = [
             ("cooldown", cooldown, ("seconds",)), ("timeout", timeout, ("seconds",)),
@@ -442,10 +444,26 @@ class WorkflowEngine:
         if cooldown is not None and cooldown.seconds is not None:
             with self._lock:
                 self._cooldowns[node.id] = time.monotonic() + resolved["cooldown"]["seconds"]
+        # Force Success（UE `UBTDecorator_ForceSuccess`：Change node result to Success，用途是
+        # 「creating optional branches in sequence」）：把这个节点对外的失败改写成成功，于是父
+        # 组合节点（Sequence）会继续往下走 —— 也就是"这一步失败也不中断"。
+        #
+        # 只改写 Failed：取消（UE 的 Aborted）与 fatal（要求重启工作进程）照旧向上传递，
+        # 把它们吞掉会让"停止"和"工作进程需要重启"这两个信号消失。
+        #
+        # 改写发生在 retry / repeat **之后**：重试与循环看的是真实结果，改写只决定这个节点
+        # 最终向父节点汇报什么。do_once 与步骤记录看到的是改写后的结果（下面那段用 `outcome`），
+        # 因此一个被强制成功的节点在 do_once 眼里就是成功。
+        forced_from: _Outcome | None = None
+        if force_success is not None and outcome.status == ActionStatus.FAILED and not outcome.fatal:
+            forced_from, outcome = outcome, _Outcome(ActionStatus.SUCCEEDED, output=outcome.output)
         if do_once is not None and (outcome.status == ActionStatus.SUCCEEDED or not resolved["do_once"]["reset_on_failure"]):
             with self._lock:
                 self._done_once.add(node.id)
-        self._record_node(node, outcome, started_perf, started_at, attempts=attempts_used, repeats=repeats_used)
+        # 条件卡的执行结果会透传所选分支的返回值，但卡片状态只表示「判断并选中分支」；
+        # 分支内部的失败由对应子节点显示，不能反向覆盖条件卡自己的状态。
+        recorded_outcome = _Outcome(outcome.node_status) if node.type == "condition" and outcome.node_status else outcome
+        self._record_node(node, recorded_outcome, started_perf, started_at, attempts=attempts_used, repeats=repeats_used, forced_from=forced_from)
         return outcome
 
     def _run_core(self, node: WorkflowNode, deadline: float, branch_cancel: threading.Event | None) -> _Outcome:
@@ -462,7 +480,8 @@ class WorkflowEngine:
             port = "true" if allowed else "false"
             branch = _condition_branch(node, port)
             if branch is not None:
-                return self._run_node(branch, deadline, branch_cancel)
+                # 控制流仍透传分支结果给父节点；仅供本卡事件记录的 status 代表判断本身已完成。
+                return replace(self._run_node(branch, deadline, branch_cancel), node_status=ActionStatus.SUCCEEDED)
             if not node.children:
                 if allowed:
                     return _Outcome(ActionStatus.SUCCEEDED)
@@ -963,6 +982,7 @@ class WorkflowEngine:
         attempts: int = 0,
         repeats: int = 0,
         decorator: str | None = None,
+        forced_from: _Outcome | None = None,
         path: tuple[list[str], list[str]] | None = None,
     ) -> None:
         if path is None:
@@ -993,6 +1013,17 @@ class WorkflowEngine:
             event["repeats"] = repeats
         if decorator is not None:
             event["decorator"] = decorator
+        if forced_from is not None:
+            # 这一步的失败被 `force_success` 改写成成功：状态按**父节点看到的结果**记（succeeded），
+            # 原始失败另存一份，运行日志里仍能看清这一步实际发生了什么。
+            # `original_status` 沿用 `branch_miss` 已有的约定（见 `_recover_selector_failures`），
+            # 于是 `_failed_node_event` 也不会把它当成真正的失败位置。
+            event["forced_success"] = True
+            event["original_status"] = forced_from.status.value
+            if forced_from.error:
+                event["original_error"] = forced_from.error
+            if forced_from.category:
+                event["original_error_category"] = forced_from.category
         if node.is_task:
             event["params"] = self._event_params(node)
         if outcome.output is not None and node.produces_output:

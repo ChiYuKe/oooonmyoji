@@ -407,8 +407,9 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
       { value: '', label: '＋ 添加' }, { value: 'cooldown', label: 'Cooldown' },
       { value: 'timeout', label: 'Time Limit' }, { value: 'retry', label: 'Retry' }, { value: 'repeat', label: 'Repeat' },
       { value: 'do_once', label: 'Do Once' },
+      { value: 'force_success', label: 'Force Success' },
     ], (type) => {
-      const defaults: Record<string, DecoratorLike> = { cooldown: { type, seconds: 1 }, timeout: { type, seconds: 10 }, retry: { type, attempts: 2, delay_seconds: 0 }, repeat: { type, count: 2 }, do_once: { type, reset_on_failure: false } };
+      const defaults: Record<string, DecoratorLike> = { cooldown: { type, seconds: 1 }, timeout: { type, seconds: 10 }, retry: { type, attempts: 2, delay_seconds: 0 }, repeat: { type, count: 2 }, do_once: { type, reset_on_failure: false }, force_success: { type } };
       const decorator = defaults[type];
       if (!decorator) return;
       mutate(() => {
@@ -534,8 +535,8 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
 
   function renderDecorator(body: UiNode, node: CompositeNode, decorator: DecoratorLike, index: number): void {
     const block = el('div', 'decorator-block');
-    const titles: Record<string, string> = { retry: '失败重试', repeat: '重复执行', cooldown: '冷却', timeout: '限时', do_once: '仅执行一次' };
-    const subtitles: Record<string, string> = { retry: 'Retry', repeat: 'Repeat', cooldown: 'Cooldown', timeout: 'Time Limit', do_once: 'Do Once' };
+    const titles: Record<string, string> = { retry: '失败重试', repeat: '重复执行', cooldown: '冷却', timeout: '限时', do_once: '仅执行一次', force_success: '强制成功' };
+    const subtitles: Record<string, string> = { retry: 'Retry', repeat: 'Repeat', cooldown: 'Cooldown', timeout: 'Time Limit', do_once: 'Do Once', force_success: 'Force Success' };
     const head = el('div', 'decorator-heading');
     const title = el('span', 'decorator-title', titles[decorator.type] || decoratorLabel(decorator));
     title.title = decoratorLabel(decorator);
@@ -571,6 +572,10 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
       row.appendChild(checkbox(decorator.reset_on_failure === true, (value) => mutate(() => { decorator.reset_on_failure = value; if (!value) delete decorator.reset_on_failure; })));
       row.appendChild(el('span', 'do-once-note', '失败后重置，成功后锁定'));
       block.appendChild(decoratorParameterControl(node, decorator, 'reset_on_failure', row, headActions));
+    } else if (decorator.type === 'force_success') {
+      // UE 的 Force Success：把这一步的失败改写成成功，于是它成为 Sequence 里的「可选分支」。
+      // 没有参数，所以这里只给一句说明；改写方向是单向的（成功不会被改写成失败）。
+      block.appendChild(el('div', 'do-once-note', '这一步失败也算成功：不会中断顺序节点，取消失败仍然中止。'));
     }
     headActions.appendChild(remove);
     body.appendChild(block);

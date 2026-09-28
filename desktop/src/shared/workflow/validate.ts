@@ -63,9 +63,11 @@ function validateDecorator(
   const allowed: Record<string, string[]> = {
     cooldown: ['type', 'seconds'], timeout: ['type', 'seconds'],
     retry: ['type', 'attempts', 'delay_seconds'], repeat: ['type', 'count'], do_once: ['type', 'reset_on_failure'],
+    force_success: ['type'],
   };
   const required: Record<string, string[]> = {
     cooldown: ['seconds'], timeout: ['seconds'], retry: ['attempts'], repeat: ['count'], do_once: [],
+    force_success: [],
   };
   const extras = Object.keys(item).filter((key) => !allowed[type].includes(key));
   if (extras.length) issues.push(issue(path, `装饰器包含未知字段：${extras.join(', ')}`, 'invalid-decorator'));

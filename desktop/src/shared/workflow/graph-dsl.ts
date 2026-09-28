@@ -656,7 +656,7 @@ class Parser {
   private parseDecorator(entry: Entry, indent: number): Record<string, any> {
     const rest = pyStrip(entry.body.slice('decorator'.length));
     if (!rest) {
-      throw entry.line.error('decorator 后面要写类型（cooldown / timeout / retry / repeat / do_once）', entry.column);
+      throw entry.line.error('decorator 后面要写类型（cooldown / timeout / retry / repeat / do_once / force_success）', entry.column);
     }
     const decorator: Record<string, any> = {
       type: parseText(rest, entry.line, entry.column + 'decorator '.length),

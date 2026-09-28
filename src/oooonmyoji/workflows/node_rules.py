@@ -55,6 +55,7 @@ def parse_decorators(
             "retry": {"type", "attempts", "delay_seconds"},
             "repeat": {"type", "count"},
             "do_once": {"type", "reset_on_failure"},
+            "force_success": {"type"},
         }.get(kind)
         if allowed is None:
             # schema 已经按 DECORATOR_TYPES 拦过一道；这里是防御性兜底（例如刚被删掉的 condition 装饰器）。
@@ -90,6 +91,10 @@ def parse_decorators(
                 expected_schema={"type": "integer"},
             )
             parsed.append(BehaviorDecorator(type=kind, count=item["count"]))
+        elif kind == "force_success":
+            # UE 的 Force Success（`UBTDecorator_ForceSuccess`）：没有参数，只是把该节点的
+            # 失败改写成成功，从而让它成为 Sequence 里的「可选分支」。
+            parsed.append(BehaviorDecorator(type=kind))
         else:
             parsed.append(BehaviorDecorator(type=kind, count=int(item["count"])))
     return tuple(parsed)

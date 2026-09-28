@@ -157,7 +157,7 @@ def test_kitchen_fixture_structures() -> None:
     assert document["groups"][0]["variablesAt"] == {"x": -448, "y": 376}
 
     # 装饰器、cases、runs 与载荷字段名保持运行时原样
-    assert nodes["rounds"]["decorators"] == [{"type": "repeat", "count": 3}]
+    assert nodes["rounds"]["decorators"] == [{"type": "repeat", "count": 3}, {"type": "force_success"}]
     assert nodes["pick"]["cases"] == [{"value": "settlement"}, {"value": 2}]
     assert nodes["fleet"]["runs"] == [{"instance": "mumu-0", "workflow": "demo", "inputs": {"运行轮数": 2}}]
     assert nodes["fleet"]["fields"] == {"state": "状态"}

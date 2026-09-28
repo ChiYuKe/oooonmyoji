@@ -118,7 +118,7 @@ test('decorator list no longer offers the removed condition decorator',()=>{
   const h=harness(),node={id:'n',type:'sequence',children:[],decorators:[]};
   h.inspector.renderDecorators(h.body,node);
   const add=h.body.children.find(item=>item.className.includes('decorator-add'));
-  assert.deepEqual(add.options.map(option=>option.value),['','cooldown','timeout','retry','repeat','do_once']);
+  assert.deepEqual(add.options.map(option=>option.value),['','cooldown','timeout','retry','repeat','do_once','force_success']);
   // 老文档里的 condition 装饰器不会再被"添加"出来：未知类型直接忽略。
   add.onChange('condition');
   assert.deepEqual(node.decorators,[]);

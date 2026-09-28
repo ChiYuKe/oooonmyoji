@@ -599,7 +599,7 @@ class _Parser:
     def _parse_decorator(self, entry: _Entry, indent: int) -> dict[str, Any]:
         rest = entry.body[len("decorator") :].strip()
         if not rest:
-            raise entry.line.error("decorator 后面要写类型（cooldown / timeout / retry / repeat / do_once）", entry.column)
+            raise entry.line.error("decorator 后面要写类型（cooldown / timeout / retry / repeat / do_once / force_success）", entry.column)
         decorator: dict[str, Any] = {"type": parse_text(rest, entry.line, entry.column + len("decorator "))}
         extra = self._parse_map(indent + INDENT)
         if "type" in extra:

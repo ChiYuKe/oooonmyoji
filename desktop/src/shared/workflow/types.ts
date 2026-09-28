@@ -6,7 +6,7 @@
 import type { ParameterInfo } from './parameters';
 
 export const NODE_TYPES = ['root', 'selector', 'sequence', 'simple_parallel', 'parallel', 'repeat_until', 'branch', 'switch', 'state_machine', 'instance_parallel', 'condition', 'bool_judge', 'break', 'task', 'group_entry', 'group_exit'] as const;
-export const DECORATOR_TYPES = ['cooldown', 'timeout', 'retry', 'repeat', 'do_once'] as const;
+export const DECORATOR_TYPES = ['cooldown', 'timeout', 'retry', 'repeat', 'do_once', 'force_success'] as const;
 export const PARALLEL_FINISH_MODES = ['abort_background', 'wait_for_background'] as const;
 export const CONDITION_OPERATORS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'and', 'or', 'not'] as const;
 export const INSTANCE_PARALLEL_WAIT_MODES = ['all', 'any'] as const;

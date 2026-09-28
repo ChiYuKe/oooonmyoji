@@ -28,7 +28,7 @@ from src.oooonmyoji.workflows.validator import validate_workflow
 from tests.workflow_files import write_workflow
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_FILES = ("活动副本.owf", "结界突破_寮突.owf", "御魂副本.owf", "御魂副本_队员.owf")
+WORKFLOW_FILES = ("御魂组队_队长.owf", "御魂组队_队员.owf", "御魂组队_双开.owf")
 GRAPH_RULES_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "graph-rules" / "cases.json"
 
 
@@ -816,6 +816,23 @@ def test_groups_are_validated_and_dropped_from_the_runtime_document() -> None:
         compile_graph(empty)
 
 
+def _referenced_workflow_files(document: dict[str, Any]) -> list[str]:
+    """文档里直接引用的子流程文件名（`instance_parallel.runs[]` / `workflow.run`）。"""
+
+    references: list[str] = []
+    for node in document.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        for run in node.get("runs", []) or []:
+            if isinstance(run, dict) and isinstance(run.get("workflow"), str):
+                references.append(run["workflow"])
+        if node.get("type") == "task" and node.get("action") in {"workflow.run", "workflow.sequence"}:
+            params = node.get("params")
+            if isinstance(params, dict) and isinstance(params.get("workflow"), str):
+                references.append(params["workflow"])
+    return references
+
+
 @pytest.mark.parametrize("name", WORKFLOW_FILES)
 def test_migrated_workflow_loads_with_real_action_manifests(name: str, tmp_path: Path) -> None:
     """迁移成 `.owf`（v6）之后，两份真实工作流仍能用真实 Action 清单加载并通过运行时校验。"""
@@ -826,6 +843,12 @@ def test_migrated_workflow_loads_with_real_action_manifests(name: str, tmp_path:
     workflow_dir = tmp_path / "workflows"
     workflow_dir.mkdir()
     write_workflow(workflow_dir / name, document)
+    # 入口工作流用 instance_parallel / workflow.run 引用别的 `.owf`：校验期要在同一目录里
+    # 解析得到被引用的子流程，所以把「这份文档直接引用的子流程」一起复制过去。
+    for reference in _referenced_workflow_files(document):
+        source = PROJECT_ROOT / "workflows" / reference
+        if source.is_file():
+            write_workflow(workflow_dir / reference, parse_document(source.read_text(encoding="utf-8")))
 
     registry = build_action_registry(PROJECT_ROOT / "plugins" / "actions")
     loader = WorkflowLoader(workflow_dir, registry, project_root=PROJECT_ROOT)

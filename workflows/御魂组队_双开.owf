@@ -1,0 +1,62 @@
+workflow souls_party_duo
+  version: 1.0.0
+  description: |
+    「A 邀请 B + 循环刷御魂」入口：一个工作流同时拉起两个 MuMu 实例。
+      扫地工（mumu-0）跑队长侧：建协战队伍 → 邀请好友「鱼不鲤窝」→ 等入队 → 循环开战结算。
+      吃鱼（mumu-1）跑队员侧：待机等邀请弹窗 → 绿勾接受入队 → 等开战 → 点掉结算奖励。
+
+    两边都从「御魂选层页 / 庭院」这类正常停靠位置起步即可，队长侧要求当前画面能看到
+    御魂选层页右下角的「组队」按钮（看完一场战斗后队伍面板本来就是常驻的）。
+
+    运行：AutoFlow Studio 打开本工作流点播放，或
+    `.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-workflow souls_party_duo`
+  resolution: [1920, 1080]
+  root: root
+  inputs:
+    运行轮数:
+      type: integer
+      default: 20
+      min: 1
+      display_name: 运行轮数
+      description: 两边共用的轮数预算，会原样传给队长侧与队员侧。
+    队友实例:
+      type: string
+      default: mumu-1
+      min_length: 1
+      max_length: 64
+      display_name: 队友实例
+      description: 被邀请的一方（吃鱼号）。
+    邀请信号:
+      type: string
+      default: invite_expected
+      min_length: 1
+      max_length: 64
+      display_name: 邀请信号
+      description: "队长发邀请前写给队员的 instance 信号名。"
+  variables: {}
+  node root root 双开御魂入口
+    at: [0, 0]
+  node duo instance_parallel "扫地工 + 吃鱼 并行"
+    at: [0, 208]
+    runs:
+      - instance: mumu-0
+        workflow: 御魂组队_队长.owf
+        inputs: {}
+      - instance: mumu-1
+        workflow: 御魂组队_队员.owf
+        inputs: {}
+    wait_for: all
+    cancel_on_failure: true
+  var inputs.运行轮数
+    at: [-400, 720]
+  var inputs.队友实例
+    at: [-448, 496]
+  var inputs.邀请信号
+    at: [8, 728]
+  edges:
+    var__inputs__运行轮数:out -> duo:runs.0.inputs.运行轮数
+    var__inputs__队友实例:out -> duo:runs.0.inputs.队友实例
+    var__inputs__邀请信号:out -> duo:runs.0.inputs.邀请信号
+    var__inputs__运行轮数:out -> duo:runs.1.inputs.运行轮数
+    var__inputs__邀请信号:out -> duo:runs.1.inputs.邀请信号
+    root -> duo

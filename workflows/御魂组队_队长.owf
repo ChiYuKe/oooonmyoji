@@ -1,0 +1,102 @@
+workflow souls_party_captain
+  version: 1.0.0
+  description: |
+    御魂组队循环（队长 / 扫地工侧）：从御魂选层页创建协战队伍，邀请队员模板对应的好友入队，
+    等队友进房后点挑战，打完结算页、关奖励并确认续邀，再回到房间开下一场。
+    每轮开战前都会检查队友是否还在队里，掉队就重新邀请一次。
+
+    模板图全部由两个 MuMu 实例的真实画面裁出，可用 `artifacts/_calibrate.py` 复验。
+    默认难度是「御魂 · 悲鸣」，房间权限「不公开（仅邀请）」。
+  resolution: [1920, 1080]
+  root: root
+  limits:
+    timeout_seconds: 21600
+    max_steps: 200000
+  inputs:
+    运行轮数:
+      type: integer
+      default: 20
+      min: 1
+      display_name: 运行轮数
+      description: |
+        开战循环的轮数预算（状态机的一轮 = 一次「识别当前画面 + 执行该状态的处理子图」）。
+        一场战斗通常吃掉几轮，默认 20 大致对应十几到二十场。
+  variables: {}
+  _inputParams:
+    emit_invite_signal: [signal, target_instance]
+    wait_member_joined: [timeout_seconds]
+  node root root 御魂组队队长入口
+    at: [472, -648]
+  node map_seq sequence 在组队页面
+    at: [80, -272]
+    decorator do_once
+      reset_on_failure: false
+  node wait_floor_from_map task 等待进入御魂选层页
+    at: [-592, -64]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-team-button.png
+      present: true
+      allow_timeout: true
+      timeout_seconds: 3
+      roi: [0, 0, 500, 107]
+      threshold: 0.8
+  node condition_1 condition 进到选层页了吗
+    at: [200, -72]
+  node task_2 task 假
+    at: [352, 168]
+    action: core.log
+    params:
+      message: 这是假
+  node break_1 break
+    at: [-176, -56]
+  node task_1 task
+    at: [-544, 456]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/task_1-templates.png]
+      roi: [638, 6, 668, 910]
+      timeout_seconds: 3
+  node sequence_1 sequence
+    at: [40, 200]
+  node task_3 task
+    at: [-168, 448]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      random_interval: [0.2, 0.5]
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+  node sequence_2 sequence
+    at: [464, -416]
+  node task_4 task
+    at: [168, 512]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_4-templates.png
+      present: true
+      timeout_seconds: 3
+      roi: [476, 121, 962, 817]
+  node task_5 task
+    at: [488, 480]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+      random_interval: [0.2, 0.5]
+  edges:
+    break_1:out.found -> condition_1:condition
+    wait_floor_from_map:out -> break_1:ref
+    task_1:out.match -> task_3:match
+    task_4:out.matches.0 -> task_5:match
+    root -> sequence_2
+    map_seq -> wait_floor_from_map
+    map_seq:then.1 -> condition_1
+    condition_1:true -> sequence_1
+    condition_1:false -> task_2
+    sequence_1 -> task_1
+    sequence_1:then.1 -> task_3
+    sequence_1:then.2 -> task_4
+    sequence_1:then.3 -> task_5
+    sequence_2 -> map_seq

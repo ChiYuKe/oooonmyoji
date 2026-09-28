@@ -6,6 +6,35 @@
 ## [Unreleased]
 
 ### 新增
+- **`force_success` 装饰器（对照 UE 的 Force Success）**：`Sequence` 的子节点一失败就整条链中断，
+  以前想让某一步「失败也无所谓」只能在外面再包一层永不失败的选择器兜底。现在给那个节点挂一个
+  `decorator force_success`，它的失败就被改写成成功，`Sequence` 照常继续 —— 也就是 UE 官方给
+  `UBTDecorator_ForceSuccess` 的定位：「Change node result to Success useful for creating optional
+  branches in sequence」。
+  - **没给 `Sequence` 加开关**：UE 的判定标准是「子节点从左到右执行、**任一失败就返回失败**」，
+    `UBTComposite_Sequence::GetNextChildHandler` 里那句 `// failure = quit` 就是这个语义，
+    Sequence 本身只有 `Apply Decorator Scope` / `Node Name` 两个属性。所以「失败也继续」的做法是
+    **改写那个子节点的结果**，而不是让 Sequence 记住失败继续跑 —— 引擎里 `sequence` 的执行循环
+    一个字都没改。
+  - **范围 = 挂载位置**：挂在 Task 上只有这一步可选；挂在一个嵌套 `Sequence` / 子图上就是整段可选；
+    挂在 `Sequence` 自身上等于整条链不中断。
+  - **只改写失败，单向**：`cancelled`（对应 UE 的 Aborted）与需要重启工作进程的致命失败照旧向上
+    传递；`retry` / `repeat` 看的是真实结果，改写只决定这个节点最终向父节点汇报什么。反向
+    （把成功改写成失败）刻意不做 —— Epic 给的理由是「对 sequence 没意义：后面的子节点永远不会跑」。
+  - **改写看得见**：步骤事件按父节点看到的结果记（`succeeded`），同时带 `forced_success: true`
+    与原始失败（`original_status` / `original_error` / `original_error_category`），
+    `_failed_node_event` 不会把它当成真正的失败位置；运行日志会显示
+    「结果改写：这一步原本失败，由 Force Success 按成功继续」。
+  - **改写的是结果，不是输出**：真失败过的那一步不会登记 `nodes.<id>.output`，下游引用它会在
+    运行时报 `reference is unavailable`（校验期仍按节点类型把输出当成可用）。UE 同样只改 node
+    result、不替任务写黑板，所以这里保持同一口径并把这个后果钉进了测试。
+  - **五处同步**：`DECORATOR_TYPES`（Python `model.py` + 桌面 `types.ts`，由 `tests/contract_check.py`
+    把关）、`node_rules.parse_decorators` 与桌面 `validate.ts` 的逐类型字段表、引擎的改写点
+    （`engine.py` 的 `_run_node_scoped`）、详情栏添加菜单与卡片摘要（`composite-inspector.ts` /
+    `subworkflow.ts`）、运行日志（`run-log.js`）。
+  - 覆盖：`tests/test_force_success.py`（成功/失败/取消/子图/条件分支/retry 交互/校验/DSL 往返），
+    全特性夹具 `tests/fixtures/dsl/kitchen.owf` 也带上它，因此 Python、桌面端与 VS Code 扩展
+    （打包产物）三份解析器都在同一份文本上验了往返。
 - **跨实例信号动作（`instance.emit_signal` / `instance.wait_signal`）**：多开时两个实例
   （队长 / 队员）之间本来没有任何通信，队员只能盲轮询屏幕 170 秒等邀请，错过队长那一次邀请
   就整轮失败。现在队长点完「发送组队邀请」写一条信号文件，队员**先等信号**、收到后再开一个
@@ -546,6 +575,25 @@
     可对备份/其它副本重跑；与编辑器里那份升级规则一致）。
 
 ### 变更
+- **`vision.wait_template` 支持「报告式等待」，超时可以不再等于失败**：以前「等到了没有」只能用
+  **成败**表达——`context.wait_for` 超时抛 `TimeoutError`，动作失败，外层 Sequence 立刻中断，
+  于是「没等到」这条路径根本走不到后面的节点，想让判断节点拿着这个结论分支就得绕
+  （`force_success` + `bool_judge` 的 `exists`）。现在把 `vision.wait_any_text` 早就有的那套
+  `allow_timeout` 补到模板等待上。
+  - **新增参数 `allow_timeout`（默认 `false`，卡片端点「允许超时」）**：为 `true` 时超时不再失败，
+    改为成功返回 `found=false` / `timed_out=true`，于是这个结论可以直接接判断节点、也可以让
+    Sequence 继续往下走。默认值保持原语义，没写的文档行为一字不变。
+  - **输出从「匹配数组」改成对象**：`{found, timed_out, matches}`。`found` 是「等待条件是否满足」
+    （`present=true` 时=出现了，`present=false` 时=消失了），`matches` 是匹配数组（超时为空）。
+    原来引用 `nodes.<id>.output.0` 的地方改成 `nodes.<id>.output.matches.0`
+    （仓库里 5 处：`御魂组队.owf` 3 处、`御魂组队_队员.owf` 1 处、`御魂组队_队长.owf` 1 处，
+    已一并迁移）。
+  - **为什么要改形状**：`present=false`（等待消失）成功时 `matches` 本来就是空数组，若超时也返回空数组，
+    两种结果就分不出来了；`found` / `timed_out` 把它们分开，也和 `vision.wait_any_text` 的输出对齐。
+  - `御魂组队_队长.owf` 顺手用上了：`等待进入御魂选层页` 勾上「允许超时」，判断节点
+    `进到选层页了吗` 读 `nodes.wait_floor_from_map.output.found` —— 等到了走真口、没等到走假口，
+    不再需要 `force_success` 或额外的布尔判断卡片。
+  - 运行日志跟着认这个新形状：命中数从 `matches` 数出来，超时未命中显示「允许超时 · 超时未等到」。
 - **队长工作流的主循环从「脚本」改成「每轮先观察画面、再按状态派发」（绞杀式改造）**。
   原来恢复链只在**开局**跑一次，之后每轮都假设「上一轮结束在我以为的地方」；实测的失败几乎
   都是「不在我以为的地方」（结算后落到探索地图/庭院，而 `ensure_party_room` 只有「已在房间 /
@@ -903,6 +951,53 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **逐步截图给"没碰屏幕"的步骤也各存一张，一次运行多出好几张一模一样的图**：顶层
+  `step-<节点id>.png` 原本每一步都存，于是根 / 顺序 / 选择 / 判断 / 拆分这些自己既不抓屏也不点击的
+  节点也各留一张，内容就是上一帧的复制品 —— 一次 8 步的运行里 7 张 `step-*.png` 有 5 张完全相同
+  （每张约 1 MB）。带标注的 `debug/` 一直只存任务节点（`runtime/debug.py` 里
+  `node_kind != "task"` 直接返回），只有这条路漏了同样的过滤，两条路口径不一致。
+  - 现在 `step-*.png` 与事件里的缩略图都只给任务节点（`_SCREENSHOT_NODE_KINDS = {"task"}`），
+    与 `debug/` 对齐：上例从 7 张降到 2 张（`step-wait_floor_from_map.png` / `step-task_2.png`），
+    每轮一张的 `last-frame.png` 照旧。容器与值卡片的运行日志行也不再挂重复缩略图
+    （运行事件 JSONL 也因此小了一截）。
+  - 回归测试：`tests/test_run_events.py::test_step_screenshots_only_cover_steps_that_touch_the_screen`
+    断言 `root → cap` 的工作流只产出 `step-cap.png`，且只有 `cap` 的步骤事件带 `screenshot`。
+- **运行日志的「查看运行截图」是破图**：`event.thumbnail` 是 Python `make_thumbnail_base64` 返回的
+  **裸 base64**（不带 `data:` 前缀），而 `run-log.js` 直接把它写进 `img.src` —— 浏览器把它当成
+  相对 URL，于是每次都只显示一个加载失败的小方块（旁边还写着「含截图」）。画布那边的节点预览
+  是一路补前缀的（`node-card.ts`），只有运行日志漏了。
+  - **补前缀**：`thumbnailUri()` 认得出裸 base64 就补 `data:image/png;base64,`，已经是 `data:` 的
+    原样用；缩略图的按钮与灯箱都走它。
+  - **只有磁盘路径时不再放破图**：拿不到缩略图、只有 `event.screenshot`（绝对路径）时，
+    渲染进程加载不了本地路径，所以不再渲染 `<img>`，改成在步骤详情里列出
+    「截图文件：<路径>」让人自己去看。
+  - 回归测试：`desktop/tests/runtime-log.test.cjs` 新增一例，断言裸 base64 被补成完整 data URL、
+    而只有路径时没有 `.screenshot-button` 且路径出现在详情里。
+- **设置页关不掉 `step-*.png`：截图输出其实是两个开关，而设置页只暴露了一个**。桌面端「设置 > 运行 >
+  调试截图」里本来只有「Debug 逐步截图」（`debug.enabled`）与「标注识别与点击位置」
+  （`debug.annotate_screenshots`），但 `artifacts/<run-id>/` 下的 `step-<节点id>.png` 与
+  `last-frame.png` 是**另一个顶层键** `save_screenshots` 写的（`runtime/runner.py` 的
+  `_step_event_payload` 与 `on_step`），它以前只能手改配置文件 —— 于是把 Debug 开关关掉之后
+  `step-*.png` 照旧每次都生成，看起来像"开关失效"。
+  - **改成一个总开关**：设置页「Debug 逐步截图」升级为「**调试截图**」，一个开关同时写两个键
+    （`save_screenshots` = `debug.enabled` = 开关值）——关掉就一份截图都不写，不会再出现
+    "关了一个还有文件"。运行时读的时候任一为真即算开着，所以老配置（只开了一个）也不会被
+    误显示成关闭。想只留一份（例如只要 Debug 截图、不要每步的原图）仍然可以手改配置。
+    `save_screenshots` → `step-*.png` + `last-frame.png` + 运行日志缩略图；
+    `debug.enabled` → `debug/<序号>-<工作流>-<步骤>-<状态>.png`（带标注，`annotate_screenshots`
+    决定是否画 ROI/匹配度/点击位置）。
+  - **打开设置页一定按配置文件里的真实值回填**，保存后的提示改成「调试截图已开启，下次运行生效 /
+    调试截图已关闭，不会再写任何截图」。
+  - **页面不再默默显示"未勾选"**：「调试截图」下面新增一行状态（`#settings-debug-status`）：
+    成功时写出配置文件里的真实值（「配置文件里当前是：调试截图 关 · 一张截图都不会写 ·
+    改完从下次运行生效」），读取或保存失败时改成红字写在页面上（只弹 toast 的话，
+    勾选框照样显示未勾选，看起来就像"开关失效"——这正是现场踩的那一跤：
+    `config/config.json` 里两个键一直是 `true`，而界面上那两个框显示未勾选，
+    于是取消勾选既没写进配置、运行也照旧出图）。
+  - 回归测试：`tests/test_run_events.py::test_screenshot_switches_write_different_files`
+    只开一个键各跑一次，断言各自只写自己那份文件（关掉的那个一个 PNG 都不许有）；
+    `desktop/tests/theme-settings.test.cjs` 锁住"只有一个截图开关 + 状态行"、
+    面板的回填/失败提示与主进程"一个开关写两个键、读时任一为真"。
 - **新增动作在动作下拉里只显示裸 id，跟旁边的动作样式不统一**。`instance.emit_signal` /
   `instance.wait_signal` 没写进 `ACTION_LABELS`，而动作下拉是
   `label: actionLabel(name)` + `detail: ACTION_LABELS[name] ? name : ''`——查不到译名时不仅标题

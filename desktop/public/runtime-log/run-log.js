@@ -246,8 +246,29 @@
     return `[${value.slice(0, 4).map((item) => Math.round(Number(item) || 0)).join(', ')}]`;
   }
 
+  /** 行输出里的第一个匹配：任务输出直接是匹配数组，或（`vision.wait_template`）是带 `matches` 的对象。 */
+  function rowMatches(row) {
+    if (Array.isArray(row.output)) return row.output;
+    const output = asObject(row.output);
+    return Array.isArray(output.matches) ? output.matches : [];
+  }
+
+  /**
+   * 缩略图的可显示 URL。`event.thumbnail` 是**裸 base64**（Python `make_thumbnail_base64`
+   * 的返回值，不带 `data:` 前缀），而 `event.screenshot` 是磁盘路径 —— 两种都会被写进
+   * `row.thumbnail`。裸 base64 直接塞给 `img.src` 会被当成相对 URL，结果就是破图；
+   * 画布那边的节点预览就是这么补前缀的（`node-card.ts`）。路径没法在渲染进程里当图片加载，
+   * 返回空串，让详情栏把路径写出来给人自己看。
+   */
+  function thumbnailUri(value) {
+    const text = String(value || '');
+    if (!text) return '';
+    if (text.startsWith('data:')) return text;
+    return /^[A-Za-z0-9+/=]+$/.test(text) ? `data:image/png;base64,${text}` : '';
+  }
+
   function firstMatch(row) {
-    const output = Array.isArray(row.output) ? row.output : [];
+    const output = rowMatches(row);
     if (output[0] && typeof output[0] === 'object') return output[0];
     const match = asObject(row.params).match;
     return match && typeof match === 'object' ? match : {};
@@ -279,9 +300,12 @@
         ? `匹配模板${template ? `：${fileLabel(template)}` : ''}`
         : `等待模板${present ? '出现' : '消失'}${template ? `：${fileLabel(template)}` : ''}`;
       if (row.action === 'vision.wait_template' && Number.isFinite(Number(params.timeout_seconds))) facts.push(`超时 ${formatNumber(params.timeout_seconds)} s`);
+      if (row.action === 'vision.wait_template' && params.allow_timeout === true) facts.push('允许超时');
       if (Number.isFinite(Number(params.threshold ?? match.threshold))) facts.push(`阈值 ${formatPercent(params.threshold ?? match.threshold)}`);
       if (params.roi || match.roi) facts.push(`ROI ${formatRect(params.roi || match.roi)}`);
-      if (Array.isArray(output)) facts.push(`命中 ${output.length} 个`);
+      const matches = rowMatches(row);
+      if (Array.isArray(row.output) || matches.length) facts.push(`命中 ${matches.length} 个`);
+      else if (row.action === 'vision.wait_template' && asObject(row.output).timed_out === true) facts.push('超时未等到');
       if (Number.isFinite(Number(match.confidence))) facts.push(`最高匹配 ${formatPercent(match.confidence)}`);
     } else if (row.action === 'vision.wait_any') {
       const templates = Array.isArray(params.templates) ? params.templates : [];
@@ -351,6 +375,7 @@
     if (row.attempts > 1) facts.push(`尝试 ${row.attempts} 次`);
     if (row.repeats > 1) facts.push(`重复 ${row.repeats} 次`);
     if (row.decorator === 'do_once') facts.push('Do Once · 本次运行已执行过，跳过');
+    if (row.forcedSuccess) facts.push('Force Success · 原本失败，已按成功继续');
     return { operation, facts };
   }
 
@@ -488,6 +513,8 @@
           attempts: Number(step.attempts) || 0,
           repeats: Number(step.repeats) || 0,
           decorator: String(step.decorator || ''),
+          forcedSuccess: step.forced_success === true,
+          originalError: String(step.original_error || ''),
           originalStatus: String(step.original_status || ''),
           recoveredBy: String(step.recovered_by || ''),
           recoveredByName: String(step.recovered_by_name || ''),
@@ -526,6 +553,8 @@
             attempts: 0,
             repeats: 0,
             decorator: '',
+            forcedSuccess: false,
+            originalError: '',
             originalStatus: '',
             recoveredBy: '',
             recoveredByName: '',
@@ -548,6 +577,8 @@
         row.attempts = Number(step.attempts) || row.attempts || 0;
         row.repeats = Number(step.repeats) || row.repeats || 0;
         row.decorator = step.decorator ? String(step.decorator) : row.decorator || '';
+        if (hasOwn(step, 'forced_success')) row.forcedSuccess = step.forced_success === true;
+        row.originalError = step.original_error ? String(step.original_error) : row.originalError || '';
         row.originalStatus = step.original_status ? String(step.original_status) : row.originalStatus || '';
         row.recoveredBy = step.recovered_by ? String(step.recovered_by) : '';
         row.recoveredByName = step.recovered_by_name ? String(step.recovered_by_name) : row.recoveredByName || '';
@@ -633,6 +664,9 @@
     if (row.errorCategory) entries.push(['错误分类', row.errorCategory]);
     if (row.recoveredByName) entries.push(['恢复来源', row.recoveredByName]);
     if (row.error) entries.push([row.status === 'branch_miss' ? '原始未完成原因' : '原始错误', row.error]);
+    if (row.forcedSuccess && row.originalError) entries.push(['被改写的失败原因', row.originalError]);
+    const shotUri = thumbnailUri(row.thumbnail);
+    if (row.thumbnail && !shotUri) entries.push(['截图文件', row.thumbnail]);
     if (entries.length === 0) return;
 
     const details = document.createElement('div'); details.className = 'step-details';
@@ -644,11 +678,11 @@
       grid.append(label, content);
     }
     details.appendChild(grid);
-    if (row.thumbnail) {
+    if (shotUri) {
       const screenshot = document.createElement('button'); screenshot.type = 'button'; screenshot.className = 'ui-button screenshot-button';
-      const image = document.createElement('img'); image.className = 'thumb'; image.src = row.thumbnail; image.alt = ''; image.loading = 'lazy';
+      const image = document.createElement('img'); image.className = 'thumb'; image.src = shotUri; image.alt = ''; image.loading = 'lazy';
       const label = document.createElement('span'); label.textContent = '查看运行截图';
-      screenshot.append(image, label); screenshot.addEventListener('click', () => openLightbox(row.thumbnail, screenshot));
+      screenshot.append(image, label); screenshot.addEventListener('click', () => openLightbox(shotUri, screenshot));
       details.appendChild(screenshot);
     }
     main.appendChild(details);
@@ -733,6 +767,13 @@
         reason.className = row.status === 'branch_miss' ? 'step-note' : 'step-error';
         reason.textContent = `${row.status === 'branch_miss' ? '跳过原因' : '失败原因'}：${reasonText}`;
         overview.appendChild(reason);
+      }
+      // 被 Force Success 改写的结果必须在日志里看得见：这一步的失败没有中断工作流。
+      if (row.forcedSuccess) {
+        const note = document.createElement('span');
+        note.className = 'step-note';
+        note.textContent = '结果改写：这一步原本失败，由 Force Success 按成功继续';
+        overview.appendChild(note);
       }
       const side = document.createElement('span'); side.className = 'step-side';
       const rowStatus = document.createElement('span'); rowStatus.className = 'row-status'; rowStatus.textContent = rowStatusLabel(row); side.appendChild(rowStatus);

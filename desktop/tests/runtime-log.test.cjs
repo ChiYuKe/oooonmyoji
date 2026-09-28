@@ -146,6 +146,24 @@ test('screenshots are keyboard buttons; Escape restores focus',()=>{
   assert.equal(h.doc.activeElement,button);
 });
 
+test('缩略图是裸 base64 时补 data 前缀；只有磁盘路径时不给破图',()=>{
+  // Python 的 make_thumbnail_base64 返回的是**裸 base64**（不带 data: 前缀）：
+  // 直接塞进 img.src 会被当成相对 URL，结果就是破图（画布那边是补了前缀的）。
+  const h=harness(); const bare=step('image'); bare.thumbnail='aGVsbG8=';
+  init(h,[bare]);
+  const image=h.$('step-list').querySelector('.screenshot-button .thumb');
+  assert.equal(image.src,'data:image/png;base64,aGVsbG8=');
+  assert.equal(h.$('step-list').querySelector('.step-attachment').textContent,'含截图');
+
+  // 只有磁盘路径（拿不到缩略图）时：渲染进程加载不了本地路径，别放一个破图，
+  // 改成把路径写进详情让人自己去看文件。
+  const h2=harness(); const pathOnly=step('image2');
+  pathOnly.screenshot='E:\\artifacts\\run\\step-image2.png';
+  init(h2,[pathOnly]);
+  assert.equal(h2.$('step-list').querySelector('.screenshot-button'),null);
+  assert.match(h2.$('step-list').textContent,/step-image2\.png/);
+});
+
 test('runtime layout shares UI styles and parses without legacy overrides',()=>{
   const postcss=require('postcss');
   for(const name of ['run-log.css','showcase.css']) postcss.parse(fs.readFileSync(path.join(root,name),'utf8'));

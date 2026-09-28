@@ -9,12 +9,12 @@
   function sampleData() {
     const start = now() - 90;
     const specs = [
-      ['等待本轮战斗结束', 'vision.wait_template', {template:'assets/templates/task_3-template.png',timeout_seconds:6,threshold:.88,roi:[708,958,491,122]}, [{confidence:.973}]],
+      ['等待本轮战斗结束', 'vision.wait_template', {template:'assets/templates/task_3-template.png',timeout_seconds:6,threshold:.88,roi:[708,958,491,122]}, {found:true,timed_out:false,matches:[{confidence:.973}]}],
       ['点击战斗结束后的继续', 'input.tap_match', {match:{template:'assets/templates/task_3-template.png'}}, {x:976,y:1063,offset_x:14,offset_y:19,interval_seconds:.41,revalidated:true}],
-      ['确认结算提示已消失', 'vision.wait_template', {template:'assets/templates/task_3-template.png',present:false,timeout_seconds:6,threshold:.88,roi:[608,943,734,137]}, []],
+      ['确认结算提示已消失', 'vision.wait_template', {template:'assets/templates/task_3-template.png',present:false,timeout_seconds:6,threshold:.88,roi:[608,943,734,137]}, {found:true,timed_out:false,matches:[]}],
       ['等待挑战按钮或战斗结算页', 'vision.wait_any', {templates:['assets/templates/task_1-template.png','assets/templates/task_3-template.png'],timeout_seconds:6}, {template:'assets/templates/task_1-template.png'}],
       ['点击挑战按钮', 'input.tap_match', {match:{template:'assets/templates/task_1-template.png'}}, {x:1772,y:943,offset_x:11,offset_y:6,revalidated:true}],
-      ['确认挑战按钮已消失', 'vision.wait_template', {template:'assets/templates/task_1-template.png',present:false,timeout_seconds:6,threshold:.88,roi:[1621,796,299,284]}, []],
+      ['确认挑战按钮已消失', 'vision.wait_template', {template:'assets/templates/task_1-template.png',present:false,timeout_seconds:6,threshold:.88,roi:[1621,796,299,284]}, {found:true,timed_out:false,matches:[]}],
     ];
     const descriptor = {workflow:'new_workflow.json',sources:[
       {id:'one',instance:'mumu-1',label:'吃鱼',startedAt:start*1000,status:scenario === 'running' ? 'running' : 'succeeded'},

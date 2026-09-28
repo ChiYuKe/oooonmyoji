@@ -82,15 +82,20 @@ export function createRunEvents(deps: RunEventsDeps) {
       if(event.instance_id && state.instanceId && event.instance_id!==state.instanceId)return;
       if (step.variable_values) state.variableValues = clone(step.variable_values);
       let status = String(step.status || '');
+      const nodeType = String(step.node_type || step.node_kind || '');
+      const reportsOwnMatchResult = nodeType === 'task' || nodeType === 'state_machine' || (!nodeType && Boolean(step.action));
+      // not_matched 是动作/状态机自己的具体结果；控制节点透传它只说明某个子节点没命中。
+      // 控制节点保留自己的 failed 状态，避免整条祖先链都显示「未匹配」。
+      const inheritedNotMatched = status === 'failed' && step.error_category === 'not_matched' && !reportsOwnMatchResult;
       if (status === 'succeeded' && step.action === 'vision.match_template') status = 'matched';
-      if (status === 'failed' && step.error_category === 'not_matched') status = 'not_matched';
+      if (status === 'failed' && step.error_category === 'not_matched' && reportsOwnMatchResult) status = 'not_matched';
       if (status === 'running') patchAllRunEdges = clearPendingRunStates(String(event.step_id));
       state.run.set(String(event.step_id), {
         status,
         engineStatus: step.status,
         duration: step.duration_ms,
-        error: step.error,
-        errorCategory: step.error_category,
+        error: inheritedNotMatched ? undefined : step.error,
+        errorCategory: inheritedNotMatched ? undefined : step.error_category,
         thumbnail: event.thumbnail,
         screenshot: event.screenshot,
       });

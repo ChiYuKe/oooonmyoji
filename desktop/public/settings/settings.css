@@ -54,6 +54,8 @@
 .theme-caption strong { font-weight: 500; font-size: 11px; }
 .theme-caption > span { color: var(--ui-muted); font-size: 9px; }
 .settings-footnote { margin: 14px 0 0; color: var(--ui-muted); font-size: 10px; }
+/* 读/写配置失败时留在页面上：只弹 toast 的话，勾选框照样显示"未勾选"，看着像开关没生效。 */
+.settings-footnote-error { color: var(--danger, #e06c75); }
 .shortcut-list { margin: 4px 0 0; padding: 0; list-style: none; }
 .shortcut-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 34px; padding: 7px 0; border-bottom: 1px solid var(--ui-line); }
 .shortcut-action { min-width: 0; color: var(--ui-text); font-size: 11px; }

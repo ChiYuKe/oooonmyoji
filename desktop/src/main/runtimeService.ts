@@ -99,7 +99,8 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
       ? raw.debug as Record<string, unknown>
       : {};
     return {
-      enabled: debug.enabled === true,
+      // 一个总开关管两份输出：配置里任一为真就算开着，界面上不会出现"关了一个还有文件"。
+      enabled: debug.enabled === true || raw.save_screenshots === true,
       annotateScreenshots: debug.annotate_screenshots !== false,
     };
   }
@@ -110,6 +111,9 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
       enabled: settings.enabled,
       annotate_screenshots: settings.annotateScreenshots,
     };
+    // 总开关同时写这两个键：`save_screenshots` 管 `step-*.png` / `last-frame.png` 与运行日志
+    // 缩略图，`debug.enabled` 管 `debug/` 里那份带标注的。只开一个的细粒度组合仍然可以手改配置。
+    raw.save_screenshots = settings.enabled;
     fs.writeFileSync(this.configPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
     return this.getDebugSettings();
   }

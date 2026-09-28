@@ -53,6 +53,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
   const restoreSession = document.querySelector<HTMLInputElement>('#settings-restore-session')!;
   const debugEnabled = document.querySelector<HTMLInputElement>('#settings-debug-enabled')!;
   const debugAnnotate = document.querySelector<HTMLInputElement>('#settings-debug-annotate')!;
+  const debugStatus = document.querySelector<HTMLElement>('#settings-debug-status')!;
   const runtimeResources = document.querySelector<HTMLElement>('#settings-runtime-resources')!;
   const runtimeProgress = document.querySelector<HTMLElement>('#settings-runtime-progress')!;
 
@@ -110,11 +111,30 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     renderRuntimeResources(await api.getRuntimeResourceStatus());
   }
 
+  /** 把"配置文件里现在到底是什么"写在页面上：勾选框只有回填成功才可信。 */
+  function showDebugStatus(text: string, error = false): void {
+    debugStatus.className = error ? 'settings-footnote settings-footnote-error' : 'settings-footnote';
+    debugStatus.textContent = text;
+  }
+
+  function debugStatusText(settings: { enabled: boolean; annotateScreenshots: boolean }): string {
+    return settings.enabled
+      ? `配置文件里当前是：调试截图 开（写 step-*.png / last-frame.png 与 debug/）· 标注 ${settings.annotateScreenshots ? '开' : '关'} · 改完从下次运行生效`
+      : '配置文件里当前是：调试截图 关 · 一张截图都不会写 · 改完从下次运行生效';
+  }
+
   async function refreshDebugSettings(): Promise<void> {
-    const settings = await api.getDebugSettings();
-    debugEnabled.checked = settings.enabled;
-    debugAnnotate.checked = settings.annotateScreenshots;
-    debugAnnotate.disabled = !settings.enabled;
+    try {
+      const settings = await api.getDebugSettings();
+      debugEnabled.checked = settings.enabled;
+      debugAnnotate.checked = settings.annotateScreenshots;
+      debugAnnotate.disabled = !settings.enabled;
+      showDebugStatus(debugStatusText(settings));
+    } catch (error) {
+      // 读不到就明说。以前只有一句 toast，页面照样显示"未勾选"，看着像开关没生效。
+      showDebugStatus(`读取配置失败：${String(error)}`, true);
+      throw error;
+    }
   }
 
   function openSettingsPanel(): void {
@@ -168,12 +188,15 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
         });
         debugEnabled.checked = settings.enabled;
         debugAnnotate.checked = settings.annotateScreenshots;
-        showToast(settings.enabled ? 'Debug 逐步截图已开启，下次运行生效' : 'Debug 逐步截图已关闭');
+        showDebugStatus(debugStatusText(settings));
+        showToast(settings.enabled ? '调试截图已开启，下次运行生效' : '调试截图已关闭，不会再写任何截图');
       } catch (error) {
+        showDebugStatus(`保存失败：${String(error)}`, true);
         showToast(`保存 Debug 设置失败：${String(error)}`);
         await refreshDebugSettings().catch(() => undefined);
       } finally {
         debugEnabled.disabled = false;
+        debugAnnotate.disabled = !debugEnabled.checked;
         debugAnnotate.disabled = !debugEnabled.checked;
       }
     };

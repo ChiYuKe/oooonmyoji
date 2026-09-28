@@ -93,11 +93,31 @@ test('settings keeps original controls and separates all categories',()=>{
     assert.equal((html.match(new RegExp(`id="settings-page-${category}"`,'g')) || []).length,1);
     assert.match(html,new RegExp(`aria-controls="settings-page-${category}"`));
   }
-  for(const id of ['settings-content-view','settings-auto-refresh','settings-default-workflow','settings-runtime-resources','settings-runtime-progress','settings-debug-enabled','settings-debug-annotate','settings-project-root']) {
+  for(const id of ['settings-content-view','settings-auto-refresh','settings-default-workflow','settings-runtime-resources','settings-runtime-progress','settings-debug-enabled','settings-debug-annotate','settings-debug-status','settings-project-root']) {
     assert.equal((html.match(new RegExp(`id="${id}"`,'g')) || []).length,1);
   }
   const css=fs.readFileSync(path.join(root,'public/settings/settings.css'),'utf8');
   assert.match(css,/#module-settings.settings-module \{ display: grid; grid-template-columns: 132px minmax\(0, 1fr\)/);
+});
+test('一个总开关同时管住两份截图输出',()=>{
+  const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
+  const panel=fs.readFileSync(path.join(root,'src/renderer/settings-panel.ts'),'utf8');
+  const service=fs.readFileSync(path.join(root,'src/main/runtimeService.ts'),'utf8');
+  // 页面：一个总开关 + 标注开关 + 一行如实报告配置的状态
+  for(const id of ['settings-debug-enabled','settings-debug-annotate','settings-debug-status']) {
+    assert.equal((html.match(new RegExp(`id="${id}"`,'g')) || []).length,1,`缺少 ${id}`);
+  }
+  assert.equal(/settings-save-screenshots/.test(html),false,'不该再有第二个截图开关');
+  // 面板：打开时按真实配置回填；读/写失败要留在页面上说话，不能只弹 toast。
+  assert.match(panel,/debugEnabled\.checked = settings\.enabled/);
+  assert.match(panel,/showDebugStatus\(debugStatusText\(settings\)\)/);
+  assert.match(panel,/读取配置失败/);
+  assert.match(panel,/保存失败/);
+  // 主进程：一个开关写两个键（`save_screenshots` 是顶层键，`enabled`/`annotate_screenshots` 在 `debug` 下）；
+  // 读的时候任一个为真就算开着，所以界面上不会再出现"关了一个还有文件"。
+  assert.match(service,/enabled: debug\.enabled === true \|\| raw\.save_screenshots === true/);
+  assert.match(service,/raw\.save_screenshots = settings\.enabled/);
+  assert.match(service,/raw\.debug = \{/);
 });
 test('settings navigation and theme events still work after the module is moved to a popout',()=>{
   function element(dataset={}) {

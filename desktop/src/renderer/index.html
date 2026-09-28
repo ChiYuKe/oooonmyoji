@@ -303,13 +303,14 @@
               <p id="settings-runtime-progress" class="settings-footnote" role="status"></p>
               <h3 class="settings-section-title">调试截图</h3>
               <label class="settings-row">
-                <span class="settings-row-copy"><strong>Debug 逐步截图</strong><small>记录执行画面，修改后从下次运行生效。</small></span>
-                <input id="settings-debug-enabled" class="ui-checkbox" type="checkbox" aria-label="Debug 逐步截图">
+                <span class="settings-row-copy"><strong>调试截图</strong><small>开：每个任务节点存一张画面（artifacts 下 step-*.png 与每轮一张 last-frame.png）并给运行日志当缩略图，另存一份带标注的到 artifacts/&lt;运行 id&gt;/debug/。关：一张都不写。修改后从下次运行生效。</small></span>
+                <input id="settings-debug-enabled" class="ui-checkbox" type="checkbox" aria-label="调试截图">
               </label>
               <label class="settings-row">
-                <span class="settings-row-copy"><strong>标注识别与点击位置</strong><small>在截图中显示 ROI、匹配度及点击位置。</small></span>
+                <span class="settings-row-copy"><strong>标注识别与点击位置</strong><small>在 Debug 截图里显示 ROI、匹配度及点击位置。</small></span>
                 <input id="settings-debug-annotate" class="ui-checkbox" type="checkbox" aria-label="标注 Debug 截图">
               </label>
+              <p id="settings-debug-status" class="settings-footnote" role="status"></p>
             </section>
             <section id="settings-page-shortcuts" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-shortcuts">
               <h2>快捷键</h2><p class="settings-intro">点击按键组合后按下新快捷键即可修改，修改立即生效并自动保存。</p>

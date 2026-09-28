@@ -56,6 +56,7 @@ const api: OnmyojiDesktopApi = {
   openWorkflowFile: (uri) => ipcRenderer.invoke('project:open-workflow-file', uri),
   openContentItem: (path) => ipcRenderer.invoke('project:open-content-item', path),
   moveContent: (request: MoveContentRequest) => ipcRenderer.invoke('project:move-content', request),
+  copyContent: (request: MoveContentRequest) => ipcRenderer.invoke('project:copy-content', request),
   listContentFolders: () => ipcRenderer.invoke('project:list-content-folders'),
   createContentFolder: (request: CreateContentFolderRequest) => ipcRenderer.invoke('project:create-content-folder', request),
   renameContent: (request: RenameContentRequest) => ipcRenderer.invoke('project:rename-content', request),

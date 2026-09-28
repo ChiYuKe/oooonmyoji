@@ -25,6 +25,9 @@ import {
   type ContentBrowserItemKind,
 } from './content-browser/items';
 import { showContentRewriteResult } from './content-browser/rewrite-dialog';
+import { bindContentMarquee } from './content-browser/marquee';
+import { runContentBatch } from './content-browser/batch';
+import { contentSelectionGesture } from './content-browser/selection';
 
 interface WorkflowDocumentTab {
   uri: string;
@@ -105,6 +108,10 @@ let collapsedContentFolders = new Set<string>();
 let contentFolderDraft: ContentFolderDraft | undefined;
 let contentRenameDraft: ContentRenameDraft | undefined;
 let selectedContentPath = '';
+let selectedContentPaths = new Set<string>();
+let cancelContentMarquee = (): void => {};
+let contentBatchBusy = false;
+let contentSelectionAnchor = '';
 let contentNameDialogState: ContentNameDialogState | undefined;
 
 
@@ -232,7 +239,7 @@ function navigateContentBrowser(folder: string): void {
   contentBrowserFolder = folder;
   contentBrowserQuery = '';
   contentBrowserSearch.value = '';
-  selectedContentPath = '';
+  setContentSelection(new Set());
   expandContentFolderPath(folder);
   renderContentBrowser();
 }
@@ -305,7 +312,7 @@ function bindContentDropTarget(element: HTMLElement, folder: string | (() => str
     if (!isInternalContentDrag(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    if (event.dataTransfer) event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move';
     element.classList.add('drop-target');
   });
   element.addEventListener('dragleave', (event) => {
@@ -319,11 +326,21 @@ function bindContentDropTarget(element: HTMLElement, folder: string | (() => str
     event.stopPropagation();
     element.classList.remove('drop-target');
     const sourcePath = contentDragPath(event).replace(/\\/g, '/').trim();
-    if (sourcePath) void moveContentItem(sourcePath, typeof folder === 'function' ? folder() : folder);
+    const targetFolder = typeof folder === 'function' ? folder() : folder;
+    const payload = event.dataTransfer?.getData('application/x-onmyoji-content-paths');
+    if (payload) {
+      try {
+        const paths: unknown = JSON.parse(payload);
+        if (!Array.isArray(paths) || !paths.every((path) => typeof path === 'string')) return;
+        const entries = [...contentBrowserWorkflowItems(), ...contentBrowserAssetItems(), ...contentFolders().map(contentFolderItem)];
+        const items = paths.map((path) => entries.find((item) => item.path === path)).filter((item): item is ContentBrowserItem => Boolean(item));
+        void performContentBatch(event.ctrlKey ? 'copy' : 'move', items, targetFolder);
+      } catch { showToast('拖动内容无效', true); }
+    } else if (sourcePath) void moveContentItem(sourcePath, targetFolder);
   });
 }
 
-async function moveContentItem(sourcePath: string, targetFolder: string): Promise<void> {
+async function moveContentItem(sourcePath: string, targetFolder: string, batch = false): Promise<MoveContentResult | undefined> {
   const source = sourcePath.replace(/\\/g, '/').trim();
   if (!source) return;
   if (isDirty()) {
@@ -343,7 +360,7 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
   const movingCurrentWorkflow = currentRelative.toLowerCase() === source.toLowerCase();
   try {
     const result = await api.moveContent({ sourcePath: source, targetFolder });
-    selectedContentPath = result.targetPath;
+    setContentSelection(new Set([result.targetPath]));
 
     const [assets, data, folders] = await Promise.all([api.listAssets(), api.bootstrap(), api.listContentFolders()]);
     contentAssets = assets;
@@ -381,18 +398,70 @@ async function moveContentItem(sourcePath: string, targetFolder: string): Promis
     }
     // 磁盘引用可能刚被重写：打开中的文档必须重新读盘，不能沿用内存里的旧正文。
     const skipped = await reloadRewrittenDocuments(result.rewritten.map((detail) => detail.path));
-    reportContentRewrite(result, '移动', skipped);
+    if (!batch) reportContentRewrite(result, '移动', skipped);
+    return result;
   } catch (error) {
+    if (batch) throw error;
     showToast(`移动失败：${errorMessage(error)}`, true);
   }
 }
 
-function selectContentItem(button: HTMLButtonElement, item: ContentBrowserItem): void {
-  selectedContentPath = item.path;
-  setDeleteTarget({ kind: 'content', path: item.path });
-  contentBrowserItems.querySelectorAll('.content-item.selected').forEach((element) => element.classList.remove('selected'));
-  button.classList.add('selected');
-  document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = item.path;
+function setContentSelection(paths: Set<string>, updateTarget = true): void {
+  if (!paths.size) contentSelectionAnchor = '';
+  selectedContentPaths = paths;
+  selectedContentPath = paths.size === 1 ? [...paths][0] : '';
+  const primaryPath = [...paths][0];
+  if (updateTarget) setDeleteTarget(primaryPath ? { kind: 'content', path: primaryPath } : undefined);
+  contentBrowserItems.querySelectorAll<HTMLElement>('.content-item').forEach((element) => {
+    element.classList.toggle('selected', paths.has(element.dataset.contentPath!));
+  });
+  document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = paths.size > 1 ? `已选择 ${paths.size} 项` : selectedContentPath;
+}
+
+function selectContentItem(button: HTMLButtonElement, item: ContentBrowserItem, event?: MouseEvent | KeyboardEvent): void {
+  if (contentBatchBusy) return;
+  const order = [...contentBrowserItems.querySelectorAll<HTMLElement>('.content-item:not(.editing)')].map((entry) => entry.dataset.contentPath!);
+  const next = contentSelectionGesture(order, selectedContentPaths, contentSelectionAnchor, item.path, event);
+  setContentSelection(next.paths);
+  contentSelectionAnchor = next.anchor;
+  button.focus({ preventScroll: true });
+}
+
+function handleContentSelectionKey(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.altKey || contentBatchBusy || contentFolderDraft || contentRenameDraft) return;
+  if ((event.target as Element).closest('input, textarea, select, [contenteditable="true"]')) return;
+  const buttons = [...contentBrowserItems.querySelectorAll<HTMLButtonElement>('.content-item:not(.editing)')];
+  if (!buttons.length) return;
+  const additive = event.ctrlKey || event.metaKey;
+  if (additive && event.key.toLowerCase() === 'a') {
+    event.preventDefault(); event.stopPropagation();
+    setContentSelection(new Set(buttons.map((button) => button.dataset.contentPath!)));
+    contentSelectionAnchor ||= buttons[0].dataset.contentPath!;
+    return;
+  }
+  const focused = contentBrowserItems.ownerDocument.activeElement;
+  let index = buttons.findIndex((button) => button === focused);
+  if (index < 0) index = buttons.findIndex((button) => selectedContentPaths.has(button.dataset.contentPath!));
+  const navigation = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key);
+  if (!navigation && event.key !== ' ') return;
+  event.preventDefault(); event.stopPropagation();
+  if (event.key === 'Home') index = 0;
+  else if (event.key === 'End') index = buttons.length - 1;
+  else if (index < 0) index = 0;
+  else if (navigation) {
+    let columns = 1;
+    if (contentBrowserView === 'grid') {
+      const top = buttons[0].offsetTop;
+      columns = buttons.filter((button) => Math.abs(button.offsetTop - top) < 2).length || 1;
+    }
+    const delta = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : event.key === 'ArrowUp' ? -columns : columns;
+    index = Math.max(0, Math.min(buttons.length - 1, index + delta));
+  }
+  const button = buttons[index];
+  const item = resolveContentDeleteTarget(button.dataset.contentPath!);
+  if (item && (!navigation || !additive || event.shiftKey)) selectContentItem(button, item, event);
+  else button.focus({ preventScroll: true });
+  button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 /**
@@ -401,14 +470,15 @@ function selectContentItem(button: HTMLButtonElement, item: ContentBrowserItem):
  */
 function selectContentFolder(folder: string): void {
   if (!folder) return;
-  selectedContentPath = folder;
+  setContentSelection(new Set([folder]));
   setDeleteTarget({ kind: 'content', path: folder });
   document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = folder;
 }
 
 function createContentItem(item: ContentBrowserItem, editing = false): HTMLButtonElement {
   const button = document.createElement('button');
-  button.className = `content-item ${item.kind}${item.workflow?.uri === getCurrentUri() ? ' current' : ''}${item.path === selectedContentPath ? ' selected' : ''}${editing ? ' editing' : ''}`;
+  button.className = `content-item ${item.kind}${item.workflow?.uri === getCurrentUri() ? ' current' : ''}${selectedContentPaths.has(item.path) ? ' selected' : ''}${editing ? ' editing' : ''}`;
+  button.dataset.contentPath = item.path;
   button.type = 'button';
   button.draggable = !editing && item.kind !== 'folder';
   button.title = editing ? '' : item.path;
@@ -483,20 +553,23 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
       }
     }, 0);
   }
-  button.addEventListener('click', () => {
-    if (!editing) selectContentItem(button, item);
+  button.addEventListener('click', (event) => {
+    if (!editing) selectContentItem(button, item, event);
   });
   if (!editing && item.kind !== 'folder') {
     button.addEventListener('dragstart', (event) => {
+      if (contentBatchBusy) { event.preventDefault(); return; }
+      if (!selectedContentPaths.has(item.path)) selectContentItem(button, item);
       const transfer = event.dataTransfer;
       if (!transfer) return;
       transfer.setData('application/x-onmyoji-content', item.path);
       transfer.setData('text/plain', item.path);
+      transfer.setData('application/x-onmyoji-content-paths', JSON.stringify([...selectedContentPaths]));
       if (item.kind === 'workflow' && item.workflow) {
         transfer.setData('application/x-onmyoji-workflow', item.workflow.uri);
-        transfer.effectAllowed = 'copy';
+        transfer.effectAllowed = 'copyMove';
       } else {
-        transfer.effectAllowed = 'move';
+        transfer.effectAllowed = 'copyMove';
       }
       button.classList.add('dragging');
     });
@@ -512,7 +585,7 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
   if (!editing) button.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    selectContentItem(button, item);
+    if (!selectedContentPaths.has(item.path)) selectContentItem(button, item);
     showContentContextMenu(event, item, button);
   });
   return button;
@@ -632,7 +705,7 @@ function renderContentBrowserFilters(): void {
     button.addEventListener('click', () => {
       if (contentBrowserFilter === filter.id) return;
       contentBrowserFilter = filter.id;
-      selectedContentPath = '';
+      setContentSelection(new Set());
       renderContentBrowser();
     });
     return button;
@@ -664,6 +737,7 @@ function renderContentBrowserBreadcrumbs(): void {
 }
 
 function renderContentBrowser(): void {
+  cancelContentMarquee();
   const folders = new Set(contentFolders());
   if (!folders.has(contentBrowserFolder)) contentBrowserFolder = '';
   renderContentBrowserTree();
@@ -678,6 +752,7 @@ function renderContentBrowser(): void {
     createFolderDraft: (path, name) => ({ kind: 'folder', path, name }),
   });
   const entries = renderPlan.map(({ item }) => item);
+  if (!entries.some((item) => item.path === contentSelectionAnchor)) contentSelectionAnchor = '';
   contentBrowserItems.className = `content-browser-items ${contentBrowserView}`;
   const renderedEntries = renderPlan.map(({ item, editing }) => ({
     item,
@@ -687,7 +762,7 @@ function renderContentBrowser(): void {
   document.querySelector<HTMLElement>('#content-browser-empty')!.classList.toggle('hidden', entries.length > 0);
   document.querySelector<HTMLElement>('#content-browser-summary')!.textContent = `${entries.length} 项`;
   document.querySelector<HTMLElement>('#content-browser-folder-count')!.textContent = `${contentFolders().filter(Boolean).length} 个文件夹`;
-  document.querySelector<HTMLElement>('#content-browser-selection')!.textContent = selectedContentPath;
+  setContentSelection(new Set([...selectedContentPaths].filter((path) => entries.some((item) => item.path === path))), false);
   document.querySelector<HTMLButtonElement>('#content-browser-up')!.disabled = contentBrowserFolder === '';
   document.querySelectorAll<HTMLButtonElement>('[data-content-view]').forEach((button) => {
     button.classList.toggle('active', button.dataset.contentView === contentBrowserView);
@@ -898,7 +973,7 @@ async function createContentFolderAt(parentPath: string): Promise<void> {
   contentRenameDraft = undefined;
   const normalizedParent = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (contentBrowserFolder !== normalizedParent) navigateContentBrowser(normalizedParent);
-  selectedContentPath = '';
+  setContentSelection(new Set());
   contentFolderDraft = { parentPath: normalizedParent, name: '新建文件夹', busy: false };
   renderContentBrowser();
 }
@@ -925,7 +1000,7 @@ async function commitContentFolderDraft(): Promise<void> {
   try {
     const createdPath = await api.createContentFolder({ parentPath: draft.parentPath, name });
     contentFolderDraft = undefined;
-    selectedContentPath = createdPath;
+    setContentSelection(new Set([createdPath]));
     await refreshContentBrowser();
     showToast(`已创建文件夹 ${createdPath}`);
   } catch (error) {
@@ -963,7 +1038,7 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
   // 搜索/筛选可能把目标条目藏起来：跳到它的父目录，保证输入框出现在网格里。
   const parent = contentParent(item.path);
   if (parent !== contentBrowserFolder) navigateContentBrowser(parent);
-  selectedContentPath = item.path;
+  setContentSelection(new Set([item.path]));
   contentRenameDraft = { item, name: item.name, busy: false };
   renderContentBrowser();
 }
@@ -1026,7 +1101,7 @@ async function performContentRename(item: ContentBrowserItem, newName: string): 
   const currentRelative = getCurrentUri() ? relativeToProject(displayFileUri(getCurrentUri())).replace(/\\/g, '/') : '';
   const renamingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
   const result = await api.renameContent({ sourcePath: item.path, newName });
-  selectedContentPath = result.targetPath;
+  setContentSelection(new Set([result.targetPath]));
   await refreshContentBrowser();
   if (item.kind === 'folder') {
     // 文件夹改名带走了内部所有工作流：先把打开中的标签搬到新路径，再统一重新读盘。
@@ -1053,13 +1128,56 @@ async function performContentRename(item: ContentBrowserItem, newName: string): 
   reportContentRewrite(result, '重命名', skipped);
 }
 
-async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
+async function performContentBatch(operation: 'move' | 'copy' | 'delete', requested: readonly ContentBrowserItem[], targetFolder?: string): Promise<void> {
+  if (contentBatchBusy || requested.length === 0) return;
+  const items = [...new Map(requested.map((item) => [item.path, item])).values()];
+  const label = operation === 'move' ? '移动' : operation === 'copy' ? '复制' : '删除';
+  if (isDirty() || getWorkflowTabs().some((tab) => tab.dirty)) {
+    showToast(`请先保存打开的工作流，再${label}内容`, true);
+    return;
+  }
+  if (operation === 'delete' && !window.confirm(`确定删除选中的 ${items.length} 项吗？\n${items.map((item) => item.path).join('\n')}`)) return;
+  contentBatchBusy = true;
+  try {
+    const result = await runContentBatch(items, async (item) => {
+      if (operation === 'delete') { await deleteContentItem(item, true); return ''; }
+      if (item.kind === 'folder') throw new Error(`暂不支持${label}文件夹，请选择文件`);
+      if (operation === 'copy') return api.copyContent({ sourcePath: item.path, targetFolder: targetFolder ?? contentParent(item.path) });
+      const moved = await moveContentItem(item.path, targetFolder ?? contentBrowserFolder, true);
+      if (!moved) throw new Error('文件未移动，请保存工作流后重试');
+      return moved;
+    });
+    await refreshContentBrowser();
+    const visible = new Set(contentBrowserEntries().map((item) => item.path));
+    const paths = result.failed.map(({ item }) => item.path);
+    if (operation === 'copy') paths.push(...result.completed.map(({ result }) => String(result)));
+    if (operation === 'move') paths.push(...result.completed.map(({ result }) => typeof result === 'string' ? result : result.targetPath));
+    setContentSelection(new Set(paths.filter((path) => visible.has(path))));
+    if (operation === 'move') {
+      const moves = result.completed.map(({ result }) => result).filter((value): value is MoveContentResult => typeof value !== 'string');
+      const rewritten = new Map<string, number>();
+      for (const move of moves) for (const detail of move.rewritten) rewritten.set(detail.path, (rewritten.get(detail.path) ?? 0) + detail.references);
+      if (rewritten.size) reportContentRewrite({ sourcePath: `${moves.length} 项`, targetPath: targetFolder ?? contentBrowserFolder,
+        updatedFiles: rewritten.size, updatedReferences: moves.reduce((sum, move) => sum + move.updatedReferences, 0),
+        rewritten: [...rewritten].map(([path, references]) => ({ path, references })),
+      }, '移动');
+    }
+    showToast(`${label}完成：成功 ${result.completed.length} 项${result.failed.length ? `，失败 ${result.failed.length} 项` : ''}`, result.failed.length > 0);
+    if (result.failed.length) window.alert(`${label}失败的项目：\n${result.failed.map(({ item, error }) => `${item.path}：${errorMessage(error)}`).join('\n')}`);
+  } catch (error) {
+    showToast(`${label}失败：${errorMessage(error)}`, true);
+  } finally {
+    contentBatchBusy = false;
+  }
+}
+
+async function deleteContentItem(item: ContentBrowserItem, batch = false): Promise<void> {
   if (isDirty()) {
     showToast('请先保存当前工作流，再删除内容', true);
     return;
   }
   if (contentRenameDraft) contentRenameDraft = undefined;
-  if (!window.confirm(`确定删除“${item.name}”吗？`)) return;
+  if (!batch && !window.confirm(`确定删除“${item.name}”吗？`)) return;
   const sourceWorkflow = item.kind === 'workflow' ? workflowDescriptorForPath(item.path) : undefined;
   const sourceWorkflowTab = sourceWorkflow
     ? getWorkflowTabs().find((tab) => tab.uri === sourceWorkflow.uri)
@@ -1072,7 +1190,7 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
   const deletingCurrentWorkflow = item.kind === 'workflow' && currentRelative.toLowerCase() === item.path.toLowerCase();
   try {
     await api.deleteContent(item.path);
-    selectedContentPath = '';
+    setContentSelection(new Set());
     await refreshContentBrowser();
     if (deletingCurrentWorkflow) {
       const deletedIndex = getWorkflowTabs().findIndex((tab) => tab.uri === getCurrentUri());
@@ -1100,8 +1218,9 @@ async function deleteContentItem(item: ContentBrowserItem): Promise<void> {
       }
       syncDocumentTabs();
     }
-    showToast(`已删除 ${item.path}`);
+    if (!batch) showToast(`已删除 ${item.path}`);
   } catch (error) {
+    if (batch) throw error;
     showToast(`删除失败：${errorMessage(error)}`, true);
   }
 }
@@ -1115,6 +1234,12 @@ function resolveContentDeleteTarget(path: string): ContentBrowserItem | undefine
     if (contentFolders().includes(candidate)) return contentFolderItem(candidate);
   }
   return undefined;
+}
+
+function contentActionSelection(item: ContentBrowserItem): ContentBrowserItem[] {
+  if (!selectedContentPaths.has(item.path)) return [item];
+  return [...selectedContentPaths].map((path) => resolveContentDeleteTarget(path))
+    .filter((entry): entry is ContentBrowserItem => Boolean(entry));
 }
 
 /** 执行已登记的删除目标；返回 true 表示这次按键已被消费。 */
@@ -1145,7 +1270,12 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     menu.appendChild(entry);
   };
 
-  if (item.kind === 'folder') {
+  const selection = contentActionSelection(item);
+  if (selection.length > 1) {
+    addEntry(`创建副本（${selection.length} 项）`, Copy, () => void performContentBatch('copy', selection));
+    addEntry(`删除（${selection.length} 项）`, Trash2, () => void performContentBatch('delete', selection));
+    addEntry('复制所有路径', Copy, () => void copyContentPath(selection.map((entry) => entry.path).join('\n')));
+  } else if (item.kind === 'folder') {
     if (item.path) addEntry('打开文件夹', FolderOpen, () => navigateContentBrowser(item.path));
     if (item.path === '') {
       addEntry('在 assets 中新建文件夹', FolderPlus, () => void createContentFolderAt('assets'));
@@ -1156,7 +1286,7 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     if (!isContentRootFolder(item.path) && item.path) {
       addContentContextSeparator(doc, menu);
       addEntry('重命名', Pencil, () => void renameContentItem(item));
-      addEntry('删除', Trash2, () => void deleteContentItem(item));
+      addEntry('删除', Trash2, () => void performContentBatch('delete', [item]));
     }
     if (item.path) addEntry('复制路径', Copy, () => void copyContentPath(item.path));
   } else {
@@ -1169,7 +1299,8 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     }
     addContentContextSeparator(doc, menu);
     addEntry('重命名', Pencil, () => void renameContentItem(item));
-    addEntry('删除', Trash2, () => void deleteContentItem(item));
+    addEntry('创建副本', Copy, () => void performContentBatch('copy', [item]));
+    addEntry('删除', Trash2, () => void performContentBatch('delete', [item]));
     addEntry('复制路径', Copy, () => void copyContentPath(item.path));
   }
   addContentContextSeparator(doc, menu);
@@ -1220,6 +1351,13 @@ function readContentBrowserZoom(): number {
 /** 绑定内容浏览器面板的右键菜单、命名弹窗、视图切换与拖放事件。 */
 function bindContentBrowserUi(): void {
   setupContentBrowserResizers();
+  contentBrowserItems.tabIndex = 0;
+  contentBrowserItems.addEventListener('keydown', handleContentSelectionKey);
+  cancelContentMarquee = bindContentMarquee(contentBrowserItems, () => selectedContentPaths, (paths) => {
+    setContentSelection(paths);
+    contentSelectionAnchor = [...paths][0] ?? '';
+    contentBrowserItems.focus({ preventScroll: true });
+  }, () => !contentBatchBusy && !contentFolderDraft && !contentRenameDraft);
   contentNameClose.addEventListener('click', () => finishContentNameDialog(null));
   contentNameCancel.addEventListener('click', () => finishContentNameDialog(null));
   contentNameSubmit.addEventListener('click', () => finishContentNameDialog(contentNameInput.value));
@@ -1269,7 +1407,7 @@ function bindContentBrowserUi(): void {
   });
   contentBrowserSearch.addEventListener('input', () => {
     contentBrowserQuery = contentBrowserSearch.value;
-    selectedContentPath = '';
+    setContentSelection(new Set());
     setDeleteTarget(undefined);
     renderContentBrowser();
   });
@@ -1372,9 +1510,9 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
     setView: setContentBrowserView,
     bindWorkflowDropTarget: bindWorkflowTabDropTarget,
     resolveDeleteTarget: resolveContentDeleteTarget,
-    resolveRenameTarget: resolveContentDeleteTarget,
+    resolveRenameTarget: (path) => selectedContentPaths.size > 1 ? undefined : resolveContentDeleteTarget(path),
     isRootFolder: isContentRootFolder,
-    deleteItem: deleteContentItem,
+    deleteItem: (item) => performContentBatch('delete', contentActionSelection(item)),
     renameItem: renameContentItem,
     // 行内重命名草稿对快捷键守卫来说等价于一个打开的命名对话框。
     isNameDialogOpen: () => Boolean(contentNameDialogState) || Boolean(contentRenameDraft),

@@ -528,6 +528,30 @@ export class ProjectService {
     };
   }
 
+  async copyContent(request: MoveContentRequest): Promise<string> {
+    const source = await this.resolveContentEntry(request.sourcePath);
+    if (source.isDirectory) throw new Error('请选择文件，暂不支持复制文件夹');
+    const root = source.relative.split('/')[0];
+    const folder = request.targetFolder ? normalizeProjectRelative(request.targetFolder) : root;
+    if (folder !== root && !folder.startsWith(`${root}/`)) throw new Error(`文件只能复制到 ${root}/ 目录内`);
+    const target = this.resolveContentLocation(folder);
+    if (!(await fs.promises.stat(target.absolute)).isDirectory()) throw new Error('目标文件夹不存在');
+    const extension = path.posix.extname(source.relative);
+    const stem = path.posix.basename(source.relative, extension);
+    // Exclusive creation prevents overwriting existing files, including concurrent copies.
+    for (let index = 0; index < 10000; index++) {
+      const name = index === 0 ? `${stem}${extension}` : `${stem} (副本${index === 1 ? '' : ` ${index}`})${extension}`;
+      const relative = path.posix.join(folder, name);
+      try {
+        await fs.promises.copyFile(source.absolute, this.resolveContentLocation(relative).absolute, fs.constants.COPYFILE_EXCL);
+        return relative;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    }
+    throw new Error('副本数量过多，请更换目标目录');
+  }
+
   async moveContent(request: MoveContentRequest): Promise<MoveContentResult> {
     const source = this.resolveContentFile(request.sourcePath);
     const sourceRoot = source.relative.slice(0, source.relative.indexOf('/'));

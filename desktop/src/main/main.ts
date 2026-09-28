@@ -343,6 +343,7 @@ function registerIpc(): void {
   ipcMain.handle('project:open-workflow-file', (_event, uri: string) => project.openWorkflowFile(uri));
   ipcMain.handle('project:open-content-item', (_event, relativePath: string) => project.openContentItem(relativePath));
   ipcMain.handle('project:move-content', (_event, request) => project.moveContent(request));
+  ipcMain.handle('project:copy-content', (_event, request) => project.copyContent(request));
   ipcMain.handle('project:list-content-folders', () => project.listContentFolders());
   ipcMain.handle('project:create-content-folder', (_event, request) => project.createContentFolder(request));
   ipcMain.handle('project:rename-content', (_event, request) => project.renameContent(request));

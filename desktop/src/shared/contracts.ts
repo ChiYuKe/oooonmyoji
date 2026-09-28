@@ -443,6 +443,7 @@ export interface OnmyojiDesktopApi {
   openWorkflowFile(uri: string): Promise<void>;
   openContentItem(path: string): Promise<void>;
   moveContent(request: MoveContentRequest): Promise<MoveContentResult>;
+  copyContent(request: MoveContentRequest): Promise<string>;
   listContentFolders(): Promise<string[]>;
   createContentFolder(request: CreateContentFolderRequest): Promise<string>;
   renameContent(request: RenameContentRequest): Promise<MoveContentResult>;

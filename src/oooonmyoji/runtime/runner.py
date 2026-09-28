@@ -90,6 +90,20 @@ class RunEventWriter:
             self._started = True
 
 
+#: 会碰屏幕的节点类型：只有它们才值得为每一步留一张画面。
+#:
+#: 容器（根 / 顺序 / 选择 / 并行 / 组边界）与值卡片（布尔判断 / 拆分 / 判断节点）自己既不抓屏
+#: 也不点击，给它们各存一张只是上一帧的复制品——一次 8 个步骤的运行里会有 5 张完全一样的图，
+#: 每个约 1 MB。带标注的 `DebugStepRecorder` 一直就只存任务节点（`runtime/debug.py` 的
+#: `node_kind != "task"` 直接返回），这里与它对齐。
+_SCREENSHOT_NODE_KINDS = frozenset({"task"})
+
+
+def _touches_screen(event: dict[str, Any]) -> bool:
+    kind = event.get("node_kind") or event.get("node_type")
+    return str(kind or "") in _SCREENSHOT_NODE_KINDS
+
+
 def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, save_screenshots: bool = False) -> dict[str, Any]:
     """构造单步运行事件，按需附带截图数据。"""
 
@@ -100,7 +114,7 @@ def _step_event_payload(run_id: str, context: Any, event: dict[str, Any], *, sav
         "step": dict(event),
         "ts": time.time(),
     }
-    if save_screenshots and context is not None and context.last_frame is not None:
+    if save_screenshots and context is not None and context.last_frame is not None and _touches_screen(event):
         try:
             saved = context.save_frame(context.last_frame, f"step-{safe_name(payload['step_id'] or 'unknown')}.png")
             payload["screenshot"] = str(saved)

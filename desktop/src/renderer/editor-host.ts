@@ -363,7 +363,6 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           const referenceResolution: [number, number] = Array.isArray(message.referenceResolution)
             ? message.referenceResolution as [number, number]
             : [1920, 1080];
-          const result = await api.captureRoi({ instanceId: String(message.instanceId ?? getSelectedInstance()), referenceResolution });
           // 框选结果要送回**持有文档**的那份画布：详情栏是镜像，没有写权，
           // 把模板/区域发给它只会让卡片停在旧值上（真画布再覆盖回去）。
           const documentFrame = (targetUri ? getDocumentFrame?.(targetUri) : undefined) ?? sourceFrame;
@@ -377,10 +376,12 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
             sourceFrame: documentFrame,
             requestFrame: sourceFrame === documentFrame ? undefined : sourceFrame,
             referenceResolution,
-            imageWidth: result.width,
-            imageHeight: result.height,
-            dataUrl: result.dataUrl,
+            imageWidth: 0,
+            imageHeight: 0,
+            dataUrl: '',
           });
+          const result = await api.captureRoi({ instanceId: String(message.instanceId || getSelectedInstance()), referenceResolution });
+          roiPicker.completeCapture(String(message.requestId ?? ''), result);
           return;
         }
         case 'checkTemplate': {
@@ -445,6 +446,7 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
       }
     } catch (error) {
       const text = errorMessage(error);
+      if (message.type === 'pickRoi') roiPicker.failCapture(String(message.requestId ?? ''));
       if (message.type === 'save') workspace.postToEditors({ type: 'workflowSaveFailed' });
       if (message.type === 'pickRoi' || message.type === 'saveTemplate') workspace.postToFrame(sourceFrame, { type: 'roiPickerError', requestId: raw.requestId, message: text });
       else if (message.type === 'checkTemplate') workspace.postToFrame(sourceFrame, { type: 'templateCheckError', requestId: raw.requestId, message: text });

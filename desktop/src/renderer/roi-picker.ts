@@ -52,6 +52,9 @@ export interface RoiPickerDeps {
 }
 
 export interface RoiPicker {
+  /** Fill an already visible capture dialog; ignore results after cancellation. */
+  completeCapture(requestId: string, result: { dataUrl: string; width: number; height: number }): void;
+  failCapture(requestId: string): void;
   /** 打开选择器；已有进行中的请求会先取消。 */
   open(request: Omit<RoiPickerRequest, 'x1' | 'y1' | 'x2' | 'y2' | 'dragging' | 'busy' | 'selected'>): void;
   /** 绑定模态层内的指针与按钮事件，只需调用一次。 */
@@ -180,7 +183,7 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
 
   async function confirm(): Promise<void> {
     const current = state;
-    if (!current || current.busy) return;
+    if (!current || current.busy || !current.dataUrl) return;
     if (current.mode === 'point') {
       const point = selectedPoint();
       if (!point) {
@@ -268,21 +271,40 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     state = { ...request, x1: 0, y1: 0, x2: 0, y2: 0, dragging: false, busy: false, selected: false };
     title.textContent = request.mode === 'point' ? '选择坐标' : request.targetPath ? '重新截取模板' : request.mode === 'asset' ? '截取模板' : '选择区域';
     subtitle.textContent = request.mode === 'point' ? '在当前画面中点击目标位置' : request.mode === 'asset' ? '从当前画面框选需要保存的区域' : '从当前画面框选识别区域';
-    hint.textContent = request.mode === 'point' ? '点击画面选择 X、Y 坐标' : '拖动鼠标框选区域';
-    confirmButton.disabled = false;
+    hint.textContent = request.dataUrl ? (request.mode === 'point' ? '点击画面选择 X、Y 坐标' : '拖动鼠标框选区域') : '正在获取模拟器画面，请稍候…';
+    confirmButton.disabled = !request.dataUrl;
     selection.style.display = 'none';
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     image.onload = () => renderSelection();
-    image.src = request.dataUrl;
+    image.hidden = !request.dataUrl;
+    image.style.display = request.dataUrl ? '' : 'none';
+    if (request.dataUrl) image.src = request.dataUrl;
+    else image.removeAttribute('src');
     window.requestAnimationFrame(() => renderSelection());
+  }
+
+  function completeCapture(requestId: string, result: { dataUrl: string; width: number; height: number }): void {
+    if (!state || state.requestId !== requestId) return;
+    Object.assign(state, { dataUrl: result.dataUrl, imageWidth: result.width, imageHeight: result.height });
+    image.hidden = false;
+    image.style.display = '';
+    image.src = result.dataUrl;
+    confirmButton.disabled = false;
+    hint.textContent = state.mode === 'point' ? '点击画面选择 X、Y 坐标' : '拖动鼠标框选区域';
+  }
+
+  function failCapture(requestId: string): void {
+    if (!state || state.requestId !== requestId) return;
+    state = undefined;
+    hide();
   }
 
   function bind(): void {
     stage.addEventListener('pointerdown', (event) => {
       const current = state;
       const point = pointerPoint(event);
-      if (!current || current.busy || !point) return;
+      if (!current || current.busy || !current.dataUrl || !point) return;
       event.preventDefault();
       current.x1 = point.x;
       current.y1 = point.y;
@@ -321,5 +343,5 @@ export function createRoiPicker(deps: RoiPickerDeps): RoiPicker {
     });
   }
 
-  return { open, bind, cancel, isOpen: () => Boolean(state) };
+  return { open, completeCapture, failCapture, bind, cancel, isOpen: () => Boolean(state) };
 }

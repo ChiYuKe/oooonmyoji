@@ -23,6 +23,17 @@ const CATALOG = [
     outputSchema: { type: 'array' },
   },
   {
+    name: 'vision.wait_nested',
+    parameters: { template: { type: 'asset', required: true } },
+    // 结果对象中的匹配列表也应展开到第一项，供单个 match 参数使用。
+    outputSchema: {
+      type: 'object', properties: {
+        found: { type: 'boolean' }, timed_out: { type: 'boolean' },
+        matches: { type: 'array', items: { type: 'object', properties: { x: { type: 'integer' }, confidence: { type: 'number' } } } },
+      },
+    },
+  },
+  {
     name: 'core.sleep',
     parameters: { seconds: { type: 'duration', required: true } },
     outputSchema: { type: 'object', properties: { elapsed: { type: 'number' } } },
@@ -92,9 +103,12 @@ test('nodeOutputFields 对象输出逐字段给引用，数组输出给整体 + 
     ['state', 'nodes.n1.output.state', '页面状态'],
     ['confidence', 'nodes.n1.output.confidence', '置信度'],
   ]);
-  // 元素类型未知的数组（只有 type: array）不给下标引用：运行时也解析不出字段。
-  const wait = { id: 'n2', type: 'task', name: '等待战斗结束', action: 'vision.wait_template' };
-  assert.deepEqual(model.nodeOutputFields(wait).map((item) => [item.field, item.ref]), [['', 'nodes.n2.output']]);
+  // 对象字段中的匹配数组展开到第一项及其字段。
+  const wait = { id: 'n2', type: 'task', name: '等待战斗结束', action: 'vision.wait_nested' };
+  assert.deepEqual(model.nodeOutputFields(wait).map((item) => item.field), [
+    'found', 'timed_out', 'matches', 'matches.0', 'matches.0.x', 'matches.0.confidence',
+  ]);
+  assert.equal(model.nodeOutputFields(wait).find((item) => item.field === 'matches.0').ref, 'nodes.n2.output.matches.0');
   // 匹配数组（items 是对象）：整体 + 第 1 项 + 该项的一层字段，这样才能喂给「单个对象」参数。
   // 自由数组不列第 2 项起：元素同形、下标无语义，运行时还可能不存在。
   const matches = { id: 'n3', type: 'task', name: '等待战斗结束', action: 'vision.wait_matches' };

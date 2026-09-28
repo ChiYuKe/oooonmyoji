@@ -11,9 +11,11 @@ import { schemaAtPath } from '../../shared/workflow/schema-path';
 import { schemaTypes } from '../../shared/workflow/bindings';
 import { CONDITION_INPUT_X, CONDITION_INPUT_Y, boolJudgeShape, expressionInputOffset, isBoolJudgeBoolPin, isBoolJudgeNode, isBooleanInputNode, isBooleanInputPin, isBreakRefPin } from './exec-ports';
 
-/** 清单声明了长度的数组输出，最多给到第几项的下标引用；单层对象字段最多展开几个。 */
+/** 清单声明了长度的数组输出，最多给到第几项的下标引用；每层对象字段最多展开几个。 */
 const REFERENCE_INDEX_LIMIT = 4;
 const REFERENCE_FIELD_LIMIT = 12;
+const REFERENCE_CANDIDATE_LIMIT = 128;
+const REFERENCE_PATH_DEPTH_LIMIT = 8;
 
 export interface CanvasWorkflowModelDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -385,12 +387,13 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
   }
 
   /**
-   * 节点输出候选：对象输出逐字段给出引用，数组输出给出整体 + 第 1 项（元素及其字段），
+   * 节点输出候选：对象按字段递归展开；数组输出给出整体 + 第 1 项（元素及其字段），
    * 其余输出只有整体一个候选。`ref` 就是写进参数的引用文本。
    *
-   * 数组为什么要给到「项」：`vision.wait_template` 这类输出是匹配数组，而目标参数
+   * 数组为什么要给到「项」：`vision.match_template` 这类输出是匹配数组，而目标参数
    * （例如 `input.tap_match.match`）只要一个对象——运行时的引用语法支持下标
-   * （`nodes.<id>.output.0`），所以拖过去应该能连。
+   * （`nodes.<id>.output.0`），所以拖过去应该能连。嵌套数组同理：`vision.wait_template`
+   * 的输出是对象，但它里面的 `matches` 是数组，所以 `output.matches.0` 也要给。
    *
    * 为什么只给第 1 项：自由数组（找模板、OCR）的元素彼此同形，第 2 项起的下标既没有
    * 独立语义，运行时也可能不存在（只命中 1 个时引用下标会直接报错）。要列更多项，
@@ -467,47 +470,57 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
         : {};
       return Object.entries(properties).slice(0, REFERENCE_FIELD_LIMIT);
     };
-    if (schema.type === 'object' && objectFields(schema).length) {
-      for (const [field, child] of objectFields(schema)) {
-        push(field, fieldLabel(field), child);
-        // 再展开一层对象字段（例如 match.x），字段数有上限，避免菜单爆炸。
-        if (child && child.type === 'object') {
-          for (const [nested, nestedSchema] of objectFields(child)) push(`${field}.${nested}`, `${fieldLabel(field)} · ${fieldLabel(nested)}`, nestedSchema);
+    const appendChildren = (parentField: string, parentLabel: string, parentSchema: any, depth = 0): void => {
+      if (!parentSchema || typeof parentSchema !== 'object') return;
+      if (depth >= REFERENCE_PATH_DEPTH_LIMIT || candidates.length >= REFERENCE_CANDIDATE_LIMIT) return;
+      if (parentSchema.type === 'object') {
+        for (const [field, child] of objectFields(parentSchema)) {
+          if (candidates.length >= REFERENCE_CANDIDATE_LIMIT) break;
+          const path = parentField ? `${parentField}.${field}` : field;
+          const label = parentLabel ? `${parentLabel} · ${fieldLabel(field)}` : fieldLabel(field);
+          push(path, label, child);
+          appendChildren(path, label, child, depth + 1);
         }
+        return;
       }
+      if (parentSchema.type !== 'array') return;
+
+      const prefixItems = Array.isArray(parentSchema.prefixItems) ? parentSchema.prefixItems : [];
+      const items = parentSchema.items && typeof parentSchema.items === 'object' ? parentSchema.items : null;
+      const elementAt = (index: number): any => (prefixItems[index] && typeof prefixItems[index] === 'object' ? prefixItems[index] : items);
+      const first = elementAt(0);
+      // 元素类型未知时不生成下标引用：运行时也无法推断其成员。
+      if (!first || !first.type) return;
+      // 自由数组只列第一项；定长/有界数组按声明长度列项，但仍受菜单上限约束。
+      const declared = prefixItems.length
+        ? prefixItems.length
+        : (typeof parentSchema.maxItems === 'number' ? parentSchema.maxItems : 1);
+      const indexes = Math.max(1, Math.min(REFERENCE_INDEX_LIMIT, declared));
+      for (let index = 0; index < indexes; index += 1) {
+        if (candidates.length >= REFERENCE_CANDIDATE_LIMIT) break;
+        const itemSchema = elementAt(index);
+        if (!itemSchema || !itemSchema.type) continue;
+        const path = parentField ? `${parentField}.${index}` : String(index);
+        const itemLabel = typeof itemSchema.title === 'string' && itemSchema.title ? itemSchema.title : `第 ${index + 1} 项`;
+        const label = parentLabel ? `${parentLabel} · ${itemLabel}` : itemLabel;
+        push(path, label, itemSchema);
+        appendChildren(path, label, itemSchema, depth + 1);
+      }
+    };
+
+    if (schema.type === 'object') {
+      appendChildren('', '', schema);
       return candidates;
     }
     if (schema.type !== 'array') {
       push('', '输出', schema);
       return candidates;
     }
-    const prefixItems = Array.isArray(schema.prefixItems) ? schema.prefixItems : [];
-    const items = schema.items && typeof schema.items === 'object' ? schema.items : null;
     // 定长元组（`prefixItems`，例如区域 rect = [x, y, w, h]）是结构体语义：只列成员，
     // 不列「整体」——`In Vec` 那种卡片拆出来就是 X / Y / Z。
-    const fixedTuple = prefixItems.length > 0;
+    const fixedTuple = Array.isArray(schema.prefixItems) && schema.prefixItems.length > 0;
     if (!fixedTuple) push('', '输出', schema);
-    const elementAt = (index: number): any => (prefixItems[index] && typeof prefixItems[index] === 'object' ? prefixItems[index] : items);
-    const first = elementAt(0);
-    // 元素类型未知（没有 items / prefixItems）时不瞎给下标：那种引用在运行时也解析不出字段。
-    if (!first || !first.type) return candidates;
-    // 下标只有两种来源才算「有语义」：声明了 prefixItems（定长元组）或 maxItems（长度有界）。
-    // 自由长度的数组（匹配结果、OCR 结果）没有声明长度，多列几个下标只会给出同样内容、
-    // 运行时还可能解析不到——所以只给第 1 项。
-    const declared = prefixItems.length
-      ? prefixItems.length
-      : (typeof schema.maxItems === 'number' ? schema.maxItems : 1);
-    const indexes = Math.max(1, Math.min(REFERENCE_INDEX_LIMIT, declared));
-    for (let index = 0; index < indexes; index += 1) {
-      const itemSchema = elementAt(index);
-      if (!itemSchema || !itemSchema.type) continue;
-      // 元组项带 `title` 时（rect 的 X/Y/W/H）直接用它当标签，否则退回「第 N 项」。
-      const itemLabel = typeof itemSchema.title === 'string' && itemSchema.title ? itemSchema.title : `第 ${index + 1} 项`;
-      push(String(index), itemLabel, itemSchema);
-      if (itemSchema.type === 'object') {
-        for (const [field, child] of objectFields(itemSchema)) push(`${index}.${field}`, `${itemLabel} · ${fieldLabel(field)}`, child);
-      }
-    }
+    appendChildren('', '', schema);
     return candidates;
   }
 

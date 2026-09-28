@@ -1137,10 +1137,16 @@ textarea { resize: vertical; min-height: 66px; font-family: var(--vscode-editor-
 .object-array-actions .object-array-remove:hover, .scalar-array-row .scalar-array-remove:hover { color: var(--danger); background: #3a3a3a; }
 
 /* 标量数组行 */
+/* 标量数组行：图标按钮要压在「输入框那一行」上。
+   asset 这类控件的 shell 是两行（输入框 + 浏览/截取/替换），整行 `align-items: center` 会把
+   ↑ ↓ 🗑 对到两行的中缝、看起来比输入框低一截；所以改成顶部对齐，并让这三个按钮与输入框同高
+   （`--ui-height` 26px），图标自然落在输入框的中线上。 */
 .scalar-array { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.scalar-array-row { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.scalar-array-row { display: flex; gap: 4px; align-items: flex-start; min-width: 0; }
 .scalar-array-row > *:first-child { flex: 1; min-width: 0; }
 .scalar-array-row button { flex: 0 0 auto; }
+.scalar-array-row > .object-array-move,
+.scalar-array-row > .scalar-array-remove { height: var(--ui-height, 26px); min-height: var(--ui-height, 26px); }
 
 /* 添加条：深灰横条 + ⊕ 图标 */
 .structured-add { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 8px; background: #2d2d2d; border: 1px solid #1f1f1f; color: #c9c9c9; font-size: 11px; border-radius: 3px; }

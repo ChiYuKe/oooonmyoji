@@ -131,6 +131,27 @@ test('all styles parse; legacy rules are layered below the component library', (
   assert.equal(css.nodes.find(node=>node.type!=='comment').name,'layer');
 });
 
+test('标量数组行的图标按钮与输入框同高并对齐到输入框那一行', () => {
+  const postcss=require('postcss');
+  // 两条规则在两个文件里：`--ui-height` 由 ui.css 的 .ui-input 用，行对齐在 workflow-editor.css。
+  const css=postcss.parse(['ui.css','workflow-editor.css']
+    .map(file=>fs.readFileSync(path.join(root,file),'utf8')).join('\n'));
+  const declarations=selector=>{
+    const found={};
+    css.walkRules(rule=>{
+      if(!rule.selectors.includes(selector)) return;
+      for(const node of rule.nodes) if(node.type==='decl') found[node.prop]=node.value;
+    });
+    return found;
+  };
+  // 行内顶部对齐：asset 这类两行高的 shell（输入框 + 浏览/截取/替换）不会再把 ↑ ↓ 🗑 挤到中缝。
+  assert.equal(declarations('.scalar-array-row')['align-items'],'flex-start');
+  // 三个按钮与输入框同高，图标因此落在输入框中线上。
+  const move=declarations('.scalar-array-row > .object-array-move');
+  assert.equal(move.height,'var(--ui-height, 26px)');
+  assert.equal(move['min-height'],'var(--ui-height, 26px)');
+  assert.equal(declarations('.ui-input').height,'var(--ui-height)');
+});
 test('tooltips share a borderless neutral surface and reduced shadow across renderers', () => {
   const postcss=require('postcss');
   for(const file of ['ui.css','workflow-editor.css','../../src/renderer/styles.css']) {

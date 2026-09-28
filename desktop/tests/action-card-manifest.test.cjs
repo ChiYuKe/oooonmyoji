@@ -65,9 +65,9 @@ test('内置 manifest 全部能通过桌面侧解析并带上卡片端点', () =
   const byName = new Map(actions.map((action) => [action.name, action]));
   const waitTemplate = byName.get('vision.wait_template');
   assert.deepEqual(waitTemplate.card.map((row) => row.param),
-    ['template', 'timeout_seconds', 'present', 'roi', 'threshold', 'scale_search']);
+    ['template', 'timeout_seconds', 'present', 'allow_timeout', 'roi', 'threshold', 'scale_search']);
   assert.deepEqual(waitTemplate.card.map((row) => row.label),
-    ['模板', '超时', '存在性', '识别区域', '匹配阈值', '多尺度搜索']);
+    ['模板', '超时', '存在性', '允许超时', '识别区域', '匹配阈值', '多尺度搜索']);
   assert.equal(waitTemplate.card.find((row) => row.param === 'present').on_label, '等待出现');
   // 有参数的 Action 都声明了卡片；没参数的（core.capture）留空。
   const noCard = actions.filter((action) => !action.card.length).map((action) => action.name);

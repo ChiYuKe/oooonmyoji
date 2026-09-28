@@ -39,6 +39,13 @@ class WaitContext:
         return [TemplateMatch(10, 20, 30, 40, 0.97, 10.0, 20.0, 30.0, 40.0)]
 
 
+class TimeoutWaitContext:
+    """等不到：真实的 ``RuntimeContext.wait_for`` 超时抛的是内置 `TimeoutError`。"""
+
+    def wait_for(self, *_args: Any, **_kwargs: Any) -> list[TemplateMatch]:
+        raise TimeoutError("timed out waiting for template to appear: assets/templates/target.png")
+
+
 def test_tap_applies_random_offset_and_interval(monkeypatch: pytest.MonkeyPatch) -> None:
     context = TapContext()
     offsets = iter((4, -3))
@@ -176,7 +183,9 @@ def test_wait_template_output_can_be_revalidated_by_tap_match() -> None:
         "threshold": 0.91,
     })
 
-    assert result.output == [{
+    assert result.output["found"] is True
+    assert result.output["timed_out"] is False
+    assert result.output["matches"] == [{
         "x": 10,
         "y": 20,
         "width": 30,
@@ -188,6 +197,34 @@ def test_wait_template_output_can_be_revalidated_by_tap_match() -> None:
         "threshold": 0.91,
         "roi": [1, 2, 300, 400],
     }]
+
+
+def test_wait_template_timeout_can_be_reported_instead_of_failing() -> None:
+    """`allow_timeout`：超时不算失败，改成 `found=false` / `timed_out=true` 让上层用值判断。
+
+    这是 `vision.wait_any_text` 已有的那套「报告式」语义（见 `text_wait.py` 的
+    `allow_timeout`）：观察者不必用「失败」表达「没等到」，于是它的结论可以直接接判断节点，
+    也不会因为自己失败而中断外层 Sequence。
+    """
+
+    result = WaitTemplateAction().execute(TimeoutWaitContext(), {
+        "template": "assets/templates/target.png",
+        "timeout_seconds": 5,
+        "allow_timeout": True,
+    })
+
+    assert result.status.value == "succeeded"
+    assert result.output == {"found": False, "timed_out": True, "matches": []}
+
+
+def test_wait_template_timeout_still_fails_by_default() -> None:
+    """默认（`allow_timeout` 不写 / false）：超时照旧抛出去 → 这一步失败。"""
+
+    with pytest.raises(TimeoutError):
+        WaitTemplateAction().execute(TimeoutWaitContext(), {
+            "template": "assets/templates/target.png",
+            "timeout_seconds": 5,
+        })
 
 
 @pytest.mark.parametrize(

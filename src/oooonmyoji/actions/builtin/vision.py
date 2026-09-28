@@ -46,23 +46,37 @@ class WaitTemplateAction(Action):
     name = "vision.wait_template"
 
     def execute(self, context: Any, arguments: dict[str, Any]) -> ActionResult:
-        matches = context.wait_for(
-            str(arguments["template"]),
-            timeout_seconds=float(arguments["timeout_seconds"]),
-            present=bool(arguments.get("present", True)),
-            roi=arguments.get("roi"),
-            threshold=float(arguments.get("threshold", 0.85)),
-            scale_search=bool(arguments.get("scale_search", False)),
-        )
+        template = str(arguments["template"])
+        threshold = float(arguments.get("threshold", 0.85))
+        try:
+            matches = context.wait_for(
+                template,
+                timeout_seconds=float(arguments["timeout_seconds"]),
+                present=bool(arguments.get("present", True)),
+                roi=arguments.get("roi"),
+                threshold=threshold,
+                scale_search=bool(arguments.get("scale_search", False)),
+            )
+        except TimeoutError:
+            if not bool(arguments.get("allow_timeout", False)):
+                # 默认语义不变：超时仍然抛出去 → 这一步失败 → 上层按「失败即中断」处理。
+                raise
+            # 「报告式」等待，与 `vision.wait_any_text` 的 `allow_timeout` 同一套语义：
+            # 超时不算失败，而是把结论放进输出（`found=false` / `timed_out=true`），
+            # 于是这个结果可以直接接判断节点 / 分支，不必再用「失败」表达。
+            #
+            # 超时时 `matches` 固定为空数组：`found` 已经说明等没等到，再回填「超时那一刻
+            # 看到的东西」会让 `present=false`（等待消失）的两种结局长得很像。
+            return ActionResult.succeeded({"found": False, "timed_out": True, "matches": []})
         output = []
         for match in matches:
             value = match.to_dict()
-            value["template"] = str(arguments["template"])
-            value["threshold"] = float(arguments.get("threshold", 0.85))
+            value["template"] = template
+            value["threshold"] = threshold
             if arguments.get("roi") is not None:
                 value["roi"] = list(arguments["roi"])
             output.append(value)
-        return ActionResult.succeeded(output)
+        return ActionResult.succeeded({"found": True, "timed_out": False, "matches": output})
 
 
 class WaitAnyAction(Action):

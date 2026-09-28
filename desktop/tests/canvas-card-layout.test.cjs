@@ -184,22 +184,22 @@ test('内置 manifest 的卡片声明引用真实参数并覆盖全部必填参�
   assert.ok(withCard >= 20, `声明卡片的 manifest 太少：${withCard}`);
 });
 
-test('等待模板的卡片就是用户指定的六个端点', () => {
+test('等待模板的卡片就是用户指定的七个端点', () => {
   const manifest = readManifests().find((item) => item.name === 'vision.wait_template');
   assert.ok(manifest, '缺少 vision.wait_template manifest');
   assert.deepEqual(manifest.card.rows.map((row) => row.label),
-    ['模板', '超时', '存在性', '识别区域', '匹配阈值', '多尺度搜索']);
+    ['模板', '超时', '存在性', '允许超时', '识别区域', '匹配阈值', '多尺度搜索']);
   assert.deepEqual(manifest.card.rows.map((row) => row.param),
-    ['template', 'timeout_seconds', 'present', 'roi', 'threshold', 'scale_search']);
+    ['template', 'timeout_seconds', 'present', 'allow_timeout', 'roi', 'threshold', 'scale_search']);
   // 每个端点的值都能在卡片上直接改：控件类型决定点击动作。
   const spec = { name: manifest.name, parameters: manifest.parameters, card: manifest.card.rows };
   const context = harness([spec]);
   const node = { id: 't', type: 'task', action: 'vision.wait_template', params: {} };
   const pins = Array.from(context.nodeVariablePins(node));
   assert.deepEqual(pins.map((pin) => Rows.paramEditorAction(pin)),
-    ['asset-menu', 'input', 'toggle', 'roi-menu', 'input', 'toggle']);
+    ['asset-menu', 'input', 'toggle', 'toggle', 'roi-menu', 'input', 'toggle']);
   // 值文本按类型给出可读形式；没配置的走清单默认值（超时 10 秒、识别区域整屏）。
   const compact = (value, max = 18) => String(value ?? '').slice(0, max);
   assert.deepEqual(pins.map((pin) => Rows.paramRowValueView(pin, compact).text),
-    ['未设置', '10s', 'true', '0,0 1920×1080', '0.85', 'false']);
+    ['未设置', '10s', 'true', 'false', '0,0 1920×1080', '0.85', 'false']);
 });

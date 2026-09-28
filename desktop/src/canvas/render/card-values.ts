@@ -29,6 +29,7 @@ export function nodeCardSummary(node: CardValueNode): string {
   const parts: string[] = [];
   if (typeof params.present === 'boolean') parts.push(params.present ? '等待出现' : '等待消失');
   if (typeof params.timeout_seconds === 'number') parts.push(`超时 ${params.timeout_seconds}s`);
+  if (params.allow_timeout === true) parts.push('允许超时');
   if (typeof params.threshold === 'number') parts.push(`阈值 ${Math.round(params.threshold * 100)}%`);
   if (parts.length) return parts.join(' · ');
   if (node.type === 'task') return Object.keys(params).length ? `${Object.keys(params).length} 项参数 · 详情栏编辑` : '详情栏编辑参数';

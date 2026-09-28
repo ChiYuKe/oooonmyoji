@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -107,14 +108,24 @@ def test_template_match_actions_declare_structured_array_items(tmp_path: Path) -
     action_dir = tmp_path / "plugins" / "actions"
     action_dir.mkdir(parents=True)
     registry = build_action_registry(action_dir)
-    for action_name in ("vision.match_template", "vision.wait_template"):
-        output = registry.get(action_name).output_schema
-        assert output["type"] == "array"
+
+    def structured_items(output: dict[str, Any]) -> dict[str, Any]:
+        assert output["type"] == "array", output
         item = output["items"]
         assert item["type"] == "object"
         assert item["properties"]["confidence"]["type"] == "number"
         assert item["properties"]["reference"]["minItems"] == 4
         assert item["properties"]["center"]["maxItems"] == 2
+        return item
+
+    structured_items(registry.get("vision.match_template").output_schema)
+    # 等待模板的输出是对象（`found` / `timed_out` / `matches`）：匹配数组挂在 `matches` 上，
+    # 每一项的形状与 `vision.match_template` 完全一致。
+    wait_output = registry.get("vision.wait_template").output_schema
+    assert wait_output["type"] == "object"
+    structured_items(wait_output["properties"]["matches"])
+    assert wait_output["properties"]["found"]["type"] == "boolean"
+    assert wait_output["properties"]["timed_out"]["type"] == "boolean"
 
 
 def test_config_rejects_unknown_instance_reference(tmp_path: Path) -> None:
@@ -303,10 +314,10 @@ def test_builtin_manifests_declare_cards_for_their_required_parameters() -> None
 
     wait_template = [row.param for row in declared["vision.wait_template"]]
     assert wait_template == [
-        "template", "timeout_seconds", "present", "roi", "threshold", "scale_search",
+        "template", "timeout_seconds", "present", "allow_timeout", "roi", "threshold", "scale_search",
     ]
     assert [row.label for row in declared["vision.wait_template"]] == [
-        "模板", "超时", "存在性", "识别区域", "匹配阈值", "多尺度搜索",
+        "模板", "超时", "存在性", "允许超时", "识别区域", "匹配阈值", "多尺度搜索",
     ]
     with_card = [name for name, rows in declared.items() if rows]
     assert len(with_card) >= 20, f"声明卡片的 Action 太少：{with_card}"

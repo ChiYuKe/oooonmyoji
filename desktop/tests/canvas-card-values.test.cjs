@@ -6,6 +6,7 @@ const {nodeCardSummary, compactValue, workflowInputVariableValue, variableValueS
 
 test('nodeCardSummary 优先展示常用参数，其次按节点类型说明', () => {
   assert.equal(nodeCardSummary({type: 'task', params: {present: false, timeout_seconds: 5, threshold: 0.8}}), '等待消失 · 超时 5s · 阈值 80%');
+  assert.equal(nodeCardSummary({type: 'task', params: {present: true, timeout_seconds: 15, allow_timeout: true, threshold: 0.8}}), '等待出现 · 超时 15s · 允许超时 · 阈值 80%');
   assert.equal(nodeCardSummary({type: 'task', params: {a: 1, b: 2}}), '2 项参数 · 详情栏编辑');
   assert.equal(nodeCardSummary({type: 'task', params: {}}), '详情栏编辑参数');
   assert.equal(nodeCardSummary({type: 'root', params: {}}), '工作流入口');

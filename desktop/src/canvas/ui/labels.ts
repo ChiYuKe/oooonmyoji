@@ -63,6 +63,7 @@ const OUTPUT_LABELS: Record<string, string> = {
   revalidated: '是否重新校验', skipped: '是否跳过', verified_gone: '是否确认消失',
   length: '文字长度', timed_out: '是否超时', status: '状态', output: '输出', error: '错误',
   error_category: '错误类别', attempts: '尝试次数',
+  found: '是否等到', matches: '匹配列表',
   received: '是否收到', emitted: '是否已发出', emitted_at: '发出时间', path: '信号文件',
   source_instance: '来源实例',
 };

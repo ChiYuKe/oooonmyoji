@@ -1,5 +1,6 @@
 // 生成无需安装 Node/Python 的 Windows 解压即用目录。
 // 保留仓库目录层级，让嵌入式 Python 的 _pth 同时找到 src 与运行依赖。
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -15,6 +16,12 @@ const resourcesRoot = path.join(outputRoot, 'resources');
 function requirePath(target, label) {
   if (!fs.existsSync(target)) throw new Error(`${label}不存在：${target}`);
   return target;
+}
+
+function run(command, args) {
+  const result = spawnSync(command, args, { stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 function copy(source, target, filter) {
@@ -88,6 +95,7 @@ const productExe = path.join(outputRoot, 'AutoFlow Studio.exe');
 requirePath(electronExe, 'Electron 可执行文件');
 fs.renameSync(electronExe, productExe);
 fs.rmSync(path.join(resourcesRoot, 'default_app.asar'), { force: true });
+run(process.execPath, [path.join(__dirname, 'patch-windows-executable-icon.cjs'), productExe]);
 
 const appRoot = path.join(resourcesRoot, 'app');
 fs.mkdirSync(appRoot, { recursive: true });

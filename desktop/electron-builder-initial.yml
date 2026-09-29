@@ -4,6 +4,8 @@ artifactName: AutoFlow-Studio-Initial-Setup-${version}.${ext}
 directories:
   output: release/initial-installer
 publish: null
+win:
+  icon: ../icon.png
 nsis:
   oneClick: false
   perMachine: false

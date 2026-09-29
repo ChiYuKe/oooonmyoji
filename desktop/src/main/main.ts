@@ -89,8 +89,18 @@ const LIVE_VIEW_INTERVAL_STORE_KEY = 'onmyoji-studio.live-view.interval-ms';
 const WINDOW_STATE_STORE_KEY = 'onmyoji-studio.window-state.v1';
 const DEFAULT_WINDOW_WIDTH = 1560;
 const DEFAULT_WINDOW_HEIGHT = 940;
+const appIconPath = path.join(
+  app.getAppPath(),
+  app.isPackaged ? 'dist' : 'src',
+  'renderer',
+  'assets',
+  'onmyoji-icon.png',
+);
 /** 拖动/缩放时的合并窗口：move 事件很多，逐次同步重写整份布局存储不划算。 */
 const WINDOW_STATE_WRITE_DELAY_MS = 300;
+
+if (process.platform === 'win32') app.setAppUserModelId('com.oooonmyoji.studio');
+
 function readTheme(): AppearanceTheme {
   const value = readLayoutStore()[THEME_STORE_KEY];
   return isAppearanceTheme(value) ? value : 'dark';
@@ -210,6 +220,7 @@ function openVisionTestWindow(instanceId: string): void {
     minHeight: 640,
     show: false,
     frame: false,
+    icon: appIconPath,
     title: '模拟器画面测试工具',
     backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
@@ -292,6 +303,7 @@ function openLiveViewWindow(instanceId: string): void {
     minHeight: 480,
     show: false,
     frame: false,
+    icon: appIconPath,
     title: '实时视觉监视',
     backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
@@ -467,6 +479,7 @@ function createBenchmarkWindow(): BrowserWindow {
     // 不可见 + 不抢焦点：基准不参与正常使用，也不需要鼠标/键盘输入。
     show: false,
     frame: false,
+    icon: appIconPath,
     title: 'AutoFlow Studio Canvas Benchmark',
     backgroundColor: '#141414',
     autoHideMenuBar: true,
@@ -503,6 +516,7 @@ function createWindow(): BrowserWindow {
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     frame: false,
+    icon: appIconPath,
     title: 'AutoFlow Studio',
     backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
@@ -530,6 +544,7 @@ function createWindow(): BrowserWindow {
           minWidth: 320,
           minHeight: 220,
           frame: false,
+          icon: appIconPath,
           title: 'AutoFlow Studio',
           backgroundColor: themeBackground(readTheme()),
           autoHideMenuBar: true,
@@ -603,6 +618,7 @@ function createSetupWindow(): BrowserWindow {
     minHeight: 400,
     show: false,
     frame: false,
+    icon: appIconPath,
     title: 'AutoFlow Studio 初始化',
     backgroundColor: '#151515',
     autoHideMenuBar: true,

@@ -345,17 +345,17 @@ def test_validator_enforces_simple_parallel_shape_and_decorators() -> None:
 def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindings() -> None:
     actions = registry(action_spec(EchoAction()))
     # 子工作流的输入键由编辑器生成（例如 v_<hash>），按实际声明取，避免改一次数据就红。
-    child_workflow = Path(__file__).resolve().parents[1] / "workflows" / f"活动副本{WORKFLOW_SUFFIX}"
+    child_workflow = Path(__file__).resolve().parents[1] / "workflows" / f"御魂组队_队长{WORKFLOW_SUFFIX}"
     child_inputs = list(parse_document(child_workflow.read_text(encoding="utf-8"), path=child_workflow.name).get("inputs", {}))
-    assert child_inputs, "活动副本应当至少声明一个输入"
+    assert child_inputs, "御魂组队_队长应当至少声明一个输入"
     child_input = child_inputs[0]
     valid = tree([
         {
             "id": "run_all",
             "type": "instance_parallel",
             "runs": [
-                {"instance": "mumu-0", "workflow": "活动副本.json", "inputs": {child_input: {"ref": "inputs.运行轮数"}}},
-                {"instance": "mumu-1", "workflow": "活动副本.json", "inputs": {}},
+                {"instance": "mumu-0", "workflow": "御魂组队_队长.owf", "inputs": {child_input: {"ref": "inputs.运行轮数"}}},
+                {"instance": "mumu-1", "workflow": "御魂组队_队长.owf", "inputs": {}},
             ],
             "wait_for": "all",
             "cancel_on_failure": True,
@@ -367,8 +367,8 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
 
     duplicate = tree([
         {"id": "run_all", "type": "instance_parallel", "runs": [
-            {"instance": "mumu-0", "workflow": "活动副本.json"},
-            {"instance": "mumu-0", "workflow": "活动副本.json"},
+            {"instance": "mumu-0", "workflow": "御魂组队_队长.owf"},
+            {"instance": "mumu-0", "workflow": "御魂组队_队长.owf"},
         ]},
     ], "run_all")
     with pytest.raises(ConfigError, match="more than once"):
@@ -376,7 +376,7 @@ def test_validator_accepts_instance_parallel_and_restricts_cross_instance_bindin
 
     output_binding = tree([
         {"id": "run_all", "type": "instance_parallel", "runs": [
-            {"instance": "mumu-0", "workflow": "活动副本.json", "inputs": {child_input: {"ref": "nodes.some.output.value"}}},
+            {"instance": "mumu-0", "workflow": "御魂组队_队长.owf", "inputs": {child_input: {"ref": "nodes.some.output.value"}}},
         ]},
     ], "run_all")
     with pytest.raises(ConfigError, match="only reference inputs"):

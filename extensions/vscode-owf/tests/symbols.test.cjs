@@ -17,7 +17,7 @@ installVscodeStub();
 const { modelFor } = require('../src/model');
 const symbols = require('../src/symbols');
 const structureTree = require('../src/features/structureTree');
-const { readWorkflow } = require('./helpers/repo.cjs');
+const { readWorkflow, readFixture } = require('./helpers/repo.cjs');
 
 test('目标引脚包含 `in`、参数名与该节点类型的特殊口', () => {
   const condition = { id: 'c', type: 'condition', params: { threshold: 0.8 }, expression: {} };
@@ -52,15 +52,15 @@ test('源引脚：判断口给 true/false，执行口给 then.0', () => {
 });
 
 test('大纲按语义分组，节点组内保持文件顺序', () => {
-  const text = readWorkflow('活动副本.owf');
-  const model = modelFor(documentOf(text, 'E:/项目/workflows/活动副本.owf'));
-  assert.equal(model.ok, true, '活动副本.owf 应解析成功');
+  const text = readFixture('kitchen.owf');
+  const model = modelFor(documentOf(text, 'E:/项目/tests/fixtures/dsl/kitchen.owf'));
+  assert.equal(model.ok, true, 'kitchen.owf 应解析成功');
 
   const roots = symbols.documentSymbols(model, { showVariables: true });
   assert.equal(roots.length, 1);
   const root = roots[0];
-  assert.equal(root.name, 'activity_loop', '根符号名取自工作流头行');
-  assert.equal(root.detail, '4.4.0', '详情取自 version');
+  assert.equal(root.name, 'kitchen', '根符号名取自工作流头行');
+  assert.equal(root.detail, '2.1.0', '详情取自 version');
 
   const groupNames = root.children.map((child) => child.name.replace(/（\d+）/, ''));
   assert.deepEqual(groupNames, ['节点', '变量', '文档块', '分组 / 注释', '连线']);
@@ -75,8 +75,8 @@ test('大纲按语义分组，节点组内保持文件顺序', () => {
 });
 
 test('关掉 showVariables 后只留节点与连线', () => {
-  const text = readWorkflow('多开御魂.owf');
-  const model = modelFor(documentOf(text, 'E:/项目/workflows/多开御魂.owf'));
+  const text = readWorkflow('御魂组队_双开.owf');
+  const model = modelFor(documentOf(text, 'E:/项目/workflows/御魂组队_双开.owf'));
   const roots = symbols.documentSymbols(model, { showVariables: false });
   assert.deepEqual(roots[0].children.map((child) => child.name.replace(/（\d+）/, '')), ['节点', '连线']);
 });
@@ -125,8 +125,8 @@ test('结构树按执行顺序展开，并按 then.<下标> 排序', () => {
 });
 
 test('结构树标出子工作流引用、装饰器与数据边', () => {
-  const text = readWorkflow('多开御魂.owf');
-  const model = modelFor(documentOf(text, 'E:/项目/workflows/多开御魂.owf'));
+  const text = readWorkflow('御魂组队_双开.owf');
+  const model = modelFor(documentOf(text, 'E:/项目/workflows/御魂组队_双开.owf'));
   const rendered = structureTree.renderTree(model).join('\n');
 
   assert.match(rendered, /\[instance_parallel\]/, '应标出节点类型');

@@ -69,13 +69,16 @@ test('阶段 8：菜单与快捷键指向同一条命令', () => {
   const bridge = read('src/canvas/interactions/input-bridge.ts');
   assert.match(bridge, /matchesShortcut\(event, 'editor\.viewportBack'\)[^\n]*executeEditorCommand\('viewportBack'\)/);
   assert.match(bridge, /matchesShortcut\(event, 'editor\.viewportForward'\)[^\n]*executeEditorCommand\('viewportForward'\)/);
-  // 空白处右键只负责加节点：这些命令各有唯一入口——视口工具条的内联按钮、工具栏 ⋮ 菜单
-  // 与快捷键，三处指向同一条命令（右键菜单不再抄一遍）。
+  // 空白处右键只负责加节点：这些命令各有唯一入口——快捷键经命令派发直达编辑器句柄
+  // （视口工具条已精简为缩放显示，不再单设后退/前进按钮；右键菜单也不抄一遍）。
   const editor = read('src/canvas/editor.ts');
   assert.doesNotMatch(editor, /label: '画布后退/, '右键菜单不再重复视口导航');
   assert.doesNotMatch(editor, /label: '重建布局/, '右键菜单不再重复布局修复');
-  assert.match(editor, /if \(back\) back\.addEventListener\('click', \(\) => \{ if \(!viewportBack\(\)\) toast\('已经是最早的位置'\); \}\);/);
-  assert.match(editor, /if \(forward\) forward\.addEventListener\('click', \(\) => \{ if \(!viewportForward\(\)\) toast\('已经是最新的位置'\); \}\);/);
+  assert.match(editor, /viewportBack: \(\) => viewportBack\(\)/, '视口后退命令在编辑器句柄里只有一条出口');
+  assert.match(editor, /viewportForward: \(\) => viewportForward\(\)/, '视口前进命令在编辑器句柄里只有一条出口');
+  const dispatch = read('src/canvas/state/editor-command-dispatch.ts');
+  assert.match(dispatch, /command === 'viewportBack'\) viewportBack\(\);/, '快捷键与命令派发指向同一条视口后退');
+  assert.match(dispatch, /command === 'viewportForward'\) viewportForward\(\);/, '快捷键与命令派发指向同一条视口前进');
   const toolbar = read('src/canvas/toolbar.ts');
   assert.match(toolbar, /label: '下一个问题 \(F8\)'/);
   assert.match(toolbar, /label: '上一个问题 \(Shift\+F8\)'/);

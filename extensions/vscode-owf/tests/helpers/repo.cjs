@@ -67,4 +67,10 @@ function readWorkflow(name) {
   return fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 }
 
-module.exports = { REPO_ROOT, EXTENSION_ROOT, CANONICAL_HEADLESS, allWorkflowFiles, contractCases, readWorkflow };
+/** 读一个共享 DSL 夹具（`tests/fixtures/dsl`，统一成 LF）。 */
+function readFixture(name) {
+  const file = path.join(REPO_ROOT, 'tests', 'fixtures', 'dsl', name);
+  return fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+}
+
+module.exports = { REPO_ROOT, EXTENSION_ROOT, CANONICAL_HEADLESS, allWorkflowFiles, contractCases, readWorkflow, readFixture };

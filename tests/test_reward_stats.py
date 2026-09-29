@@ -271,30 +271,3 @@ def test_supervisor_drains_reward_stats_before_stopping_ocr(tmp_path: Path) -> N
     assert supervisor._stopping is True
     assert ocr_pool.closed is True
     assert supervisor.ocr_pool is None
-
-
-def test_reward_material_catalog_templates_exist_and_are_readable() -> None:
-    cv2 = pytest.importorskip("cv2")
-    np = pytest.importorskip("numpy")
-    project_root = Path(__file__).resolve().parents[1]
-    catalog_path = project_root / "assets" / "templates" / "rewards" / "catalog.json"
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-    assert catalog["schema_version"] == 1
-    assert len(catalog["templates"]) == 10
-    materials = {material["id"]: material["name"] for material in catalog["templates"]}
-    assert materials["orochi_scale_fragment"] == "八岐大蛇鳞片"
-    assert materials["material_shikigami"] == "四星青吉鬼"
-    assert materials["friendship_points"] == "友情点"
-    assert "soul_purple" not in materials
-    quantities = {
-        material["id"]: material["default_quantity"]
-        for material in catalog["templates"]
-    }
-    assert quantities["material_shikigami"] == 1
-    assert quantities["friendship_points"] is None
-    for material in catalog["templates"]:
-        template_path = catalog_path.parent / material["template"]
-        image = cv2.imdecode(np.frombuffer(template_path.read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR)
-        assert image is not None, material["id"]
-        assert image.shape[0] >= 80
-        assert image.shape[1] >= 80

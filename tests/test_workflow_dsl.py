@@ -30,7 +30,7 @@ from src.oooonmyoji.workflows.dsl import (
 from src.oooonmyoji.workflows.graph_compile import compile_graph
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_FILES = ("活动副本.owf", "结界突破_寮突.owf")
+WORKFLOW_FILES = ("御魂组队.owf", "御魂组队_队长.owf", "御魂组队_队员.owf", "御魂组队_双开.owf")
 GRAPH_RULES_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "graph-rules" / "cases.json"
 KITCHEN_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "dsl" / "kitchen.owf"
 

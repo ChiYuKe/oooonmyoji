@@ -33,7 +33,7 @@ test('打包产物与 desktop/src/shared/workflow 源码一致（--check）', ()
 
 test('仓库内所有 .owf 都能解析，且 emit 是规范形式', () => {
   const files = allWorkflowFiles();
-  assert.ok(files.length >= 8, `至少应找到 8 个 .owf，实际 ${files.length}`);
+  assert.ok(files.length >= 5, `至少应找到 5 个 .owf，实际 ${files.length}`);
 
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf8');
@@ -99,8 +99,8 @@ test('解析失败时给出可用的行列定位与原文行', () => {
 });
 
 test('只读文档头就能拿到工作流 id', () => {
-  const text = fs.readFileSync(path.join(REPO_ROOT, 'workflows', '多开御魂.owf'), 'utf8');
-  assert.equal(parser.readDocumentId(text), 'two_souls');
+  const text = fs.readFileSync(path.join(REPO_ROOT, 'workflows', '御魂组队_双开.owf'), 'utf8');
+  assert.equal(parser.readDocumentId(text), 'souls_party_duo');
   // 头行缺失时不应抛异常，只返回 null。
   assert.equal(parser.readDocumentId('node a task\n'), null);
 });

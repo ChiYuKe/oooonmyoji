@@ -14,7 +14,7 @@ const path = require('node:path');
 
 const scanner = require('../src/scanner');
 const parser = require('../src/parser');
-const { allWorkflowFiles, readWorkflow } = require('./helpers/repo.cjs');
+const { allWorkflowFiles, readFixture } = require('./helpers/repo.cjs');
 
 test('扫描出的节点 id 与解析结果完全一致（含变量节点的派生 id）', () => {
   for (const file of allWorkflowFiles()) {
@@ -99,10 +99,12 @@ test('变量节点按 `var <scope>.<key>` 派生 id，键里的点归键所有',
 });
 
 test('分组、注释框与通用块条目都能被识别', () => {
-  const scanned = scanner.scan(readWorkflow('活动副本.owf'));
-  assert.ok(scanned.groups.length >= 1, '活动副本.owf 应有节点组');
+  const scanned = scanner.scan(readFixture('kitchen.owf'));
+  assert.ok(scanned.groups.length >= 1, 'kitchen.owf 应有节点组');
   assert.ok(scanned.containers.some((entry) => entry.key === 'inputs'), '应识别 inputs 块');
-  assert.ok(scanned.containers.some((entry) => entry.key === 'variables'), '应识别 variables 块');
+  // 空 `variables: {}` 在文本里写成 `{}`，扫描器按文档键处理而不是容器；
+  // 变量节点（`var inputs.…`）单独收进 `scanned.variables`。
+  assert.ok(scanned.variables.length >= 1, '应识别 var 变量节点');
 
   const inputs = scanned.containers.find((entry) => entry.key === 'inputs');
   assert.ok(inputs.entries.length >= 1, 'inputs 块内应有条目');

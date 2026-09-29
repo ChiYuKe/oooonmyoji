@@ -35,15 +35,6 @@ workflow souls_party_member
     at: [220, 0]
   node loop state_machine 队员循环
     at: [160, 144]
-    cases:
-      - value: invite
-        child: invite_handler
-      - value: room
-        child: idle_handler
-      - value: lineup
-        child: lineup_handler
-      - value: reward
-        child: reward_handler
     states:
       - name: invite
         template: assets/templates/souls/party/invite-accept-button.png

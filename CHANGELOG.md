@@ -951,6 +951,22 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **御魂组队工作流回归可编译的规范形式**：`御魂组队_队员.owf` 的 `state_machine` 节点残留了一段
+  `cases:` 块——状态机按 `case.<下标>` 连边、状态名只在 `states` 里声明，节点上写 `cases`
+  编译期直接报错，已删除；`御魂组队.owf` 规范化为 emit 不动点（删多余空行、省略默认引脚
+  `then.0`）。`御魂组队_队长.owf` 补上双开入口传入的 `队友实例` / `邀请信号` 两个输入声明
+  （此前 `双开.owf` 向队长传未声明输入，校验报 `undeclared child inputs`）。四个示例工作流
+  现在都能通过「规范形式 + 编译」双检查。
+- **测试基线与清理后的仓库一致**：`test_workflow_dsl.py` 的 `WORKFLOW_FILES` 换成现存四个御魂组队
+  工作流；`test_workflows.py` 的实例并行用例改读 `御魂组队_队长.owf` 并把 run 引用指到现存文件；
+  删除两个引用已删资源的失效测试（`test_realm_raid_workflow.py`、奖励素材目录 catalog 校验）——
+  奖励素材目录本就是可选加载（代码里带 try/catch），不再强校验。VS Code 扩展测试的夹具引用从
+  已删除的 `活动副本.owf` / `多开御魂.owf` 迁到 `tests/fixtures/dsl/kitchen.owf` 与
+  `御魂组队_双开.owf`，仓库 .owf 数量下限随样本规模调到 5。
+- **恢复被误删的格式规范文档**：`docs/workflow-dsl-v6.md` / `docs/graph-document-v5.md` /
+  `docs/README.md` / `docs/mcp-client-config.example.json` 从历史恢复，并补齐 `state_machine`
+  （`states` / `terminal_states` / `state_timeout_seconds` / `allow_ocr` / `case.<下标>` 连边）
+  与 `force_success` 装饰器的说明；仓库内 README 与工作流目录的文档链接随之恢复。
 - **逐步截图给"没碰屏幕"的步骤也各存一张，一次运行多出好几张一模一样的图**：顶层
   `step-<节点id>.png` 原本每一步都存，于是根 / 顺序 / 选择 / 判断 / 拆分这些自己既不抓屏也不点击的
   节点也各留一张，内容就是上一帧的复制品 —— 一次 8 步的运行里 7 张 `step-*.png` 有 5 张完全相同

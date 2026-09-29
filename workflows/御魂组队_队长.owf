@@ -51,7 +51,7 @@ workflow souls_party_captain
   node break_1 break
     at: [-176, -56]
   node task_1 task
-    at: [-544, 456]
+    at: [-864, 472]
     action: vision.wait_any
     params:
       templates: [assets/templates/task_1-templates.png]
@@ -60,7 +60,7 @@ workflow souls_party_captain
   node sequence_1 sequence
     at: [40, 200]
   node task_3 task
-    at: [-168, 448]
+    at: [-488, 464]
     action: input.tap_match
     params:
       verify_gone: true
@@ -70,7 +70,7 @@ workflow souls_party_captain
   node sequence_2 sequence
     at: [464, -416]
   node task_4 task
-    at: [168, 512]
+    at: [-152, 528]
     action: vision.wait_template
     params:
       template: assets/templates/task_4-templates.png
@@ -78,18 +78,37 @@ workflow souls_party_captain
       timeout_seconds: 3
       roi: [476, 121, 962, 817]
   node task_5 task
-    at: [488, 480]
+    at: [168, 496]
+    action: input.tap_match
+    params:
+      verify_gone: false
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+      random_interval: [0.2, 0.5]
+  node task_6 task
+    at: [472, 536]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_6-template.png
+      present: true
+      timeout_seconds: 3
+      roi: [522, 756, 888, 175]
+  node task_7 task
+    at: [808, 520]
     action: input.tap_match
     params:
       verify_gone: true
       random_offset: 20
       disappeared_state_timeout_seconds: 1
       random_interval: [0.2, 0.5]
+  node sequence_5 sequence
+    at: [544, -280]
   edges:
     break_1:out.found -> condition_1:condition
     wait_floor_from_map:out -> break_1:ref
     task_1:out.match -> task_3:match
     task_4:out.matches.0 -> task_5:match
+    task_6:out.matches.0 -> task_7:match
     root -> sequence_2
     map_seq -> wait_floor_from_map
     map_seq:then.1 -> condition_1
@@ -99,4 +118,7 @@ workflow souls_party_captain
     sequence_1:then.1 -> task_3
     sequence_1:then.2 -> task_4
     sequence_1:then.3 -> task_5
+    sequence_1:then.4 -> task_6
+    sequence_1:then.5 -> task_7
     sequence_2 -> map_seq
+    sequence_2:then.1 -> sequence_5

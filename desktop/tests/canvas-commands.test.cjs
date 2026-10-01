@@ -190,19 +190,20 @@ test('判断节点：真/假口各接一个子节点，口位与 children 对齐
   assert.equal(Object.hasOwn(condition, 'ports'), false);
 });
 
-test('复制粘贴只落卡片：执行连线与「指向别的节点」的引用都不带', () => {
+test('复制粘贴只复制选中的节点：子孙节点与执行连线都不带', () => {
   const h = harness(tree());
   h.state.raw.nodes[3].params = {value: {ref: 'nodes.a.output.value'}, literal: 3};
-  h.state.selected = new Set(['seq']);
+  h.state.selected = new Set(['seq', 'b']);
   assert.equal(h.commands.copySelection(), true);
   h.commands.pasteClipboard({x: 40, y: 40});
   const copy = h.state.raw.nodes.find((node) => node.id === 'seq_1');
   assert.ok(copy);
   assert.deepEqual(copy.children, [], '执行连线不带过来：children 清空，自己接');
-  assert.deepEqual([...h.state.selected].sort(), ['a_1', 'b_1', 'seq_1'], '子树仍然一起复制出来（只是不连线）');
+  assert.deepEqual([...h.state.selected].sort(), ['b_1', 'seq_1'], '只粘贴明确选中的两个节点，不自动复制未选中的子孙节点');
+  assert.equal(h.state.raw.nodes.some((node) => node.id === 'a_1'), false, '未选中的后代节点不会复制');
   assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'b_1').params, {literal: 3},
     '指向另一个节点的引用也摘掉，字面量照旧');
-  assert.deepEqual(h.toasts.at(-1), ['已粘贴 3 个节点（没带连线）', false]);
+  assert.deepEqual(h.toasts.at(-1), ['已粘贴 2 个节点（没带连线）', false]);
 });
 
 test('复制粘贴保留变量绑定：它是「取值来自哪个变量」，不是节点之间的线', () => {

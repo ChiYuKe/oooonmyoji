@@ -465,7 +465,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
   }
 
   /**
-   * 把选中子树打包成剪贴板内容（节点 + 布局 + 引用到的变量与卡片），并存进画布状态。
+   * 把指定节点打包成剪贴板内容（节点 + 布局 + 引用到的变量与卡片），并存进画布状态。
    *
    * `keepEdges` 决定粘贴时是否重建子树内部的执行连线：复制为 false（只带卡片），
    * 剪切为 true（搬走这一段，结构跟着回来）。
@@ -522,9 +522,9 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return `card_${index}`;
   }
 
-  /** 把选中节点及其子树复制到画布剪贴板（粘贴时只落卡片，连线不带过去）。 */
+  /** 只复制当前选中的节点；粘贴时落下卡片，连线不带过去。 */
   function copySelection(): boolean {
-    const ids = selectionTreeIds();
+    const ids = new Set([...state.selected].filter((id) => id !== state.raw?.root && nodeById(id)?.type !== 'root'));
     if (ids.size === 0) {
       toast('请先选择要复制的节点', true);
       return false;

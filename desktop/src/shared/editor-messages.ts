@@ -275,7 +275,7 @@ export interface CanvasClipboardPayload {
   version: 1;
   /** 复制来源文档 URI：同文档粘贴不补变量/卡片（源文档里本来就有）。 */
   sourceUri: string;
-  /** 被复制的节点（含子树）。节点结构由画布侧宽松处理，这里只保证是对象数组。 */
+  /** 被复制的选中节点（不自动包含后代）。节点结构由画布侧宽松处理，这里只保证是对象数组。 */
   nodes: any[];
   /** 节点 id → 世界坐标。 */
   layout: Record<string, { x: number; y: number }>;

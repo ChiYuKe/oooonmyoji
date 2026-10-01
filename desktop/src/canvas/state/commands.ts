@@ -13,6 +13,7 @@ import {
 } from '../model/exec-ports';
 import { isGroupBoundaryNode } from '../model/node-groups';
 import { NODE_TYPES } from '../../shared/workflow/types';
+import { nextNodeId } from '../../shared/workflow/node-identifiers';
 
 export interface PointerPoint {
   x: number;
@@ -99,9 +100,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
 
   function nextId(prefix = 'node'): string {
     const used = new Set(nodes().map((node) => node.id));
-    let index = 1;
-    while (used.has(`${prefix}_${index}`)) index += 1;
-    return `${prefix}_${index}`;
+    return nextNodeId(prefix, used);
   }
 
   function parentOf(childId: string): { node: any; index: number } | null {
@@ -324,12 +323,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       node._nodeType = type;
       return node;
     }
-    const prefix = type === 'simple_parallel' ? 'parallel'
-      : type === 'instance_parallel' ? 'instances'
-        : type === 'bool_judge' ? 'bool'
-          : type === 'break' ? 'break'
-            : type;
-    const node: any = { id: nextId(prefix), type, children: [] };
+    const node: any = { id: nextId(type), type, children: [] };
     if (type === 'task') {
       delete node.children;
       node.action = state.catalog[0] ? state.catalog[0].name : 'core.capture';
@@ -567,10 +561,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     const used = new Set(nodes().map((node) => node.id));
     const idMap = new Map<string, string>();
     for (const src of payload.nodes) {
-      const prefix = (src.id || 'node').replace(/_\d+$/, '') || 'node';
-      let index = 1;
-      let candidate = `${prefix}_${index}`;
-      while (used.has(candidate)) { index += 1; candidate = `${prefix}_${index}`; }
+      const candidate = nextNodeId(src.type, used);
       used.add(candidate);
       idMap.set(src.id, candidate);
     }
@@ -596,7 +587,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
         if (Array.isArray(item)) return item.forEach(remap);
         if (!item || typeof item !== 'object') return;
         if (typeof item.ref === 'string') {
-          for (const [oldId, newId] of idMap) item.ref = item.ref.replace(`nodes.${oldId}.output.`, `nodes.${newId}.output.`);
+          item.ref = item.ref.replace(/^nodes\.([^.]+)\.output(?=\.|$)/, (_: string, oldId: string) => `nodes.${idMap.get(oldId) || oldId}.output`);
         }
         Object.values(item).forEach(remap);
       };

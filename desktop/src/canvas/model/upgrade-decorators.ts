@@ -9,6 +9,8 @@
  * 载入文档时就地跑（`migrateDocument`），让老文件"能打开也能直接保存/运行"。
  */
 
+import { nextNodeId } from '../../shared/workflow/node-identifiers';
+
 const CONDITION = 'condition';
 /** 与「判断节点落在父与子之间」的同一套落点规则。 */
 const MIDPOINT_Y_OFFSET = 24;
@@ -22,14 +24,8 @@ function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function uniqueId(nodeId: string, used: Set<string>): string {
-  const base = `${nodeId}_cond`;
-  let candidate = base;
-  let index = 2;
-  while (used.has(candidate)) {
-    candidate = `${base}${index}`;
-    index += 1;
-  }
+function uniqueId(used: Set<string>): string {
+  const candidate = nextNodeId(CONDITION, used);
   used.add(candidate);
   return candidate;
 }
@@ -66,7 +62,7 @@ export function upgradeConditionDecorators(raw: unknown): number {
     let childId = nodeId;
     for (let index = conditions.length - 1; index >= 0; index -= 1) {
       const decorator = conditions[index];
-      const judgeId = uniqueId(conditions.length === 1 ? nodeId : `${nodeId}_c${index + 1}`, usedIds);
+      const judgeId = uniqueId(usedIds);
       const judge: Record<string, any> = {
         id: judgeId,
         type: CONDITION,

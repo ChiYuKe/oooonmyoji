@@ -196,12 +196,12 @@ test('复制粘贴只复制选中的节点：子孙节点与执行连线都不�
   h.state.selected = new Set(['seq', 'b']);
   assert.equal(h.commands.copySelection(), true);
   h.commands.pasteClipboard({x: 40, y: 40});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'seq_1');
+  const copy = h.state.raw.nodes.find((node) => node.id === 'sequence_1');
   assert.ok(copy);
   assert.deepEqual(copy.children, [], '执行连线不带过来：children 清空，自己接');
-  assert.deepEqual([...h.state.selected].sort(), ['b_1', 'seq_1'], '只粘贴明确选中的两个节点，不自动复制未选中的子孙节点');
-  assert.equal(h.state.raw.nodes.some((node) => node.id === 'a_1'), false, '未选中的后代节点不会复制');
-  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'b_1').params, {literal: 3},
+  assert.deepEqual([...h.state.selected].sort(), ['sequence_1', 'task_1'], '只粘贴明确选中的两个节点，不自动复制未选中的子孙节点');
+  assert.equal(h.state.raw.nodes.some((node) => node.id === 'task_2'), false, '未选中的后代节点不会复制');
+  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'task_1').params, {literal: 3},
     '指向另一个节点的引用也摘掉，字面量照旧');
   assert.deepEqual(h.toasts.at(-1), ['已粘贴 2 个节点（没带连线）', false]);
 });
@@ -223,10 +223,10 @@ test('复制粘贴保留变量绑定：它是「取值来自哪个变量」，�
   h.state.selected = new Set(['a']);
   h.commands.copySelection();
   h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'a_1');
+  const copy = h.state.raw.nodes.find((node) => node.id === 'task_1');
   assert.deepEqual(copy.params, {template: {ref: 'inputs.模板'}, threshold: 0.9},
     '摘掉指向 src 的引用；变量绑定与字面量照旧');
-  assert.equal(h.state.raw._variableLinks['a_1:template'], 'var__inputs__模板', '副本的变量绑定仍然接着卡片');
+  assert.equal(h.state.raw._variableLinks['task_1:template'], 'var__inputs__模板', '副本的变量绑定仍然接着卡片');
 });
 
 test('复制粘贴判断节点不再带口位（连线不带过来）', () => {
@@ -238,7 +238,7 @@ test('复制粘贴判断节点不再带口位（连线不带过来）', () => {
   h.state.selected = new Set(['judge']);
   h.commands.copySelection();
   h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'judge_1');
+  const copy = h.state.raw.nodes.find((node) => node.id === 'condition_1');
   assert.deepEqual(copy.children, [], '判断节点粘出来是空的，口位也就没有意义');
   assert.equal(Object.hasOwn(copy, 'ports'), false, 'ports 与 children 一起清掉，不会留一个对不上的口位');
   assert.equal(copy.expression, true, '表达式这类配置照旧带过来');
@@ -255,7 +255,7 @@ test('复制粘贴 switch 不再带 cases.child 与 default_child', () => {
   h.state.selected = new Set(['pick']);
   h.commands.copySelection();
   h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'pick_1');
+  const copy = h.state.raw.nodes.find((node) => node.id === 'switch_1');
   assert.deepEqual(copy.children, [], '分支连线不带过来');
   assert.deepEqual(copy.cases, [{value: 'a'}], '分支取值保留，指向子节点的字段清掉（不会指向旧 id）');
   assert.equal(Object.hasOwn(copy, 'default_child'), false);
@@ -267,9 +267,9 @@ test('剪切粘贴保留子树内部连线与数据绑定（搬走这一段）',
   h.state.selected = new Set(['seq']);
   assert.equal(h.commands.cutSelection(), true);
   h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'seq_1');
-  assert.deepEqual(copy.children, ['a_1', 'b_1'], '剪切是搬走：子树内部连线跟着回来');
-  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'b_1').params, {value: {ref: 'nodes.a_1.output.value'}},
+  const copy = h.state.raw.nodes.find((node) => node.id === 'sequence_1');
+  assert.deepEqual(copy.children, ['task_1', 'task_2'], '剪切是搬走：子树内部连线跟着回来');
+  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'task_2').params, {value: {ref: 'nodes.task_1.output.value'}},
     '绑定跟着回来，并且指向同批搬过来的节点');
   assert.deepEqual(h.toasts.at(-1), ['已粘贴 3 个节点', false]);
 });
@@ -331,17 +331,17 @@ test('跨画布粘贴：目标文档补上被引用的输入与变量卡片，�
   target.state.clipboard = payload;
 
   assert.equal(target.commands.pasteClipboard({x: 400, y: 300}), true);
-  const pasted = target.state.raw.nodes.find((node) => node.id === 'a_1');
+  const pasted = target.state.raw.nodes.find((node) => node.id === 'task_1');
   assert.ok(pasted, '新文档里生成重命名后的节点');
   assert.deepEqual(pasted.params, {value: {ref: 'inputs.运行轮次'}});
   assert.deepEqual(target.state.raw.inputs['运行轮次'], {type: 'integer', default: 3}, '输入定义被补进目标文档');
-  assert.deepEqual(target.state.raw._layout.a_1, {x: 400, y: 300}, '锚点是剪贴板包围盒左上角，所以落在鼠标处');
+  assert.deepEqual(target.state.raw._layout.task_1, {x: 400, y: 300}, '锚点是剪贴板包围盒左上角，所以落在鼠标处');
   const cardIds = Object.keys(target.state.raw._variableCards);
   assert.equal(cardIds.length, 1);
   assert.deepEqual(target.state.raw._variableCards[cardIds[0]], {
     name: '运行轮次', scope: 'inputs', x: 490, y: 480,
   }, '变量卡片跟着整组一起偏移');
-  assert.equal(target.state.raw._variableLinks['a_1:value'], cardIds[0], '连线项按新节点 id 补上');
+  assert.equal(target.state.raw._variableLinks['task_1:value'], cardIds[0], '连线项按新节点 id 补上');
 });
 
 test('同文档粘贴不重复补变量与卡片', () => {
@@ -378,5 +378,5 @@ test('目标文档已有同名变量时以目标为准；已有卡片时也只�
 
   assert.deepEqual(target.state.raw.inputs['运行轮次'], {type: 'string', default: '目标自己的定义'}, '不覆盖目标文档的定义');
   assert.deepEqual(Object.keys(target.state.raw._variableCards), ['card_9'], '不新建重复卡片');
-  assert.equal(target.state.raw._variableLinks['a_1:value'], 'card_9', '直接把新节点接到已有卡片上');
+  assert.equal(target.state.raw._variableLinks['task_1:value'], 'card_9', '直接把新节点接到已有卡片上');
 });

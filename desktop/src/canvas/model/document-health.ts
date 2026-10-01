@@ -3,11 +3,12 @@
  *
  * 两条原则：
  * 1. **迁移只改能被 v4 解释的那几个字段**（废弃的 `public`、缺 schema_version/version、
- *    已删除的 `condition` 装饰器），不猜测用户的意图；调用方把它包进 `mutate`，
+ *    已删除的 `condition` 装饰器与内部节点标识），不猜测用户的意图；调用方把它包进 `mutate`，
  *    所以迁移本身可以 Ctrl+Z 撤销。
  * 2. **布局异常只重建布局**：绝不因为坐标坏了就动节点/参数/连线数据——那些是用户的劳动成果。
  */
 import { upgradeConditionDecorators } from './upgrade-decorators';
+import { normalizeNodeIdentifiers } from '../../shared/workflow/node-identifiers';
 
 export interface MigrationOutcome {
   /** 是否真的改了东西。 */
@@ -30,7 +31,8 @@ function isRecord(value: unknown): value is Record<string, any> {
  * - 缺 `version` → 补 `4.0.0`；
  * - 定义上的 `public` 字段（v4 已移除，运行时按 additionalProperties 拒绝）→ 删掉，
  *   并在定义上留 `_migratedPublic` 说明来处，方便用户回查；
- * - 已删除的 `condition` 装饰器 → 换成等价的判断节点（`判断(真口 → N)`）。
+ * - 已删除的 `condition` 装饰器 → 换成等价的判断节点（`判断(真口 → N)`）；
+ * - 旧节点标识 → 类型与正整数编号，原子同步文档内所有引用。
  */
 export function migrateDocument(raw: any): MigrationOutcome {
   const steps: string[] = [];
@@ -71,6 +73,11 @@ export function migrateDocument(raw: any): MigrationOutcome {
   // `condition` 装饰器已删除（判断节点取代它）：老文档载入时就地升级，否则"能打开但不能运行"。
   const upgraded = upgradeConditionDecorators(raw);
   if (upgraded) steps.push(`把 ${upgraded} 个 condition 装饰器升级为判断节点`);
+  // Missing/duplicate identities are ambiguous; leave them for normal validation.
+  try {
+    const ids = normalizeNodeIdentifiers(raw);
+    if (ids.size) steps.push(`统一 ${ids.size} 个内部节点标识并同步引用`);
+  } catch { /* Do not guess which duplicate node a reference belongs to. */ }
   return { changed: steps.length > 0, steps };
 }
 

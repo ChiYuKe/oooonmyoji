@@ -2,6 +2,7 @@ import type { CanvasState } from '../state/canvas-state';
 import type { MenuEntry } from '../ui/overlays';
 import { groupCardPosition, groupVariableCardIds } from '../canvas/card-follow-layout';
 import { GROUP_ENTRY_TYPE, GROUP_EXIT_TYPE } from '../../shared/workflow/types';
+import { nextNodeId } from '../../shared/workflow/node-identifiers';
 import { conditionPortsOf } from './exec-ports';
 import { summarizeNodeGroupRun } from './node-group-runtime';
 
@@ -543,9 +544,7 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
     const used = new Set(nodes().map((node) => String(node.id)));
     const created: any[] = [];
     const nextBoundaryId = (type: string): string => {
-      let index = 1;
-      while (used.has(`${type}_${index}`)) index += 1;
-      const id = `${type}_${index}`;
+      const id = nextNodeId(type, used);
       used.add(id);
       return id;
     };
@@ -932,10 +931,8 @@ export function createNodeGroups(deps: NodeGroupsDeps) {
   }
 
   function nextId(): string {
-    let index = 1;
     const used = new Set([...nodes().map((node) => String(node.id)), ...groups().map((group) => group.id)]);
-    while (used.has(`node_group_${index}`)) index += 1;
-    return `node_group_${index}`;
+    return nextNodeId('node_group', used);
   }
 
   function groupSelection(): boolean {

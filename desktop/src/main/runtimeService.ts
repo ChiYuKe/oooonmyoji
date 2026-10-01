@@ -35,6 +35,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private stopRequested = false;
   private stopGeneration = 0;
   private watchTimer: NodeJS.Timeout | undefined;
+  private watchFinishTimer: NodeJS.Timeout | undefined;
   private watchedFiles = new Map<string, { offset: number; instanceId: string; pending: string }>();
 
   constructor(private readonly project: ProjectService) {
@@ -322,7 +323,11 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
   private finishWatching(): void {
     this.tickWatcher();
-    setTimeout(() => {
+    if (this.watchFinishTimer) clearTimeout(this.watchFinishTimer);
+    const watchedFiles = this.watchedFiles;
+    this.watchFinishTimer = setTimeout(() => {
+      // A previous run's delayed drain must never stop a newer run's watcher.
+      if (this.watchedFiles !== watchedFiles) return;
       this.tickWatcher();
       this.stopWatching();
     }, 1400);
@@ -330,7 +335,9 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
   private stopWatching(): void {
     if (this.watchTimer) clearInterval(this.watchTimer);
+    if (this.watchFinishTimer) clearTimeout(this.watchFinishTimer);
     this.watchTimer = undefined;
+    this.watchFinishTimer = undefined;
     this.watchedFiles.clear();
   }
 

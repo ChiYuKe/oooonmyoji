@@ -16,6 +16,16 @@ class TapMatchAction(Action):
         match = arguments["match"]
         if not isinstance(match, dict):
             return ActionResult.failed("match must be an object", category="workflow")
+        candidates: list[dict[str, Any]] = []
+        disappeared_timeout = 0.0
+        if arguments.get("disappeared_states"):
+            try:
+                candidates = _state_candidates(arguments["disappeared_states"])
+                disappeared_timeout = float(arguments.get("disappeared_state_timeout_seconds", 0.0))
+            except (TypeError, ValueError) as exc:
+                return ActionResult.failed(str(exc), category="workflow")
+            if disappeared_timeout < 0:
+                return ActionResult.failed("disappeared_state_timeout_seconds must be non-negative", category="workflow")
         selected = match
         if bool(arguments.get("revalidate", True)):
             template = match.get("template")
@@ -24,36 +34,23 @@ class TapMatchAction(Action):
             context.capture()
             matches = context.find_template(template, roi=match.get("roi"), threshold=float(match.get("threshold", 0.85)))
             if not matches:
-                disappeared_states = arguments.get("disappeared_states", [])
-                if disappeared_states:
-                    try:
-                        candidates = _state_candidates(disappeared_states)
-                    except ValueError as exc:
-                        return ActionResult.failed(str(exc), category="workflow")
-                    disappeared_timeout = float(arguments.get("disappeared_state_timeout_seconds", 0.0))
-                    if disappeared_timeout < 0:
-                        return ActionResult.failed("disappeared_state_timeout_seconds must be non-negative", category="workflow")
-                    disappeared_deadline = time.monotonic() + disappeared_timeout
-                    while True:
-                        detected = _detect_state_current(context, candidates, allow_ocr=False)
-                        if detected is not None:
-                            return ActionResult.succeeded({
-                                "origin_x": 0,
-                                "origin_y": 0,
-                                "x": 0,
-                                "y": 0,
-                                "offset_x": 0,
-                                "offset_y": 0,
-                                "interval_seconds": 0.0,
-                                "revalidated": True,
-                                "skipped": True,
-                                "final_state": detected["state"],
-                            })
-                        if time.monotonic() >= disappeared_deadline:
-                            break
-                        context.check_cancelled()
-                        time.sleep(min(0.1, max(0.0, disappeared_deadline - time.monotonic())))
-                        context.capture()
+                if candidates:
+                    detected = _wait_for_disappeared_state(context, candidates, disappeared_timeout)
+                    if detected is not None:
+                        return ActionResult.succeeded({
+                            "origin_x": 0,
+                            "origin_y": 0,
+                            "x": 0,
+                            "y": 0,
+                            "offset_x": 0,
+                            "offset_y": 0,
+                            "interval_seconds": 0.0,
+                            "revalidated": True,
+                            "skipped": True,
+                            "final_state": detected["state"],
+                            "verified_gone": True,
+                        })
+                    return ActionResult.failed("matched template disappeared but no configured next state appeared", category="vision")
                 return ActionResult.failed("template match is no longer present", category="vision")
             selected = matches[0].to_dict()
         reference = selected.get("reference")
@@ -111,7 +108,7 @@ class TapMatchAction(Action):
                         },
                     )
                 time.sleep(min(0.1, max(0.0, verify_deadline - time.monotonic())))
-        return ActionResult.succeeded({
+        output = {
             "origin_x": x,
             "origin_y": y,
             "x": clicked_x,
@@ -123,7 +120,37 @@ class TapMatchAction(Action):
             "skipped": False,
             "final_state": "",
             "verified_gone": verified_gone,
-        })
+        }
+        if candidates:
+            # 消失确认刚截取的画面可直接复用；未开启消失确认时须在点击后重新截图。
+            if not verified_gone:
+                context.capture()
+            detected = _wait_for_disappeared_state(context, candidates, disappeared_timeout)
+            if detected is None:
+                return ActionResult.failed(
+                    "tap completed but no configured next state appeared",
+                    category="vision",
+                    output=output,
+                )
+            output["final_state"] = detected["state"]
+        return ActionResult.succeeded(output)
+
+
+def _wait_for_disappeared_state(
+    context: Any, candidates: list[dict[str, Any]], timeout_seconds: float,
+) -> dict[str, Any] | None:
+    """从当前截图开始等待允许的下一状态，供点击前复核和点击后确认共用。"""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        context.check_cancelled()
+        detected = _detect_state_current(context, candidates, allow_ocr=False)
+        if detected is not None:
+            return detected
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(0.1, remaining))
+        context.capture()
 
 
 class DismissTemplateUntilTextAction(Action):

@@ -138,6 +138,126 @@ def test_tap_match_fails_when_template_does_not_disappear() -> None:
     assert context.taps == [(120, 210, 0)]
 
 
+@pytest.mark.parametrize("verify_gone", [True, False])
+def test_tap_match_requires_configured_next_state_after_click(verify_gone: bool) -> None:
+    context = StateContext("realm")
+    result = TapMatchAction().execute(context, {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png", "threshold": 0.9},
+        "verify_gone": verify_gone,
+        "disappeared_states": [{"name": "experience", "template": "experience.png", "threshold": 0.9}],
+        "disappeared_state_timeout_seconds": 0,
+    })
+
+    assert result.status.value == "failed"
+    assert result.error_category == "vision"
+    assert "no configured next state appeared" in result.error
+    assert result.output["verified_gone"] is verify_gone
+    assert result.output["final_state"] == ""
+    assert result.output["skipped"] is False
+    assert context.taps == [(120, 210, 0)]
+
+
+@pytest.mark.parametrize("revalidate,verify_gone", [(True, True), (True, False), (False, True), (False, False)])
+def test_tap_match_reports_confirmed_next_state_after_click(revalidate: bool, verify_gone: bool) -> None:
+    context = StateContext("realm")
+    result = TapMatchAction().execute(context, {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png", "threshold": 0.9},
+        "revalidate": revalidate,
+        "verify_gone": verify_gone,
+        "disappeared_states": [
+            {"name": "experience", "template": "experience.png"},
+            {"name": "courtyard", "templates": ["missing.png", "courtyard.png"], "roi": [0, 0, 400, 400], "threshold": 0.9},
+        ],
+        "disappeared_state_timeout_seconds": 0,
+    })
+
+    assert result.status.value == "succeeded"
+    assert result.output["verified_gone"] is verify_gone
+    assert result.output["final_state"] == "courtyard"
+    assert result.output["skipped"] is False
+    assert context.taps == [(120, 210, 0)]
+
+
+def test_tap_match_waits_for_next_state_after_click(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.stateflow.time.monotonic", lambda: clock[0])
+
+    def advance_clock(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.stateflow.time.sleep", advance_clock)
+
+    class LoadingContext(StateContext):
+        def capture(self) -> object:
+            if self.taps and clock[0] >= 0.2:
+                self.state = "experience"
+            return super().capture()
+
+    context = LoadingContext("realm")
+    result = TapMatchAction().execute(context, {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png"},
+        "verify_gone": True,
+        "disappeared_states": [{"name": "experience", "template": "experience.png"}],
+        "disappeared_state_timeout_seconds": 0.5,
+    })
+
+    assert result.status.value == "succeeded"
+    assert result.output["final_state"] == "experience"
+    assert result.output["verified_gone"] is True
+    assert clock[0] == pytest.approx(0.2)
+    assert context.taps == [(120, 210, 0)]
+
+
+def test_tap_match_times_out_then_rechecks_next_state_without_clicking_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.stateflow.time.monotonic", lambda: clock[0])
+
+    def advance_clock(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr("src.oooonmyoji.actions.builtin.stateflow.time.sleep", advance_clock)
+    context = StateContext("realm")
+    arguments = {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png"},
+        "verify_gone": True,
+        "disappeared_states": [{"name": "experience", "template": "experience.png"}],
+        "disappeared_state_timeout_seconds": 3,
+    }
+
+    failed = TapMatchAction().execute(context, arguments)
+    assert failed.status.value == "failed"
+    assert clock[0] == pytest.approx(3)
+    assert failed.output["verified_gone"] is True
+    still_missing = TapMatchAction().execute(context, arguments)
+    assert still_missing.status.value == "failed"
+    assert clock[0] == pytest.approx(6)
+
+    context.state = "experience"
+    retried = TapMatchAction().execute(context, arguments)
+    assert retried.status.value == "succeeded"
+    assert retried.output["skipped"] is True
+    assert retried.output["verified_gone"] is True
+    assert retried.output["final_state"] == "experience"
+    assert context.taps == [(120, 210, 0)]
+
+
+@pytest.mark.parametrize("overrides", [
+    {"disappeared_states": [{"name": "experience"}]},
+    {"disappeared_state_timeout_seconds": -1},
+])
+def test_tap_match_validates_next_state_configuration_before_clicking(overrides: dict[str, Any]) -> None:
+    context = StateContext("realm")
+    result = TapMatchAction().execute(context, {
+        "match": {"reference": [100, 200, 40, 20], "template": "realm.png"},
+        "disappeared_states": [{"name": "experience", "template": "experience.png"}],
+        **overrides,
+    })
+
+    assert result.status.value == "failed"
+    assert result.error_category == "workflow"
+    assert context.taps == []
+
+
 def test_tap_match_accepts_confirmed_next_state_when_transient_match_disappears() -> None:
     context = StateContext("experience")
     result = TapMatchAction().execute(context, {

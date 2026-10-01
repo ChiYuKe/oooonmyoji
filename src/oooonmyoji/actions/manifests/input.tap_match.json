@@ -3,7 +3,7 @@
   "name": "input.tap_match",
   "version": "1.0.0",
   "entry": "builtin:TapMatchAction",
-  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。开启重新校验后，每次执行都会先重新确认模板仍在画面中；开启 verify_gone 后，点击节点会在自身内部确认原模板消失，确认失败时由 Retry 只重试当前点击节点。输出实际点击坐标、偏移量和等待间隔。",
+  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。开启重新校验后，每次执行都会先重新确认模板仍在画面中；开启 verify_gone 后，点击节点会在自身内部确认原模板消失。配置消失状态列表后，点击后还必须确认其中一个下一状态出现才返回成功；确认失败时由 Retry 只重试当前节点。输出实际点击坐标、偏移量和等待间隔。",
   "parameters": {
     "match": {
       "type": "object",
@@ -18,7 +18,7 @@
     "disappeared_states": {
       "type": "array",
       "default": [],
-      "description": "复核时原模板已消失后允许确认的下一状态；命中时不点击并返回成功",
+      "description": "点击后必须出现的下一状态，任一命中才返回成功，超时则失败；点击前复核发现原模板已消失时，确认下一状态后跳过点击并返回成功。空列表不校验下一状态",
       "items": {
         "type": "object",
         "properties": {
@@ -34,7 +34,7 @@
       "type": "duration",
       "default": 0,
       "min": 0,
-      "description": "原模板消失后等待允许下一状态的最长时间"
+      "description": "点击后（开启消失确认时从原模板消失起）或点击前复核发现原模板已消失后，等待列表中下一状态的最长时间；超时则失败，0 表示只检查当前截图"
     },
     "hold_ms": {
       "type": "integer",

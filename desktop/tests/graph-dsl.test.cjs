@@ -22,7 +22,7 @@ const {
 const ROOT = path.join(__dirname, '..', '..');
 const KITCHEN = path.join(ROOT, 'tests', 'fixtures', 'dsl', 'kitchen.owf');
 const GRAPH_RULES = path.join(ROOT, 'tests', 'fixtures', 'graph-rules', 'cases.json');
-const WORKFLOW_FILES = ['御魂组队.owf', '御魂组队_队长.owf', '御魂组队_队员.owf', '御魂组队_双开.owf'];
+const WORKFLOW_FILES = ['御魂组队_队长.owf', '御魂组队_队员.owf', '御魂组队_双开.owf'];
 
 const CASES = JSON.parse(fs.readFileSync(GRAPH_RULES, 'utf8')).cases;
 

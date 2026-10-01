@@ -11,7 +11,7 @@ workflow souls_party_duo
     运行：AutoFlow Studio 打开本工作流点播放，或
     `.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-workflow souls_party_duo`
   resolution: [1920, 1080]
-  root: duo_entry
+  root: root_1
   inputs:
     运行轮数:
       type: integer
@@ -20,9 +20,9 @@ workflow souls_party_duo
       display_name: 运行轮数
       description: 两边共用的轮数预算，会原样传给队长侧与队员侧。
   variables: {}
-  node duo_entry root 双开御魂入口
+  node root_1 root 双开御魂入口
     at: [0, 0]
-  node run_captain_and_member instance_parallel 并行运行队长与队员工作流
+  node instance_parallel_1 instance_parallel 并行跑队长与队员（双开）
     at: [0, 208]
     runs:
       - instance: mumu-0
@@ -36,6 +36,6 @@ workflow souls_party_duo
   var inputs.运行轮数
     at: [-368, 520]
   edges:
-    var__inputs__运行轮数:out -> run_captain_and_member:runs.0.inputs.运行轮数
-    var__inputs__运行轮数:out -> run_captain_and_member:runs.1.inputs.运行轮数
-    duo_entry -> run_captain_and_member
+    var__inputs__运行轮数:out -> instance_parallel_1:runs.0.inputs.运行轮数
+    var__inputs__运行轮数:out -> instance_parallel_1:runs.1.inputs.运行轮数
+    root_1 -> instance_parallel_1

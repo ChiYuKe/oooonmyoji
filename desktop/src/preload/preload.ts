@@ -97,6 +97,11 @@ const api: OnmyojiDesktopApi = {
     ipcRenderer.on('runtime:state', wrapped);
     return () => ipcRenderer.removeListener('runtime:state', wrapped);
   },
+  onRuntimeLogClear: (listener) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('runtime:log-clear', wrapped);
+    return () => ipcRenderer.removeListener('runtime:log-clear', wrapped);
+  },
   onRunEvent: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: Record<string, unknown>): void => listener(value);
     ipcRenderer.on('runtime:run-event', wrapped);

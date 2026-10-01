@@ -1122,6 +1122,7 @@ async function start(): Promise<void> {
   window.StudioShortcuts?.subscribe(refreshShortcutLabels);
   api.onRuntimeOutput((event) => runtimeLog.appendOutput(event));
   api.onRuntimeState(updateRuntimeState);
+  api.onRuntimeLogClear(() => runtimeLog.clear());
   api.onRunEvent((event) => {
     runtimeLog.appendRunEvent(event);
     workspace.postToAllEditors({ type: 'runEvent', event });

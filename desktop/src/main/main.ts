@@ -373,6 +373,8 @@ function registerIpc(): void {
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
+    // 每次用户重新启动工作流时，先清掉日志面板中上次运行的记录。
+    _event.sender.send('runtime:log-clear');
     // 先把观看请求登记下去，再 spawn 运行时：否则运行时启动初期的帧会被门控丢掉。
     liveViewRequest?.begin(request.instanceId);
     return runtime.runWorkflow(request);

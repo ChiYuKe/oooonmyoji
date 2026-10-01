@@ -493,6 +493,7 @@ export interface OnmyojiDesktopApi {
   onVisionEvent(listener: (event: VisionStreamEvent) => void): () => void;
   onRuntimeOutput(listener: (event: RuntimeOutputEvent) => void): () => void;
   onRuntimeState(listener: (event: RuntimeStateEvent) => void): () => void;
+  onRuntimeLogClear(listener: () => void): () => void;
   onRunEvent(listener: (event: Record<string, unknown>) => void): () => void;
   onWindowMaximized(listener: (maximized: boolean) => void): () => void;
   /** MCP 门控操作请求用户确认：应用用自己的确认弹窗提问。 */

@@ -35,7 +35,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private stopRequested = false;
   private stopGeneration = 0;
   private watchTimer: NodeJS.Timeout | undefined;
-  private watchedFiles = new Map<string, { offset: number; instanceId: string }>();
+  private watchedFiles = new Map<string, { offset: number; instanceId: string; pending: string }>();
 
   constructor(private readonly project: ProjectService) {
     super();
@@ -316,7 +316,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
   private startWatching(files: Array<{ file: string; instanceId: string }>): void {
     this.stopWatching();
-    this.watchedFiles = new Map(files.map(({ file, instanceId }) => [file, { offset: 0, instanceId }]));
+    this.watchedFiles = new Map(files.map(({ file, instanceId }) => [file, { offset: 0, instanceId, pending: '' }]));
     this.watchTimer = setInterval(() => this.tickWatcher(), 350);
   }
 
@@ -355,8 +355,14 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
         } finally {
           fs.closeSync(descriptor);
         }
-        this.watchedFiles.set(file, { ...watch, offset: size });
-        for (const line of chunk.split('\n')) {
+        // JSONL writers can be observed between writes (especially for events
+        // containing screenshots). Keep the trailing fragment and prepend it
+        // to the next read instead of advancing past and losing the event.
+        const previousPending = size < offset ? '' : watch.pending;
+        const lines = `${previousPending}${chunk}`.split('\n');
+        const pending = lines.pop() || '';
+        this.watchedFiles.set(file, { ...watch, offset: size, pending });
+        for (const line of lines) {
           if (!line.trim()) continue;
           try {
             const event = JSON.parse(line) as Record<string, unknown>;
@@ -371,7 +377,8 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
             }
             this.emit('runEvent', event);
           } catch {
-            // Ignore a partial final line; the next poll will carry complete events.
+            // A complete JSONL line should parse; malformed lines are isolated
+            // so they cannot stop later events from being delivered.
           }
         }
       } catch {

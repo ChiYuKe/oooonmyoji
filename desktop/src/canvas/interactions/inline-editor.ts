@@ -20,6 +20,8 @@ import type { ParamRowLike, ParamRowKind, ParamRowRect, ParamRowDefinition } fro
 export interface InlineEditorDeps {
   editNextParameter?(nodeId: string, param: string, direction: 1 | -1): void;
   state: CanvasState;
+  /** 提交时解析真实节点；投影或复用卡片可能持有撤销前的对象。 */
+  nodeById?(id: string): any;
   wrap: HTMLElement;
   el(tag: string, className?: string, text?: string): HTMLElement;
   mutate(fn: () => void): void;
@@ -99,6 +101,10 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
    * 素材浏览器与 ROI 拾取弹层自己会包一层 mutate，所以它们用这个裸写入。
    */
   function writeParamLiteral(node: any, param: string, value: unknown): void {
+    // 撤销会替换文档对象，但内容未变的 SVG 卡片仍可复用其事件处理器。
+    // 每次写入都按 id 取当前文档节点，也避免把组内投影视图当成文档修改。
+    if (deps.nodeById) node = deps.nodeById(node.id);
+    if (!node) return;
     // 布尔判断卡片的左/右操作数就是引脚的默认值（UE 的比较节点）：字面量写在
     // expression 对应操作数的位置上，`undefined` 表示清空这一侧。
     if (isBoolJudgeOperandPin(node, param)) {

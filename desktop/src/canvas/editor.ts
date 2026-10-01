@@ -1015,7 +1015,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
         InlineEditor.openSequentialParameter({ node, pin: pins[next], rect: { x: pos.x + row.hit.x, y: pos.y + row.hit.y, width: row.hit.width, height: row.hit.height }, world: pos, clientX: 0, clientY: 0, valueAlign: info.fixed ? 'left' : 'right' });
       });
     },
-    state, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
+    state, nodeById, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
     showMenu, nodeVariablePinMenuItems, requestInspector,
     toast: (message, error) => toast(message, error), enumOption, fieldLabel,
     openAssetBrowser, openWorkflowBrowser, requestRoi,

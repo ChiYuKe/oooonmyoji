@@ -50,9 +50,10 @@ function harness(options = {}) {
   const links = {};
   const editor = createCanvasInlineEditor({
     state,
+    nodeById: options.nodeById,
     wrap: { getBoundingClientRect: () => ({ left: 10, top: 20 }) },
     el: (tag, className, text) => { const node = new FakeNode(tag); node.className = className || ''; node.textContent = text || ''; return node; },
-    mutate: (fn) => { calls.mutations += 1; fn(); },
+    mutate: (fn) => { calls.mutations += 1; if (options.mutate) options.mutate(fn); else fn(); },
     clearParameterLiteralCache: (nodeId, name) => calls.cleared.push([nodeId, name]),
     rememberParameterLiteral: (node, name, value) => calls.remembered.push([node.id, name, value]),
     variableLinks: () => links,
@@ -80,6 +81,62 @@ function harness(options = {}) {
 
 const rect = { x: 100, y: 96 + 3, width: 120, height: 18 };
 const request = (node, pin, extra = {}) => ({ node, pin, rect, clientX: 40, clientY: 60, world: { x: 108, y: 108 }, ...extra });
+
+test('撤销其它节点后，复用卡片的超时编辑写回当前文档并可撤销重做', () => {
+  const { createEditorHistory } = require('../dist-test-renderer/canvas/state/history.js');
+  const { documentText } = require('../dist-test-renderer/canvas/state/document-text.js');
+  let history;
+  const h = harness({
+    nodeById: (id) => h.state.raw.nodes.find((node) => node.id === id),
+    mutate: (fn) => history.mutate(fn),
+  });
+  Object.assign(h.state, {
+    raw: { schema_version: 4, id: 'test', version: '1', root: 'wait', resolution: [1920, 1080], inputs: {}, variables: {}, nodes: [
+      { id: 'wait', type: 'task', action: 'vision.wait_template', params: { timeout_seconds: 300 } },
+      { id: 'other', type: 'task', action: 'core.capture', params: {} },
+    ] },
+    selected: new Set(), undo: [], redo: [],
+  });
+  let dirty = 0;
+  history = createEditorHistory({
+    state: h.state, cleanupReleased: () => [], clearVariableCardSelection() {},
+    nodeById: (id) => h.state.raw.nodes.find((node) => node.id === id),
+    setDirty: () => dirty++, render() {},
+  });
+  const cached = h.state.raw.nodes[0];
+  history.mutate(() => { h.state.raw.nodes[1].name = 'changed'; });
+  history.undo();
+  assert.notEqual(h.state.raw.nodes[0], cached, '撤销恢复快照，但未改变内容的卡片仍持有旧对象');
+  const pin = { param: 'timeout_seconds', definition: { type: 'duration', min: 0 }, configured: true, value: 300 };
+  h.editor.openParamEditor(request(cached, pin));
+  h.body.children[0].children[0].value = '3';
+  h.fireDocument('pointerdown', { target: new FakeNode('outside') });
+  assert.equal(h.state.raw.nodes[0].params.timeout_seconds, 3);
+  assert.equal(cached.params.timeout_seconds, 300, '旧对象不再作为写入目标');
+  assert.equal(dirty, 3, '参数编辑进入保存通知');
+  const { parseDocument } = require('../dist-test-renderer/shared/workflow/graph-dsl.js');
+  const { toCanvasDocument } = require('../dist-test-renderer/shared/workflow/graph-document.js');
+  assert.equal(toCanvasDocument(parseDocument(documentText(h.state))).nodes[0].params.timeout_seconds, 3);
+  history.undo();
+  assert.equal(h.state.raw.nodes[0].params.timeout_seconds, 300);
+  history.redo();
+  assert.equal(h.state.raw.nodes[0].params.timeout_seconds, 3);
+});
+
+test('组内投影判断节点的字面量写回真实节点，已删除节点不再写入', () => {
+  let current = { id: 'judge', type: 'bool_judge', expression: { eq: [1, 2] } };
+  const projection = { ...current, _nodeGroupMember: true };
+  const { editor, calls, links } = harness({ nodeById: () => current });
+  links['judge:left'] = 'old-card';
+  editor.setParamLiteral(projection, 'left', 3);
+  assert.deepEqual(current.expression, { eq: [3, 2] });
+  assert.deepEqual(projection.expression, { eq: [1, 2] });
+  assert.equal(links['judge:left'], undefined);
+  current = null;
+  editor.setParamLiteral(projection, 'left', 4);
+  assert.deepEqual(projection.expression, { eq: [1, 2] });
+  assert.deepEqual(calls.remembered, []);
+});
 
 test('setParamLiteral 写入字面量并清理变量链接与缓存', () => {
   const { editor, calls, links } = harness();

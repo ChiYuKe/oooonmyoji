@@ -8,7 +8,7 @@ workflow souls_party_captain
     模板图全部由两个 MuMu 实例的真实画面裁出，可用 `artifacts/_calibrate.py` 复验。
     默认难度是「御魂 · 悲鸣」，房间权限「不公开（仅邀请）」。
   resolution: [1920, 1080]
-  root: root
+  root: captain_entry
   limits:
     timeout_seconds: 21600
     max_steps: 200000
@@ -25,14 +25,14 @@ workflow souls_party_captain
   _inputParams:
     emit_invite_signal: [signal, target_instance]
     wait_member_joined: [timeout_seconds]
-  node root root 御魂组队队长入口
-    at: [472, -648]
-  node map_seq sequence 在组队页面
-    at: [80, -272]
+  node captain_entry root 御魂组队队长入口
+    at: [2511, 0]
+  node floor_page_team_setup sequence 选层页建队与邀队
+    at: [872, 416]
     decorator do_once
       reset_on_failure: false
-  node wait_floor_from_map task 等待进入御魂选层页
-    at: [-592, -64]
+  node wait_for_floor_team_button task 等待御魂选层页组队按钮
+    at: [0, 646]
     action: vision.wait_template
     params:
       template: assets/templates/souls/party/floor-team-button.png
@@ -41,84 +41,166 @@ workflow souls_party_captain
       timeout_seconds: 3
       roi: [0, 0, 500, 107]
       threshold: 0.8
-  node condition_1 condition 进到选层页了吗
-    at: [200, -72]
-  node task_2 task 假
-    at: [352, 168]
+  node floor_page_detected condition 已进入御魂选层页
+    at: [1743, 646]
+  node floor_wait_timeout_log task 选层页等待超时占位日志
+    at: [2324, 1064]
     action: core.log
     params:
       message: 这是假
-  node break_1 break
-    at: [-176, -56]
-  node task_1 task
-    at: [-864, 472]
+  node floor_button_wait_timeout break 选层页按钮等待超时
+    at: [1443, 646]
+  node wait_for_empty_party_slot task 等待协战队伍空位
+    at: [332, 1564]
     action: vision.wait_any
     params:
       templates: [assets/templates/task_1-templates.png]
       roi: [638, 6, 668, 910]
       timeout_seconds: 3
-  node sequence_1 sequence
-    at: [40, 200]
-  node task_3 task
-    at: [-488, 464]
+  node create_team_and_invite_sequence sequence 创建队伍并邀请好友
+    at: [1162, 1064]
+  node tap_empty_party_slot task 点击队伍空位创建队伍
+    at: [664, 1564]
     action: input.tap_match
     params:
       verify_gone: true
       random_interval: [0.2, 0.5]
       random_offset: 20
       disappeared_state_timeout_seconds: 1
-  node sequence_2 sequence
-    at: [464, -416]
-  node task_4 task
-    at: [-152, 528]
+  node captain_party_loop sequence 队长组队挑战循环
+    at: [2511, 208]
+  node wait_for_invitee_in_friend_list task 等待目标好友出现在邀请列表
+    at: [996, 1564]
     action: vision.wait_template
     params:
       template: assets/templates/task_4-templates.png
       present: true
       timeout_seconds: 3
       roi: [476, 121, 962, 817]
-  node task_5 task
-    at: [168, 496]
+  node select_invitee task 选择目标好友
+    at: [1328, 1564]
     action: input.tap_match
     params:
       verify_gone: false
       random_offset: 20
       disappeared_state_timeout_seconds: 1
       random_interval: [0.2, 0.5]
-  node task_6 task
-    at: [472, 536]
+  node wait_for_invite_button task 等待邀请按钮
+    at: [1660, 1564]
     action: vision.wait_template
     params:
       template: assets/templates/task_6-template.png
       present: true
       timeout_seconds: 3
       roi: [522, 756, 888, 175]
-  node task_7 task
-    at: [808, 520]
+  node send_party_invite task 发送组队邀请
+    at: [1992, 1564]
     action: input.tap_match
     params:
       verify_gone: true
       random_offset: 20
       disappeared_state_timeout_seconds: 1
       random_interval: [0.2, 0.5]
-  node sequence_5 sequence
-    at: [544, -280]
+  node wait_for_member_then_challenge sequence 等待队友入队并发起挑战
+    at: [2988, 416]
+  node wait_for_party_slot_filled task 等待队友进入队伍
+    at: [2656, 646]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_for_party_slot_filled-template.png
+      present: true
+      allow_timeout: true
+      timeout_seconds: 300
+      roi: [718, 102, 469, 191]
+      threshold: 0.8
+  node member_joined condition 队友已入队
+    at: [3320, 646]
+  node member_join_wait_timeout break 等待队友入队超时
+    at: [3020, 646]
+  node tap_challenge_button task 点击协战挑战按钮
+    at: [3652, 1564]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+      random_interval: [0.2, 0.5]
+    decorator retry
+      attempts: 5
+      delay_seconds: 0.1
+  node wait_for_challenge_button task 等待协战挑战按钮
+    at: [2988, 1564]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_floor_from_map_1-template.png
+      present: true
+      allow_timeout: true
+      timeout_seconds: 300
+      roi: [1669, 832, 251, 248]
+      threshold: 0.8
+    decorators: []
+  node start_party_battle sequence 发起协战
+    at: [3320, 1064]
+  node wait_for_challenge_button_1 task 等待协战挑战按钮
+    at: [3320, 1564]
+    action: core.sleep
+    params:
+      seconds: 1
+    decorators: []
+  node wait_for_member_then_challenge_1 sequence 等待挑战结束
+    at: [4150, 416]
+  node wait_for_empty_party_slot_1 task 等待协战队伍空位
+    at: [3984, 1064]
+    action: vision.wait_any
+    params:
+      templates:
+        - assets/templates/wait_for_empty_party_slot_1-templates.png
+        - assets/templates/wait_for_empty_party_slot_1-templates.png
+      roi: [741, 952, 472, 128]
+      timeout_seconds: 60
+  node tap_empty_party_slot_1 task 点击队伍空位创建队伍
+    at: [4316, 1064]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      random_interval: [0.2, 0.5]
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+    decorator retry
+      attempts: 5
+      delay_seconds: 0.1
+  node sequence_1 sequence
+    at: [4150, 646]
   edges:
-    break_1:out.found -> condition_1:condition
-    wait_floor_from_map:out -> break_1:ref
-    task_1:out.match -> task_3:match
-    task_4:out.matches.0 -> task_5:match
-    task_6:out.matches.0 -> task_7:match
-    root -> sequence_2
-    map_seq -> wait_floor_from_map
-    map_seq:then.1 -> condition_1
-    condition_1:true -> sequence_1
-    condition_1:false -> task_2
-    sequence_1 -> task_1
-    sequence_1:then.1 -> task_3
-    sequence_1:then.2 -> task_4
-    sequence_1:then.3 -> task_5
-    sequence_1:then.4 -> task_6
-    sequence_1:then.5 -> task_7
-    sequence_2 -> map_seq
-    sequence_2:then.1 -> sequence_5
+    floor_button_wait_timeout:out.found -> floor_page_detected:condition
+    wait_for_floor_team_button:out -> floor_button_wait_timeout:ref
+    wait_for_empty_party_slot:out.match -> tap_empty_party_slot:match
+    wait_for_invitee_in_friend_list:out.matches.0 -> select_invitee:match
+    wait_for_invite_button:out.matches.0 -> send_party_invite:match
+    member_join_wait_timeout:out.found -> member_joined:condition
+    wait_for_party_slot_filled:out -> member_join_wait_timeout:ref
+    wait_for_challenge_button:out.matches.0 -> tap_challenge_button:match
+    wait_for_empty_party_slot_1:out.match -> tap_empty_party_slot_1:match
+    captain_entry -> captain_party_loop
+    floor_page_team_setup -> wait_for_floor_team_button
+    floor_page_team_setup:then.1 -> floor_page_detected
+    floor_page_detected:true -> create_team_and_invite_sequence
+    floor_page_detected:false -> floor_wait_timeout_log
+    create_team_and_invite_sequence -> wait_for_empty_party_slot
+    create_team_and_invite_sequence:then.1 -> tap_empty_party_slot
+    create_team_and_invite_sequence:then.2 -> wait_for_invitee_in_friend_list
+    create_team_and_invite_sequence:then.3 -> select_invitee
+    create_team_and_invite_sequence:then.4 -> wait_for_invite_button
+    create_team_and_invite_sequence:then.5 -> send_party_invite
+    captain_party_loop -> floor_page_team_setup
+    captain_party_loop:then.1 -> wait_for_member_then_challenge
+    captain_party_loop:then.2 -> wait_for_member_then_challenge_1
+    wait_for_member_then_challenge -> wait_for_party_slot_filled
+    wait_for_member_then_challenge:then.1 -> member_joined
+    member_joined:true -> start_party_battle
+    start_party_battle -> wait_for_challenge_button
+    start_party_battle:then.1 -> wait_for_challenge_button_1
+    start_party_battle:then.2 -> tap_challenge_button
+    wait_for_member_then_challenge_1 -> sequence_1
+    sequence_1 -> wait_for_empty_party_slot_1
+    sequence_1:then.1 -> tap_empty_party_slot_1

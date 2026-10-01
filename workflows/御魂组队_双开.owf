@@ -11,7 +11,7 @@ workflow souls_party_duo
     运行：AutoFlow Studio 打开本工作流点播放，或
     `.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-workflow souls_party_duo`
   resolution: [1920, 1080]
-  root: root
+  root: duo_entry
   inputs:
     运行轮数:
       type: integer
@@ -19,24 +19,10 @@ workflow souls_party_duo
       min: 1
       display_name: 运行轮数
       description: 两边共用的轮数预算，会原样传给队长侧与队员侧。
-    队友实例:
-      type: string
-      default: mumu-1
-      min_length: 1
-      max_length: 64
-      display_name: 队友实例
-      description: 被邀请的一方（吃鱼号）。
-    邀请信号:
-      type: string
-      default: invite_expected
-      min_length: 1
-      max_length: 64
-      display_name: 邀请信号
-      description: "队长发邀请前写给队员的 instance 信号名。"
   variables: {}
-  node root root 双开御魂入口
+  node duo_entry root 双开御魂入口
     at: [0, 0]
-  node duo instance_parallel "扫地工 + 吃鱼 并行"
+  node run_captain_and_member instance_parallel 并行运行队长与队员工作流
     at: [0, 208]
     runs:
       - instance: mumu-0
@@ -46,17 +32,10 @@ workflow souls_party_duo
         workflow: 御魂组队_队员.owf
         inputs: {}
     wait_for: all
-    cancel_on_failure: true
+    cancel_on_failure: false
   var inputs.运行轮数
-    at: [-400, 720]
-  var inputs.队友实例
-    at: [-448, 496]
-  var inputs.邀请信号
-    at: [8, 728]
+    at: [-368, 520]
   edges:
-    var__inputs__运行轮数:out -> duo:runs.0.inputs.运行轮数
-    var__inputs__队友实例:out -> duo:runs.0.inputs.队友实例
-    var__inputs__邀请信号:out -> duo:runs.0.inputs.邀请信号
-    var__inputs__运行轮数:out -> duo:runs.1.inputs.运行轮数
-    var__inputs__邀请信号:out -> duo:runs.1.inputs.邀请信号
-    root -> duo
+    var__inputs__运行轮数:out -> run_captain_and_member:runs.0.inputs.运行轮数
+    var__inputs__运行轮数:out -> run_captain_and_member:runs.1.inputs.运行轮数
+    duo_entry -> run_captain_and_member

@@ -8,7 +8,7 @@ workflow souls_party_member
     队员侧不主动开战：开战由队长在协战房间里点挑战触发。自动准备/自动挑战由
     游戏本身负责，这里只处理「接受邀请」和「结算推进」两件事。
   resolution: [1920, 1080]
-  root: root
+  root: member_entry
   limits:
     timeout_seconds: 21600
     max_steps: 200000
@@ -21,162 +21,99 @@ workflow souls_party_member
       description: |
         状态机的轮数预算，建议与队长工作流保持一致。一轮 = 一次「识别当前画面 + 处理」，
         被邀请、参战、结算各会吃掉若干轮。
-    邀请信号:
-      type: string
-      default: invite_expected
-      min_length: 1
-      max_length: 64
-      display_name: 邀请信号
-      description: "队长 emit 的信号名；只作为提示，收到后仍以屏幕上的邀请弹窗为准。"
   variables: {}
-  node root root 御魂组队队员入口
-    at: [168, -312]
-  node main sequence 队员主流程
-    at: [220, 0]
-  node loop state_machine 队员循环
-    at: [160, 144]
-    states:
-      - name: invite
-        template: assets/templates/souls/party/invite-accept-button.png
-        roi: [120, 300, 220, 160]
-        threshold: 0.9
-      - name: room
-        template: assets/templates/souls/party/room-challenge-button.png
-        roi: [1700, 860, 220, 220]
-        threshold: 0.85
-      - name: lineup
-        template: assets/templates/souls/party/lineup-title.png
-        roi: [820, 0, 300, 160]
-        threshold: 0.85
-      - name: reward
-        template: assets/templates/souls/souls-victory-continue.png
-        roi: [1400, 640, 500, 200]
-        threshold: 0.85
-    allow_ocr: false
-    state_timeout_seconds: 150
-  node invite_handler sequence 接受组队邀请
-    at: [0, 440]
-  node wait_accept_button task 等待接受邀请按钮
-    at: [-96, 608]
+  node member_entry root 御魂组队队员入口
+    at: [160, -528]
+  node member_main_flow sequence 队员主流程
+    at: [144, -256]
+  node wait_for_invite_accept_button task 等待协战邀请弹窗
+    at: [-1216, 168]
     action: vision.wait_template
     params:
       template: assets/templates/souls/party/invite-accept-button.png
       present: true
-      timeout_seconds: 30
-      roi: [120, 300, 220, 160]
-      threshold: 0.9
-  node tap_accept_button task 点击绿勾接受邀请
-    at: [240, 620]
+      allow_timeout: true
+      timeout_seconds: 100
+      roi: [0, 296, 783, 186]
+      threshold: 0.8
+  node floor_page_detected condition 已回到御魂选层页
+    at: [840, 136]
+  node floor_page_detected_after_battle condition 已回到御魂选层页
+    at: [1184, 744]
+  node wait_for_floor_page_return sequence 确认御魂选层页状态
+    at: [752, 448]
+  node wait_for_floor_team_button task 等待御魂选层页组队按钮
+    at: [304, 720]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_for_floor_team_button-template.png
+      present: true
+      allow_timeout: true
+      timeout_seconds: 300
+      roi: [1609, 743, 309, 337]
+      threshold: 0.8
+  node floor_button_wait_timeout break 选层页按钮等待超时
+    at: [640, 808]
+  node accept_party_invite task 接受协战邀请
+    at: [-872, 144]
     action: input.tap_match
     params:
-      revalidate: true
-      random_offset: 4
-      random_interval: [0.1, 0.3]
-  node wait_after_accept task 等待进入协战房间
-    at: [480, 620]
-    action: vision.wait_template
-    params:
-      template: assets/templates/souls/party/room-challenge-button.png
-      present: true
-      timeout_seconds: 40
-      roi: [1700, 860, 220, 220]
-      threshold: 0.85
-  node idle_handler sequence 待机等队长开战
-    at: [1000, 440]
-  node wait_battle task 等待进入阵容页
-    at: [1000, 620]
-    action: vision.wait_template
-    params:
-      template: assets/templates/souls/party/lineup-title.png
-      present: true
-      timeout_seconds: 600
-      roi: [820, 0, 300, 160]
-      threshold: 0.85
-  node lineup_handler sequence 阵容页：等结算页
-    at: [1500, 440]
-  node wait_settlement task 等待战斗结算
-    at: [1500, 620]
-    action: vision.wait_template
-    params:
-      template: assets/templates/souls/souls-victory-continue.png
-      present: true
-      timeout_seconds: 600
-      roi: [1400, 640, 500, 200]
-      threshold: 0.85
-  node reward_handler sequence 点掉奖励页
-    at: [2100, 440]
-  node tap_reward task 点击屏幕继续（关奖励页）
-    at: [2100, 620]
-    action: input.tap
-    params:
-      x: 960
-      y: 900
-      random_offset: 40
-      random_interval: [0.3, 0.7]
-  node wait_reward_gone task 等待结算标记消失
-    at: [2340, 620]
-    action: vision.wait_template
-    params:
-      template: assets/templates/souls/souls-victory-continue.png
-      present: false
-      timeout_seconds: 20
-      roi: [1400, 640, 500, 200]
-      threshold: 0.85
-  node fallback sequence 兜底：确认续邀弹窗
-    at: [2900, 440]
-  node wait_reinvite task 等待续邀弹窗
-    at: [2900, 620]
-    action: vision.wait_template
-    params:
-      template: assets/templates/souls/party/reinvite-dialog-title.png
-      present: true
-      timeout_seconds: 10
-      roi: [640, 400, 640, 140]
-      threshold: 0.9
-  node tap_reinvite_confirm task 点击确定接受续邀
-    at: [3140, 620]
-    action: input.tap
-    params:
-      x: 1105
-      y: 655
-      random_offset: 5
+      verify_gone: true
       random_interval: [0.2, 0.5]
-  node wait_room_back task 等待回到协战房间
-    at: [3380, 620]
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+  node wait_for_floor_page task 等待御魂选层页
+    at: [88, 192]
     action: vision.wait_template
     params:
-      template: assets/templates/souls/party/room-challenge-button.png
+      template: assets/templates/souls/party/floor-team-button.png
       present: true
-      timeout_seconds: 30
-      roi: [1700, 860, 220, 220]
-      threshold: 0.85
-  node log_done task 记录已完成全部轮数
-    at: [608, 104]
-    action: core.log
+      allow_timeout: true
+      timeout_seconds: 300
+      roi: [0, 0, 419, 139]
+      threshold: 0.8
+  node floor_page_wait_timeout break 选层页按钮等待超时
+    at: [440, 176]
+  node accept_invitation_sequence sequence 等待并接受组队邀请
+    at: [-840, -72]
+  node wait_for_next_party_round sequence 等待下一轮协战
+    at: [456, -48]
+  node accept_party_invite_1 task 接受协战邀请
+    at: [1232, 1080]
+    action: input.tap_match
     params:
-      message: 御魂组队（队员）：已按运行轮数完成全部参战
-  var inputs.运行轮数
-    at: [-220, 220]
-  var inputs.邀请信号
-    at: [-220, 340]
+      verify_gone: true
+      random_interval: [0.2, 0.5]
+      random_offset: 20
+      disappeared_state_timeout_seconds: 1
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.1
+  node sequence_1 sequence
+    at: [1032, 912]
+  node accept_party_invite_2 task 接受协战邀请
+    at: [920, 1088]
+    action: core.sleep
+    params:
+      seconds: 1
+    decorators: []
   edges:
-    var__inputs__运行轮数:out -> loop:max_iterations
-    wait_accept_button:out.matches.0 -> tap_accept_button:match
-    root -> main
-    main -> loop
-    main:then.1 -> log_done
-    loop:case.0 -> invite_handler
-    loop:case.1 -> idle_handler
-    loop:case.2 -> lineup_handler
-    loop:case.3 -> reward_handler
-    loop:default -> fallback
-    invite_handler -> wait_accept_button
-    invite_handler:then.1 -> tap_accept_button
-    invite_handler:then.2 -> wait_after_accept
-    idle_handler -> wait_battle
-    lineup_handler -> wait_settlement
-    reward_handler -> tap_reward
-    reward_handler:then.1 -> wait_reward_gone
-    fallback -> wait_reinvite
-    fallback:then.1 -> tap_reinvite_confirm
-    fallback:then.2 -> wait_room_back
+    floor_page_wait_timeout:out.found -> floor_page_detected:condition
+    floor_button_wait_timeout:out.found -> floor_page_detected_after_battle:condition
+    wait_for_floor_team_button:out -> floor_button_wait_timeout:ref
+    wait_for_invite_accept_button:out.matches.0 -> accept_party_invite:match
+    wait_for_floor_page:out -> floor_page_wait_timeout:ref
+    wait_for_floor_team_button:out.matches.0 -> accept_party_invite_1:match
+    member_entry -> member_main_flow
+    member_main_flow -> accept_invitation_sequence
+    member_main_flow:then.1 -> wait_for_next_party_round
+    floor_page_detected:true -> wait_for_floor_page_return
+    floor_page_detected_after_battle:true -> sequence_1
+    wait_for_floor_page_return -> wait_for_floor_team_button
+    wait_for_floor_page_return:then.1 -> floor_page_detected_after_battle
+    accept_invitation_sequence -> wait_for_invite_accept_button
+    accept_invitation_sequence:then.1 -> accept_party_invite
+    wait_for_next_party_round -> wait_for_floor_page
+    wait_for_next_party_round:then.1 -> floor_page_detected
+    sequence_1 -> accept_party_invite_2
+    sequence_1:then.1 -> accept_party_invite_1

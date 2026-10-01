@@ -5,6 +5,39 @@ const { createEditorHistory } = require('../dist-test-renderer/canvas/state/hist
 const { createEditorStatus } = require('../dist-test-renderer/canvas/state/editor-status.js');
 const { planActionParameters, parameterValueAccepted, nodeReferenceValidator } = require('../dist-test-renderer/canvas/model/parameter-edits.js');
 
+test('无需动态代码的参数校验与原有 schema 规则一致', () => {
+  const Ajv2020 = require('ajv/dist/2020').default;
+  const { parameterToSchema } = require('../dist-test-renderer/shared/workflow/parameters.js');
+  const { allowBinding } = require('../dist-test-renderer/shared/workflow/bindings.js');
+  const ajv = new Ajv2020({ strict: false });
+  const cases = [
+    [{ type: 'number', min: 0, max: 1 }, [0, .8, 1, -1, 2, '0.8', NaN, Infinity]],
+    [{ type: 'integer', min: 1 }, [1, 1.5, 0, '1']],
+    [{ type: 'duration', min: 0 }, [300, 3, 0, -1, '3']],
+    [{ type: 'boolean' }, [true, false, 0, 'true']],
+    ...['string', 'asset', 'path', 'workflow', 'enum', 'key'].map(type => [{ type, minLength: 1, maxLength: 3 }, ['abc', '', 'abcd', '😀', 3]]),
+    [{ type: 'key' }, ['BACK', '4', 'A_B', 'A B', '返回']],
+    [{ type: 'color' }, ['#fF00aA', '#fff', 'red', 3]],
+    [{ type: 'enum', enum: ['a', 'b'] }, ['a', 'b', 'c', 1]],
+    [{ type: 'point' }, [{ x: 1, y: 2 }, { x: 1 }, { x: 1.5, y: 2 }, { x: 1, y: 2, extra: 3 }, [1, 2]]],
+    [{ type: 'rect' }, [[1669, 832, 251, 248], [1, 2, 3], [1, 2, 3, 4, 5], [1.5, 2, 3, 4], ['1', 2, 3, 4]]],
+    [{ type: 'array', minItems: 1, maxItems: 2, items: { type: 'integer' } }, [[1], [1, 2], [], [1, 2, 3], [1.2], ['1']]],
+    [{ type: 'object', properties: { x: { type: 'number', required: true }, names: { type: 'array', items: { type: 'string' } } } }, [{ x: 1 }, {}, { x: 1, extra: true }, { x: '1' }, { x: 1, names: ['a'] }, { x: 1, names: [3] }]],
+    [{ type: 'object' }, [{}, { free: [1, 'a'] }, null, []]],
+    [{ type: 'any', enum: [{ x: 1, y: 2 }] }, [{ y: 2, x: 1 }, { x: 2, y: 1 }]],
+    [{ type: 'any' }, [null, 1, 'a', {}, []]],
+  ];
+  for (const [definition, values] of cases) {
+    const expected = ajv.compile(allowBinding(parameterToSchema(definition)));
+    for (const value of values) assert.equal(parameterValueAccepted(definition, value), expected(value), `${JSON.stringify(definition)} / ${JSON.stringify(value)}`);
+  }
+  const accepts = (ref, def) => ref === 'inputs.count' && def.type === 'integer';
+  assert.equal(parameterValueAccepted({ type: 'integer' }, { ref: 'inputs.count' }, accepts), true);
+  assert.equal(parameterValueAccepted({ type: 'integer' }, { ref: '' }, accepts), false);
+  assert.equal(parameterValueAccepted({ type: 'integer' }, { ref: 'inputs.count', extra: true }, accepts), false);
+  assert.equal(parameterValueAccepted({ type: 'array', items: { type: 'integer' } }, [{ ref: 'inputs.count' }], accepts), true);
+});
+
 function el(tag, className = '', textContent = '') {
   return { tag, className, textContent, children: [], events: {}, type: '', disabled: false, dataset: {},
     appendChild(child) { this.children.push(child); return child; },

@@ -9,6 +9,7 @@ export interface TitlebarMenuOptions {
 }
 
 const MORE_ACTIONS: Array<{ label: string; type: string; checkable?: boolean } | 'separator'> = [
+  { label: '搜索节点和参数 (Ctrl+F)', type: 'searchNodes' },
   { label: '新建工作流', type: 'newWorkflow' },
   { label: '选择其他工作流…', type: 'openWorkflowPicker' },
   { label: '打开 JSON', type: 'openFile' },

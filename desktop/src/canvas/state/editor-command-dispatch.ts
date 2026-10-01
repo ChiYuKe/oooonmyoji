@@ -282,6 +282,11 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
         state.inspector = 'node';
         const id = String(selection.nodeId || '');
         if (selectionNodeById(id)) state.selected.add(id);
+      } else if (selection.kind === 'nodes') {
+        state.inspector = 'node';
+        for (const id of Array.isArray(selection.nodeIds) ? selection.nodeIds : []) {
+          if (typeof id === 'string' && selectionNodeById(id)) state.selected.add(id);
+        }
       } else if (selection.kind === 'comment') {
         // 注释框：详情栏镜像按 id 从自己的文档副本里取它（见 inspector/comment-inspector.ts）。
         state.inspector = 'comment';

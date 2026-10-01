@@ -18,6 +18,7 @@ import {
 import type { ParamRowLike, ParamRowKind, ParamRowRect, ParamRowDefinition } from '../render/param-rows';
 
 export interface InlineEditorDeps {
+  editNextParameter?(nodeId: string, param: string, direction: 1 | -1): void;
   state: CanvasState;
   wrap: HTMLElement;
   el(tag: string, className?: string, text?: string): HTMLElement;
@@ -42,6 +43,7 @@ export interface InlineEditorDeps {
 export interface CanvasInlineEditor {
   /** 卡片值区点击入口：按参数类型决定菜单、切换、输入框或详情栏。 */
   openParamEditor(request: NodeParamEditorRequest): void;
+  openSequentialParameter(request: NodeParamEditorRequest): void;
   closeInlineEditor(): void;
   /** 画布重绘（平移、缩放、运行状态刷新）后重新贴合当前行。 */
   refreshInlineEditor(): void;
@@ -57,7 +59,7 @@ interface ActiveEditor {
   kind: ParamRowKind;
   anchor: () => ParamRowRect;
   shell: HTMLElement;
-  input: HTMLInputElement;
+  input: HTMLInputElement | HTMLSelectElement;
   /** 读取浮层内容（坐标点是两个输入框，颜色带取色器，所以不直接读 input.value）。 */
   read: () => { ok: true; value: unknown } | { ok: false; error: string };
   closed: boolean;
@@ -71,6 +73,11 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
   } = deps;
 
   let active: ActiveEditor | null = null;
+  const drafts = new WeakMap<object, Map<string, { values: string[]; source: string }>>();
+
+  function draftSource(pin: ParamRowLike): string {
+    return JSON.stringify([pin.configured, pin.value, pin.definition]);
+  }
 
   function sameValue(left: unknown, right: unknown): boolean {
     try {
@@ -134,7 +141,12 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
   }
 
   function closeInlineEditor(): void {
-    if (active) detach(active);
+    if (active) {
+      const saved = drafts.get(active.node) || new Map<string, { values: string[]; source: string }>();
+      saved.set(active.param, { values: [...Array.from(active.shell.querySelectorAll('input')), ...Array.from(active.shell.querySelectorAll('select'))].map((input) => input.value), source: draftSource(active.pin) });
+      drafts.set(active.node, saved);
+      detach(active);
+    }
   }
 
   function onDocumentPointerDown(event: Event): void {
@@ -147,11 +159,11 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
   }
 
   function onDocumentWheel(): void {
-    if (active) detach(active);
+    if (active) commit(active);
   }
 
   function onWindowBlur(): void {
-    if (active) detach(active);
+    if (active) commit(active, false);
   }
 
   function positionShell(editor: ActiveEditor): void {
@@ -179,16 +191,19 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     return Boolean(active);
   }
 
-  function commit(editor: ActiveEditor): void {
-    if (editor.closed) return;
+  function commit(editor: ActiveEditor, refocus = true): boolean {
+    if (editor.closed) return false;
     const parsed = editor.read();
     if (!parsed.ok) {
       toast(`${editor.param}：${parsed.error}`, true);
-      editor.input.focus();
-      return;
+      editor.input.setAttribute('aria-invalid', 'true');
+      if (refocus) editor.input.focus();
+      return false;
     }
+    drafts.get(editor.node)?.delete(editor.param);
     detach(editor);
     applyParamLiteral(editor.node, editor.param, parsed.value);
+    return true;
   }
 
   /** 行内输入框：数值/时长/颜色/按键共用一套样式。 */
@@ -216,10 +231,16 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     const shell = el('div', `inline-param-editor${valueAlign === 'left' ? ' value-align-left' : ''}${tupleClass}`);
     const current = paramEditorCurrentValue(pin);
     const label = fieldLabel(String(pin.param));
-    let primary: HTMLInputElement;
+    let primary: HTMLInputElement | HTMLSelectElement;
     let read: ActiveEditor['read'];
 
-    if (kind === 'point') {
+    if (kind === 'boolean' || kind === 'enum') {
+      const select = document.createElement('select'); select.className = 'ui-input inline-param-input'; select.setAttribute('aria-label', label);
+      const values = kind === 'boolean' ? [true, false] : definition.enum || [];
+      for (const value of values) { const option = document.createElement('option'); option.value = JSON.stringify(value); option.textContent = kind === 'boolean' ? (value ? '开启' : '关闭') : enumOption(String(value)); select.appendChild(option); }
+      select.value = JSON.stringify(current ?? values[0]); primary = select; shell.appendChild(select);
+      read = () => values.some((value) => JSON.stringify(value) === select.value) ? { ok: true, value: JSON.parse(select.value) } : { ok: false, error: '请选择一个有效值' };
+    } else if (kind === 'point') {
       // 坐标点：X/Y 两个整数输入，回车一次提交整点。
       const parts = paramPointParts(current);
       const xInput = literalInput('inline-param-axis', 'number', String(parts.x), `${label} X`);
@@ -315,15 +336,25 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
       event.stopPropagation();
       if (event.key === 'Enter' && !event.isComposing) {
         event.preventDefault();
-        commit(editor);
+        if (commit(editor)) deps.editNextParameter?.(node.id, String(pin.param), 1);
+      } else if (event.key === 'Tab' && deps.editNextParameter) {
+        const controls = [...Array.from(shell.querySelectorAll('input')), ...Array.from(shell.querySelectorAll('select'))];
+        if ((!event.shiftKey && event.target === controls.at(-1)) || (event.shiftKey && event.target === controls[0])) {
+          event.preventDefault();
+          if (commit(editor)) deps.editNextParameter(node.id, String(pin.param), event.shiftKey ? -1 : 1);
+        }
       } else if (event.key === 'Escape') {
         event.preventDefault();
+        drafts.get(editor.node)?.delete(editor.param);
         detach(editor);
       }
     };
-    const inputs = Array.from(shell.querySelectorAll('input')) as HTMLInputElement[];
+    const inputs = [...Array.from(shell.querySelectorAll('input')), ...Array.from(shell.querySelectorAll('select'))];
+    const draft = drafts.get(node)?.get(String(pin.param));
+    if (draft?.source === draftSource(pin)) inputs.forEach((input, index) => { if (draft.values[index] !== undefined) input.value = draft.values[index]; });
+    else drafts.get(node)?.delete(String(pin.param));
     for (const input of inputs) {
-      input.addEventListener('keydown', onKeyDown);
+      input.addEventListener('keydown', onKeyDown as EventListener);
       input.addEventListener('blur', () => {
         if (editor.closed) return;
         // 点击外部时 pointerdown 已提交；这里的 blur 只负责收尾（例如按 Tab 离开）。
@@ -338,7 +369,7 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     document.addEventListener('wheel', onDocumentWheel, true);
     window.addEventListener('blur', onWindowBlur);
     primary.focus();
-    primary.select();
+    if ('select' in primary) primary.select();
   }
 
   /** 按键：常用 keyevent 选择器，仍可自定义令牌。 */
@@ -491,5 +522,6 @@ export function createCanvasInlineEditor(deps: InlineEditorDeps): CanvasInlineEd
     }
   }
 
-  return { openParamEditor, closeInlineEditor, refreshInlineEditor, inlineEditorOpen, setParamLiteral: applyParamLiteral };
+  const openSequentialParameter = (request: NodeParamEditorRequest) => openLiteralInput(request.node, request.pin, () => request.rect, paramRowKindOf(request.pin, request.pin.definition), request.valueAlign);
+  return { openParamEditor, openSequentialParameter, closeInlineEditor, refreshInlineEditor, inlineEditorOpen, setParamLiteral: applyParamLiteral };
 }

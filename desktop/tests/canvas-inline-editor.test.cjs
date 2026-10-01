@@ -250,17 +250,17 @@ test('输入框提交、取消、非法值与外部点击的行为', () => {
   fireDocument('pointerdown', { target: insideInput });
   assert.equal(editor.inlineEditorOpen(), true);
   assert.equal(target.params.random_offset, 30);
-  // 滚轮缩放与窗口失焦直接收掉浮层（不写盘）。
+  // 滚轮缩放与窗口失焦提交合法值，防止草稿被丢弃。
   fireDocument('wheel', {});
   assert.equal(editor.inlineEditorOpen(), false);
-  assert.equal(target.params.random_offset, 30);
+  assert.equal(target.params.random_offset, 31);
   editor.openParamEditor(request(target, pin));
   const blurInput = body.children[0].children[0];
   blurInput.value = '41';
   fireWindow('blur', {});
   assert.equal(editor.inlineEditorOpen(), false);
   flushTimers();
-  assert.equal(target.params.random_offset, 30, '失焦只是收浮层，不会偷偷提交');
+  assert.equal(target.params.random_offset, 41, '切换窗口前保存合法输入');
   // Tab 离开（blur 事件）会在下一轮宏任务提交。
   editor.openParamEditor(request(target, pin));
   const tabInput = body.children[0].children[0];
@@ -290,6 +290,26 @@ test('结构体参数不就地编辑，转到详情栏并提示', () => {
   editor.openParamEditor(request(node, { param: '' }));
   assert.equal(calls.inspectors.length, 2);
   assert.equal(calls.menus.length, 1);
+});
+
+test('滚轮和窗口切换保留非法草稿，重新打开恢复全部输入，Esc 明确取消', () => {
+  const { editor, body, fireDocument, fireWindow } = harness();
+  const node = { id: 'tap', params: { random_offset: 10 } };
+  const pin = { param: 'random_offset', definition: { type: 'integer', min: 0 }, configured: true, value: 10 };
+  editor.openParamEditor(request(node, pin));
+  body.children[0].children[0].value = '-1';
+  fireDocument('wheel', {});
+  assert.equal(editor.inlineEditorOpen(), true);
+  assert.equal(node.params.random_offset, 10);
+  fireWindow('blur', {});
+  assert.equal(editor.inlineEditorOpen(), true);
+  editor.closeInlineEditor();
+  editor.openParamEditor(request(node, pin));
+  const restored = body.children[0].children[0];
+  assert.equal(restored.value, '-1');
+  restored.events.keydown[0]({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  editor.openParamEditor(request(node, pin));
+  assert.equal(body.children[0].children[0].value, '10');
 });
 
 test('坐标点参数用 X/Y 双输入，回车提交整点', () => {

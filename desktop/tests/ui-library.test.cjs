@@ -131,6 +131,16 @@ test('all styles parse; legacy rules are layered below the component library', (
   assert.equal(css.nodes.find(node=>node.type!=='comment').name,'layer');
 });
 
+test('取消下拉变更后显示及再次打开的选区都保留原值', () => {
+  const { UI, doc } = harness();
+  const dropdown = UI.dropdown({ value: 'a', options: [{ value: 'a', label: '原值' }, { value: 'b', label: '新值' }], onChange: () => false });
+  dropdown.children[0].click();
+  doc.body.querySelectorAll('.ui-dropdown-item')[1].click();
+  assert.equal(dropdown.children[0].textContent, '原值');
+  dropdown.children[0].click();
+  assert.equal(doc.body.querySelectorAll('.ui-dropdown-item')[0].attrs['aria-selected'], 'true');
+});
+
 test('标量数组行的图标按钮与输入框同高并对齐到输入框那一行', () => {
   const postcss=require('postcss');
   // 两条规则在两个文件里：`--ui-height` 由 ui.css 的 .ui-input 用，行对齐在 workflow-editor.css。

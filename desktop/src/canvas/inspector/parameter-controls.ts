@@ -10,6 +10,7 @@ import { KEY_NAMES, keyOptionLabel } from '../../shared/parameter-types';
 import { paramColorSwatch, paramPointParts } from '../render/param-rows';
 import { isBindingValue } from '../../shared/workflow/bindings';
 import { parameterLiteralCache, parameterLiteralCacheKey } from '../state/literal-cache';
+import { commonParameterNames, nodeReferenceValidator, parameterValueAccepted, planActionParameters } from '../model/parameter-edits';
 
 type UiNode = any;
 
@@ -43,6 +44,7 @@ export interface ParameterControlsDeps {
   appendMissingAssetAction(...args: any[]): void;
   openWorkflowBrowser(...args: any[]): void;
   renderInspector(): void;
+  confirmParameterRemoval?(names: string[]): boolean;
   VariableSystem: { visible(raw: any, owner: any, nodeId: any): boolean; defaultAt(raw: any, ref: any, nodeId?: any): any };
   selectInput(value: unknown, options: Array<{ value: string; label: string }>, onChange: (value: string) => void, className?: string): UiNode;
   textInput(value: unknown, onChange: (value: string) => void, options?: Record<string, unknown>): UiNode;
@@ -69,20 +71,105 @@ export function createParameterControls(deps: ParameterControlsDeps) {
         detail: ACTION_LABELS[spec.name] ? spec.name : '',
         title: spec.description || spec.name,
       })),
-      onChange: (value: string) => mutate(() => {
-        node.action = value;
-        node.params = {};
-        clearParameterLiteralCache(node.id);
-        if (state.raw?._inputParams && typeof state.raw._inputParams === 'object') delete state.raw!._inputParams[node.id];
-      }),
+      onChange: (value: string) => {
+        if (value === node.action) return;
+        const definitions = state.catalog.find((spec) => spec.name === value)?.parameters || {};
+        const catalog = { byName: (name: string) => state.catalog.find((spec) => spec.name === name), names: () => state.catalog.map((spec) => spec.name) };
+        const plan = planActionParameters(node.params || {}, definitions, nodeReferenceValidator(state.raw, catalog, node.id));
+        if (plan.removed.length && !(deps.confirmParameterRemoval?.(plan.removed) ?? window.confirm(`更换动作将移除以下不兼容参数：\n${plan.removed.map(fieldLabel).join('、')}\n其余参数会保留。是否继续？`))) return false;
+        mutate(() => {
+          node.action = value;
+          node.params = clone(plan.params);
+          for (const name of plan.removed) {
+            clearParameterLiteralCache(node.id, name);
+            const prefix = `${node.id}:${name}`;
+            for (const key of Object.keys(variableLinks())) if (key === prefix || key.startsWith(`${prefix}.`)) delete variableLinks()[key];
+            for (const key of Object.keys(parameterLiteralCache(state))) if (key.startsWith(`${prefix}.`)) delete parameterLiteralCache(state)[key];
+            if (state.raw?._inputParams?.[node.id]) delete state.raw._inputParams[node.id][name];
+          }
+        });
+        toast(`已更换动作，保留 ${Object.keys(plan.params).length} 个参数${plan.removed.length ? `，移除 ${plan.removed.length} 个不兼容参数` : ''}`);
+      },
       searchable: true,
       placeholder: '搜索动作…',
       emptyText: '没有匹配的动作',
     });
   }
 
+  function renderBatchParameters(body: UiNode, selected: any[]): void {
+    const tasks = selected.filter((node) => node?.type === 'task');
+    if (tasks.length !== selected.length) {
+      body.appendChild(el('div', 'field-hint', '请只选择任务节点，以批量编辑共同参数。'));
+      return;
+    }
+    const definitions = tasks.map((node) => state.catalog.find((spec) => spec.name === node.action)?.parameters || {});
+    const names = commonParameterNames(definitions);
+    body.appendChild(el('div', 'field-hint', `修改后点「应用到 ${tasks.length} 个节点」；每次批量应用可一次撤销。已有引用会在应用固定值后解除。`));
+    if (!names.length) body.appendChild(el('div', 'empty-section', '所选节点没有共同参数。'));
+    for (const name of names) {
+      const def = definitions[0][name];
+      const values = tasks.map((node, index) => Object.prototype.hasOwnProperty.call(node.params || {}, name) ? node.params[name] : definitions[index][name].default);
+      const mixed = values.some((value) => JSON.stringify(value) !== JSON.stringify(values[0]));
+      const bound = values.some(isBindingValue);
+      const block = el('div', 'parameter-block');
+      block.dataset.parameterName = name;
+      block.appendChild(el('div', 'parameter-heading', fieldLabel(name)));
+      if (mixed || bound) block.appendChild(el('div', 'field-hint', mixed ? '多个值（应用前各节点保持原值）' : '当前为引用（应用固定值后解除）'));
+      let draft = clone(values.find((value) => value !== undefined && !isBindingValue(value)) ?? defaultValue(def));
+      const apply = el('button', 'full-command', `应用到 ${tasks.length} 个节点`);
+      apply.type = 'button';
+      apply.disabled = true;
+      const change = (value: any) => { draft = value; apply.disabled = false; };
+      if (['number', 'integer', 'duration', 'string', 'path', 'workflow', 'asset', 'key', 'color'].includes(def.type) && !def.enum?.length) {
+        const numeric = ['number', 'integer', 'duration'].includes(def.type);
+        block.appendChild(textInput(mixed || bound ? '' : draft, (value) => change(numeric ? (value.trim() ? Number(value) : NaN) : value), {
+          type: numeric ? 'number' : 'text', step: def.type === 'integer' ? 1 : 'any', placeholder: mixed ? '多个值' : bound ? '输入固定值' : '',
+        }));
+      } else if (def.type === 'boolean') {
+        block.appendChild(selectInput(mixed || bound ? '' : String(Boolean(draft)), [{ value: '', label: '选择新值…' }, { value: 'true', label: '开启' }, { value: 'false', label: '关闭' }], (value) => { if (value) change(value === 'true'); }));
+      } else if (def.enum?.length) {
+        const choices = def.enum.filter((value: unknown) => definitions.every((defs) => parameterValueAccepted(defs[name], value)));
+        block.appendChild(selectInput(mixed || bound ? '' : JSON.stringify(draft), [{ value: '', label: '选择新值…' }, ...choices.map((value: unknown) => ({ value: JSON.stringify(value), label: enumOption(String(value)) }))], (value) => { if (value) change(JSON.parse(value)); }));
+      } else {
+        block.appendChild(complexValueControl(`batch:${name}`, def, draft, change));
+        if (mixed) block.appendChild(el('div', 'field-hint', '下方显示一份取值；点击应用后统一为此值。'));
+        apply.disabled = false;
+      }
+      apply.addEventListener('click', () => {
+        if (apply.disabled) return;
+        const catalog = { byName: (name: string) => state.catalog.find((spec) => spec.name === name), names: () => state.catalog.map((spec) => spec.name) };
+        const invalid = tasks.find((node, index) => !parameterValueAccepted(definitions[index][name], draft, nodeReferenceValidator(state.raw, catalog, node.id, true)));
+        if (invalid) { toast(`${fieldLabel(name)}不符合「${invalid.name || invalid.id}」的取值要求，未修改任何节点`, true); return; }
+        mutate(() => {
+          for (const node of tasks) {
+            node.params ||= {};
+            node.params[name] = clone(draft);
+            const prefix = `${node.id}:${name}`;
+            for (const key of Object.keys(variableLinks())) if (key === prefix || key.startsWith(`${prefix}.`)) delete variableLinks()[key];
+            rememberParameterLiteral(node, name, draft);
+          }
+        });
+        toast(`已修改 ${tasks.length} 个节点的${fieldLabel(name)}`);
+      });
+      block.appendChild(apply);
+      const reset = el('button', 'full-command', '各自恢复默认值');
+      reset.type = 'button';
+      reset.addEventListener('click', () => mutate(() => {
+        for (const node of tasks) {
+          if (node.params) delete node.params[name];
+          const prefix = `${node.id}:${name}`;
+          for (const key of Object.keys(variableLinks())) if (key === prefix || key.startsWith(`${prefix}.`)) delete variableLinks()[key];
+          clearParameterLiteralCache(node.id, name);
+        }
+      }));
+      if (definitions.every((defs) => defs[name].default !== undefined || !defs[name].required)) block.appendChild(reset);
+      body.appendChild(block);
+    }
+  }
+
   function renderParameter(body: UiNode, node: any, name: string, definition: any): void {
     const block = el('div', 'parameter-block');
+    block.dataset.parameterName = name;
     const heading = el('div', 'parameter-heading');
     const headingName = el('span', '', `${fieldLabel(name)}${definition.required ? ' *' : ''}`);
     headingName.title = name;
@@ -937,7 +1024,7 @@ export function createParameterControls(deps: ParameterControlsDeps) {
   }
 
   return {
-    actionDropdown, renderParameter, renderCoordinatePair,
+    actionDropdown, renderBatchParameters, renderParameter, renderCoordinatePair,
     parameterLiteralCache: () => parameterLiteralCache(state),
     parameterLiteralCacheKey,
     rememberParameterLiteral,

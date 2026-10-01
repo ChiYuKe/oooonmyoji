@@ -97,7 +97,7 @@ export function createInputBridge(deps: InputBridgeDeps) {
     wrap.addEventListener('pointerdown', hideVariableDropGhost);
     window.addEventListener('keydown', (event: any) => {
       const tag = event.target && event.target.tagName;
-      const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable;
       // 排列预览还挂着的时候，键盘就是确认条的快捷键：Enter 应用、Esc 取消（同一条命令）。
       // 先处理再交给下面的通用 Esc 清理，避免「Esc 只关了菜单、预览还挂着」。
       if (!editing && state.arrangePreview) {
@@ -123,6 +123,7 @@ export function createInputBridge(deps: InputBridgeDeps) {
       if (!editing && matchesShortcut(event, 'editor.cut')) { event.preventDefault(); cutSelection(); }
       if (!editing && matchesShortcut(event, 'editor.paste')) { event.preventDefault(); pasteClipboard(); }
       if (!editing && matchesShortcut(event, 'editor.selectAll')) { event.preventDefault(); executeEditorCommand('selectAll'); }
+      if (!editing && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') { event.preventDefault(); executeEditorCommand('searchNodeByName', ''); }
       if (!editing && matchesShortcut(event, 'editor.save')) { event.preventDefault(); $('btn-save')?.click(); }
       if (!editing && matchesShortcut(event, 'editor.undo')) { event.preventDefault(); undo(); }
       if (!editing && matchesShortcut(event, 'editor.redo')) { event.preventDefault(); redo(); }

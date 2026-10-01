@@ -35,7 +35,7 @@ export interface DropdownOption {
 export interface DropdownOptions {
   value?: unknown;
   options?: DropdownOption[];
-  onChange?: (value: string) => void;
+  onChange?: (value: string) => boolean | void;
   searchable?: boolean;
   placeholder?: string;
   emptyText?: string;
@@ -397,10 +397,11 @@ export function dropdown({ value, options, onChange, searchable = false, placeho
           if (item.disabled) return;
           const changed = current !== entry.value;
           close();
+          const previous = current;
           current = entry.value;
           renderButton();
           trigger.focus();
-          if (changed) onChange?.(entry.value);
+          if (changed && onChange?.(entry.value) === false) { current = previous; renderButton(); }
         });
         itemsBox.appendChild(item);
       }

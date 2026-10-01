@@ -72,7 +72,7 @@ import { createCanvasCards } from './render/cards';
 import { createNodeCardRenderer } from './render/node-card';
 import { createNodeCards } from './render/node-cards';
 import { createRenderEntry, type CanvasRenderEntry } from './render/render-entry';
-import { paramRowKindOf } from './render/param-rows';
+import { paramRowKindOf, paramRowGeometry } from './render/param-rows';
 import type { RenderFlags } from './render/render-scheduler';
 import { createCanvasMessages } from './shell/messages';
 import { createCanvasCommands } from './state/commands';
@@ -737,6 +737,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     renderTaskInspector: () => {}, renderCompositeInspector: () => {}, renderDecorators: () => {},
     renderWorkflowInspector: () => {}, renderVariablesInspector: () => {}, renderInstanceRunInspector: () => {},
     renderEdgeInspector: () => {}, renderCommentInspector: () => {},
+    renderBatchParameters: (body, selected) => ParameterControls.renderBatchParameters(body, selected),
   };
   const InspectorPanel = createInspectorPanel({
     state, UI, $, el, nodeById: (id) => viewNodeById(id) || nodeById(id), hideAssetPathPreview, types: TYPES, typeNames: TYPE_NAMES, typeLabels: TYPE_LABEL,
@@ -749,7 +750,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   } = InspectorPanel;
 
   const StudioToolbar = createEditorToolbar({
-    state, $, el, UI, vscode, showMenu, setDirty, toast, nodes: viewNodes, nodeTitle: nodeTitleOf, focusNode,
+    state, $, el, UI, vscode, showMenu, setDirty, toast, nodes: () => [...nodes(), ...viewNodes()], nodeTitle: nodeTitleOf, focusNode,
+    actionTitle: actionLabel, fieldTitle: fieldLabel, referenceTitle: referenceLabel,
     currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
     // 保存走把关入口（只拦运行时会拒绝的错误）；问题导航与布局重建给「更多」菜单。
     requestSave: () => requestSave(),
@@ -865,6 +867,26 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { renderInstanceRunCard, renderVariableCard, registerCardPress } = Cards;
 
   const InlineEditor = createCanvasInlineEditor({
+    editNextParameter: (nodeId, param, direction) => {
+      const node = nodeById(nodeId);
+      if (!node || !viewNodeById(nodeId)) return;
+      paramRowsExpanded().add(nodeId);
+      const editable = (pin: any) => !pin.variable && !(pin.value && typeof pin.value === 'object' && typeof pin.value.ref === 'string') && !['complex', 'asset', 'workflow'].includes(paramRowKindOf(pin, pin.definition));
+      const before = nodeVariablePins(node);
+      const index = before.findIndex((pin: any) => pin.param === param);
+      let nextIndex = index + direction;
+      while (nextIndex >= 0 && nextIndex < before.length && !editable(before[nextIndex])) nextIndex += direction;
+      if (nextIndex < 0 || nextIndex >= before.length) { wrap.tabIndex = -1; wrap.focus(); return; }
+      const nextParam = before[nextIndex].param;
+      render({ graph: true });
+      queueMicrotask(() => {
+        const pins = nodeVariablePins(node), next = pins.findIndex((pin: any) => pin.param === nextParam);
+        if (next < 0) return;
+        const info = paramRowInfo(node), pos = viewPosition(node);
+        const row = paramRowGeometry({ nodeWidth: NODE_W, baseHeight: BASE_H, rowHeight: nodeRowHeight(node), index: next, pinX: VARIABLE_PIN_X, twoLine: info.twoLine, boxedInline: info.fixed && !info.twoLine });
+        InlineEditor.openSequentialParameter({ node, pin: pins[next], rect: { x: pos.x + row.hit.x, y: pos.y + row.hit.y, width: row.hit.width, height: row.hit.height }, world: pos, clientX: 0, clientY: 0, valueAlign: info.fixed ? 'left' : 'right' });
+      });
+    },
     state, wrap, el, mutate, clearParameterLiteralCache, rememberParameterLiteral, variableLinks,
     showMenu, nodeVariablePinMenuItems, requestInspector,
     toast: (message, error) => toast(message, error), enumOption, fieldLabel,
@@ -1636,6 +1658,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   }
 
   function focusNode(id: string, param?: string): void {
+    const selected = state.selected.has(id);
+    if (!viewNodeById(id)) {
+      if (currentGroup()) leaveGroup();
+      const groupId = issueNodeGroupId(id);
+      if (groupId) enterGroup(groupId, id);
+    }
+    if (selected) state.selected = new Set([id]);
     renderPieces?.focusNode(id, param);
   }
   /** 双击节点：自动聚焦并放大到完整卡片档。 */

@@ -544,7 +544,7 @@ test('定位后节点短暂闪烁：立刻高亮、1.4 秒后自动消退', (t) 
 test('搜索定位与结构树定位共用同一条闪烁路径', () => {
   const toolbar = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/toolbar.ts'), 'utf8');
   // 搜索命中后 focusNode → render-entry 的 focusNode 会闪烁。
-  assert.match(toolbar, /focusNode\(target\.id\)/);
+  assert.match(toolbar, /focusNode\(target\.nodeId, target\.param\)/);
   const renderEntry = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/render/render-entry.ts'), 'utf8');
   const focusFn = renderEntry.slice(renderEntry.indexOf('function focusNode('), renderEntry.indexOf('function focusNodeDetail('));
   assert.match(focusFn, /flashNode\(id, param\)/, '搜索/结构树定位都会闪烁');

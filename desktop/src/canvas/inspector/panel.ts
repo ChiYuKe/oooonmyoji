@@ -8,6 +8,7 @@
  * 通过 `renderers` 记录在**分派时**读取各渲染器（入口按构造顺序填表）。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { installParameterNavigation } from '../interactions/parameter-navigation';
 import type { Ui } from '../ui/elements';
 import { isValueCardNode } from '../model/exec-ports';
 
@@ -22,6 +23,7 @@ export interface InspectorRenderers {
   renderEdgeInspector(): void;
   /** 注释框（UE Comment）：选中它时详情面板显示颜色 / 字号 / 文字。 */
   renderCommentInspector(): void;
+  renderBatchParameters?(body: HTMLElement, nodes: any[]): void;
 }
 
 export interface InspectorPanelDeps {
@@ -73,6 +75,7 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     empty.classList.add('hidden');
     body.classList.remove('hidden');
     body.innerHTML = '';
+    installParameterNavigation(body);
     return body;
   }
 
@@ -167,7 +170,8 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
       || state.inspector === 'comment'
       || Boolean(state.selectedRun)
       || Boolean(state.selectedEdge)
-      || Boolean(selectedNode && !valueCardSelected);
+      || Boolean(selectedNode && !valueCardSelected)
+      || selected.length > 1;
     $('inspector').classList.toggle('hidden', !open);
     $('editor-main').classList.toggle('inspector-open', open);
     if (!open) {
@@ -185,6 +189,11 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     if (state.selectedRun) { renderers.renderInstanceRunInspector(); return; }
     if (state.selectedEdge) { renderers.renderEdgeInspector(); return; }
     if (selected.length !== 1) {
+      if (selected.length > 1) {
+        const body = clearInspector(`${selected.length} 个节点 · 批量编辑`);
+        renderers.renderBatchParameters?.(body, selected.map(nodeById).filter(Boolean));
+        return;
+      }
       $('inspector-title').textContent = selected.length ? `${selected.length} 个节点` : '详细信息';
       $('inspector-empty').textContent = selected.length ? '可拖动或按 Delete 删除所选节点' : '选择一个节点';
       $('inspector-empty').classList.remove('hidden');

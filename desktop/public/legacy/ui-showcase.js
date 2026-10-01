@@ -25,6 +25,7 @@
   $('demo-rect').appendChild(UI.rect({ value: [708,958,491,122], onChange: value => report(`区域：${value.join(', ')}`), onPick: () => report('框选入口示例') }));
   $('demo-rect-disabled').appendChild(UI.rect({value:[0,0,100,100],disabled:true}));
   $('demo-dropdowns').appendChild(UI.dropdown({value:'ready',label:'含禁用选项的搜索列表',searchable:true,options:[{value:'ready',label:'可用选项'},{value:'locked',label:'禁用选项',disabled:true},{value:'next',label:'下一项',detail:'搜索后可按方向键选择'}],onChange:value=>report(`选择：${value}`)}));
+  $('demo-dropdowns').appendChild(UI.dropdown({value:'keep',label:'取消变更保留原值',options:[{value:'keep',label:'当前选项'},{value:'cancel',label:'取消本次变更'}],onChange:()=>{report('变更已取消，保留原选项');return false;}}));
   for (const [token, label] of [['bg','背景'], ['panel','面板'], ['surface','控件'], ['selected','选中']]) {
     const row = make('div', 'swatch'); const color = make('i',''); color.style.background = `var(--ui-${token})`;
     row.append(color, make('span','',label)); $('demo-swatches').appendChild(row);

@@ -63,6 +63,7 @@ export function createEditorStatus(deps: EditorStatusDeps) {
     if (state.selectedRun) return { kind: 'run', nodeId: state.selectedRun.nodeId, index: state.selectedRun.index };
     if (state.selectedEdge) return { kind: 'edge', parent: state.selectedEdge.parent, child: state.selectedEdge.child };
     if (state.selected.size === 1) return { kind: 'node', nodeId: [...state.selected][0] };
+    if (state.selected.size > 1) return { kind: 'nodes', nodeIds: [...state.selected] };
     return { kind: 'none' };
   }
 

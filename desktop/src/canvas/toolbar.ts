@@ -4,6 +4,7 @@
  * 选择器钩子（setWorkflow/setInstance）随工厂返回，由入口交给桥接转发。
  */
 import { documentText } from './state/document-text';
+import { openNodeSearch } from './interactions/node-search';
 
 export interface ToolbarInstance {
   id: string;
@@ -88,7 +89,10 @@ export interface ToolbarDeps {
   nodes(): ToolbarNode[];
   /** 节点显示标题（值卡片是类型派生标题）；缺省时退回 `node.name`。搜索与提示都说这一层。 */
   nodeTitle?(node: ToolbarNode): string;
-  focusNode(id: string): void;
+  actionTitle?(name: string): string;
+  fieldTitle?(name: string): string;
+  referenceTitle?(ref: string): string;
+  focusNode(id: string, param?: string): void;
   currentNodeGroup?(): { id: string; name: string } | null;
   leaveNodeGroup?(): boolean;
   groupSelection?(): boolean;
@@ -281,6 +285,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     $('btn-more').addEventListener('click', () => {
       const rect = $('btn-more').getBoundingClientRect();
       showMenu(rect.right, rect.bottom + 4, [
+        { label: '搜索节点和参数 (Ctrl+F)', run: () => searchNodeByName('') },
         { label: '折叠所选节点', run: () => deps.groupSelection?.() },
         'separator',
         // 问题导航：画布上的红标记走到哪都能一键跳到下一个（F8 / Shift+F8 同一条命令）。
@@ -304,37 +309,15 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
   }
 
   function searchNodeByName(value: string): void {
-    const query = String(value || '').trim();
-    if (!query) {
-      toast('请输入卡片名称', true);
-      return;
-    }
-    // 搜索匹配卡片上看得见的标题：值卡片显示类型派生标题（`Break 识别结果` / `等于`），
-    // 只按 `name` 找会漏掉它们。
-    const titleOf = (node: ToolbarNode): string => {
-      const title = deps.nodeTitle ? String(deps.nodeTitle(node) || '').trim() : '';
-      return title || String(node && node.name || '').trim();
-    };
-    const normalized = query.toLocaleLowerCase();
-    const matches = nodes().filter((node) => titleOf(node).toLocaleLowerCase().includes(normalized));
-    if (matches.length === 0) {
-      state.nodeSearch = { query: normalized, ids: [], index: -1 };
-      toast(`没有找到标题包含“${query}”的卡片`, true);
-      return;
-    }
-    const ids = matches.map((node) => node.id);
-    const sameResults = state.nodeSearch.query === normalized
-      && ids.length === state.nodeSearch.ids.length
-      && ids.every((id, index) => id === state.nodeSearch.ids[index]);
-    const index = sameResults ? (state.nodeSearch.index + 1) % matches.length : 0;
-    const target = matches[index];
-    state.nodeSearch = { query: normalized, ids, index };
-    state.selected = new Set([target.id]);
-    state.selectedEdge = null;
-    state.selectedRun = null;
-    state.inspector = 'node';
-    focusNode(target.id);
-    toast(`卡片 ${index + 1}/${matches.length}：${titleOf(target)}`);
+    openNodeSearch({
+      nodes, query: String(value || ''),
+      labels: { title: deps.nodeTitle, action: deps.actionTitle, field: deps.fieldTitle, reference: deps.referenceTitle },
+      focus: (target) => {
+        state.selected = new Set([target.nodeId]);
+        state.selectedEdge = null; state.selectedRun = null; state.inspector = 'node';
+        focusNode(target.nodeId, target.param);
+      },
+    });
   }
 
   function setWorkflow(uri: string): void {

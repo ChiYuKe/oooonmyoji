@@ -31,8 +31,9 @@ export interface SidebarVariable {
 
 /** 详细信息面板的选中项（画布投影给壳层转发）。 */
 export interface InspectorSelection {
-  kind: 'none' | 'node' | 'run' | 'edge' | 'variables' | 'workflow' | 'comment';
+  kind: 'none' | 'node' | 'nodes' | 'run' | 'edge' | 'variables' | 'workflow' | 'comment';
   nodeId?: string;
+  nodeIds?: string[];
   index?: number;
   parent?: string;
   child?: string;

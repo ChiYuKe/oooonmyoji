@@ -260,7 +260,7 @@ def validate_graph_structure(
             parent_counts[child_id] += 1
         if node.type == "root" and len(node.children) != 1:
             raise ConfigError(f"root node {node.id} must contain exactly one child")
-        if node.type in {"selector", "sequence"} and not node.children:
+        if node.type == "selector" and not node.children:
             raise ConfigError(f"{node.type} node {node.id} must contain at least one child")
         if node.type == "simple_parallel":
             if len(node.children) != 2:

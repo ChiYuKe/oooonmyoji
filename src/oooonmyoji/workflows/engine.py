@@ -525,6 +525,9 @@ class WorkflowEngine:
                 failed_branches.append((history_start, history_end))
             return last
         if node.type == "sequence":
+            if not node.children:
+                # 顺序节点没有子节点时是空操作：成功结束并让父节点继续。
+                return _Outcome(ActionStatus.SUCCEEDED)
             last = _Outcome(ActionStatus.SUCCEEDED)
             for child_id in node.children:
                 last = self._run_node(child_id, deadline, branch_cancel)

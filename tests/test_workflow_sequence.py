@@ -80,9 +80,8 @@ def test_sequence_stops_after_first_failure(tmp_path: Path, monkeypatch: pytest.
     assert "fail" in ids and "last" not in ids
 
 
-def test_sequence_rejects_empty_children(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sequence_with_no_children_succeeds_as_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = _setup(tmp_path); monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
-    _write(tmp_path, "sequence_bad", [])
-    record = _run(config, "sequence_bad")
-    assert record.status.value == "failed"
-    assert record.error_category == "config"
+    _write(tmp_path, "sequence_noop", [])
+    record = _run(config, "sequence_noop")
+    assert record.status.value == "succeeded"

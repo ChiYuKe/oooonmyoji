@@ -319,7 +319,7 @@ test('值卡片不显示用户自定义名称：Break / 运算符标题保持 UE
   // 拆分卡：UE 的 `Break <Struct>`，来源用中文短名，不再把 break_1 当标题。
   const brk=render({id:'break_1',type:'break',ref:{ref:'nodes.classify.output'},pins:[]});
   assert.equal(byClass(brk,'card-title')[0].textContent,'Break');
-  assert.match(tip(brk),/^Break\nID: break_1/, '稳定 ID 仍在悬停提示里，写引用时照得到');
+  assert.equal(tip(brk),'Break', '悬停提示不展示内部 ID');
   // 没绑来源时只说类型，同样不裸露 ID。
   const unbound=render({id:'break_2',type:'break',pins:[]});
   assert.equal(byClass(unbound,'card-title')[0].textContent,'Break');
@@ -331,7 +331,7 @@ test('值卡片不显示用户自定义名称：Break / 运算符标题保持 UE
   ]});
   assert.equal(byClass(bool,'card-title')[0].textContent,'等于');
   assert.equal(byClass(bool,'bool-judge-operator')[0].textContent,'==','卡面中间仍是 UE 紧凑节点那样的运算符符号');
-  assert.match(tip(bool),/\nID: bool_1/);
+  assert.equal(tip(bool),'等于');
 
   // 纯数据节点忽略用户自定义 name，标题保持 UE 运算符语义。
   const named=render({id:'bool_2',type:'bool_judge',name:'结界未结算',expression:{eq:[1,1]},pins:[]});

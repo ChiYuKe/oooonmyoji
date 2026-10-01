@@ -92,6 +92,7 @@ test('compact rows keep full detail data and show failures without expansion',()
   assert.match(ok.children[0].textContent,/节点 ok/); assert.match(ok.children[0].textContent,/432 ms/);
   assert.doesNotMatch(ok.children[0].textContent,/vision\.wait_template|ROI|开始时间/);
   assert.match(ok.children[1].textContent,/实际参数/); assert.match(ok.children[1].textContent,/子流程/);
+  assert.doesNotMatch(ok.children[1].textContent,/节点 ID/);
   assert.match(ok.children[1].textContent,/ROI \[1, 2, 30, 40\]/);
   assert.match(bad.children[0].textContent,/失败原因/);
   assert.equal(h.$('completed-count').textContent,'1'); assert.equal(h.$('failed-count').textContent,'1');

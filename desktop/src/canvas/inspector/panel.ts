@@ -11,6 +11,7 @@ import type { CanvasState } from '../state/canvas-state';
 import { installParameterNavigation } from '../interactions/parameter-navigation';
 import type { Ui } from '../ui/elements';
 import { isValueCardNode } from '../model/exec-ports';
+import { nodeDisplayTitle } from '../model/node-title';
 
 /** 详情面板分派的各内容渲染器；入口按构造顺序填入真实实现。 */
 export interface InspectorRenderers {
@@ -36,7 +37,6 @@ export interface InspectorPanelDeps {
   types: readonly string[];
   typeNames: Record<string, string>;
   typeLabels: Record<string, string>;
-  renameNode(nodeId: string, value: string): void;
   renameNodeGroup(groupId: string, value: string): void;
   execPinNames(groupId: string, side: 'inputs' | 'outputs'): string[];
   addExecPin(groupId: string, side: 'inputs' | 'outputs'): boolean;
@@ -63,7 +63,7 @@ export interface InspectorPanel {
 export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
   const {
     state, UI, $, el, nodeById, hideAssetPathPreview, types, typeNames, typeLabels,
-    renameNode, renameNodeGroup, execPinNames, addExecPin, renameExecPin, removeExecPin, changeNodeType, mutate, deleteSelection, renderers,
+    renameNodeGroup, execPinNames, addExecPin, renameExecPin, removeExecPin, changeNodeType, mutate, deleteSelection, renderers,
   } = deps;
 
   function clearInspector(title: string): HTMLElement {
@@ -202,7 +202,7 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     }
     const node = selectedNode;
     if (!node) return;
-    const body = clearInspector(node.name || node.id);
+    const body = clearInspector(nodeDisplayTitle(node));
     if (node._nodeGroup) {
       section(body, '折叠图');
       const nameRow = field(body, '名称');
@@ -233,12 +233,11 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     section(body, '节点');
     const basics = el('div', 'node-basics');
     body.appendChild(basics);
-    const idRow = field(basics, 'ID', '引用与运行事件使用的稳定标识');
-    idRow.appendChild(textInput(node.id, (value) => renameNode(node.id, value.trim())));
     const nameRow = field(basics, '名称');
     // 固定 id：F2 重命名（editor.rename → renameSelection）靠它聚焦名称输入框。
     const nameInput = textInput(node.name || '', (value) => mutate(() => { if (value.trim()) node.name = value.trim(); else delete node.name; })) as HTMLInputElement;
     nameInput.id = 'inspector-node-name';
+    nameInput.placeholder = nodeDisplayTitle({ ...node, name: undefined });
     nameRow.appendChild(nameInput);
     if (node.type !== 'root') {
       const typeRow = field(basics, '类型');

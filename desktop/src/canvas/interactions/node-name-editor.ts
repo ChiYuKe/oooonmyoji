@@ -1,6 +1,7 @@
 import type { CanvasState } from '../state/canvas-state';
 import { worldRectToScreen } from '../render/param-rows';
 import { isGroupVariablesNode, isProjectedGroupNode } from '../model/node-groups';
+import { nodeDisplayTitle } from '../model/node-title';
 
 export interface NodeNameEditorDeps {
   state: CanvasState;
@@ -124,7 +125,7 @@ export function createNodeNameEditor(deps: NodeNameEditorDeps): CanvasNodeNameEd
       : String(node.name || '');
     if (!group) {
       // 值卡片没设过名字时，占位提示就是卡片现在显示的派生标题（清空=回到它）。
-      input.placeholder = String(deps.derivedTitle?.(node) || node.id || '');
+      input.placeholder = String(deps.derivedTitle?.(node) || nodeDisplayTitle(node));
     }
     input.spellcheck = false;
     input.setAttribute('aria-label', '节点组名称');

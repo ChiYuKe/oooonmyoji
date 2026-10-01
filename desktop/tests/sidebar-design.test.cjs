@@ -117,9 +117,9 @@ test('值卡片在结构树上显示派生标题；F2 改的是手动显示名�
   const nameOf = (row) => row.children[2].children[0];
   // 值卡片带上来的就是派生标题（`Break 识别结果`），不再裸露 break_1。
   assert.equal(nameOf(rows()[0]).textContent, 'Break 识别结果');
-  // 标题与稳定 ID 不同时，悬停提示补出 ID，写引用时照得到。
-  assert.equal(rows()[0].title, 'Break 识别结果\nbreak_1\nbreak\nF2 重命名\nDelete 删除该节点');
-  assert.equal(rows()[1].title, '结界未结算\nbool_1\nbool_judge\nF2 重命名\nDelete 删除该节点');
+  // 悬停提示使用显示名，不补内部 ID。
+  assert.equal(rows()[0].title, 'Break 识别结果\nbreak\nF2 重命名\nDelete 删除该节点');
+  assert.equal(rows()[1].title, '结界未结算\nbool_judge\nF2 重命名\nDelete 删除该节点');
 
   // F2：没设过 name 的值卡片输入框为空，占位提示是派生标题；提交写的是手动显示名。
   sidebar.startNodeRename('break_1');

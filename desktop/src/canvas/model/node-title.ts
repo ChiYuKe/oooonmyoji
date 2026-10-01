@@ -8,12 +8,20 @@
  * - Break 结构体节点（`K2Node_BreakStruct`）的标题是 `Break <Struct>`，
  *   这里写 `Break <来源显示名>`；来源的原始引用仍由副标题整句回读。
  *
- * 三层优先级：手动设过的 `name` > 类型派生标题 > 节点 ID。
+ * 三层优先级：手动设过的 `name` > 类型派生标题 > 中文类型名称。
  * `name` 是本项目特有的覆盖层（UE 没有逐个改名的能力），没设过时标题永远是可读的
- * 类型/来源派生文本，ID 只留在悬停提示与引用文本里。
+ * 类型/来源派生文本，内部 ID 不作为用户可见的标题。
  *
  * 纯计算、无 DOM 依赖，画布卡片、结构树、浮动编辑器共用同一份标题。
  */
+import { ACTION_LABELS } from '../ui/labels';
+
+const NODE_TYPE_TITLES: Record<string, string> = {
+  root: '根节点', task: '任务', selector: '选择器', sequence: '顺序',
+  simple_parallel: '简单并行', parallel: '并行', repeat_until: '循环直到',
+  branch: '条件分支', switch: '多路开关', state_machine: '状态机',
+  instance_parallel: '实例并行', condition: '判断', node_group: '折叠图',
+};
 
 /**
  * 运算符 → 中文名。与条件回读（subworkflow 的 `conditionToText`）共用同一张表：
@@ -72,17 +80,20 @@ export function derivedNodeTitle(node: any, deps: NodeTitleDeps = {}): string {
 }
 
 /**
- * 卡片标题：`name` 覆盖 > 类型派生标题 > 节点 ID；**值卡片例外**。
+ * 卡片标题：`name` 覆盖 > 类型派生标题 > 中文类型名称；**值卡片例外**。
  *
  * 布尔判断 / 拆分是 UE 的「纯数据节点」：标题只说类型语义（比较节点显示运算符、
  * Break 显示 `Break`），**不显示用户自定义的实例名**——这样一眼扫过去能分清「数据类型卡」
  * 与「业务步骤卡」。实例名不会丢：它仍出现在条件回读整句里，也是 F2 改名框的占位提示
- * （见 `derivedNodeTitle`），稳定 ID 留在悬停提示里。
+ * （见 `derivedNodeTitle`）。稳定 ID 仅用于内部引用。
  */
 export function nodeDisplayTitle(node: any, deps: NodeTitleDeps = {}): string {
+  if (!node || typeof node !== 'object') return '';
   if (node?.type === 'bool_judge' || node?.type === 'break') {
-    return node.type === 'break' ? 'Break' : derivedNodeTitle(node, deps) || String(node?.id || '');
+    return node.type === 'break' ? 'Break' : derivedNodeTitle(node, deps);
   }
   const name = typeof node?.name === 'string' ? node.name.trim() : '';
-  return name || derivedNodeTitle(node, deps) || String(node?.id || '');
+  return (name !== node.id ? name : '') || derivedNodeTitle(node, deps)
+    || ACTION_LABELS[node.action]
+    || (node._nodeGroup ? '折叠图' : NODE_TYPE_TITLES[node.type]) || '节点';
 }

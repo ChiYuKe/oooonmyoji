@@ -5,6 +5,7 @@
  * 只读文档与模型，不做文档修改；布局常量由调用方传入。
  */
 import type { CanvasState } from '../state/canvas-state';
+import { nodeDisplayTitle } from './node-title';
 import { cardRowLabel, cardRowOf, cardRowParams, hasCardLayout } from '../render/card-layout';
 import { nodeOutputSchema } from '../../shared/workflow/graph';
 import { schemaAtPath } from '../../shared/workflow/schema-path';
@@ -592,7 +593,7 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
       if (!node || !node.id || node.id === excludeNodeId) continue;
       if (node.type === 'condition' || node.type === 'root') continue;
       if (!isCompositeSchema(outputSchemaOf(node))) continue;
-      const name = node.name || (node.action ? fieldLabel(node.action) : '') || node.id;
+      const name = nodeDisplayTitle(node);
       candidates.push({ ref: `nodes.${node.id}.output`, label: `${name} · 输出` });
     }
     for (const scope of ['inputs', 'variables'] as const) {
@@ -622,7 +623,7 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
     const match = /^nodes\.([^\.]+)\.output(?:\.(.+))?$/.exec(text);
     if (!match) return text;
     const source = nodes().find((item: any) => item && item.id === match[1]);
-    const name = source ? (source.name || source.id) : match[1];
+    const name = (source?.name && source.name !== source.id ? source.name : '') || nodeDisplayTitle(source) || '节点已移除';
     if (!match[2]) return name;
     return match[2].split('.').reduce((label, segment) => (
       /^\d+$/.test(segment) ? `${label}[${segment}]` : `${label}.${fieldLabel(segment)}`

@@ -6,7 +6,8 @@
  * 只读文档与目录，不修改状态；schema 解析与变量可见性由注入的模块提供。
  */
 import type { CanvasState } from '../state/canvas-state';
-import { actionLabel, outputFieldLabel } from '../ui/labels';
+import { outputFieldLabel } from '../ui/labels';
+import { nodeDisplayTitle } from './node-title';
 import { BOOL_JUDGE_OUTPUT_SCHEMA } from '../../shared/workflow/types';
 import { nodeOutputSchema } from '../../shared/workflow/graph';
 
@@ -216,14 +217,12 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
   }
 
   /**
-   * 引用里的来源节点显示名：节点名缺失时逐级回退到动作中文名、再到 id。
-   * 原始路径对新手是天书，但 id 是唯一稳定的锚点，所以最后一定有个能看懂的锚。
+   * 引用里的来源节点显示名：节点名缺失时使用动作或类型中文名。
    */
   function nodeSourceName(nodeId: string): string {
     const source = nodeIndex().get(nodeId);
-    return (source && source.name)
-      || (source && source.action ? actionLabel(source.action) : '')
-      || nodeId;
+    return (source?.name && source.name !== source.id ? source.name : '')
+      || nodeDisplayTitle(source) || '节点已移除';
   }
 
   /** 输出路径的一段：数组下标写「第 N 项」，字段名走字段中文标签。 */
@@ -235,7 +234,7 @@ export function createCanvasReferences(deps: CanvasReferencesDeps): CanvasRefere
   function nodeReferenceLabel(ref: string): string {
     const [, nodeId, slot, ...tail] = ref.split('.');
     const sourceName = nodeSourceName(nodeId);
-    if (slot !== 'output') return `${sourceName}（${nodeId}）`;
+    if (slot !== 'output') return sourceName;
     const segments = tail.map(outputSegmentLabel);
     return `${sourceName} › ${segments.length ? segments.join(' › ') : '输出'}`;
   }

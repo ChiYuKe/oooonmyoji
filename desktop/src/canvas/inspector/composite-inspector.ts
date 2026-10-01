@@ -9,6 +9,7 @@
 import { createVariableSystem } from '../model/variable-system';
 import { isBindingValue } from '../../shared/workflow/bindings';
 import { CONDITION_PORT_LABELS, CONDITION_PORT_ORDER, conditionPortsOf } from '../model/exec-ports';
+import { nodeDisplayTitle } from '../model/node-title';
 
 export type UiNode = HTMLElement & Record<string, any>;
 
@@ -115,8 +116,8 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
         const slot = el('div', 'condition-slot');
         slot.appendChild(el('span', `condition-slot-title condition-slot-${port}`, CONDITION_PORT_LABELS[port]));
         if (childId) {
-          const name = el('span', 'condition-slot-child', nodeById(childId)?.name || childId);
-          name.title = childId;
+          const name = el('span', 'condition-slot-child', nodeDisplayTitle(nodeById(childId)) || '节点已移除');
+          name.title = name.textContent || '';
           slot.appendChild(name);
           const removeTip = `断开${CONDITION_PORT_LABELS[port]}口上的分支`;
           const remove = iconButton('icon-button danger condition-slot-remove', removeTip, 'trash', () => {
@@ -381,8 +382,8 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
     children.forEach((childId: string, index: number) => {
       const row = el('div', 'child-row');
       row.appendChild(el('span', 'child-order', String(index + 1)));
-      const childName = el('span', 'child-name', nodeById(childId)?.name || childId);
-      childName.title = `${childName.textContent}\n${childId}`;
+      const childName = el('span', 'child-name', nodeDisplayTitle(nodeById(childId)) || '节点已移除');
+      childName.title = childName.textContent || '';
       row.appendChild(childName);
       const up = el('button', 'icon-button', '↑');
       up.title = '提高优先级';
@@ -501,7 +502,7 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
         if (!raw) return;
         if (keys.some((key) => isBindingValue(decorator[key]))) { exposeDecoratorParameter(node, decorator, keys); return; }
         mutate(() => {
-          const id = VariableSystemCreate(raw, 'inputs', `${node.name || node.id} · 重试配置`, { ...VariableSystemPresets.retry, _autoPublished: true }, { attempts: decorator.attempts ?? 1, delay_seconds: decorator.delay_seconds ?? 0 });
+          const id = VariableSystemCreate(raw, 'inputs', `${nodeDisplayTitle(node)} · 重试配置`, { ...VariableSystemPresets.retry, _autoPublished: true }, { attempts: decorator.attempts ?? 1, delay_seconds: decorator.delay_seconds ?? 0 });
           for (const key of keys) decorator[key] = { ref: `inputs.${id}.${key}` };
         });
       },

@@ -55,7 +55,7 @@ function harness(selectedNode, overrides = {}) {
     nodeById: (id) => (id === selectedNode.id ? selectedNode : null),
     hideAssetPathPreview() {},
     types: ['task', 'sequence', 'break', 'bool_judge'], typeNames: {}, typeLabels: {},
-    renameNode() {}, renameNodeGroup() {}, changeNodeType() {}, mutate() {}, deleteSelection() {},
+    renameNodeGroup() {}, changeNodeType() {}, mutate(fn) { fn(); }, deleteSelection() {},
     renderers: {
       renderTaskInspector() { rendered.push('task'); },
       renderCompositeInspector() { rendered.push('composite'); },
@@ -82,10 +82,19 @@ test('值卡片选中时不打开详情面板', () => {
 });
 
 test('普通节点照旧打开详情面板', () => {
-  const sequence = harness({ id: 'seq', type: 'sequence', children: [] });
+  const sequenceNode = { id: 'seq', type: 'sequence', children: [] };
+  const sequence = harness(sequenceNode);
   sequence.panel.renderInspector();
   assert.equal(sequence.elements.get('inspector').classList.contains('hidden'), false);
   assert.deepEqual(sequence.rendered, ['composite']);
+  assert.equal(sequence.elements.get('inspector-title').textContent, '顺序');
+  const basics = sequence.elements.get('inspector-body').children.find(node => node.className === 'node-basics');
+  assert.equal(basics.children.some(row => row.children[0].textContent === 'ID'), false);
+  const nameInput = basics.children[0].children[1];
+  assert.equal(nameInput.placeholder, '顺序');
+  nameInput.onChange('挑战循环');
+  assert.equal(sequenceNode.name, '挑战循环');
+  assert.equal(sequenceNode.id, 'seq');
 
   const task = harness({ id: 't1', type: 'task', action: 'core.sleep', params: {} });
   task.panel.renderInspector();

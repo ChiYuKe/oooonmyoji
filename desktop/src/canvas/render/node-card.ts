@@ -198,7 +198,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
   const conditionToText = deps.conditionToText;
   // 标题里只用「来源名」这一层（`Break 识别结果`），字段引用才带完整路径。
   const referenceTitle = deps.referenceTitleOf ?? ((ref: unknown) => referenceLabel(ref));
-  /** 卡片标题：name 覆盖 > 值卡片类型派生标题 > 节点 ID（见 model/node-title）。 */
+  /** 卡片标题：name 覆盖 > 类型派生标题 > 中文类型名称（见 model/node-title）。 */
   const titleOf = (node: any): string => nodeDisplayTitle(node, { referenceTitle: (ref: string) => referenceTitle(ref) });
   const issuesOf = nodeIssueInfo ?? (() => null);
   const issuesText = issueTitle ?? ((items: any[]) => items.map((item) => String(item && item.message || '')).filter(Boolean).join('\n'));
@@ -573,7 +573,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
     nodeCards.text(group, { className: 'node-name card-title', x: 39, y: 22, value: titleOf(node), width: nodeWidth - (showRowToggle ? 71 : 51), size: 12 });
     nodeCards.text(group, { className: 'node-type card-kicker', x: contentX, y: 47, value: subRef ? '子工作流' : typeNames[node.type] || node.type, width: 130, size: 10 });
     const nodeErrorText = issueInfo && issueInfo.node.length ? issuesText(issueInfo.node) : '';
-    svgEl('title', {}, group).textContent = `${titleOf(node)}\nID: ${node.id}${hasRunStatus ? `\n${runLabels[runStatus] || runStatus}${run?.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
+    svgEl('title', {}, group).textContent = `${titleOf(node)}${hasRunStatus ? `\n${runLabels[runStatus] || runStatus}${run?.error ? `：${run.error}` : ''}` : ''}${nodeErrorText ? `\n⚠ ${nodeErrorText}` : ''}${locked ? '\n🔒 位置已锁定（自动排列与拖动都会跳过）' : ''}`;
     if (issueInfo && issueInfo.node.length) {
       const dot = svgEl('circle', { class: 'node-error-dot', cx: nodeWidth - 8, cy: 8, r: 4 }, group);
       dot.style.pointerEvents = 'none';

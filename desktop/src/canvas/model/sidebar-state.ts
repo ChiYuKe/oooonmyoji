@@ -3,6 +3,7 @@
  * 原 `editor-sidebar-state.js`；主编辑器通过工厂注入依赖，迁移期由 main.ts 以旧全局名挂载。
  */
 import type { SidebarNode, SidebarVariable } from '../../shared/editor-messages';
+import { nodeDisplayTitle } from './node-title';
 
 export interface SidebarDefinitionSource {
   display_name?: unknown;
@@ -117,7 +118,7 @@ export function createSidebarState(deps: SidebarStateDeps): SidebarStateControll
       return {
         id: node.id,
         // 显示用标题：值卡片是类型派生标题（`Break 识别结果` / `等于`），不再裸露节点 ID。
-        name: deps.nodeTitle ? deps.nodeTitle(node) : (explicitName || String(node.id)),
+        name: deps.nodeTitle ? deps.nodeTitle(node) : nodeDisplayTitle(node),
         // 行内改名编辑的是这一层（手动设过的显示名）；留空提交即删掉它、标题回到派生结果。
         explicitName,
         type: typeof node.type === 'string' ? node.type : 'task',

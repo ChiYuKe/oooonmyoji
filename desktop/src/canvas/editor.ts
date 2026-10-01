@@ -425,7 +425,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     mutate(() => { locked = toggleNodeLock(state.raw, target); });
     // 锁定状态进了卡片内容签名，走图形重绘让角标立刻出现/消失。
     render({ graph: true, selection: true, panels: true });
-    toast(locked ? `已锁定「${String(node.name || node.id)}」的位置` : `已解锁「${String(node.name || node.id)}」的位置`);
+    toast(locked ? `已锁定「${nodeTitleOf(node)}」的位置` : `已解锁「${nodeTitleOf(node)}」的位置`);
   };
 
   /**
@@ -607,7 +607,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
       if (!node || node.type !== 'task' || node.action !== preset.action) { toast('请选择使用同一动作的任务节点', true); return false; }
       const defs = catalogLike().byName(preset.action)?.parameters || {};
       if (Object.entries(preset.params).some(([name, value]) => !defs[name] || !parameterValueAccepted(defs[name], value))) { toast('预设不符合当前动作要求，请重新保存', true); return false; }
-      if (!window.confirm(`将「${preset.name}」的参数套用到「${node.name || node.id}」？现有参数及引用将被替换，可撤销。`)) return false;
+      if (!window.confirm(`将「${preset.name}」的参数套用到「${nodeTitleOf(node)}」？现有参数及引用将被替换，可撤销。`)) return false;
       mutate(() => {
         node.params = clone(preset.params); clearParameterLiteralCache(node.id);
         for (const key of Object.keys(variableLinks())) if (key.startsWith(`${node.id}:`)) delete variableLinks()[key];
@@ -867,7 +867,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   };
   const InspectorPanel = createInspectorPanel({
     state, UI, $, el, nodeById: (id) => viewNodeById(id) || nodeById(id), hideAssetPathPreview, types: TYPES, typeNames: TYPE_NAMES, typeLabels: TYPE_LABEL,
-    renameNode, renameNodeGroup: renameGroup, execPinNames, addExecPin, renameExecPin, removeExecPin,
+    renameNodeGroup: renameGroup, execPinNames, addExecPin, renameExecPin, removeExecPin,
     changeNodeType, mutate, deleteSelection,
     renderers: inspectorRenderers,
   });

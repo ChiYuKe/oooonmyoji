@@ -280,8 +280,7 @@ export function createSidebar(deps: SidebarDeps): Sidebar {
       row.className = `tree-row${node.id === selectedNode ? ' selected' : ''}`;
       // 标题与节点 ID 不同（值卡片显示派生标题、普通节点显示了中文名）时，悬停里补出 ID，
       // 好让人照着写 `nodes.<id>.output` 引用。
-      const idLine = node.id === node.name ? '' : `${node.id}\n`;
-      row.title = `${node.name}\n${idLine}${node.meta}\nF2 重命名\nDelete 删除该节点`;
+      row.title = `${node.name}\n${node.meta}\nF2 重命名\nDelete 删除该节点`;
       row.dataset.nodeId = node.id;
       if (hasChildren) row.setAttribute('aria-expanded', String(branchOpen));
 

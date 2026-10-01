@@ -156,8 +156,8 @@ test('referenceCompatibleWithPin 按值类型判断，引用显示名用节点�
   const numeric = { id: 'm3', type: 'task', name: '数值', action: 'core.sleep', params: {} };
   assert.deepEqual(model.referenceFieldsForPin(matches, numeric, 'seconds').map((item) => item.field),
     ['0.x', '0.confidence']);
-  // 源节点已删除时用 id 兜底，字段名仍走共享标签。
-  assert.equal(model.referenceDisplayName('nodes.gone.output.state'), 'gone.页面状态');
+  // 源节点已删除时显示原因，字段名仍走共享标签。
+  assert.equal(model.referenceDisplayName('nodes.gone.output.state'), '节点已移除.页面状态');
   assert.equal(model.referenceDisplayName('inputs.x'), 'inputs.x');
   assert.equal(model.referenceDisplayName(undefined), '');
 });

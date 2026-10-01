@@ -88,7 +88,7 @@ test('布尔判断卡片进阶编辑器：嵌套条件控件 + 装饰器，点�
   assert.equal(byClass(shell, 'value-card-editor-title')[0].textContent, '结界未结算');
   assert.equal(byClass(shell, 'value-card-editor-kind')[0].textContent, '布尔判断');
   assert.equal(byClass(shell, 'condition-control').length, 1);
-  assert.equal(byClass(shell, 'field-hint')[0].textContent, '输出引用：nodes.bool_1.output.value');
+  assert.equal(byClass(shell, 'field-hint')[0].textContent, '输出判断结果：可连接到其他节点的布尔输入');
   assert.equal(byClass(shell, 'decorator-section').length, 1, '装饰器跟着一起搬进浮层');
   // 定位：贴卡片（屏幕坐标），宽度固定。
   assert.match(shell.style.left, /^\d+px$/);

@@ -187,8 +187,8 @@ test('节点输出引用渲染成「节点名 › 字段名」，不再是裸路
   // 数组输出给出「第 N 项」，并继续往下翻译字段。
   assert.equal(references.referenceLabel('nodes.wait.output.0.confidence'), '等待模板 › 第 1 项 › 置信度');
   assert.equal(references.referenceLabel('nodes.wait.output'), '等待模板 › 输出');
-  // 节点已被删除时至少还能认出 id，绝不返回看不懂的路径。
-  assert.equal(references.referenceLabel('nodes.ghost.output.state'), 'ghost › 状态');
+  // 节点已被删除时显示原因，绝不显示内部 id。
+  assert.equal(references.referenceLabel('nodes.ghost.output.state'), '节点已移除 › 状态');
   // 变量与输入沿用原有译名。
   assert.equal(references.referenceLabel('variables.时长'), '变量 · variables.时长');
   assert.equal(references.referenceLabel(''), '无可用引用');
@@ -199,7 +199,7 @@ test('节点输出引用渲染成「节点名 › 字段名」，不再是裸路
   assert.equal(references.referenceTitle('nodes.wait.output'), '等待模板');
   assert.equal(references.referenceTitle('nodes.classify.output.state'), '识别页面状态 › 状态');
   assert.equal(references.referenceTitle('nodes.wait.output.0.confidence'), '等待模板 › 第 1 项 › 置信度');
-  assert.equal(references.referenceTitle('nodes.ghost.output'), 'ghost');
+  assert.equal(references.referenceTitle('nodes.ghost.output'), '节点已移除');
   assert.equal(references.referenceTitle('variables.时长'), '变量 · variables.时长');
   assert.equal(references.referenceTitle(''), '无可用引用');
 });

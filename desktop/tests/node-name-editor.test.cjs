@@ -109,7 +109,7 @@ test('组内合成卡编辑所属组名，Esc 取消；缩放平移时继续贴�
   assert.equal(h.editor.isOpen(), false);
 });
 
-test('普通节点同样在卡片标题上编辑显示名，空名称回退到稳定 ID', () => {
+test('普通节点同样在卡片标题上编辑显示名，空名称回退到中文类型名', () => {
   const h = harness();
   const task = {id: 'task_1', name: '点击挑战按钮', type: 'task'};
   h.positions.set(task.id, {x: 24, y: 48});
@@ -120,12 +120,12 @@ test('普通节点同样在卡片标题上编辑显示名，空名称回退到�
   key(input, 'Enter');
   assert.deepEqual(h.nodesRenamed, [['task_1', '点击准备按钮']]);
 
-  // 没设过显示名的节点：输入框是空的，标题由卡片按「名称 || 稳定 ID」回退，占位提示给出它。
+  // 没设过显示名的节点：输入框是空的，占位提示使用中文类型名。
   const unnamed = {id: 'sequence_1', type: 'sequence'};
   assert.equal(h.editor.open(unnamed), true);
   input = h.body.children[0].children[0];
   assert.equal(input.value, '', '输入框只放手动设过的显示名');
-  assert.equal(input.placeholder, 'sequence_1');
+  assert.equal(input.placeholder, '顺序');
   input.value = '';
   key(input, 'Enter');
   assert.deepEqual(h.nodesRenamed, [['task_1', '点击准备按钮']], '空提交没改变显示名就不发命令');

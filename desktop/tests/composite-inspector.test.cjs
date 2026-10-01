@@ -24,7 +24,7 @@ test('sequence child list preserves row order, boundary buttons and disconnect s
   assert.equal(rows[0].children[2].disabled,true);assert.equal(rows[1].children[3].disabled,true);
   rows[0].children[3].events.click();assert.deepEqual(node.children,['b','a']);
   rows[1].children[4].events.click();assert.deepEqual(Array.from(h.deps.disconnected),['root','b']);
-  assert(rows[0].children[1].title.includes('a'));
+  assert.equal(rows[0].children[1].title, '节点 a');
 });
 const tree=(node,out=[])=>{out.push(node);for(const c of node.children||[])if(c&&typeof c==='object')tree(c,out);return out;};
 const byClass=(node,name)=>tree(node).filter(x=>String(x.className||'').split(' ').includes(name));
@@ -60,7 +60,7 @@ test('布尔判断卡片：只编辑条件表达式，给出回读与输出引�
   assert.equal(byClass(h.body,'condition-control').length,1);
   assert.equal(tree(h.body).some(x=>x.tag==='textarea'),false);
   assert.equal(byClass(h.body,'condition-readback')[0].textContent,'当 条件成立 时为真');
-  assert.equal(byClass(h.body,'field-hint')[0].textContent,'输出引用：nodes.bool_1.output.value');
+  assert.equal(byClass(h.body,'field-hint')[0].textContent,'输出判断结果：可连接到其他节点的布尔输入');
   // 叶子卡片没有分支槽位，也没有子节点列表。
   assert.equal(byClass(h.body,'condition-slot').length,0);
   assert.equal(byClass(h.body,'child-row').length,0);

@@ -29,7 +29,7 @@ export function renderBoolJudgeFields(body: any, node: any, deps: ValueCardField
   // 中文回读是给新手的保险：只要这句话读得通，条件就是对的。
   const text = conditionToText(node.expression);
   if (text) body.appendChild(el('div', 'condition-readback', `当 ${text} 时为真`));
-  body.appendChild(el('div', 'field-hint', `输出引用：nodes.${node.id || ''}.output.value`));
+  body.appendChild(el('div', 'field-hint', '输出判断结果：可连接到其他节点的布尔输入'));
 }
 
 /** 拆分卡片：按字段列表把来源输出拆成可单独引用的引用（UE 没有的进阶能力）。 */

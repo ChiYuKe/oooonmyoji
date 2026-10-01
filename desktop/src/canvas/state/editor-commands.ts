@@ -7,6 +7,7 @@
 import type { CanvasState } from '../state/canvas-state';
 import { BOOL_JUDGE_COMPARISON_OPERATORS, boolJudgeShape } from '../model/exec-ports';
 import { parameterLiteralCache, parameterLiteralCacheKey } from './literal-cache';
+import { isStandardNodeId, remapNodeIdentifiers } from '../../shared/workflow/node-identifiers';
 
 export interface EditorCommandsDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -235,20 +236,11 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
   }
 
   function renameNode(oldId: string, value: string): void {
-    if (!value || value === oldId) return;
-    if (nodeById(value)) { toast('节点 ID 已存在', true); return; }
+    if (!value || value === oldId || !nodeById(oldId)) return;
+    if (!isStandardNodeId(value)) { toast('内部标识必须使用节点类型与正整数编号', true); return; }
+    if (nodeById(value) || Object.prototype.hasOwnProperty.call(state.raw?._nodeGroups || {}, value)) { toast('节点标识已被占用', true); return; }
     mutate(() => {
-      const node = nodeById(oldId); node.id = value;
-      for (const parent of nodes()) if (Array.isArray(parent.children)) parent.children = parent.children.map((child: any) => child === oldId ? value : child);
-      if (state.raw.root === oldId) state.raw.root = value;
-      layout()[value] = layout()[oldId]; delete layout()[oldId];
-      const remap = (item: any) => {
-        if (Array.isArray(item)) return item.forEach(remap);
-        if (!item || typeof item !== 'object') return;
-        if (typeof item.ref === 'string') item.ref = item.ref.replace(`nodes.${oldId}.output.`, `nodes.${value}.output.`);
-        Object.values(item).forEach(remap);
-      };
-      remap(state.raw.nodes);
+      remapNodeIdentifiers(state.raw, new Map([[oldId, value]]));
       state.selected = new Set([value]);
     });
   }

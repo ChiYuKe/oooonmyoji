@@ -651,7 +651,6 @@
 
   function appendStepDetails(main, row) {
     const entries = [];
-    entries.push(['节点 ID', row.stepId]);
     if (row.action) entries.push(['动作类型', row.action]);
     const description = describeStep(row);
     entries.push(['执行操作', description.operation]);

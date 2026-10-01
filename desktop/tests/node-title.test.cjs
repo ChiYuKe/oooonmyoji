@@ -1,6 +1,6 @@
 /**
  * UE 风格的节点标题：值卡片（布尔判断 / 拆分）的标题由类型派生。
- * 普通卡片：手动 name > 类型派生 > 节点 ID；值卡片例外——忽略自定义 name，
+ * 普通卡片：手动 name > 类型派生 > 中文类型名称；值卡片例外——忽略自定义 name，
  * 标题永远是可读的类型语义（`等于` / `Break`），实例名留在条件回读与改名框占位里。
  */
 const {test} = require('node:test');
@@ -44,10 +44,14 @@ test('拆分卡片标题 = UE 的 `Break <Struct>`，来源用引用短名', () 
   assert.equal(breakTitle({type: 'break', ref: {ref: 'nodes.classify.output'}}), 'Break nodes.classify.output');
 });
 
-test('三层优先级：手动 name > 类型派生标题 > 节点 ID（值卡片例外，见下一条）', () => {
+test('未命名节点使用中文标题，手动名称优先且不回退到内部 ID', () => {
   const deps = {referenceTitle: () => '识别结果'};
-  // 普通卡片：手动 name 优先，没设过才用派生标题，最后才回退到 ID。
-  assert.equal(nodeDisplayTitle({id: 'task_1', type: 'task'}, deps), 'task_1');
+  // 普通卡片：手动 name 优先，没设过时使用类型或动作中文名。
+  assert.equal(nodeDisplayTitle({id: 'task_1', type: 'task'}, deps), '任务');
+  assert.equal(nodeDisplayTitle({id: 'task_1', type: 'task', action: 'vision.wait_template'}, deps), '等待模板');
+  assert.equal(nodeDisplayTitle({id: 'sequence_5', type: 'sequence', name: 'sequence_5'}, deps), '顺序');
+  assert.equal(nodeDisplayTitle({id: 'sequence_5', type: 'sequence', name: '   '}, deps), '顺序');
+  assert.equal(nodeDisplayTitle({id: 'unknown_1', type: 'unknown'}, deps), '节点');
   assert.equal(nodeDisplayTitle({id: 'task_1', type: 'task', name: '点击挑战'}, deps), '点击挑战');
   assert.equal(derivedNodeTitle({id: 'task_1', type: 'task'}, deps), '');
   assert.equal(nodeDisplayTitle(null), '');

@@ -63,7 +63,7 @@ test('结构树节点推派生标题，并把手动显示名单独推给行内�
     ['bool_1', '结界未结算', '结界未结算'],
   ]);
 
-  // 没注入标题解析器时退回 `name || id`（独立窗口等旧调用方的行为不变）。
+  // 没注入标题解析器时也使用类型名称，不向用户显示内部 ID。
   const fallback = harness({ nodes: [{ id: 'break_1', type: 'break' }] });
-  assert.deepEqual(plain(fallback.messages[0].nodes.map((node) => [node.name, node.explicitName])), [['break_1', '']]);
+  assert.deepEqual(plain(fallback.messages[0].nodes.map((node) => [node.name, node.explicitName])), [['Break', '']]);
 });

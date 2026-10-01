@@ -103,6 +103,8 @@ class WorkflowEngine:
         cancel_event: Any | None = None,
         cancel_grace_seconds: float = 1.0,
         workflow_path: tuple[str, ...] | None = None,
+        clock: Callable[[], float] | None = None,
+        before_node: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.workflow = workflow
         self.registry = registry
@@ -114,6 +116,9 @@ class WorkflowEngine:
         self.cancel_event = cancel_event
         self.cancel_grace_seconds = cancel_grace_seconds
         self.workflow_path = workflow_path or (workflow.workflow_id,)
+        self._clock = clock or time.monotonic
+        self._timer = clock or time.perf_counter
+        self.before_node = before_node
         self.outputs: dict[str, Any] = {}
         self.history: list[dict[str, Any]] = []
         self.requires_worker_restart = False
@@ -127,10 +132,33 @@ class WorkflowEngine:
         self._workflow_deadline = 0.0
         self._current_step: str | None = None
 
-    def run(self) -> WorkflowResult:
+    def run(
+        self,
+        *,
+        entry_nodes: tuple[str, ...] | None = None,
+        initial_outputs: dict[str, Any] | None = None,
+        initial_variables: dict[str, Any] | None = None,
+    ) -> WorkflowResult:
+        """Run the tree, or explicit test entry points with supplied prior state."""
+        if entry_nodes is not None and (not entry_nodes or any(item not in self.compiled.node_map for item in entry_nodes)):
+            raise WorkflowError("test entry nodes must name existing nodes")
+        for name, value in (initial_variables or {}).items():
+            schema = self.workflow.variable_schema.get("properties", {}).get(name)
+            if schema is None:
+                raise WorkflowError(f"unknown test variable: {name}")
+            self._validate_action_input(schema, value, f"test variable {name}")
+        for name, value in (initial_outputs or {}).items():
+            node = self.compiled.node_map.get(name)
+            if node is None or not node.produces_output:
+                raise WorkflowError(f"unknown test output node: {name}")
+            _json_safe(value)
+            if node.is_task and node.action:
+                self._validate_action_output(self.registry.get(node.action).output_schema, value, f"test output {name}")
+        self._test_variables = deepcopy(initial_variables or {})
         with self._lock:
             self.variables = deepcopy(self.workflow.variable_defaults)
             self.outputs = {}
+            self.outputs.update(deepcopy(initial_outputs or {}))
             self.history = []
             self.requires_worker_restart = False
             self._steps = 0
@@ -139,7 +167,7 @@ class WorkflowEngine:
             self._data_node_last_event = {}
             self._current_step = None
         self._workflow_deadline = (
-            time.monotonic() + self.workflow.timeout_seconds
+            self._clock() + self.workflow.timeout_seconds
             if self.workflow.timeout_seconds is not None
             else math.inf
         )
@@ -151,7 +179,12 @@ class WorkflowEngine:
                 if source is not None and source in self.inputs:
                     self._validate_action_input(self.workflow.variable_schema["properties"][name], self.inputs[source], f"variable {name}")
                     self.variables[name] = deepcopy(self.inputs[source])
-            outcome = self._run_node(self.compiled.root, self._workflow_deadline, None)
+            self.variables.update(deepcopy(initial_variables or {}))
+            outcome = _Outcome(ActionStatus.SUCCEEDED)
+            for entry in entry_nodes or (self.compiled.root,):
+                outcome = self._run_node(entry, self._workflow_deadline, None)
+                if outcome.status != ActionStatus.SUCCEEDED:
+                    break
         except CancelledError as exc:
             outcome = _Outcome(ActionStatus.CANCELLED, error=str(exc), category="cancelled")
         except _ExecutionLimit as exc:
@@ -224,9 +257,10 @@ class WorkflowEngine:
         # 值卡片不在执行树里：被别的节点按需拉起时，它不属于那个节点的子树，
         # 路径只写它自己；执行树里走到它（老文档）时才有真实祖先。
         path_ids, path_names, _ = self._node_path(node_id, ancestors=[] if node_id not in self._node_stack() else None)
-        started_perf = time.perf_counter()
+        started_perf = self._timer()
         started_at = time.time()
         try:
+            self._notify_start(node, path=(path_ids, path_names), before=True)
             with self._lock:
                 allowed = self._resolver().condition(node.expression) if node.type == "bool_judge" else None
                 if node.type == "bool_judge":
@@ -249,6 +283,8 @@ class WorkflowEngine:
                     else:
                         output = value
                 self.outputs[node_id] = output
+        except CancelledError:
+            raise
         except Exception as exc:
             error = str(exc)
             if self._data_node_last_event.get(node_id) != ("failed", error):
@@ -304,7 +340,7 @@ class WorkflowEngine:
         with self._lock:
             saved = {name: deepcopy(self.variables[name]) for name in local}
             for name, definition in local.items():
-                self.variables[name] = deepcopy(self.inputs.get(definition.get("initial_from"), self.workflow.variable_defaults[name]))
+                self.variables[name] = deepcopy(getattr(self, "_test_variables", {}).get(name, self.inputs.get(definition.get("initial_from"), self.workflow.variable_defaults[name])))
         stack = self._node_stack()
         stack.append(node_id)
         try:
@@ -327,6 +363,8 @@ class WorkflowEngine:
             # 失败记成这条路径上的失败结果，而不是把异常抛穿整棵树。
             try:
                 self._evaluate_data_node(node.id)
+            except CancelledError:
+                raise
             except Exception as exc:
                 return _Outcome(
                     ActionStatus.FAILED,
@@ -336,14 +374,15 @@ class WorkflowEngine:
             with self._lock:
                 output = self.outputs.get(node.id)
             return _Outcome(ActionStatus.SUCCEEDED, output=output)
-        started_perf = time.perf_counter()
+        self._notify_start(node, before=True)
+        started_perf = self._timer()
         started_at = time.time()
         self._notify_start(node)
 
         cooldown = self._decorator(node, "cooldown")
         if cooldown is not None:
             with self._lock:
-                remaining = self._cooldowns.get(node.id, 0.0) - time.monotonic()
+                remaining = self._cooldowns.get(node.id, 0.0) - self._clock()
             if remaining > 0:
                 outcome = _Outcome(ActionStatus.FAILED, error=f"cooldown active for {remaining:.3f}s", category="cooldown")
                 self._record_node(node, outcome, started_perf, started_at, decorator="cooldown")
@@ -387,7 +426,7 @@ class WorkflowEngine:
                 outcome = _Outcome(ActionStatus.FAILED, error=f"{kind} decorator failed: {exc}", category="workflow")
                 self._record_node(node, outcome, started_perf, started_at, decorator=kind)
                 return outcome
-        node_deadline = min(deadline, time.monotonic() + resolved["timeout"]["seconds"]) if timeout is not None else deadline
+        node_deadline = min(deadline, self._clock() + resolved["timeout"]["seconds"]) if timeout is not None else deadline
         attempts = resolved["retry"]["attempts"] if retry is not None else 1
         retry_delay = resolved["retry"]["delay_seconds"] if retry is not None else 0
         repeat_count = 1
@@ -432,7 +471,7 @@ class WorkflowEngine:
         except _ExecutionLimit:
             raise
         except WorkflowTimeoutError as exc:
-            category = "workflow_timeout" if time.monotonic() >= self._workflow_deadline else "node_timeout"
+            category = "workflow_timeout" if self._clock() >= self._workflow_deadline else "node_timeout"
             outcome = _Outcome(ActionStatus.FAILED, error=str(exc), category=category, fatal=category == "workflow_timeout")
         except CancelledError as exc:
             outcome = _Outcome(ActionStatus.CANCELLED, error=str(exc), category="cancelled")
@@ -443,7 +482,7 @@ class WorkflowEngine:
 
         if cooldown is not None and cooldown.seconds is not None:
             with self._lock:
-                self._cooldowns[node.id] = time.monotonic() + resolved["cooldown"]["seconds"]
+                self._cooldowns[node.id] = self._clock() + resolved["cooldown"]["seconds"]
         # Force Success（UE `UBTDecorator_ForceSuccess`：Change node result to Success，用途是
         # 「creating optional branches in sequence」）：把这个节点对外的失败改写成成功，于是父
         # 组合节点（Sequence）会继续往下走 —— 也就是"这一步失败也不中断"。
@@ -585,7 +624,7 @@ class WorkflowEngine:
             "match": match if isinstance(match, dict) else {},
             "iterations": iterations,
             "terminal": terminal,
-            "elapsed_seconds": round(time.monotonic() - started, 6),
+            "elapsed_seconds": round(self._clock() - started, 6),
         }
 
     def _run_state_machine(
@@ -605,7 +644,7 @@ class WorkflowEngine:
         `nodes.<状态机>.output.match`——识别与点击因而不会各自漂移。
         """
 
-        started = time.monotonic()
+        started = self._clock()
         try:
             detection = self.registry.get(node.state_action)
         except AutomationError as exc:
@@ -871,7 +910,7 @@ class WorkflowEngine:
         )
 
     def _execute(self, action: Any, arguments: dict[str, Any], deadline: float, branch_cancel: threading.Event | None) -> ActionResult:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - self._clock()
         if remaining <= 0:
             raise WorkflowTimeoutError("Behavior Tree node timed out")
         token: Any = None
@@ -904,7 +943,7 @@ class WorkflowEngine:
                     if isinstance(completed, ActionResult) and completed.status == ActionStatus.CANCELLED:
                         return completed
                 return ActionResult.cancelled("Behavior Tree branch cancellation requested")
-            remaining = deadline - time.monotonic()
+            remaining = deadline - self._clock()
             if remaining <= 0:
                 break
             thread.join(min(0.05, remaining))
@@ -913,7 +952,7 @@ class WorkflowEngine:
             thread.join(self.cancel_grace_seconds)
             if thread.is_alive():
                 self.requires_worker_restart = True
-            category = "workflow_timeout" if time.monotonic() >= self._workflow_deadline else "action_timeout"
+            category = "workflow_timeout" if self._clock() >= self._workflow_deadline else "action_timeout"
             return ActionResult.failed("Action timed out", category=category)
         result = result_queue.get_nowait()
         if isinstance(result, BaseException):
@@ -948,8 +987,9 @@ class WorkflowEngine:
             # A failed reference is still useful in the event as its unresolved source.
             return _summary(node.params)
 
-    def _notify_start(self, node: WorkflowNode, *, path: tuple[list[str], list[str]] | None = None) -> None:
-        if self.on_step_start is None:
+    def _notify_start(self, node: WorkflowNode, *, path: tuple[list[str], list[str]] | None = None, before: bool = False) -> None:
+        callback = self.before_node if before else self.on_step_start
+        if callback is None:
             return
         if path is None:
             path_ids, path_names, _ = self._node_path(node.id)
@@ -972,8 +1012,8 @@ class WorkflowEngine:
             "ts": time.time(),
         }
         if node.is_task:
-            event["params"] = self._event_params(node)
-        self.on_step_start(event)
+            event["params"] = deepcopy(node.params) if before else self._event_params(node)
+        callback(event)
 
     def _record_node(
         self,
@@ -1008,7 +1048,7 @@ class WorkflowEngine:
             "node_path_names": path_names,
             "breadcrumb": breadcrumb,
             "started_at": started_at,
-            "duration_ms": round((time.perf_counter() - started_perf) * 1000, 3),
+            "duration_ms": round((self._timer() - started_perf) * 1000, 3),
         }
         if attempts > 1:
             event["attempts"] = attempts
@@ -1069,15 +1109,15 @@ class WorkflowEngine:
         if self.cancel_event is not None and self.cancel_event.is_set():
             raise CancelledError("workflow cancellation requested")
         self.context.check_cancelled()
-        if time.monotonic() >= deadline:
+        if self._clock() >= deadline:
             message = "workflow timeout exceeded" if deadline == self._workflow_deadline else "Behavior Tree node timed out"
             raise WorkflowTimeoutError(message)
 
     def _sleep(self, seconds: float, deadline: float, branch_cancel: threading.Event | None) -> None:
-        end = min(time.monotonic() + seconds, deadline)
-        while time.monotonic() < end:
+        end = min(self._clock() + seconds, deadline)
+        while self._clock() < end:
             self._ensure_running(deadline, branch_cancel)
-            time.sleep(min(0.05, end - time.monotonic()))
+            time.sleep(min(0.05, end - self._clock()))
 
     def _validate_action_input(self, schema: dict[str, Any], arguments: Any, node_id: str) -> None:
         try:

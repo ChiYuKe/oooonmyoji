@@ -1,11 +1,12 @@
 import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTheme } from '../shared/appearance';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import {
   app,
+  dialog,
   BrowserWindow,
   ipcMain,
   net,
@@ -42,6 +43,11 @@ import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
 import { RuntimeResourceManager } from './runtimeResources';
 import { VisionStream } from './visionStream';
+import { WorkflowTestService } from './workflowTestService';
+import type { WorkflowTestInit, WorkflowTestRequest, TestCommand, TestNodeDraft, TestNodeAdded } from '../shared/workflow-testing';
+import { validateTestNode } from '../shared/node-test';
+import { TestNodeTransfers } from './testNodeTransfer';
+import { loadActionCatalog } from './core/catalog';
 import {
   MIN_WINDOW_HEIGHT,
   MIN_WINDOW_WIDTH,
@@ -67,6 +73,11 @@ let runtime: RuntimeService;
 let rendererServer: Server | undefined;
 let rendererBaseUrl = '';
 let visionTestWindow: BrowserWindow | undefined;
+let workflowTestWindow: BrowserWindow | undefined;
+let workflowTestService: WorkflowTestService | undefined;
+let workflowTestInit: WorkflowTestInit | undefined;
+const workflowTestImages = new Set<string>();
+const testNodeTransfers = new TestNodeTransfers();
 let visionTestStream: VisionStream | undefined;
 let visionTestInstanceId = '';
 let liveViewWindow: BrowserWindow | undefined;
@@ -205,6 +216,38 @@ function stopVisionTestStream(): void {
   const stream = visionTestStream;
   visionTestStream = undefined;
   if (stream) void stream.stop();
+}
+
+function openWorkflowTestWindow(init: WorkflowTestInit): void {
+  if (workflowTestWindow && !workflowTestWindow.isDestroyed()) {
+    if (workflowTestService?.running) throw new Error('测试台正在运行，请先停止测试再打开另一份流程');
+    workflowTestInit = init;
+    workflowTestWindow.webContents.send('test:event', { type: 'init', init });
+    workflowTestWindow.focus();
+    return;
+  }
+  workflowTestInit = init;
+  workflowTestImages.clear();
+  const window = new BrowserWindow({
+    width: 1450, height: 950, minWidth: 1050, minHeight: 700, show: false,
+    icon: appIconPath, title: '节点试验台', backgroundColor: themeBackground(readTheme()),
+    frame: false,
+    autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true },
+  });
+  const service = new WorkflowTestService(project.projectRoot);
+  workflowTestWindow = window;
+  workflowTestService = service;
+  service.on('event', (event) => { if (!window.isDestroyed()) window.webContents.send('test:event', event); });
+  void window.loadURL(`${rendererBaseUrl}/workflow-test.html`);
+  window.once('ready-to-show', () => window.show());
+  window.on('maximize', () => window.webContents.send('window:maximized', true));
+  window.on('unmaximize', () => window.webContents.send('window:maximized', false));
+  window.once('closed', () => {
+    // Keep the service registered until it exits, so another run cannot race its device input.
+    if (workflowTestWindow === window) workflowTestWindow = undefined;
+    void service.dispose().finally(() => { if (workflowTestService === service) workflowTestService = undefined; });
+  });
 }
 
 function openVisionTestWindow(instanceId: string): void {
@@ -373,6 +416,7 @@ function registerIpc(): void {
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
+    if (workflowTestService?.usingDevice) throw new Error('脚本测试正在运行，请先停止测试');
     // 每次用户重新启动工作流时，先清掉日志面板中上次运行的记录。
     _event.sender.send('runtime:log-clear');
     // 先把观看请求登记下去，再 spawn 运行时：否则运行时启动初期的帧会被门控丢掉。
@@ -388,7 +432,60 @@ function registerIpc(): void {
   ipcMain.handle('runtime:capture-roi', (_event, request: RoiCaptureRequest) => runtime.captureRoi(request));
   ipcMain.handle('runtime:check-template', (_event, request: TemplateCheckRequest) => runtime.checkTemplate(request));
 
+  ipcMain.handle('test:open', (event, init: WorkflowTestInit) => {
+    if (ownerWindow(event) !== mainWindow) throw new Error('请从工作流编辑器打开测试台');
+    if (workflowTestService?.running && !workflowTestWindow) throw new Error('正在停止上一次测试，请稍后重试');
+    openWorkflowTestWindow(init);
+  });
+  const testOwner = (event: IpcMainInvokeEvent): void => {
+    if (ownerWindow(event) !== workflowTestWindow) throw new Error('请从节点试验台操作');
+  };
+  ipcMain.handle('test:init', (event) => { testOwner(event); return workflowTestInit; });
+  ipcMain.handle('test:images', async (event) => {
+    testOwner(event);
+    const result = await dialog.showOpenDialog(ownerWindow(event), { title: '选择离线测试截图', properties: ['openFile', 'multiSelections'], filters: [{ name: '截图', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }] });
+    for (const file of result.filePaths) workflowTestImages.add(path.resolve(file));
+    return result.filePaths;
+  });
+  ipcMain.handle('test:start', (event, request: WorkflowTestRequest) => {
+    testOwner(event);
+    if (request.mode === 'live' && (runtime.running || visionTestStream?.running)) throw new Error('请先停止正在运行的脚本或画面测试');
+    if (request.images?.some((file) => !workflowTestImages.has(path.resolve(file)))) throw new Error('请通过选择截图按钮重新选择文件');
+    return workflowTestService?.start(request);
+  });
+  ipcMain.handle('test:command', (event, command: TestCommand) => { testOwner(event); workflowTestService?.command(command); });
+  ipcMain.handle('test:report', (event) => {
+    testOwner(event);
+    if (workflowTestService?.reportPath) shell.showItemInFolder(workflowTestService.reportPath);
+  });
+  ipcMain.handle('test:template', async (event) => {
+    testOwner(event);
+    const result = await dialog.showOpenDialog(ownerWindow(event), { title: '选择模板图片', properties: ['openFile'], filters: [{ name: '模板图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }] });
+    if (result.canceled || !result.filePaths[0]) return undefined;
+    const source = path.resolve(result.filePaths[0]);
+    const relative = path.relative(project.projectRoot, source);
+    if (relative && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) return relative.split(path.sep).join('/');
+    const folder = path.join(project.projectRoot, 'assets', 'templates'); mkdirSync(folder, { recursive: true });
+    const parsed = path.parse(source); let target = path.join(folder, parsed.base), index = 1;
+    while (existsSync(target)) target = path.join(folder, `${parsed.name}-${index++}${parsed.ext}`);
+    copyFileSync(source, target);
+    return path.relative(project.projectRoot, target).split(path.sep).join('/');
+  });
+  ipcMain.handle('test:add-node', async (event, draft: TestNodeDraft) => {
+    testOwner(event);
+    if (!workflowTestInit?.uri || !mainWindow || mainWindow.isDestroyed()) throw new Error('请先打开目标工作流');
+    const node = validateTestNode(draft, loadActionCatalog(project.projectRoot).all());
+    const id = await testNodeTransfers.add(workflowTestInit.uri, node, request => mainWindow!.webContents.send('test:add-node', request));
+    if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); }
+    return id;
+  });
+  ipcMain.handle('test:node-added', (event, result: TestNodeAdded) => {
+    if (ownerWindow(event) !== mainWindow) throw new Error('请从工作流编辑器操作');
+    testNodeTransfers.complete(result);
+  });
+
   ipcMain.handle('tools:open-vision-test', (_event, instanceId: string) => {
+    if (workflowTestService?.usingDevice) throw new Error('请先停止脚本测试');
     openVisionTestWindow(typeof instanceId === 'string' ? instanceId : '');
   });
   ipcMain.handle('tools:open-live-view', (_event, instanceId: string) => {
@@ -718,7 +815,7 @@ function registerResourceIpc(projectRoot: string): void {
   });
   ipcMain.handle('resources:activate', async (_event, value: unknown) => {
     if (!resourceManager) throw new Error('当前版本使用内置运行环境，无法切换');
-    if (runtime?.running || visionTestStream?.running) throw new Error('有任务或画面测试正在运行，请先停止后再切换');
+    if (runtime?.running || visionTestStream?.running || workflowTestService?.running) throw new Error('有任务或测试正在运行，请先停止后再切换');
     const result = resourceManager.activate(variantId(value));
     process.env.ONMYOJI_RUNTIME_ROOT = resourceManager.runtimeRoot;
     process.env.ONMYOJI_OCR_USE_GPU = result.activeVariant === 'gpu' ? '1' : '0';
@@ -729,7 +826,7 @@ function registerResourceIpc(projectRoot: string): void {
   });
   ipcMain.handle('resources:remove', (_event, value: unknown) => {
     if (!resourceManager) throw new Error('当前版本使用内置运行环境，无法删除');
-    if (runtime?.running || visionTestStream?.running) throw new Error('有任务或画面测试正在运行，请先停止后再管理运行环境');
+    if (runtime?.running || visionTestStream?.running || workflowTestService?.running) throw new Error('有任务或测试正在运行，请先停止后再管理运行环境');
     return resourceManager.remove(variantId(value));
   });
 }
@@ -782,6 +879,7 @@ app.on('before-quit', (event) => {
   void (async () => {
     try {
       await runtime?.dispose();
+      await workflowTestService?.dispose();
     } finally {
       stopVisionTestStream();
       liveViewRequest?.stop();

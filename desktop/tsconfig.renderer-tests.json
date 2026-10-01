@@ -9,6 +9,8 @@
     "types": ["node"]
   },
   "include": [
+    "src/renderer/titlebar-menus.ts",
+    "src/renderer/workflow-test.ts",
     "src/renderer/instance-picker.ts",
     "src/renderer/panels/sidebar.ts",
     "src/renderer/variable-references.ts",

@@ -7,6 +7,7 @@
 import type { CanvasState } from '../state/canvas-state';
 
 export interface EditorCommandDispatchDeps {
+  requestWorkflowTest?(): void;
   efficiencyCommand?(command: string, value?: any): boolean;
   state: Omit<CanvasState, 'raw'> & { raw: any };
   mutate(fn: () => void): void;
@@ -91,7 +92,8 @@ export function createEditorCommandDispatch(deps: EditorCommandDispatchDeps) {
   const selectionNodeById = deps.selectionNodeById ?? nodeById;
   function executeEditorCommand(command: string, value?: any): any {
     if (deps.efficiencyCommand?.(command, value)) return;
-    if (command === 'undo') undo();
+    if (command === 'openWorkflowTest') deps.requestWorkflowTest?.();
+    else if (command === 'undo') undo();
     else if (command === 'redo') redo();
     else if (command === 'cut') cutSelection();
     else if (command === 'copy') copySelection();

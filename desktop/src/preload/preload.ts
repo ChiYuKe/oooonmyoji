@@ -21,6 +21,25 @@ import type {
 } from '../shared/contracts';
 
 const api: OnmyojiDesktopApi = {
+  openWorkflowTest: (init) => ipcRenderer.invoke('test:open', init),
+  workflowTestInit: () => ipcRenderer.invoke('test:init'),
+  workflowTestImages: () => ipcRenderer.invoke('test:images'),
+  workflowTestStart: (request) => ipcRenderer.invoke('test:start', request),
+  workflowTestCommand: (command) => ipcRenderer.invoke('test:command', command),
+  workflowTestReport: () => ipcRenderer.invoke('test:report'),
+  workflowTestTemplate: () => ipcRenderer.invoke('test:template'),
+  workflowTestAddNode: (node) => ipcRenderer.invoke('test:add-node', node),
+  workflowTestNodeAdded: (result) => ipcRenderer.invoke('test:node-added', result),
+  onWorkflowTestAddNode: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: import('../shared/workflow-testing').TestNodeTransfer) => listener(request);
+    ipcRenderer.on('test:add-node', handler);
+    return () => ipcRenderer.removeListener('test:add-node', handler);
+  },
+  onWorkflowTestEvent: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: import('../shared/workflow-testing').WorkflowTestEvent) => listener(value);
+    ipcRenderer.on('test:event', handler);
+    return () => ipcRenderer.removeListener('test:event', handler);
+  },
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),

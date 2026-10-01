@@ -119,6 +119,20 @@ export interface RunWorkflowMessage {
   instanceId?: unknown;
 }
 
+export interface OpenWorkflowTestMessage {
+  type: 'openWorkflowTest';
+  text?: unknown;
+  instanceId?: unknown;
+  nodeIds?: unknown;
+}
+export interface WorkflowTestNodeAddedMessage {
+  type: 'workflowTestNodeAdded';
+  requestId: string;
+  uri: string;
+  nodeId?: string;
+  error?: string;
+}
+
 export interface StopWorkflowMessage {
   type: 'stopWorkflow';
 }
@@ -325,6 +339,8 @@ export type EditorMessage =
   | NavigateWorkflowTrailMessage
   | ReloadRequestMessage
   | RunWorkflowMessage
+  | OpenWorkflowTestMessage
+  | WorkflowTestNodeAddedMessage
   | StopWorkflowMessage
   | SelectInstanceMessage
   | PickRoiMessage
@@ -363,6 +379,8 @@ export const EDITOR_MESSAGE_TYPES = [
   'reloadRequest',
   'refreshWorkflows',
   'runWorkflow',
+  'openWorkflowTest',
+  'workflowTestNodeAdded',
   'stopWorkflow',
   'selectInstance',
   'pickRoi',

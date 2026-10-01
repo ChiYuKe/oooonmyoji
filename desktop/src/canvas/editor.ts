@@ -44,6 +44,7 @@ import { createCanvasHitTest } from './interactions/hit-test';
 import { createInputBridge } from './interactions/input-bridge';
 import { createCanvasInlineEditor } from './interactions/inline-editor';
 import { createNodeNameEditor } from './interactions/node-name-editor';
+import { createTestNodeInserter } from './state/test-node-insertion';
 import { createValueCardEditor } from './interactions/value-card-editor';
 import { createCanvasPointer } from './interactions/pointer';
 import { createCanvasPortMenu } from './interactions/port-menu';
@@ -520,6 +521,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     onNodesRemoved: (ids) => removeMembers(ids),
   });
   const { parentOf, canConnect, canConnectNodes, connect, disconnect, buildNode, addNode, deleteSelection, copySelection, cutSelection, pasteClipboard } = Commands;
+  const insertTestNode = createTestNodeInserter({
+    catalog: () => state.catalog, buildNode, nodes, layout, mutate,
+    point: () => worldPoint({ clientX: wrap.getBoundingClientRect().left + wrap.clientWidth / 2, clientY: wrap.getBoundingClientRect().top + wrap.clientHeight / 2 }),
+    created: id => { addToCurrentGroup([id]); state.selected = new Set([id]); state.selectedEdge = null; state.selectedRun = null; state.inspector = 'node'; },
+    focus: id => focusNode(id),
+    reply: result => vscode.postMessage({ type: 'workflowTestNodeAdded', ...result }),
+  });
 
   function choiceNode(choice: CreationChoice): any {
     const node = buildNode(choice.type);
@@ -1197,8 +1205,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { handleRunEvent, deleteCurrentSelection } = RunEvents;
 
   const EditorCommandDispatch = createEditorCommandDispatch({
+    requestWorkflowTest: () => vscode.postMessage({ type: 'openWorkflowTest', text: documentText(state), instanceId: state.instanceId, nodeIds: [...state.selected] }),
     efficiencyCommand: (command, value) => {
-      if (command === 'quickCreate') Efficiency.openPicker();
+      if (command === 'addTestNode') insertTestNode(value);
+      else if (command === 'quickCreate') Efficiency.openPicker();
       else if (command === 'openPresets') Efficiency.openPicker({}, 'presets');
       else if (command === 'savePreset') Efficiency.savePreset();
       else if (command === 'replaceParameters') Efficiency.openReplacement(typeof value === 'string' ? value : '');

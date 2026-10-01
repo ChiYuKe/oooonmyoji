@@ -70,6 +70,18 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
     loadWorkflow, loadDocumentOnce, sendDocumentInit, resolveWorkflow, selectInstance, refreshWorkflows,
   } = deps;
 
+  api.onWorkflowTestAddNode?.(request => {
+    void (async () => {
+      try {
+        if (!workspace.tab(request.uri)) throw new Error('目标工作流已关闭，请重新打开它后再添加');
+        await openWorkflowTab(request.uri, true);
+        const frame = getDocumentFrame?.(request.uri);
+        if (!frame?.contentWindow) throw new Error('目标画布尚未准备好，请稍后重试');
+        workspace.postToFrame(frame, { type: 'editorCommand', command: 'addTestNode', value: request });
+      } catch (error) { await api.workflowTestNodeAdded({ requestId: request.requestId, uri: request.uri, error: errorMessage(error) }); }
+    })();
+  });
+
   async function handleMessage(message: EditorMessage, sourceFrame: HTMLIFrameElement): Promise<void> {
     const raw = message as unknown as Record<string, unknown>;
     const sourceUri = workspace.frameUriForFrame(sourceFrame);
@@ -367,6 +379,20 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
           workspace.setDocumentText(targetUri, text);
           await api.runWorkflow({ uri: targetUri, instanceId: String(message.instanceId ?? getSelectedInstance()), text });
           showRuntimePanel();
+          return;
+        }
+        case 'openWorkflowTest': {
+          await api.openWorkflowTest({
+            uri: targetUri,
+            text: String(message.text ?? workspace.tab(targetUri)?.text ?? ''),
+            instanceId: String(message.instanceId ?? getSelectedInstance()),
+            nodeIds: Array.isArray(message.nodeIds) ? message.nodeIds.filter((id): id is string => typeof id === 'string') : [],
+          });
+          return;
+        }
+        case 'workflowTestNodeAdded': {
+          if (sourceUri !== message.uri) return;
+          await api.workflowTestNodeAdded({ requestId: message.requestId, uri: message.uri, nodeId: message.nodeId, error: message.error });
           return;
         }
         case 'stopWorkflow': {

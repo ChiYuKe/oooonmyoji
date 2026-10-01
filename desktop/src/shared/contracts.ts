@@ -1,5 +1,6 @@
 import type { AppearanceTheme } from './appearance';
 import type { ActionCardRow } from './parameter-types';
+import type { WorkflowTestInit, WorkflowTestRequest, WorkflowTestEvent, TestCommand, TestNodeDraft, TestNodeTransfer, TestNodeAdded } from './workflow-testing';
 
 export interface ParameterInfo {
   type: string;
@@ -462,6 +463,17 @@ export interface OnmyojiDesktopApi {
   /** 引用查看器悬停浮窗：按项目相对路径取一份可预览的内容。 */
   readContentPreview(path: string): Promise<ContentPreview>;
   runWorkflow(request: RunWorkflowRequest): Promise<void>;
+  openWorkflowTest(init: WorkflowTestInit): Promise<void>;
+  workflowTestInit(): Promise<WorkflowTestInit>;
+  workflowTestImages(): Promise<string[]>;
+  workflowTestStart(request: WorkflowTestRequest): Promise<void>;
+  workflowTestCommand(command: TestCommand): Promise<void>;
+  workflowTestReport(): Promise<void>;
+  workflowTestTemplate(): Promise<string | undefined>;
+  workflowTestAddNode(node: TestNodeDraft): Promise<string>;
+  onWorkflowTestAddNode(listener: (request: TestNodeTransfer) => void): () => void;
+  workflowTestNodeAdded(result: TestNodeAdded): Promise<void>;
+  onWorkflowTestEvent(listener: (event: WorkflowTestEvent) => void): () => void;
   stopWorkflow(): Promise<void>;
   getDebugSettings(): Promise<RuntimeDebugSettings>;
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;

@@ -100,9 +100,16 @@ app.whenReady().then(async () => {
     window.dispatchEvent(new PointerEvent('pointerup',{clientX:box.left+1100,clientY:box.top+650,bubbles:true}));await tick();
     assert.ok(document.querySelector('.editing-dialog'));searchPicker('condition');choose('condition');
     const condition=state.raw.nodes.find(node=>node.type==='condition');assert.equal(condition.expression.ref,'nodes.'+cardTask.id+'.output.found');
+    // The node lab's payload commits into the live document through the normal command/history path.
+    const originalText=JSON.stringify(state.raw),originalUndo=state.undo.length;
+    const draft={action:'vision.wait_template',name:'试验台调好的节点',params:{template:'assets/templates/button.png',threshold:.96,timeout_seconds:2.5,roi:[0,0,1920,1080]}};
+    command('addTestNode',{requestId:'lab-smoke',uri:'isolated.owf',node:draft});await tick();
+    const reply=posts.find(message=>message.type==='workflowTestNodeAdded'&&message.requestId==='lab-smoke');assert.ok(reply?.nodeId,JSON.stringify(reply));
+    const inserted=state.raw.nodes.find(node=>node.id===reply.nodeId);assert.deepEqual(inserted.params,draft.params);assert.equal(inserted.name,draft.name);assert.ok(state.selected.has(inserted.id));assert.equal(state.undo.length,originalUndo+1);
+    command('undo');assert.equal(JSON.stringify(state.raw),originalText);command('redo');assert.deepEqual(state.raw.nodes.find(node=>node.id===reply.nodeId).params,draft.params);command('undo');
     command('openPresets'); await tick();
     assert.equal(document.querySelector('.editing-dialog-controls select').value,'presets');
-    return {quickCreate:true,executionDrop:true,outputDrop:true,preset:true,favorite:true,imageRecipe:true,replacementUndo:true,keyboardNavigation:true,inlineNavigation:true};
+    return {quickCreate:true,executionDrop:true,outputDrop:true,preset:true,favorite:true,imageRecipe:true,replacementUndo:true,keyboardNavigation:true,inlineNavigation:true,nodeLabInsertionUndo:true};
   })()`);
   await new Promise(resolve=>setTimeout(resolve,150));
   fs.writeFileSync(path.join(artifacts,'efficiency-presets.png'),(await win.webContents.capturePage()).toPNG());

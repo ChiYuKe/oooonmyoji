@@ -78,6 +78,20 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
     const targetUri = sourceUri ?? workspace.activeUri();
     try {
       switch (message.type) {
+        case 'getEditingLibrary': {
+          try { workspace.postToFrame(sourceFrame, { type: 'editingLibrary', library: await api.getEditingLibrary() }); }
+          catch (error) { workspace.postToFrame(sourceFrame, { type: 'editingLibraryError', error: errorMessage(error) }); }
+          return;
+        }
+        case 'updateEditingLibrary': {
+          try {
+            const library = await api.updateEditingLibrary(message.change);
+            workspace.postToAllEditors({ type: 'editingLibrary', library });
+            if (message.change.op === 'save') showToast('项目预设已保存');
+            if (message.change.op === 'remove') showToast('项目预设已删除');
+          } catch (error) { workspace.postToFrame(sourceFrame, { type: 'editingLibraryError', error: errorMessage(error) }); }
+          return;
+        }
         case 'ready': {
           if (sourceFrame === detailsFrame) {
             const activeInit = workspace.activeRuntime()?.init;

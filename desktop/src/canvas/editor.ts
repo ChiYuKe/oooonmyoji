@@ -36,6 +36,10 @@ import { createEditorExport } from './export';
 import { createAssetActions } from './interactions/asset-actions';
 import { createAssetBrowser } from './interactions/asset-browser';
 import { createCanvasConnections } from './interactions/connections';
+import { createEfficiencyTools, type CreationChoice, type CreationContext } from './interactions/efficiency-tools';
+import { parameterValueAccepted } from './model/parameter-edits';
+import { bindingTypesCompatible } from '../shared/workflow/bindings';
+import { parameterToSchema } from '../shared/workflow/parameters';
 import { createCanvasHitTest } from './interactions/hit-test';
 import { createInputBridge } from './interactions/input-bridge';
 import { createCanvasInlineEditor } from './interactions/inline-editor';
@@ -517,6 +521,118 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const { parentOf, canConnect, canConnectNodes, connect, disconnect, buildNode, addNode, deleteSelection, copySelection, cutSelection, pasteClipboard } = Commands;
 
+  function choiceNode(choice: CreationChoice): any {
+    const node = buildNode(choice.type);
+    if (choice.action) { node.action = choice.action; node.params = clone(choice.params || {}); }
+    if (choice.preset) node.name = choice.preset.name;
+    return node;
+  }
+  function creationConnectionError(node: any, context: CreationContext): string | null {
+    const connection = context.connection;
+    if (!connection) return null;
+    if (connection.direction === 'from-input') return canConnectNodes(node, nodeById(connection.child), null, currentNodeGroupId());
+    const original = nodeById(connection.parent);
+    if (!original) return '源节点已删除';
+    const parent = clone(original);
+    if (connection.oldChild) {
+      const index = parent.children?.indexOf(connection.oldChild) ?? -1;
+      if (index >= 0) { parent.children.splice(index, 1); parent.ports?.splice(index, 1); }
+    }
+    return canConnectNodes(parent, node, connection.slot, currentNodeGroupId());
+  }
+  function referenceCreationOptions(node: any, context: CreationContext) {
+    const source = context.reference && nodeById(context.reference.nodeId);
+    if (!source) return [];
+    const fields = nodeOutputFields(source).filter((field: any) => context.reference.field == null || field.field === context.reference.field);
+    if (node.type === 'condition' || node.type === 'bool_judge') return fields.filter((field: any) => bindingTypesCompatible({ type: 'boolean' }, field.schema)).map((field: any) => ({ param: '$expression', ref: field.ref, label: `布尔条件 ← ${referenceDisplayName(field.ref)}` }));
+    if (node.type === 'break') return fields.filter((field: any) => ['object', 'array'].includes(field.schema?.type)).map((field: any) => ({ param: '$ref', ref: field.ref, label: `拆分来源 ← ${referenceDisplayName(field.ref)}` }));
+    const definitions = node.type === 'task' ? catalogLike().byName(node.action)?.parameters || {} : {};
+    return Object.entries<any>(definitions).flatMap(([param, definition]) => fields.filter((field: any) => bindingTypesCompatible(parameterToSchema(definition), field.schema)).map((field: any) => ({ param, ref: field.ref, label: `${fieldLabel(param)} ← ${referenceDisplayName(field.ref)}` })));
+  }
+  function addChoice(choice: CreationChoice, context: CreationContext): boolean {
+    const node = choiceNode(choice);
+    if (choice.action) {
+      const spec = catalogLike().byName(choice.action);
+      if (!spec) { toast('这个动作已不可用', true); return false; }
+      for (const [param, value] of Object.entries(node.params)) if (!spec.parameters?.[param] || !parameterValueAccepted(spec.parameters[param], value)) { toast(`预设中的${fieldLabel(param)}不符合当前动作要求，请重新保存预设`, true); return false; }
+    }
+    const error = creationConnectionError(node, context);
+    if (error) { toast(error, true); return false; }
+    const point = context.point || worldPoint({ clientX: wrap.getBoundingClientRect().left + wrap.clientWidth / 2, clientY: wrap.getBoundingClientRect().top + wrap.clientHeight / 2 });
+    const insert = (binding?: { param: string; ref: string }) => {
+      // Rebuild at commit time so a menu left open cannot reuse an occupied id.
+      const fresh = choiceNode(choice);
+      const nextError = creationConnectionError(fresh, context);
+      if (nextError) { toast(nextError, true); return; }
+      if (binding) {
+        if (!referenceCreationOptions(fresh, context).some((item: any) => item.param === binding.param && item.ref === binding.ref)) { toast('输出端点已发生变化，请重新拖线', true); return; }
+        if (binding.param === '$expression') fresh.expression = { ref: binding.ref };
+        else if (binding.param === '$ref') fresh.ref = { ref: binding.ref };
+        else fresh.params[binding.param] = { ref: binding.ref };
+      }
+      mutate(() => {
+        nodes().push(fresh); addToCurrentGroup([fresh.id]);
+        layout()[fresh.id] = { x: Math.round(point.x - NODE_W / 2), y: Math.round(point.y - BASE_H / 2) };
+        const connection = context.connection;
+        if (connection?.direction === 'from-input') connect(fresh.id, connection.child);
+        else if (connection) {
+          if (connection.oldChild) disconnect(connection.parent, connection.oldChild);
+          connect(connection.parent, fresh.id, connection.slot ?? connection.oldIndex);
+        }
+        state.selected = new Set([fresh.id]); state.selectedEdge = null; state.selectedRun = null; state.inspector = 'node';
+      });
+    };
+    if (context.reference) {
+      const options = referenceCreationOptions(node, context);
+      if (!options.length) { toast('没有兼容的参数端点', true); return false; }
+      if (options.length === 1) insert(options[0]);
+      else {
+        const rect = wrap.getBoundingClientRect();
+        queueMicrotask(() => showMenu(rect.left + rect.width / 2, rect.top + rect.height / 2, options.map((item: any) => ({ label: item.label, run: () => insert(item) }))));
+      }
+    } else insert();
+    return true;
+  }
+  const Efficiency = createEfficiencyTools({
+    state, bridge, nodes, actionLabel, fieldLabel, typeNames: TYPE_NAMES, mutate,
+    clearParameterLiteralCache: (nodeId, name) => clearParameterLiteralCache(nodeId, name),
+    toast: (message, error) => toast(message, error),
+    accept: (choice, context) => {
+      const node = choiceNode(choice);
+      return !creationConnectionError(node, context) && (!context.reference || referenceCreationOptions(node, context).length > 0);
+    },
+    create: addChoice,
+    applyPreset: (preset) => {
+      const node = nodes().find((item) => state.selected.size === 1 && state.selected.has(item.id));
+      if (!node || node.type !== 'task' || node.action !== preset.action) { toast('请选择使用同一动作的任务节点', true); return false; }
+      const defs = catalogLike().byName(preset.action)?.parameters || {};
+      if (Object.entries(preset.params).some(([name, value]) => !defs[name] || !parameterValueAccepted(defs[name], value))) { toast('预设不符合当前动作要求，请重新保存', true); return false; }
+      if (!window.confirm(`将「${preset.name}」的参数套用到「${node.name || node.id}」？现有参数及引用将被替换，可撤销。`)) return false;
+      mutate(() => {
+        node.params = clone(preset.params); clearParameterLiteralCache(node.id);
+        for (const key of Object.keys(variableLinks())) if (key.startsWith(`${node.id}:`)) delete variableLinks()[key];
+      }); return true;
+    },
+    createAsset: (asset, mode, point) => {
+      if (mode !== 'click') return addChoice({ id: '', type: 'task', title: '', action: mode === 'wait' ? 'vision.wait_template' : 'vision.match_template', params: { template: asset } }, { point });
+      const filename = asset.slice(asset.lastIndexOf('/') + 1);
+      mutate(() => {
+        const sequence = buildNode('sequence'); sequence.name = `识别并点击 ${filename}`; nodes().push(sequence);
+        const wait = buildNode('task'); wait.action = 'vision.wait_template'; wait.params = { template: asset }; wait.name = `等待 ${filename}`; nodes().push(wait);
+        const tap = buildNode('task'); tap.action = 'input.tap_match'; tap.params = { match: { ref: `nodes.${wait.id}.output.matches.0` } }; tap.name = `点击 ${filename}`; nodes().push(tap);
+        addToCurrentGroup([sequence.id, wait.id, tap.id]); connect(sequence.id, wait.id); connect(sequence.id, tap.id);
+        layout()[sequence.id] = { x: Math.round(point.x - NODE_W / 2), y: Math.round(point.y) };
+        layout()[wait.id] = { x: Math.round(point.x - NODE_W - 20), y: Math.round(point.y + 190) };
+        layout()[tap.id] = { x: Math.round(point.x + 20), y: Math.round(point.y + 190) };
+        state.selected = new Set([sequence.id]); state.selectedEdge = null; state.selectedRun = null; state.inspector = 'node';
+      }); return true;
+    },
+  });
+  function pointInCanvas(point: { x: number; y: number }): boolean {
+    const x = point.x * state.zoom + state.panX, y = point.y * state.zoom + state.panY;
+    return x >= 0 && y >= 0 && x <= wrap.clientWidth && y <= wrap.clientHeight;
+  }
+
   const HitTest = createCanvasHitTest({
     state, worldPoint, nodes: viewNodes, nodeById: viewNodeById, position: viewPosition, nodeHeight: viewNodeHeight, nodeRowHeight, nodeVariablePins: viewNodeVariablePins,
     variableCompatibleWithPin, variableCompatibleWithInstanceInput, instanceRunCards: viewInstanceRunCards,
@@ -554,6 +670,10 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     // 反向拖线落到判断节点时要知道接哪个执行口（真/假）。
     execPortAt: (point, parentId) => execPortAt(point, parentId),
     onEmptyVariableDrop: (connection, point) => handleEmptyVariableDrop(connection, point),
+    onEmptyReferenceDrop: (reference, point) => {
+      if (!pointInCanvas(point)) return false;
+      Efficiency.openPicker({ reference, point }); return true;
+    },
   });
   const {
     startConnection, startConnectionFromInput, captureConnectionPointer: capturePointerFromConnections,
@@ -572,6 +692,12 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     notifyInspector: () => requestInspector(),
     variableConnectionTargetAt, referenceConnectionTargetAt,
     finishConnection, cancelConnection, finishVariableConnection, finishReferenceConnection, setDirty,
+    finishEmptyConnection: (event) => {
+      const connection = state.connect && { ...state.connect };
+      const point = worldPoint(event as any);
+      cancelConnection();
+      if (connection && pointInCanvas(point) && (!connection.startPoint || Math.hypot(point.x - connection.startPoint.x, point.y - connection.startPoint.y) >= 8 / state.zoom)) Efficiency.openPicker({ connection, point });
+    },
     coalesce: (flags) => renderPieces?.coalesce(flags ?? { viewport: true, interaction: true }),
     // 框选矩形要跟着指针走：走带标记的同步重绘，不延后到下一帧。
     renderWith: (flags) => renderPieces?.render(flags),
@@ -750,6 +876,8 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   } = InspectorPanel;
 
   const StudioToolbar = createEditorToolbar({
+    quickCreate: () => Efficiency.openPicker(), openPresets: () => Efficiency.openPicker({}, 'presets'),
+    savePreset: () => Efficiency.savePreset(), replaceParameters: (query) => Efficiency.openReplacement(query),
     state, $, el, UI, vscode, showMenu, setDirty, toast, nodes: () => [...nodes(), ...viewNodes()], nodeTitle: nodeTitleOf, focusNode,
     actionTitle: actionLabel, fieldTitle: fieldLabel, referenceTitle: referenceLabel,
     currentNodeGroup: currentGroup, leaveNodeGroup: leaveGroup, groupSelection,
@@ -1069,6 +1197,14 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   const { handleRunEvent, deleteCurrentSelection } = RunEvents;
 
   const EditorCommandDispatch = createEditorCommandDispatch({
+    efficiencyCommand: (command, value) => {
+      if (command === 'quickCreate') Efficiency.openPicker();
+      else if (command === 'openPresets') Efficiency.openPicker({}, 'presets');
+      else if (command === 'savePreset') Efficiency.savePreset();
+      else if (command === 'replaceParameters') Efficiency.openReplacement(typeof value === 'string' ? value : '');
+      else return false;
+      return true;
+    },
     convertInputToVariable: VariableInspectors.convertInputToVariable,
     requestInspectorRename,
     renameVariable: VariableInspectors.renameVariable,
@@ -1208,6 +1344,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
 
   // 从桌面端变量面板拖入变量：允许放置时显示跟随光标的提示，落点吸附兼容端点。
   const InputBridge = createInputBridge({
+    openQuickCreate: () => Efficiency.openPicker(), onAssetDrop: (path, point) => Efficiency.dropAsset(path, point),
     state, $, el, wrap, worldPoint, placeVariableCard, variableDragMime: VARIABLE_DRAG_MIME,
     getShortcuts: () => window.StudioShortcuts,
     cancelConnection, cancelVariableConnection, cancelReferenceConnection,

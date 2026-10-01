@@ -82,7 +82,7 @@ export interface CanvasCommands {
   descendants(id: string, out?: Set<string>): Set<string>;
   canConnect(parentId: string, childId: string): string | null;
   /** 节点对象版 canConnect：用于刚刚 buildNode、还没入图的新节点。 */
-  canConnectNodes(parent: any, child: any, port?: ConditionPort | null): string | null;
+  canConnectNodes(parent: any, child: any, port?: ConditionPort | null, prospectiveGroupId?: string): string | null;
   connect(parentId: string, childId: string, port?: number | ConditionPort): boolean;
   disconnect(parentId: string, childId: string): void;
   buildNode(type: string): any;
@@ -140,7 +140,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
    *
    * 判断节点按口校验：真/假各最多一个子节点，占用中的口要先断开。
    */
-  function canConnectNodes(parent: any, child: any, port?: ConditionPort | null): string | null {
+  function canConnectNodes(parent: any, child: any, port?: ConditionPort | null, prospectiveGroupId?: string): string | null {
     if (!parent || !child) return '节点不存在';
     if (child.type === 'bool_judge' || child.type === 'break') return '纯数据节点不接执行流，请通过数据端点引用';
     if (parent.type === 'task') return 'Task 没有子节点输出';
@@ -150,6 +150,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     if (child.type === 'root') return 'Root 不允许父节点';
     const parentId = String(parent.id);
     const childId = String(child.id);
+    const connectionGroupId = (id: string) => nodeById(id) ? groupIdOf(id) : (prospectiveGroupId || '');
     if (parentId === childId || descendants(childId).has(parentId)) return '连接会形成环';
     // 折叠图边界卡是真实的执行流隧道：方向由折叠图的边界定义——
     // 入口的父在组外、子在组内；出口的父在组内、子在组外。边界卡自己只接一条边。
@@ -158,17 +159,17 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       if (child.type === 'group_entry') {
         const entryGroup = groupIdOf(childId);
         if (!entryGroup) return '折叠图入口卡必须属于某个折叠图（展开折叠图时它会自动消失）';
-        if (groupIdOf(parentId) === entryGroup) return '折叠图入口卡只能由本折叠图外的节点连入';
+        if (connectionGroupId(parentId) === entryGroup) return '折叠图入口卡只能由本折叠图外的节点连入';
       }
       if (parent.type === 'group_entry') {
         const entryGroup = groupIdOf(parentId);
         if (!entryGroup) return '折叠图入口卡必须属于某个折叠图（展开折叠图时它会自动消失）';
-        if (groupIdOf(childId) !== entryGroup) return '折叠图入口只能接本折叠图内的节点';
+        if (connectionGroupId(childId) !== entryGroup) return '折叠图入口只能接本折叠图内的节点';
       }
       if (child.type === 'group_exit') {
         const exitGroup = groupIdOf(childId);
         if (!exitGroup) return '折叠图出口卡必须属于某个折叠图（展开折叠图时它会自动消失）';
-        if (groupIdOf(parentId) !== exitGroup) return '折叠图出口卡只能由本折叠图内的节点连入';
+        if (connectionGroupId(parentId) !== exitGroup) return '折叠图出口卡只能由本折叠图内的节点连入';
       }
     }
     if (parent.type === 'group_entry' || parent.type === 'group_exit') {
@@ -177,8 +178,8 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     }
     // 跨折叠图的执行边必须经过边界卡（UE Collapse Graph 里隧道是显式的）：
     // 一边在组内一边在组外的直连会被打回，请先在折叠图里接上入口/出口卡。
-    const parentGroup = groupIdOf(parentId);
-    const childGroup = groupIdOf(childId);
+    const parentGroup = connectionGroupId(parentId);
+    const childGroup = connectionGroupId(childId);
     if (parentGroup !== childGroup && !isGroupBoundaryNode(parent) && !isGroupBoundaryNode(child)) {
       if (parentGroup && !childGroup) return '跨折叠图的执行边必须经过折叠图出口卡';
       if (!parentGroup && childGroup) return '跨折叠图的执行边必须经过折叠图入口卡';

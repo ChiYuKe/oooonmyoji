@@ -308,6 +308,8 @@ export interface ClipboardMessage {
 }
 
 export type EditorMessage =
+  | { type: 'getEditingLibrary' }
+  | { type: 'updateEditingLibrary'; change: import('./editing-library').EditingLibraryChange }
   | ReadyMessage
   | CreateVariableNodeMessage
   | DocumentStateChangedMessage
@@ -342,6 +344,8 @@ export type EditorMessage =
   | ClipboardWriteMessage;
 
 export const EDITOR_MESSAGE_TYPES = [
+  'getEditingLibrary',
+  'updateEditingLibrary',
   'ready',
   'createVariableNode',
   'documentStateChanged',

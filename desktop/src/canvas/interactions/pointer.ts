@@ -69,6 +69,7 @@ export interface PointerDeps {
   referenceConnectionTargetAt(event: PointerEventLike): any;
   finishConnection(event: PointerEventLike, target: any): void;
   cancelConnection(): void;
+  finishEmptyConnection?(event: PointerEventLike): void;
   finishVariableConnection(event: PointerEventLike): void;
   finishReferenceConnection(event: PointerEventLike): void;
   setDirty(value?: boolean): void;
@@ -390,6 +391,7 @@ export function createCanvasPointer(deps: PointerDeps): CanvasPointer {
       if (Number.isInteger(event.pointerId) && Number.isInteger(state.connect.pointerId) && event.pointerId !== state.connect.pointerId) return;
       const target = connectionTargetAt(event) || state.connect.hover;
       if (target) finishConnection(event, target);
+      else if (deps.finishEmptyConnection) deps.finishEmptyConnection(event);
       else cancelConnection();
       return;
     }

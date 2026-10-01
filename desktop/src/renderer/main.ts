@@ -763,6 +763,7 @@ function updateMaximizedState(maximized: boolean): void {
 
 let runtimeEdgePreviewEnabled = readRuntimeEdgePreview(window.localStorage);
 const titlebarMenus = createTitlebarMenus((type) => {
+  if (['quickCreate', 'openPresets', 'savePreset', 'replaceParameters'].includes(type)) { workspace.editorCommand(type); return; }
   if (type === 'searchNodes') { workspace.editorCommand('searchNodeByName', ''); return; }
   if (type === 'toggleRuntimeEdgePreview') {
     runtimeEdgePreviewEnabled = !runtimeEdgePreviewEnabled;

@@ -51,6 +51,8 @@ const api: OnmyojiDesktopApi = {
   },
   bootstrap: () => ipcRenderer.invoke('project:bootstrap'),
   getWorkflowInit: (uri, selectedInstance, canGoBack) => ipcRenderer.invoke('project:get-workflow-init', uri, selectedInstance, canGoBack),
+  getEditingLibrary: () => ipcRenderer.invoke('project:get-editing-library'),
+  updateEditingLibrary: (change) => ipcRenderer.invoke('project:update-editing-library', change),
   saveWorkflow: (uri, text) => ipcRenderer.invoke('project:save-workflow', uri, text),
   createWorkflow: () => ipcRenderer.invoke('project:create-workflow'),
   openWorkflowFile: (uri) => ipcRenderer.invoke('project:open-workflow-file', uri),

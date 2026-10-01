@@ -438,6 +438,8 @@ export interface OnmyojiDesktopApi {
   onRuntimeResourceProgress(listener: (event: RuntimeResourceProgress) => void): () => void;
   bootstrap(): Promise<BootstrapData>;
   getWorkflowInit(uri: string, selectedInstance: string, canGoBack: boolean): Promise<WorkflowEditorInit>;
+  getEditingLibrary(): Promise<import('./editing-library').EditingLibrary>;
+  updateEditingLibrary(change: import('./editing-library').EditingLibraryChange): Promise<import('./editing-library').EditingLibrary>;
   saveWorkflow(uri: string, text: string): Promise<void>;
   createWorkflow(): Promise<string | undefined>;
   openWorkflowFile(uri: string): Promise<void>;

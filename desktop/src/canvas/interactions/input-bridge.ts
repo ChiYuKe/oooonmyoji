@@ -8,6 +8,8 @@ import type { CanvasState } from '../state/canvas-state';
 import { isProjectedGroupNode } from '../model/node-groups';
 
 export interface InputBridgeDeps {
+  openQuickCreate?(): void;
+  onAssetDrop?(path: string, point: { x: number; y: number }): void;
   state: Omit<CanvasState, 'raw'> & { raw: any };
   $(id: string): HTMLElement;
   el(tag: string, className?: string, text?: string): any;
@@ -52,6 +54,7 @@ export function createInputBridge(deps: InputBridgeDeps) {
   let dropGhost: HTMLElement | null = null;
 
   const variableDragAccepted = (event: any): boolean => Boolean(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes(variableDragMime));
+  const assetDragAccepted = (event: any): boolean => Boolean(deps.onAssetDrop && event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('application/x-onmyoji-asset'));
   const hideVariableDropGhost = (): void => { if (dropGhost) dropGhost.classList.add('hidden'); };
 
   /** 读取当前配置的绑定；由桌面壳层通过 StudioShortcuts 共享。 */
@@ -63,12 +66,12 @@ export function createInputBridge(deps: InputBridgeDeps) {
 
   function install(): void {
     wrap.addEventListener('dragover', (event: any) => {
-      if (!variableDragAccepted(event)) return;
+      if (!variableDragAccepted(event) && !assetDragAccepted(event)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
       if (!dropGhost) dropGhost = el('div', 'variable-drop-ghost');
       const rect = wrap.getBoundingClientRect();
-      dropGhost!.textContent = '＋ 变量卡片';
+      dropGhost!.textContent = assetDragAccepted(event) ? '＋ 用图片创建节点' : '＋ 变量卡片';
       dropGhost!.style.left = `${event.clientX - rect.left + 14}px`;
       dropGhost!.style.top = `${event.clientY - rect.top + 12}px`;
       dropGhost!.classList.remove('hidden');
@@ -78,6 +81,10 @@ export function createInputBridge(deps: InputBridgeDeps) {
     });
     wrap.addEventListener('drop', (event: any) => {
       hideVariableDropGhost();
+      if (assetDragAccepted(event)) {
+        event.preventDefault(); event.stopPropagation();
+        deps.onAssetDrop?.(event.dataTransfer.getData('application/x-onmyoji-asset'), worldPoint(event)); return;
+      }
       if (!variableDragAccepted(event)) return;
       event.preventDefault();
       const payload = event.dataTransfer.getData(variableDragMime);
@@ -98,6 +105,9 @@ export function createInputBridge(deps: InputBridgeDeps) {
     window.addEventListener('keydown', (event: any) => {
       const tag = event.target && event.target.tagName;
       const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable;
+      if (!editing && event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && deps.openQuickCreate && (event.target === document.body || wrap.contains(event.target))) {
+        event.preventDefault(); deps.openQuickCreate(); return;
+      }
       // 排列预览还挂着的时候，键盘就是确认条的快捷键：Enter 应用、Esc 取消（同一条命令）。
       // 先处理再交给下面的通用 Esc 清理，避免「Esc 只关了菜单、预览还挂着」。
       if (!editing && state.arrangePreview) {

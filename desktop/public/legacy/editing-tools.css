@@ -2,6 +2,39 @@
   position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.5);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
+.editing-dialog-overlay {
+  position: fixed; inset: 0; z-index: 10500; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.editing-dialog {
+  background: var(--surface, var(--panel, #242424)); color: var(--text, var(--fg, #d2d2d2));
+  border: 1px solid var(--border, #444); border-radius: 8px; box-shadow: 0 12px 48px #0007;
+  width: min(1000px, 94vw); max-height: 85vh; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.editing-dialog-head, .editing-dialog-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.editing-dialog-head strong { flex: 1; }
+.editing-dialog-controls input { flex: 1; min-width: 180px; width: auto; }
+.editing-dialog-controls select { flex: 0 0 150px; width: 150px; }
+.editing-choice-list, .editing-replacement-list { overflow: auto; min-height: 80px; }
+.editing-choice { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border, #444); padding: 4px; }
+.editing-choice.active { background: var(--surface-hover, var(--panel-2, #343434)); outline: 1px solid var(--blue, var(--accent, #3694d4)); outline-offset: -1px; }
+.editing-choice-main { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; flex: 1; min-width: 0; padding: 8px; text-align: left; border: 0; background: transparent; }
+.editing-choice-main span { color: var(--muted, #999); overflow-wrap: anywhere; }
+.editing-choice > button:not(.editing-choice-main) { flex-shrink: 0; padding: 6px 8px; }
+.editing-dialog .ui-input { min-height: 30px; }
+.editing-dialog p { margin: 0; line-height: 1.6; }
+.editing-replacement-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.editing-replacement-controls input, .editing-replacement-controls select { min-width: 0; width: 100%; box-sizing: border-box; }
+.editing-replacement-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border-bottom: 1px solid var(--border, #444); }
+.editing-replacement-row > div { min-width: 0; flex: 1; }
+.editing-replacement-row pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; font-size: 12px; }
+.editing-error { color: var(--red, #ee7777); }
+.editing-asset-path { overflow-wrap: anywhere; }
+@media (max-width: 650px) {
+  .editing-choice { flex-wrap: wrap; }
+  .editing-choice-main { flex-basis: 100%; }
+  .editing-replacement-controls { grid-template-columns: 1fr 1fr; }
+}
 .node-search-dialog {
   background: var(--surface, var(--panel, #242424)); color: var(--text, var(--fg, #d2d2d2));
   border: 1px solid var(--border, #444); border-radius: 8px; box-shadow: 0 12px 48px #0007;

@@ -59,6 +59,7 @@ export interface ConnectionsDeps {
   referenceDisplayNameOf?(ref: string): string;
   /** 变量线落在空白画布时交给宿主创建合适的端点/变量卡；返回 true 表示已处理。 */
   onEmptyVariableDrop?(connection: any, point: ConnectionPoint): boolean;
+  onEmptyReferenceDrop?(connection: any, point: ConnectionPoint): boolean;
 }
 
 export interface CanvasConnections {
@@ -110,7 +111,7 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     if (event) { event.preventDefault(); event.stopPropagation(); }
     const point = at || (event ? worldPoint(event as PointerLike & { clientX: number; clientY: number }) : { x: 0, y: 0 });
     state.connect = {
-      direction: 'from-output', parent: parentId, x: point.x, y: point.y, hover: null,
+      direction: 'from-output', parent: parentId, x: point.x, y: point.y, startPoint: point, hover: null,
       pointerId: event ? captureConnectionPointer(event) : null,
       // 判断节点：记住从哪个口（真/假）拖出来的，落点才知道接哪一支。
       ...(port ? { slot: port } : {}),
@@ -123,7 +124,7 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     if (event && event.button !== 0) return;
     if (event) { event.preventDefault(); event.stopPropagation(); }
     const point = at || (event ? worldPoint(event as PointerLike & { clientX: number; clientY: number }) : { x: 0, y: 0 });
-    state.connect = { direction: 'from-input', child: childId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
+    state.connect = { direction: 'from-input', child: childId, x: point.x, y: point.y, startPoint: point, hover: null, pointerId: event ? captureConnectionPointer(event) : null };
     state.selectedEdge = null;
     render();
   }
@@ -351,7 +352,7 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
     if (event && event.button !== 0) return;
     if (event) { event.preventDefault(); event.stopPropagation(); }
     const point = at || (event ? worldPoint(event as PointerLike & { clientX: number; clientY: number }) : { x: 0, y: 0 });
-    state.referenceConnect = { nodeId, x: point.x, y: point.y, hover: null, pointerId: event ? captureConnectionPointer(event) : null, field: field === undefined ? null : field };
+    state.referenceConnect = { nodeId, x: point.x, y: point.y, startPoint: point, hover: null, pointerId: event ? captureConnectionPointer(event) : null, field: field === undefined ? null : field };
     state.selectedEdge = null;
     render();
   }
@@ -472,6 +473,9 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
         const source = nodeById(connection.nodeId);
         const sourceName = source ? (source.name || source.id) : connection.nodeId;
         toast(`${fieldLabel(miss.param)} 不接受「${sourceName}」的输出类型`, true);
+      } else if ((!connection.startPoint || Math.hypot(connection.x - connection.startPoint.x, connection.y - connection.startPoint.y) >= 8 / state.zoom) && deps.onEmptyReferenceDrop?.(connection, worldPoint(event as PointerLike & { clientX: number; clientY: number }))) {
+        render();
+        return;
       }
       render();
       return;

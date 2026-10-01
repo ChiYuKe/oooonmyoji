@@ -78,6 +78,10 @@ export interface ToolbarNode {
 }
 
 export interface ToolbarDeps {
+  quickCreate?(): void;
+  openPresets?(): void;
+  savePreset?(): void;
+  replaceParameters?(query?: string): void;
   state: ToolbarState;
   $(id: string): HTMLElement;
   el(tag: string, className?: string, text?: string): HTMLElement;
@@ -285,6 +289,10 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     $('btn-more').addEventListener('click', () => {
       const rect = $('btn-more').getBoundingClientRect();
       showMenu(rect.right, rect.bottom + 4, [
+        { label: '快捷创建节点 (Tab)', run: () => deps.quickCreate?.() },
+        { label: '项目参数预设…', run: () => deps.openPresets?.() },
+        { label: '保存所选节点为项目预设…', run: () => deps.savePreset?.() },
+        { label: '搜索并批量替换参数…', run: () => deps.replaceParameters?.() },
         { label: '搜索节点和参数 (Ctrl+F)', run: () => searchNodeByName('') },
         { label: '折叠所选节点', run: () => deps.groupSelection?.() },
         'separator',
@@ -312,6 +320,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
     openNodeSearch({
       nodes, query: String(value || ''),
       labels: { title: deps.nodeTitle, action: deps.actionTitle, field: deps.fieldTitle, reference: deps.referenceTitle },
+      replace: deps.replaceParameters,
       focus: (target) => {
         state.selected = new Set([target.nodeId]);
         state.selectedEdge = null; state.selectedRun = null; state.inspector = 'node';

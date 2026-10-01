@@ -32,6 +32,7 @@ import {
   type ContentReferenceMapping,
   type RewritePlan,
 } from './core/contentReferences';
+import { ProjectEditingLibrary } from './core/editingLibrary';
 import { buildReferenceGraph } from './core/references';
 import { collectRefSuggestions, parseWorkflow, validateWorkflow } from './core/workflow';
 import { workflowTemplate } from './core/workflowTemplate';
@@ -55,11 +56,13 @@ const PREVIEW_TEXT_MAX_BYTES = 256 * 1024;
 export class ProjectService {
   readonly workflowRoot: string;
   readonly assetsRoot: string;
+  readonly editingLibrary: ProjectEditingLibrary;
 
   constructor(readonly projectRoot: string) {
     this.projectRoot = path.resolve(projectRoot);
     this.workflowRoot = path.join(this.projectRoot, 'workflows');
     this.assetsRoot = path.join(this.projectRoot, 'assets');
+    this.editingLibrary = new ProjectEditingLibrary(this.projectRoot);
   }
 
   private workflowPath(uri: string): string {

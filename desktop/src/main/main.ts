@@ -351,6 +351,8 @@ function registerIpc(): void {
     return init;
   });
   ipcMain.handle('project:save-workflow', (_event, uri: string, text: string) => project.saveWorkflow(uri, text));
+  ipcMain.handle('project:get-editing-library', () => project.editingLibrary.list());
+  ipcMain.handle('project:update-editing-library', (_event, change) => project.editingLibrary.update(change));
   ipcMain.handle('project:create-workflow', (event) => project.createWorkflow(ownerWindow(event)));
   ipcMain.handle('project:open-workflow-file', (_event, uri: string) => project.openWorkflowFile(uri));
   ipcMain.handle('project:open-content-item', (_event, relativePath: string) => project.openContentItem(relativePath));

@@ -9,6 +9,10 @@ export interface TitlebarMenuOptions {
 }
 
 const MORE_ACTIONS: Array<{ label: string; type: string; checkable?: boolean } | 'separator'> = [
+  { label: '快捷创建节点 (Tab)', type: 'quickCreate' },
+  { label: '项目参数预设…', type: 'openPresets' },
+  { label: '保存所选节点为项目预设…', type: 'savePreset' },
+  { label: '搜索并批量替换参数…', type: 'replaceParameters' },
   { label: '搜索节点和参数 (Ctrl+F)', type: 'searchNodes' },
   { label: '新建工作流', type: 'newWorkflow' },
   { label: '选择其他工作流…', type: 'openWorkflowPicker' },

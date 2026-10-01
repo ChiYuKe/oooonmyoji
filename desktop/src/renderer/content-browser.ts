@@ -563,6 +563,7 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
       const transfer = event.dataTransfer;
       if (!transfer) return;
       transfer.setData('application/x-onmyoji-content', item.path);
+      if (item.kind === 'asset') transfer.setData('application/x-onmyoji-asset', item.path);
       transfer.setData('text/plain', item.path);
       transfer.setData('application/x-onmyoji-content-paths', JSON.stringify([...selectedContentPaths]));
       if (item.kind === 'workflow' && item.workflow) {

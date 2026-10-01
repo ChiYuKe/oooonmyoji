@@ -102,8 +102,9 @@ import { createSidebar } from './panels/sidebar';
 import { createEditorHost } from './editor-host';
 import { createInstancePicker, instanceLabel } from './instance-picker';
 import { createTitlebarMenus } from './titlebar-menus';
+import { openWorkflowHistory } from './workflow-history';
 import { parseEditorMessage } from '../shared/editor-messages';
-import { WORKFLOW_SUFFIX } from '../shared/workflow/graph-dsl';
+import { WORKFLOW_SUFFIX, parseDocument } from '../shared/workflow/graph-dsl';
 import {
   readRuntimeEdgePreview,
   writeRuntimeEdgePreview,
@@ -683,6 +684,29 @@ const editorHost = createEditorHost({
     const relative = relativeToProject(workspace.displayFileUri(uri));
     if (relative) referenceViewer.open(relative, document);
     else showToast('无法定位当前工作流的项目路径', true);
+  },
+  openWorkflowHistory: (uri) => {
+    if (!uri) { showToast('请先打开一个工作流', true); return; }
+    void openWorkflowHistory({
+      uri, api,
+      currentText: () => workspace.tab(uri)?.text || '',
+      showError: (error) => showToast(errorMessage(error), true),
+      restore: async (text) => {
+        parseDocument(text);
+        const confirmed = await impactConfirm.open({ title: '恢复历史版本', summary: '将用选中的历史版本替换这份工作流。当前内容会先保存到历史，恢复操作也可用 Ctrl+Z 撤销。', confirmLabel: '恢复此版本' });
+        if (confirmed !== true) return false;
+        workspace.cancelAutoSave(uri);
+        await workspace.waitForAutoSave();
+        const current = workspace.tab(uri)?.text;
+        const runtime = workspace.getDocumentRuntimes().get(uri);
+        if (!current || !runtime) throw new Error('工作流已关闭，请重新打开后恢复');
+        await api.saveWorkflow(uri, current);
+        if (workspace.tab(uri)?.text !== current) throw new Error('工作流在恢复期间发生了修改，请重新对比后恢复');
+        workspace.postToFrame(runtime.frame, { type: 'restoreDocument', text });
+        showToast('已恢复历史版本，可用 Ctrl+Z 撤销');
+        return true;
+      },
+    });
   },
   showVariableReferences: (data, source) => variableReferences.open(data, source),
   showImpactConfirm: async (request) => (await impactConfirm.open(request)) === true,

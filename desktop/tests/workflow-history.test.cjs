@@ -1,0 +1,67 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const Module = require('node:module');
+const original = Module._load;
+Module._load = function (name, ...args) { return name === 'electron' ? { dialog: {}, shell: {}, BrowserWindow: class {} } : original.call(this, name, ...args); };
+const { ProjectService } = require('../dist-electron/main/projectService.js');
+Module._load = original;
+const { WorkflowHistory, retainedHistoryIds } = require('../dist-electron/main/core/workflowHistory.js');
+const { emitRuntimeDocument } = require('../dist-electron/shared/workflow/graph-dsl.js');
+const { workflowDiff } = require('../dist-test-renderer/renderer/workflow-history.js');
+
+const text = (description) => emitRuntimeDocument({ schema_version: 4, id: 'test', version: '1.0', resolution: [1920,1080], root: 'root', description, nodes: [{ id: 'root', type: 'root', children: [] }] });
+test('保存保留修改前后版本，重启可读，连续保存不会丢失中间版本', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-history-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'workflows'));
+  const file = path.join(root, 'workflows', 'test.owf'); fs.writeFileSync(file, text('原版'));
+  const project = new ProjectService(root);
+  await Promise.all([project.saveWorkflow(file, text('第一版')), project.saveWorkflow(file, text('第二版'))]);
+  assert.equal(fs.readFileSync(file, 'utf8'), text('第二版'));
+  const reopened = new ProjectService(root);
+  const entries = await reopened.listWorkflowHistory(file);
+  const versions = await Promise.all(entries.map((entry) => reopened.readWorkflowHistory(file, entry.id)));
+  assert.deepEqual(versions, [text('第二版'), text('第一版'), text('原版')]);
+  await reopened.saveWorkflow(file, text('第二版'));
+  assert.equal((await reopened.listWorkflowHistory(file)).length, 3);
+  await reopened.saveWorkflow(file, versions[2]);
+  assert.equal(fs.readFileSync(file, 'utf8'), text('原版'));
+  assert.equal((await reopened.listWorkflowHistory(file)).length, 4);
+  await assert.rejects(reopened.readWorkflowHistory(file, '../../config.json'), /标识无效/);
+  await assert.rejects(reopened.listWorkflowHistory(path.join(root, 'outside.owf')), /workflows/);
+  await assert.rejects(reopened.saveWorkflow(file, 'not a workflow'));
+  assert.equal(fs.readFileSync(file, 'utf8'), text('原版'));
+});
+test('频繁自动保存保留最近编辑，同时保留昨天及更早的检查点', () => {
+  const now = Date.now();
+  const recent = Array.from({ length: 200 }, (_, index) => ({ id: `recent-${index}`, at: now - index * 1000, bytes: 1 }));
+  const old = Array.from({ length: 40 }, (_, index) => ({ id: `day-${index}`, at: now - (index + 1) * 86400000, bytes: 1 }));
+  const keep = retainedHistoryIds([...recent, ...old], now);
+  assert.ok(keep.has('recent-0')); assert.ok(keep.has('recent-19'));
+  assert.ok(keep.has('day-0')); assert.ok(keep.has('day-10'));
+  assert.ok(keep.size < 80);
+});
+test('单个损坏的快照不影响其他版本', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-history-corrupt-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'workflows', 'x.owf'); const history = new WorkflowHistory(root);
+  await history.record(file, 'a'); await history.record(file, 'b');
+  const entries = await history.list(file);
+  const bucket = fs.readdirSync(path.join(root, 'artifacts', 'workflow-history'))[0];
+  fs.writeFileSync(path.join(root, 'artifacts', 'workflow-history', bucket, `${entries[0].id}.json`), '{');
+  const intact = await new WorkflowHistory(root).list(file);
+  assert.equal(intact.length, 1);
+  assert.equal((await history.read(file, intact[0].id)).text, 'a');
+});
+test('完整逐行对比正确对齐插入删除，大文件仍显示所有内容', () => {
+  const rows = workflowDiff('a\nb\nc', 'a\nx\nb\nc');
+  assert.deepEqual(rows.filter((row) => row.changed), [{ left: null, right: 'x', changed: true }]);
+  assert.deepEqual(workflowDiff('a\nb', 'a').filter((row) => row.changed), [{ left: 'b', right: null, changed: true }]);
+  const large = Array.from({ length: 1500 }, (_, index) => `节点-${index}`).join('\n');
+  const diff = workflowDiff(large, `${large}\n新增`);
+  assert.equal(diff.filter((row) => row.left !== null).length, 1500);
+  assert.equal(diff.filter((row) => row.right !== null).length, 1501);
+});

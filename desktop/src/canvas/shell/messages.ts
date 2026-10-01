@@ -281,6 +281,12 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
   else if (message.type === 'workflowSaveFailed') setDirty(true);
   else if (message.type === 'externalChange') { const banner = $('external-banner'); banner.textContent = '文件已在外部修改'; banner.classList.remove('hidden'); }
   else if (message.type === 'replaceDocument') replaceDocument(String(message.text || ''), message.recordHistory === true);
+  else if (message.type === 'restoreDocument') {
+    const text = String(message.text || '');
+    try { parseDocument(text); } catch { toast('历史版本无法解析，未恢复', true); return; }
+    replaceDocument(text, true);
+    setDirty(true);
+  }
   else if (message.type === 'editorCommand') executeEditorCommand(String(message.command || ''), message.value);
   }
   return { handleMessage };

@@ -21,6 +21,7 @@ const MORE_ACTIONS: Array<{ label: string; type: string; checkable?: boolean } |
   { label: '在结构树窗口查看', type: 'openWorkflowTree' },
   'separator',
   { label: '查看引用', type: 'openReferences' },
+  { label: '版本历史…', type: 'openWorkflowHistory' },
   'separator',
   { label: '运行连线预览', type: 'toggleRuntimeEdgePreview', checkable: true },
   'separator',

@@ -202,6 +202,8 @@ export interface OpenReferencesMessage {
   type: 'openReferences';
 }
 
+export interface OpenWorkflowHistoryMessage { type: 'openWorkflowHistory' }
+
 /** 删除被引用的变量时，把引用清单交给壳层的「变量引用」面板。 */
 export interface VariableReferencesRequestedMessage {
   type: 'variableReferencesRequested';
@@ -336,6 +338,7 @@ export type EditorMessage =
   | OpenWorkflowPickerMessage
   | OpenWorkflowTreeMessage
   | OpenReferencesMessage
+  | OpenWorkflowHistoryMessage
   | VariableReferencesRequestedMessage
   | VariableRenameImpactRequestedMessage
   | SaveBlockedRequestedMessage
@@ -373,6 +376,7 @@ export const EDITOR_MESSAGE_TYPES = [
   'openWorkflowPicker',
   'openWorkflowTree',
   'openReferences',
+  'openWorkflowHistory',
   'variableReferencesRequested',
   'variableRenameImpactRequested',
   'saveBlockedRequested',

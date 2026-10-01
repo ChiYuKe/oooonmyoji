@@ -27,6 +27,7 @@ export interface EditorHostDeps {
   showRuntimePanel: () => void;
   openContentBrowserSearch: () => void;
   openReferences: (uri: string) => void;
+  openWorkflowHistory?: (uri: string) => void;
   /** 打开「变量引用」面板，列出谁在引用某个变量。 */
   showVariableReferences?: (data: VariableReferencesData, source: VariableReferencesSource) => void;
   /** 影响范围确认弹窗：改名等操作先亮出影响清单，返回 true 表示确认继续。 */
@@ -90,6 +91,10 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
             if (message.change.op === 'save') showToast('项目预设已保存');
             if (message.change.op === 'remove') showToast('项目预设已删除');
           } catch (error) { workspace.postToFrame(sourceFrame, { type: 'editingLibraryError', error: errorMessage(error) }); }
+          return;
+        }
+        case 'openWorkflowHistory': {
+          deps.openWorkflowHistory?.(targetUri);
           return;
         }
         case 'ready': {

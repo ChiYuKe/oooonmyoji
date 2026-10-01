@@ -32,11 +32,13 @@ import {
   type ContentReferenceMapping,
   type RewritePlan,
 } from './core/contentReferences';
-import { ProjectEditingLibrary } from './core/editingLibrary';
 import { buildReferenceGraph } from './core/references';
 import { collectRefSuggestions, parseWorkflow, validateWorkflow } from './core/workflow';
 import { workflowTemplate } from './core/workflowTemplate';
 import { emitDocument, parseDocument, WORKFLOW_SUFFIX } from '../shared/workflow/graph-dsl';
+import { WorkflowHistory } from './core/workflowHistory';
+import { ProjectEditingLibrary } from './core/editingLibrary';
+import { randomUUID } from 'node:crypto';
 
 const IMAGE_MIME = new Map([
   ['.png', 'image/png'],
@@ -56,12 +58,15 @@ const PREVIEW_TEXT_MAX_BYTES = 256 * 1024;
 export class ProjectService {
   readonly workflowRoot: string;
   readonly assetsRoot: string;
+  private readonly history: WorkflowHistory;
   readonly editingLibrary: ProjectEditingLibrary;
+  private readonly saveQueues = new Map<string, Promise<void>>();
 
   constructor(readonly projectRoot: string) {
     this.projectRoot = path.resolve(projectRoot);
     this.workflowRoot = path.join(this.projectRoot, 'workflows');
     this.assetsRoot = path.join(this.projectRoot, 'assets');
+    this.history = new WorkflowHistory(this.projectRoot);
     this.editingLibrary = new ProjectEditingLibrary(this.projectRoot);
   }
 
@@ -215,7 +220,35 @@ export class ProjectService {
     const file = this.workflowPath(uri);
     // 语法闸门：渲染进程写过来的文本必须是能解析的 `.owf`，否则不落盘。
     parseDocument(text, path.basename(file));
-    await fs.promises.writeFile(file, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
+    const next = text.endsWith('\n') ? text : `${text}\n`;
+    const key = file.toLowerCase();
+    const previous = this.saveQueues.get(key) || Promise.resolve();
+    const run = previous.catch(() => {}).then(async () => {
+      let current: string | undefined;
+      try { current = await fs.promises.readFile(file, 'utf8'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      if (current !== undefined) await this.history.record(file, current);
+      if (current === next) return;
+      const temp = `${file}.${randomUUID()}.tmp`;
+      try {
+        await fs.promises.writeFile(temp, next, { encoding: 'utf8', flag: 'wx' });
+        await fs.promises.rename(temp, file);
+      } finally { await fs.promises.rm(temp, { force: true }); }
+      await this.history.record(file, next);
+    });
+    this.saveQueues.set(key, run);
+    try { await run; }
+    finally { if (this.saveQueues.get(key) === run) this.saveQueues.delete(key); }
+  }
+
+  async listWorkflowHistory(uri: string) {
+    const file = this.workflowPath(uri);
+    await this.saveQueues.get(file.toLowerCase());
+    return this.history.list(file);
+  }
+
+  async readWorkflowHistory(uri: string, id: string): Promise<string> {
+    return (await this.history.read(this.workflowPath(uri), id)).text;
   }
 
   async createWorkflow(owner: BrowserWindow): Promise<string | undefined> {

@@ -161,7 +161,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     const launchStopGeneration = this.stopGeneration;
     const workflowPath = this.project.resolveWorkflowPath(request.uri);
     const workflowReference = this.project.workflowReference(request.uri);
-    await fs.promises.writeFile(workflowPath, request.text.endsWith('\n') ? request.text : `${request.text}\n`, 'utf8');
+    await this.project.saveWorkflow(request.uri, request.text);
 
     let runs: Array<{ instance: string }> = [];
     try {

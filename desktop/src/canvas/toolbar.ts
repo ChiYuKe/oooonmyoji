@@ -310,6 +310,7 @@ export function createEditorToolbar(deps: ToolbarDeps): ToolbarController {
         { label: '在结构树窗口查看', run: () => vscode.postMessage({ type: 'openWorkflowTree' }) },
         'separator',
         { label: '查看引用', run: () => vscode.postMessage({ type: 'openReferences' }) },
+        { label: '版本历史…', run: () => vscode.postMessage({ type: 'openWorkflowHistory' }) },
         'separator',
         { label: '重新加载', run: () => vscode.postMessage({ type: 'reloadRequest' }) },
       ], { align: 'end' });

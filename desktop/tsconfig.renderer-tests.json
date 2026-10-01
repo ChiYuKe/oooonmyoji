@@ -17,6 +17,7 @@
     "src/renderer/rename-shortcuts.ts",
     "src/renderer/impact-confirm.ts",
     "src/renderer/recovery-store.ts",
+    "src/renderer/workflow-history.ts",
     "src/renderer/content-browser/items.ts",
     "src/renderer/content-browser/marquee.ts",
     "src/renderer/content-browser/batch.ts",

@@ -34,6 +34,12 @@ export interface WorkflowDescriptor {
   }>;
 }
 
+export interface WorkflowHistoryEntry {
+  id: string;
+  at: number;
+  bytes: number;
+}
+
 export interface RuntimeInstance {
   id: string;
   backend?: string;
@@ -441,6 +447,8 @@ export interface OnmyojiDesktopApi {
   getEditingLibrary(): Promise<import('./editing-library').EditingLibrary>;
   updateEditingLibrary(change: import('./editing-library').EditingLibraryChange): Promise<import('./editing-library').EditingLibrary>;
   saveWorkflow(uri: string, text: string): Promise<void>;
+  listWorkflowHistory(uri: string): Promise<WorkflowHistoryEntry[]>;
+  readWorkflowHistory(uri: string, id: string): Promise<string>;
   createWorkflow(): Promise<string | undefined>;
   openWorkflowFile(uri: string): Promise<void>;
   openContentItem(path: string): Promise<void>;

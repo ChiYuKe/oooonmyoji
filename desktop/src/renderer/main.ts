@@ -102,6 +102,8 @@ import { createSidebar } from './panels/sidebar';
 import { createEditorHost } from './editor-host';
 import { createInstancePicker, instanceLabel } from './instance-picker';
 import { createTitlebarMenus } from './titlebar-menus';
+import { installTeamBuilderResizer } from './team-builder-layout';
+import { installSoulCalculator } from './soul-calculator';
 import { openWorkflowHistory } from './workflow-history';
 import { parseEditorMessage } from '../shared/editor-messages';
 import { WORKFLOW_SUFFIX, parseDocument } from '../shared/workflow/graph-dsl';
@@ -888,7 +890,16 @@ function openAboutPage(): void {
   }, 0);
 }
 
+let disposeTeamBuilderResizer: (() => void) | undefined;
+let disposeSoulCalculator: (() => void) | undefined;
+
 function bindUi(): void {
+  disposeSoulCalculator = installSoulCalculator(document.querySelector<HTMLElement>('#team-builder-soul-calculator')!, api);
+  disposeTeamBuilderResizer = installTeamBuilderResizer(
+    document.querySelector<HTMLElement>('#module-onmyoji-team-builder')!,
+    document.querySelector<HTMLElement>('#team-builder-resizer')!,
+    api,
+  );
   roiPicker.bind();
   document.querySelectorAll<HTMLElement>('[data-editor-command]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -909,6 +920,9 @@ function bindUi(): void {
       if (button.dataset.appCommand === 'settings') settings.openSettingsPanel();
       if (button.dataset.appCommand === 'visionTest') void openVisionTest();
       if (button.dataset.appCommand === 'liveView') void openLiveView();
+      if (button.dataset.appCommand === 'onmyojiTeamBuilder') {
+        workbenchFrame?.showFloating('onmyojiTeamBuilder');
+      }
       if (button.dataset.appCommand === 'help') void openHelpReadme();
       if (button.dataset.appCommand === 'about') openAboutPage();
     });
@@ -1175,6 +1189,8 @@ window.addEventListener('beforeunload', () => {
   workspace.persistWorkflowSessionNow();
   workspace.cancelAutoSave();
   settings.dispose();
+  disposeTeamBuilderResizer?.();
+  disposeSoulCalculator?.();
   lifecycle.suppressRemovals();
   sharedPanelDockBridge?.dispose();
   docking?.dispose();

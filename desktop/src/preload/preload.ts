@@ -96,6 +96,13 @@ const api: OnmyojiDesktopApi = {
   getDebugSettings: () => ipcRenderer.invoke('runtime:get-debug-settings'),
   updateDebugSettings: (settings: RuntimeDebugSettings) => ipcRenderer.invoke('runtime:update-debug-settings', settings),
   listInstances: () => ipcRenderer.invoke('runtime:list-instances'),
+  fetchSouls: (instanceId) => ipcRenderer.invoke('souls:fetch', instanceId),
+  cancelSoulFetch: (instanceId) => ipcRenderer.invoke('souls:cancel', instanceId),
+  onSoulFetchProgress: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: import('../shared/souls').SoulFetchProgress) => listener(value);
+    ipcRenderer.on('souls:progress', handler);
+    return () => ipcRenderer.removeListener('souls:progress', handler);
+  },
   listAssets: () => ipcRenderer.invoke('project:list-assets'),
   readAssetData: (paths) => ipcRenderer.invoke('project:read-asset-data', paths),
   saveTemplate: (request: SaveTemplateRequest) => ipcRenderer.invoke('project:save-template', request),

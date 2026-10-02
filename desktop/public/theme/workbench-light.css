@@ -175,6 +175,9 @@
 :root[data-theme="light"] .dock-module {
     background: var(--dock-panel-background, #ededed)
 }
+:root[data-theme="light"] .soul-status-area .error {
+    color: var(--danger, #885050)
+}
 :root[data-theme="light"] .module-command-strip {
     border-bottom: 1px solid #e8e8e8;
     background: var(--dock-panel-background, #ededed)

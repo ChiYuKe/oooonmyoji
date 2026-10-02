@@ -1,6 +1,7 @@
 import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTheme } from '../shared/appearance';
 import path from 'node:path';
 import { AiAssistant } from './aiAssistant';
+import { SoulService } from './soulService';
 import { loadAiImage } from './ai-images';
 import { pathToFileURL } from 'node:url';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
@@ -74,6 +75,7 @@ let setupWindow: BrowserWindow | undefined;
 let benchmarkWindow: BrowserWindow | undefined;
 let project: ProjectService;
 let runtime: RuntimeService;
+let souls: SoulService | undefined;
 let rendererServer: Server | undefined;
 let rendererBaseUrl = '';
 let visionTestWindow: BrowserWindow | undefined;
@@ -429,7 +431,16 @@ function registerIpc(): void {
   ipcMain.handle('project:save-canvas', (event, request: SaveCanvasRequest) => project.saveCanvas(ownerWindow(event), request));
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
+  ipcMain.handle('souls:fetch', async (_event, instanceId: unknown) => {
+    if (typeof instanceId !== 'string' || !(await runtime.listInstances()).some((item) => item.id === instanceId)) {
+      throw new Error('所选实例已离线，请刷新实例列表');
+    }
+    if (runtime.running || workflowTestService?.running) throw new Error('请先停止工作流或节点测试，再获取御魂');
+    return souls!.fetch(instanceId);
+  });
+  ipcMain.handle('souls:cancel', (_event, instanceId: unknown) => typeof instanceId === 'string' ? souls?.cancel(instanceId) : undefined);
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
+    if (souls?.running) throw new Error('正在获取御魂，请等待完成或取消后再运行工作流');
     if (workflowTestService?.usingDevice) throw new Error('脚本测试正在运行，请先停止测试');
     // 每次用户重新启动工作流时，先清掉日志面板中上次运行的记录。
     _event.sender.send('runtime:log-clear');
@@ -462,6 +473,7 @@ function registerIpc(): void {
     return result.filePaths;
   });
   ipcMain.handle('test:start', (event, request: WorkflowTestRequest) => {
+    if (souls?.running) throw new Error('正在获取御魂，请等待完成或取消后再运行节点测试');
     testOwner(event);
     if (request.mode === 'live' && (runtime.running || visionTestStream?.running)) throw new Error('请先停止正在运行的脚本或画面测试');
     if (request.images?.some((file) => !workflowTestImages.has(path.resolve(file)))) throw new Error('请通过选择截图按钮重新选择文件');
@@ -758,6 +770,12 @@ async function initializeRuntimeServices(projectRoot: string): Promise<void> {
   runtimeInitialized = true;
   project = new ProjectService(projectRoot);
   runtime = new RuntimeService(project);
+  souls = new SoulService(projectRoot);
+  souls.on('progress', (progress) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('souls:progress', progress);
+    }
+  });
   liveViewRequest = new LiveViewRequest(runtime.liveViewDirectory);
   await protocol.handle('onmyoji-resource', (request) => {
     const file = project.resolveResourceUrl(request.url);
@@ -892,6 +910,7 @@ app.on('before-quit', (event) => {
   isQuitting = true;
   void (async () => {
     try {
+      await souls?.dispose();
       await runtime?.dispose();
       await workflowTestService?.dispose();
     } finally {

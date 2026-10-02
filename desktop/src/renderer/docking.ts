@@ -50,7 +50,7 @@ import { SHARED_PANEL_DEFINITIONS } from './docking/shared-panels';
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
-export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'referenceViewer' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -102,6 +102,8 @@ export interface WorkbenchFrameController {
   readonly dockviewApi: DockviewApi;
   isOpen(panelId: WorkbenchPanelId): boolean;
   show(panelId: WorkbenchPanelId): void;
+  /** 首次打开时浮动；再次打开时保留已有停靠位置。 */
+  showFloating(panelId: WorkbenchPanelId): void;
   toggle(panelId: WorkbenchPanelId): void;
   popout(panelId: WorkbenchPanelId): void;
   activePanelId(): WorkbenchPanelId | undefined;
@@ -231,6 +233,16 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     initialWidth: 680,
     minimumWidth: 420,
     minimumHeight: 300,
+  },
+  onmyojiTeamBuilder: {
+    title: '阴阳师阵容配队',
+    moduleElementId: 'module-onmyoji-team-builder',
+    reference: 'workflow',
+    direction: 'within',
+    initialWidth: 1000,
+    initialHeight: 720,
+    minimumWidth: 320,
+    minimumHeight: 220,
   },
   variableReferences: {
     ...SHARED_PANEL_DEFINITIONS.variableReferences,
@@ -830,6 +842,20 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     dockviewApi: api,
     isOpen: (panelId) => Boolean(api.getPanel(panelId)),
     show,
+    showFloating: (panelId) => {
+      const existed = Boolean(api.getPanel(panelId));
+      show(panelId);
+      const panel = api.getPanel(panelId);
+      if (!panel || existed || panelId === 'workflow') return;
+      const definition = WORKBENCH_PANEL_DEFINITIONS[panelId];
+      const width = Math.min(definition.initialWidth ?? 760, Math.max(320, container.clientWidth - 80));
+      const height = Math.min(definition.initialHeight ?? 560, Math.max(220, container.clientHeight - 80));
+      api.addFloatingGroup(panel, {
+        width, height,
+        x: Math.max(0, (container.clientWidth - width) / 2),
+        y: Math.max(0, (container.clientHeight - height) / 2),
+      });
+    },
     toggle: (panelId) => {
       if (panelId === 'workflow') return;
       const panel = api.getPanel(panelId);

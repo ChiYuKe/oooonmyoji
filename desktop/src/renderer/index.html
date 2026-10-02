@@ -44,6 +44,7 @@
             <button type="button" role="menuitemcheckbox" data-workbench-panel="overview" aria-checked="true"><span>概览</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="onmyojiTeamBuilder" aria-checked="false"><span>阴阳师阵容配队</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="referenceViewer" aria-checked="false"><span>引用查看器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="variableReferences" aria-checked="false"><span>变量引用</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
@@ -81,6 +82,12 @@
           <div class="titlebar-dropdown" role="menu">
             <button type="button" role="menuitem" data-editor-command="selectAll" data-shortcut="editor.selectAll"><span>全选节点</span><kbd>Ctrl+A</kbd></button>
             <button type="button" role="menuitem" data-editor-command="clearSelection"><span>取消选择</span></button>
+          </div>
+        </div>
+        <div class="menu-root">
+          <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">扩展</button>
+          <div class="titlebar-dropdown" role="menu">
+            <button type="button" role="menuitem" data-app-command="onmyojiTeamBuilder"><span>阴阳师阵容配队</span></button>
           </div>
         </div>
         <div class="menu-root">
@@ -246,6 +253,55 @@
         </section>
 
         <section id="module-reference-viewer" class="dock-module reference-viewer-module" aria-label="引用查看器"></section>
+
+        <section id="module-onmyoji-team-builder" class="dock-module onmyoji-team-builder-module" aria-label="阴阳师阵容配队">
+          <aside id="team-builder-sidebar" class="team-builder-sidebar">
+            <header class="team-builder-pane-header">栏目</header>
+            <nav class="team-builder-categories" role="tablist" aria-orientation="vertical" aria-label="阵容栏目">
+              <button id="team-builder-tab-soul-calculator" class="team-builder-category" type="button" role="tab" aria-selected="true" aria-controls="team-builder-soul-calculator">御魂计算</button>
+            </nav>
+          </aside>
+          <div id="team-builder-resizer" class="content-browser-resizer team-builder-resizer" role="separator" aria-orientation="vertical" aria-label="调整栏目宽度" aria-controls="team-builder-sidebar" tabindex="0"></div>
+          <section class="team-builder-content" aria-label="阵容内容">
+            <header class="team-builder-pane-header">御魂计算</header>
+            <div id="team-builder-soul-calculator" class="team-builder-content-body soul-calculator" role="tabpanel" aria-labelledby="team-builder-tab-soul-calculator">
+              <div class="soul-toolbar">
+                <label for="soul-instance">模拟器实例</label>
+                <select id="soul-instance" aria-label="选择获取御魂的实例"><option value="">请选择实例</option></select>
+                <button id="soul-refresh" type="button">刷新实例</button>
+                <button id="soul-fetch" type="button" disabled>获取御魂</button>
+                <button id="soul-cancel" type="button" hidden>取消获取</button>
+              </div>
+              <div class="soul-status-area">
+                <p id="soul-status" role="status" aria-live="polite">选择实例后，点击“获取御魂”读取当前角色的背包。</p>
+                <progress id="soul-progress" aria-label="御魂读取进度" hidden></progress>
+                <p id="soul-summary" class="soul-summary"></p>
+              </div>
+              <div class="soul-filters">
+                <input id="soul-search" type="search" placeholder="搜索御魂名称、套装编号或 ID" aria-label="搜索御魂" />
+                <select id="soul-stars" aria-label="按星级筛选"><option value="">全部星级</option><option value="6">六星</option><option value="5">五星</option><option value="4">四星</option><option value="3">三星</option><option value="2">二星</option><option value="1">一星</option></select>
+                <select id="soul-state" aria-label="按状态筛选"><option value="">全部状态</option><option value="locked">已锁定</option><option value="equipped">已装备</option><option value="discarded">已弃置</option></select>
+              </div>
+              <div class="soul-results-layout">
+              <div class="soul-results">
+                <div id="soul-empty" class="soul-empty">尚未获取御魂数据</div>
+                <table id="soul-table" hidden>
+                  <caption class="sr-only">所选实例的御魂背包</caption>
+                  <thead><tr><th>御魂</th><th>位置</th><th>星级</th><th>等级</th><th>主属性</th><th>副属性</th><th>状态</th><th>御魂 ID</th></tr></thead>
+                  <tbody id="soul-rows"></tbody>
+                </table>
+              </div>
+              <aside id="soul-detail" class="soul-detail" aria-label="御魂详细属性"><p>选择一条御魂查看详情</p></aside>
+              </div>
+              <footer class="soul-pagination">
+                <span id="soul-page-info">0 条御魂</span>
+                <button id="soul-prev" type="button" disabled>上一页</button>
+                <button id="soul-next" type="button" disabled>下一页</button>
+              </footer>
+              <p class="soul-note">已解析的属性按游戏面板数值显示；未加载的属性会标记为待解析。暂不包含收纳库存，图标图片尚未解包。</p>
+            </div>
+          </section>
+        </section>
 
         <section id="module-variable-references" class="dock-module variable-references-module" aria-label="变量引用"></section>
 

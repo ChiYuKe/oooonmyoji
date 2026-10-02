@@ -1,4 +1,5 @@
 import type { AppearanceTheme } from './appearance';
+import type { SoulSnapshot, SoulFetchProgress } from './souls';
 import type { ActionCardRow } from './parameter-types';
 import type { WorkflowTestInit, WorkflowTestRequest, WorkflowTestEvent, TestCommand, TestNodeDraft, TestNodeTransfer, TestNodeAdded } from './workflow-testing';
 
@@ -485,6 +486,9 @@ export interface OnmyojiDesktopApi {
   getDebugSettings(): Promise<RuntimeDebugSettings>;
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
+  fetchSouls(instanceId: string): Promise<SoulSnapshot | null>;
+  cancelSoulFetch(instanceId: string): Promise<void>;
+  onSoulFetchProgress(listener: (progress: SoulFetchProgress) => void): () => void;
   listAssets(): Promise<AssetImage[]>;
   readAssetData(paths: string[]): Promise<Array<{ path: string; dataUrl: string }>>;
   saveTemplate(request: SaveTemplateRequest): Promise<string>;

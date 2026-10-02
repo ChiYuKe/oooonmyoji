@@ -121,6 +121,7 @@ button { color: inherit; }
 }
 .menu-trigger:hover, .menu-root.open > .menu-trigger { background: #303030; color: #fff; }
 .titlebar-dropdown {
+  -webkit-app-region: no-drag;
   position: absolute;
   top: 31px;
   left: 0;
@@ -434,6 +435,89 @@ select option:checked { color: #fff; }
 .dock-workspace-shell, .dock-workspace { min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; }
 .dock-module-host, .dock-module { width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .dock-module { display: flex; flex-direction: column; overflow: hidden; background: var(--dock-panel-background, #242424); }
+.onmyoji-team-builder-module {
+  display: grid;
+  grid-template-columns: minmax(0, var(--team-builder-sidebar-width, 15%)) 5px minmax(0, 1fr);
+}
+.team-builder-sidebar, .team-builder-content {
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+.team-builder-resizer { -webkit-app-region: no-drag; }
+.soul-calculator { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow: hidden; }
+.soul-toolbar, .soul-filters, .soul-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.soul-toolbar select { min-width: 160px; max-width: 320px; flex: 1; }
+.soul-calculator button, .soul-calculator select, .soul-calculator input { min-height: 30px; border: 1px solid var(--border); border-radius: 3px; padding: 4px 9px; background: var(--surface-raised); color: var(--text); font: inherit; }
+.soul-calculator button { cursor: pointer; }
+.soul-calculator button:disabled { opacity: .45; cursor: default; }
+.soul-calculator button:hover:not(:disabled) { background: var(--surface-hover); }
+.soul-calculator [hidden] { display: none !important; }
+.soul-calculator p { margin: 0; }
+.soul-status-area { display: grid; gap: 6px; font-size: 12px; }
+.soul-status-area .error { color: var(--danger, #e68787); }
+.soul-status-area progress { width: 100%; height: 6px; accent-color: var(--blue); }
+.soul-summary, .soul-note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.soul-filters input { min-width: 120px; flex: 1; }
+.soul-results { flex: 1; min-height: 80px; overflow: auto; border: 1px solid var(--border); border-radius: 3px; }
+.soul-results-layout { display: flex; flex: 1; gap: 12px; min-height: 80px; overflow: hidden; }
+.soul-detail { width: 270px; flex: 0 0 270px; overflow: auto; padding: 14px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 4px; line-height: 1.8; }
+.soul-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.soul-detail h3 { margin: 0; font-size: 16px; font-weight: 500; }
+.soul-icon, .soul-icon-placeholder { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; object-fit: contain; }
+.soul-icon-placeholder { display: inline-grid; place-items: center; border: 1px solid var(--border); color: var(--muted); background: var(--surface); font-size: 18px; }
+.soul-row-select { display: flex; align-items: center; gap: 8px; border: 0 !important; background: transparent !important; white-space: nowrap; }
+.soul-results td:nth-child(6) { white-space: pre-line; }
+.soul-results tr.selected { background: var(--surface-hover); }
+.soul-main-attribute { color: var(--yellow); padding: 8px 0; margin: 8px 0; border-block: 1px solid var(--border); }
+.soul-sub-attribute { font-size: 12px; }
+.soul-set-effect { color: var(--muted); font-size: 12px; margin-top: 12px !important; }
+.soul-detail-id { font-size: 11px; overflow-wrap: anywhere; color: var(--muted); margin-top: 12px !important; }
+.soul-calculator { container-type: inline-size; }
+@container (max-width: 700px) { .soul-detail { display: none; } }
+.soul-results table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.soul-results th { position: sticky; top: 0; background: var(--surface-raised); z-index: 1; text-align: left; font-weight: 500; }
+.soul-results td, .soul-results th { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.soul-results tbody tr:hover { background: var(--surface-hover); }
+.soul-empty { display: grid; place-items: center; min-height: 120px; padding: 20px; color: var(--muted); text-align: center; }
+.soul-pagination { font-size: 12px; color: var(--muted); }
+.soul-pagination span { flex: 1; }
+.soul-note { line-height: 1.6; }
+.soul-results .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+.team-builder-pane-header {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ui-line, var(--border));
+  color: var(--muted);
+  font-size: 12px;
+}
+.team-builder-categories, .team-builder-content-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.team-builder-categories { padding: 6px; }
+.team-builder-category {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.team-builder-category:hover { background: var(--surface-hover); }
+.team-builder-category[aria-selected="true"] {
+  background: var(--vscode-list-activeSelectionBackground, var(--surface-raised));
+}
+.team-builder-category:focus-visible {
+  outline: 1px solid var(--ui-focus, var(--blue));
+  outline-offset: -1px;
+}
 .module-command-strip { flex: 0 0 28px; display: flex; align-items: center; gap: 6px; padding: 0 5px 0 8px; border-bottom: 1px solid #151617; background: var(--dock-panel-background, #242424); }
 .module-context { min-width: 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .panel-action { width: 26px; height: 26px; margin-left: auto; padding: 0; display: grid; place-items: center; }
@@ -593,6 +677,11 @@ select option:checked { color: #fff; }
 }
 body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   -webkit-app-region: drag;
+}
+/* Native window dragging ignores DOM stacking order. An open titlebar menu
+   overlaps this tab strip, so suspend its drag region until the menu closes. */
+body:has(.menu-root.open) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
+  -webkit-app-region: no-drag;
 }
 .onmyoji-workbench-dockview .dv-resize-container .dv-tabs-and-actions-container,
 .onmyoji-workbench-dockview .dv-tabs-and-actions-container .dv-tab,

@@ -39,6 +39,7 @@ import { emitDocument, parseDocument, WORKFLOW_SUFFIX } from '../shared/workflow
 import { WorkflowHistory } from './core/workflowHistory';
 import { ProjectEditingLibrary } from './core/editingLibrary';
 import { randomUUID } from 'node:crypto';
+import { functionOutputSchema } from '../shared/workflow/function-outputs';
 
 const IMAGE_MIME = new Map([
   ['.png', 'image/png'],
@@ -134,12 +135,16 @@ export class ProjectService {
       let id = '';
       let description = '';
       let inputs: WorkflowDescriptor['inputs'] = [];
+      let reusable = false;
+      let outputSchema: Record<string, unknown> | undefined;
       let validationStatus: WorkflowDescriptor['validationStatus'] = 'unknown';
       let updatedAt: number | undefined;
       const relativePath = path.relative(this.projectRoot, file).split(path.sep).join('/');
       try {
         const raw = parseDocument(await fs.promises.readFile(file, 'utf8'), relativePath) as unknown;
         const parsed = parseWorkflow(raw);
+        reusable = parsed.raw?._reusable === true;
+        outputSchema = functionOutputSchema(parsed, actionCatalog);
         id = parsed.id ?? '';
         description = parsed.description?.trim() ?? '';
         inputs = Object.entries(parsed.inputs).map(([name, definition]) => ({
@@ -168,6 +173,8 @@ export class ProjectService {
         validationStatus,
         ...(updatedAt !== undefined ? { updatedAt } : {}),
         ...(inputs.length ? { inputs } : {}),
+        ...(reusable ? { reusable } : {}),
+        ...(outputSchema ? { outputSchema } : {}),
       };
     }));
     return descriptors.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN') || left.rel.localeCompare(right.rel, 'zh-CN'));
@@ -264,6 +271,27 @@ export class ProjectService {
     const file = this.workflowPath(result.filePath);
     const id = path.basename(file, path.extname(file)).replace(/[^A-Za-z0-9_-]+/g, '_') || 'new_workflow';
     await fs.promises.writeFile(file, emitDocument(workflowTemplate(id)), { encoding: 'utf8', flag: 'wx' });
+    return pathToFileURL(file).toString();
+  }
+
+  async createReusableFunction(name: string, text: string): Promise<string> {
+    if (typeof name !== 'string' || typeof text !== 'string') throw new Error('功能创建请求无效');
+    const title = normalizeContentName(name);
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(title) || title.length > 80) throw new Error('功能名称无效');
+    const raw = parseDocument(text);
+    if (raw._reusable !== true) throw new Error('功能文档缺少可复用标记');
+    const issue = validateWorkflow(raw, loadActionCatalog(this.projectRoot)).find(item => item.severity === 'error');
+    if (issue) throw new Error(`功能校验失败：${issue.message}`);
+    const directory = path.join(this.workflowRoot, 'functions');
+    await fs.promises.mkdir(directory, { recursive: true });
+    if (!isPathInside(await fs.promises.realpath(this.workflowRoot), await fs.promises.realpath(directory))) throw new Error('功能目录必须位于项目 workflows 内');
+    const file = this.workflowPath(path.join(directory, `${title}${WORKFLOW_SUFFIX}`));
+    try {
+      await fs.promises.writeFile(file, text.endsWith('\n') ? text : `${text}\n`, { encoding: 'utf8', flag: 'wx' });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('同名功能已存在，请换一个名称');
+      throw error;
+    }
     return pathToFileURL(file).toString();
   }
 

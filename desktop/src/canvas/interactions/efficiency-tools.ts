@@ -5,7 +5,21 @@ import { planParameterReplacement, replacementStillCurrent } from '../model/para
 import { nodeReferenceValidator, parameterValueAccepted } from '../model/parameter-edits';
 
 export interface CreationContext { connection?: any; reference?: any; point?: { x: number; y: number } }
-export interface CreationChoice { id: string; title: string; type: string; action?: string; params?: Record<string, unknown>; preset?: ActionPreset; description?: string }
+export interface CreationChoice { id: string; title: string; type: string; action?: string; params?: Record<string, unknown>; preset?: ActionPreset; description?: string; reusable?: boolean }
+const CREATION_TYPE_DESCRIPTIONS: Record<string, string> = {
+  sequence: '按顺序执行多个子节点，适合把识别、点击、等待等步骤组织为连续流程。',
+  selector: '依次尝试子节点，首个成功后结束，适合多种备选策略。',
+  condition: '检查条件并从真、假两个执行分支继续。',
+  bool_judge: '对输入值进行布尔或比较判断，可使用上游输出。',
+  break: '从上游的对象或数组输出中拆出字段，供其他节点引用。',
+  parallel: '并行执行多个子节点，根据完成策略决定何时结束。',
+  simple_parallel: '执行主任务时同时运行后台分支。',
+  branch: '根据布尔条件选择真或假分支。',
+  switch: '根据输入值匹配多个分支，并可配置默认分支。',
+  repeat_until: '重复运行子节点，直到满足结束条件。',
+  state_machine: '根据识别到的状态执行对应处理流程，并控制状态转换。',
+  instance_parallel: '在多个运行实例中并行执行指定工作流。',
+};
 export interface EfficiencyDeps {
   state: any; bridge: CanvasBridge;
   nodes(): any[];
@@ -29,6 +43,7 @@ export function createEfficiencyTools(deps: EfficiencyDeps) {
     if (message.type === 'init') deps.bridge.post({ type: 'getEditingLibrary' });
     if (message.type === 'editingLibrary') { library = parseEditingLibrary(message.library); redraw?.(); }
     if (message.type === 'editingLibraryError') deps.toast(String(message.error || '读取预设失败'), true);
+    if (message.type === 'workflows') queueMicrotask(() => redraw?.());
   });
   const catalog = () => ({ byName: (name: string) => deps.state.catalog.find((item: any) => item.name === name), names: () => deps.state.catalog.map((item: any) => item.name) });
   const selected = () => deps.nodes().find((node) => deps.state.selected.size === 1 && deps.state.selected.has(node.id) && node.type === 'task');
@@ -56,29 +71,31 @@ export function createEfficiencyTools(deps: EfficiencyDeps) {
     const controls = el('div', 'editing-dialog-controls');
     const input = el('input', 'ui-input'); input.type = 'search'; input.placeholder = '搜索动作、节点类型或参数预设'; input.setAttribute('aria-label', '搜索新节点');
     const scope = el('select', 'ui-input'); scope.setAttribute('aria-label', '节点范围');
-    for (const [value, text] of [['all', '全部'], ['favorites', '收藏'], ['recent', '最近使用'], ['presets', '项目预设']]) { const option = el('option', '', text); option.value = value; scope.append(option); }
+    for (const [value, text] of [['all', '全部'], ['functions', '可复用功能'], ['favorites', '收藏'], ['recent', '最近使用'], ['presets', '项目预设']]) { const option = el('option', '', text); option.value = value; scope.append(option); }
     scope.value = initialScope;
     const save = el('button', '', '保存选中节点为预设'); save.type = 'button'; save.disabled = !selected(); save.addEventListener('click', () => { close(); savePreset(); });
     controls.append(input, scope, save);
     const hint = el('div', 'field-hint', '↑ ↓ 选择，回车创建。星标收藏；项目预设跨工作流共享。');
     const list = el('div', 'editing-choice-list'); dialog.append(controls, hint, list);
     let active = 0, visible: CreationChoice[] = [];
-    const favorite = (choice: CreationChoice) => choice.preset ? choice.preset.favorite : Boolean(choice.action && library.favoriteActions.includes(choice.action));
+    const favorite = (choice: CreationChoice) => choice.reusable ? false : choice.preset ? choice.preset.favorite : Boolean(choice.action && library.favoriteActions.includes(choice.action));
     const create = (choice: CreationChoice) => {
       if (deps.create(choice, context)) { update({ op: 'use', id: choice.id }); close(); redraw = undefined; }
     };
+    const choices = (): CreationChoice[] => [
+      ...deps.state.catalog.map((item: any) => ({ id: `action:${item.name}`, title: deps.actionLabel(item.name), type: 'task', action: item.name, description: item.description })),
+      ...['sequence', 'selector', 'condition', 'bool_judge', 'break', 'parallel', 'simple_parallel', 'branch', 'switch', 'repeat_until', 'state_machine', 'instance_parallel'].map((type) => ({ id: `type:${type}`, title: deps.typeNames[type] || type, type, description: CREATION_TYPE_DESCRIPTIONS[type] })),
+      ...library.presets.map((preset) => ({ id: `preset:${preset.id}`, title: preset.name, type: 'task', action: preset.action, params: preset.params, preset })),
+      ...(deps.state.workflows || []).filter((workflow: any) => workflow.reusable && workflow.uri !== deps.state.docUri).map((workflow: any) => ({ id: `function:${workflow.id || workflow.rel}`, title: workflow.name.replace(/\.owf$/i, ''), type: 'task', action: 'workflow.run', params: { workflow: workflow.rel.replace(/^workflows\//, '') }, description: workflow.description, reusable: true })),
+    ];
+    const inScope = (choice: CreationChoice) => !(scope.value === 'presets' && !choice.preset
+      || scope.value === 'functions' && !choice.reusable || scope.value === 'favorites' && !favorite(choice)
+      || scope.value === 'recent' && !library.recent.includes(choice.id));
     const render = () => {
       if (!overlay.isConnected) { redraw = undefined; return; }
-      const choices: CreationChoice[] = [
-        ...deps.state.catalog.map((item: any) => ({ id: `action:${item.name}`, title: deps.actionLabel(item.name), type: 'task', action: item.name, description: item.description })),
-        ...['sequence', 'selector', 'condition', 'bool_judge', 'break', 'parallel', 'simple_parallel', 'branch', 'switch', 'repeat_until', 'state_machine', 'instance_parallel'].map((type) => ({ id: `type:${type}`, title: deps.typeNames[type] || type, type })),
-        ...library.presets.map((preset) => ({ id: `preset:${preset.id}`, title: preset.name, type: 'task', action: preset.action, params: preset.params, preset })),
-      ];
       const words = input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-      visible = choices.filter((choice) => {
-        if (scope.value === 'presets' && !choice.preset) return false;
-        if (scope.value === 'favorites' && !favorite(choice)) return false;
-        if (scope.value === 'recent' && !library.recent.includes(choice.id)) return false;
+      visible = choices().filter((choice) => {
+        if (!inScope(choice)) return false;
         const text = `${choice.title} ${choice.action || choice.type} ${choice.description || ''}`.toLocaleLowerCase();
         return words.every((word) => text.includes(word)) && deps.accept(choice, context);
       }).sort((a, b) => {
@@ -90,9 +107,9 @@ export function createEfficiencyTools(deps: EfficiencyDeps) {
       visible.forEach((choice, index) => {
         const row = el('div', `editing-choice${index === active ? ' active' : ''}`);
         const button = el('button', 'editing-choice-main'); button.type = 'button';
-        button.append(el('strong', '', choice.title), el('span', '', `${choice.preset ? '项目预设 · ' : ''}${choice.action || choice.type}`)); button.title = choice.description || choice.title;
+        button.append(el('strong', '', choice.title), el('span', '', choice.reusable ? '可复用功能' : `${choice.preset ? '项目预设 · ' : ''}${choice.action || choice.type}`)); button.title = choice.description || choice.title;
         button.addEventListener('click', () => create(choice)); row.append(button);
-        if (choice.action) {
+        if (choice.action && !choice.reusable) {
           const star = el('button', '', favorite(choice) ? '★' : '☆'); star.type = 'button'; star.setAttribute('aria-label', `${favorite(choice) ? '取消收藏' : '收藏'} ${choice.title}`); star.addEventListener('click', () => update({ op: 'favorite', id: choice.id })); row.append(star);
         }
         if (choice.preset) {

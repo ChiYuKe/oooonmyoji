@@ -442,6 +442,10 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
       );
     }
     const spec = node.action ? catalogByName(node.action) : null;
+    if (node.action === 'workflow.run' && spec?.outputSchema) {
+      const child = workflowDescriptor(node.params?.workflow);
+      if (child?.outputSchema) return { ...spec.outputSchema, properties: { ...spec.outputSchema.properties, output: child.outputSchema } };
+    }
     return spec && spec.outputSchema ? spec.outputSchema : null;
   }
 
@@ -478,7 +482,8 @@ export function createCanvasWorkflowModel(deps: CanvasWorkflowModelDeps) {
         for (const [field, child] of objectFields(parentSchema)) {
           if (candidates.length >= REFERENCE_CANDIDATE_LIMIT) break;
           const path = parentField ? `${parentField}.${field}` : field;
-          const label = parentLabel ? `${parentLabel} · ${fieldLabel(field)}` : fieldLabel(field);
+          const title = typeof child?.title === 'string' ? child.title : fieldLabel(field);
+          const label = parentLabel ? `${parentLabel} · ${title}` : title;
           push(path, label, child);
           appendChildren(path, label, child, depth + 1);
         }

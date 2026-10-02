@@ -76,6 +76,7 @@ const api: OnmyojiDesktopApi = {
   listWorkflowHistory: (uri) => ipcRenderer.invoke('project:list-workflow-history', uri),
   readWorkflowHistory: (uri, id) => ipcRenderer.invoke('project:read-workflow-history', uri, id),
   createWorkflow: () => ipcRenderer.invoke('project:create-workflow'),
+  createReusableFunction: (name, text) => ipcRenderer.invoke('project:create-reusable-function', name, text),
   openWorkflowFile: (uri) => ipcRenderer.invoke('project:open-workflow-file', uri),
   openContentItem: (path) => ipcRenderer.invoke('project:open-content-item', path),
   moveContent: (request: MoveContentRequest) => ipcRenderer.invoke('project:move-content', request),

@@ -399,6 +399,7 @@ function registerIpc(): void {
   ipcMain.handle('project:list-workflow-history', (_event, uri: string) => project.listWorkflowHistory(uri));
   ipcMain.handle('project:read-workflow-history', (_event, uri: string, id: string) => project.readWorkflowHistory(uri, id));
   ipcMain.handle('project:create-workflow', (event) => project.createWorkflow(ownerWindow(event)));
+  ipcMain.handle('project:create-reusable-function', (_event, name: string, text: string) => project.createReusableFunction(name, text));
   ipcMain.handle('project:open-workflow-file', (_event, uri: string) => project.openWorkflowFile(uri));
   ipcMain.handle('project:open-content-item', (_event, relativePath: string) => project.openContentItem(relativePath));
   ipcMain.handle('project:move-content', (_event, request) => project.moveContent(request));

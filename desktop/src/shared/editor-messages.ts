@@ -334,6 +334,7 @@ export interface ClipboardMessage {
 }
 
 export type EditorMessage =
+  | { type: 'createReusableFunction'; requestId: string; name: string; text: string }
   | { type: 'getEditingLibrary' }
   | { type: 'updateEditingLibrary'; change: import('./editing-library').EditingLibraryChange }
   | ReadyMessage
@@ -373,6 +374,7 @@ export type EditorMessage =
   | ClipboardWriteMessage;
 
 export const EDITOR_MESSAGE_TYPES = [
+  'createReusableFunction',
   'getEditingLibrary',
   'updateEditingLibrary',
   'ready',

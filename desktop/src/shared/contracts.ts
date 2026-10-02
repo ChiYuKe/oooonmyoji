@@ -29,6 +29,8 @@ export interface WorkflowDescriptor {
   source?: 'generated' | 'project';
   validationStatus?: 'valid' | 'invalid' | 'unknown';
   updatedAt?: number;
+  reusable?: boolean;
+  outputSchema?: Record<string, unknown>;
   inputs?: Array<{
     name: string;
     definition: ParameterInfo;
@@ -451,6 +453,7 @@ export interface OnmyojiDesktopApi {
   listWorkflowHistory(uri: string): Promise<WorkflowHistoryEntry[]>;
   readWorkflowHistory(uri: string, id: string): Promise<string>;
   createWorkflow(): Promise<string | undefined>;
+  createReusableFunction(name: string, text: string): Promise<string>;
   openWorkflowFile(uri: string): Promise<void>;
   openContentItem(path: string): Promise<void>;
   moveContent(request: MoveContentRequest): Promise<MoveContentResult>;

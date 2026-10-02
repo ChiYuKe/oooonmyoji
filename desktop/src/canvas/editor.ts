@@ -37,6 +37,7 @@ import { createAssetActions } from './interactions/asset-actions';
 import { createAssetBrowser } from './interactions/asset-browser';
 import { createCanvasConnections } from './interactions/connections';
 import { createEfficiencyTools, type CreationChoice, type CreationContext } from './interactions/efficiency-tools';
+import { createReusableFunctions } from './interactions/reusable-functions';
 import { parameterValueAccepted } from './model/parameter-edits';
 import { bindingTypesCompatible } from '../shared/workflow/bindings';
 import { parameterToSchema } from '../shared/workflow/parameters';
@@ -533,6 +534,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     const node = buildNode(choice.type);
     if (choice.action) { node.action = choice.action; node.params = clone(choice.params || {}); }
     if (choice.preset) node.name = choice.preset.name;
+    if (choice.reusable) node.name = choice.title;
     return node;
   }
   function creationConnectionError(node: any, context: CreationContext): string | null {
@@ -601,6 +603,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     } else insert();
     return true;
   }
+  const ReusableFunctions = createReusableFunctions({ state, bridge, mutate, toast });
   const Efficiency = createEfficiencyTools({
     state, bridge, nodes, actionLabel, fieldLabel, typeNames: TYPE_NAMES, mutate,
     clearParameterLiteralCache: (nodeId, name) => clearParameterLiteralCache(nodeId, name),
@@ -1073,6 +1076,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     // 值卡片的内容就地编辑：点卡片上的条件 / 拆分回读行打开贴着卡片的浮动编辑器。
     openValueCardEditor: (nodeId: string) => ValueCardEditor.open(nodeId),
     valueCardMenuItems,
+    extractReusableFunction: (nodeId: string) => ReusableFunctions.extract(nodeId),
     enterNodeGroup: enterGroup, ungroupNodeGroup: ungroup, groupSelection,
     focusNodeDetail,
     contextMenuSuppressedByPan,

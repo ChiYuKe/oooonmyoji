@@ -111,6 +111,7 @@ export interface NodeRenderDeps {
   enterNodeGroup?(groupId: string, focusNodeId?: string): boolean;
   ungroupNodeGroup?(groupId: string): boolean;
   groupSelection?(): boolean;
+  extractReusableFunction?(nodeId: string): void;
   render(): void;
   /** 双击节点：聚焦并把缩放提到完整卡片档（概览 / 紧凑模式下用）。 */
   focusNodeDetail?(nodeId: string): void;
@@ -1302,6 +1303,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
           { label: '进入子工作流视图', run: () => requestOpenSubWorkflow(node.id) },
           'separator',
           ...(state.selected.size >= 2 && groupSelection ? [{ label: '折叠所选节点', run: () => groupSelection() }, 'separator'] : []),
+          ...(deps.extractReusableFunction ? [{ label: '封装为可复用功能…', run: () => deps.extractReusableFunction!(node.id) }] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           { label: '删除节点', danger: true, run: () => deleteSelection() },
@@ -1318,6 +1320,7 @@ export function createNodeCardRenderer(deps: NodeRenderDeps): CanvasNodeCardRend
         render();
         showMenu(event.clientX, event.clientY, [
           ...(state.selected.size >= 2 && groupSelection ? [{ label: '折叠所选节点', run: () => groupSelection() }, 'separator'] : []),
+          ...(deps.extractReusableFunction && !['root', 'instance_parallel', 'group_entry', 'group_exit', 'bool_judge', 'break'].includes(node.type) ? [{ label: '封装为可复用功能…', run: () => deps.extractReusableFunction!(node.id) }] : []),
           { label: '复制 (Ctrl+C)', run: () => copySelection() },
           { label: '剪切 (Ctrl+X)', run: () => cutSelection() },
           'separator',

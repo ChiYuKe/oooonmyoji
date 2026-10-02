@@ -91,6 +91,18 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
     const targetUri = sourceUri ?? workspace.activeUri();
     try {
       switch (message.type) {
+        case 'createReusableFunction': {
+          try {
+            if (!sourceUri || typeof message.requestId !== 'string' || typeof message.name !== 'string' || typeof message.text !== 'string') throw new Error('功能创建请求无效');
+            const uri = await api.createReusableFunction(message.name, message.text);
+            try { await refreshWorkflows?.(); }
+            catch (error) { showToast(`功能已创建，目录刷新失败：${errorMessage(error)}`, true); }
+            workspace.postToFrame(sourceFrame, { type: 'reusableFunctionCreated', requestId: message.requestId, uri });
+          } catch (error) {
+            workspace.postToFrame(sourceFrame, { type: 'reusableFunctionCreated', requestId: message.requestId, error: errorMessage(error) });
+          }
+          return;
+        }
         case 'getEditingLibrary': {
           try { workspace.postToFrame(sourceFrame, { type: 'editingLibrary', library: await api.getEditingLibrary() }); }
           catch (error) { workspace.postToFrame(sourceFrame, { type: 'editingLibraryError', error: errorMessage(error) }); }

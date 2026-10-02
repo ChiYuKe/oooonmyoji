@@ -95,3 +95,6 @@
 .theme-options { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-width: none; }
 .theme-option:has(:checked) { box-shadow: inset 0 0 0 1px var(--ui-focus); }
 .theme-caption { padding-right: 18px; }
+/* AI connection form */
+.settings-ai-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+#settings-page-ai .settings-row > .ui-input { width: min(320px, 45%); min-width: 140px; }

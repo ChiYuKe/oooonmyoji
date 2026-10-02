@@ -431,6 +431,10 @@ export interface RuntimeResourceProgress {
 }
 
 export interface OnmyojiDesktopApi {
+  getAiSettings(): Promise<import('./ai-assistant').AiSettings>;
+  saveAiSettings(value: import('./ai-assistant').AiSettingsUpdate): Promise<import('./ai-assistant').AiSettings>;
+  testAiConnection(): Promise<void>;
+  getAiSuggestions(value: import('./ai-assistant').AiSuggestionRequest): Promise<import('./ai-assistant').AiSuggestionResult>;
   minimizeWindow(): Promise<void>;
   toggleMaximizeWindow(): Promise<boolean>;
   closeWindow(): Promise<void>;

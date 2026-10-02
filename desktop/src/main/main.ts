@@ -1,5 +1,7 @@
 import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTheme } from '../shared/appearance';
 import path from 'node:path';
+import { AiAssistant } from './aiAssistant';
+import { loadAiImage } from './ai-images';
 import { pathToFileURL } from 'node:url';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -10,6 +12,8 @@ import {
   BrowserWindow,
   ipcMain,
   net,
+  nativeImage,
+  safeStorage,
   nativeTheme,
   protocol,
   screen,
@@ -385,6 +389,15 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('project:bootstrap', async () => project.bootstrap(await runtime.listInstances()));
+  const ai = new AiAssistant(path.join(app.getPath('userData'), 'ai-settings.json'), {
+    available: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+    encrypt: (value) => safeStorage.encryptString(value),
+    decrypt: (value) => safeStorage.decryptString(value),
+  }, net.fetch.bind(net), relative => loadAiImage(project.projectRoot, relative, nativeImage.createFromBuffer));
+  ipcMain.handle('ai:settings', () => ai.getSettings());
+  ipcMain.handle('ai:save-settings', (_event, value) => ai.saveSettings(value));
+  ipcMain.handle('ai:test', () => ai.testConnection());
+  ipcMain.handle('ai:suggest', (_event, value) => ai.suggest(value));
   ipcMain.handle('project:get-workflow-init', async (_event, uri: string, selectedInstance: string, canGoBack: boolean) => {
     const instances = await runtime.listInstances();
     const selected = chooseRuntimeInstance(instances, selectedInstance);

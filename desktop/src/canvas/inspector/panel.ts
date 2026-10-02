@@ -46,6 +46,7 @@ export interface InspectorPanelDeps {
   mutate(fn: () => void): void;
   deleteSelection(): void;
   renderers: InspectorRenderers;
+  openAiSuggestions?(node: any): void;
 }
 
 export interface InspectorPanel {
@@ -203,6 +204,10 @@ export function createInspectorPanel(deps: InspectorPanelDeps): InspectorPanel {
     const node = selectedNode;
     if (!node) return;
     const body = clearInspector(nodeDisplayTitle(node));
+    if (deps.openAiSuggestions) {
+      const ai = el('button', 'full-command', 'AI 命名与参数建议') as HTMLButtonElement; ai.type = 'button';
+      ai.addEventListener('click', () => deps.openAiSuggestions?.(node)); body.append(ai);
+    }
     if (node._nodeGroup) {
       section(body, '折叠图');
       const nameRow = field(body, '名称');

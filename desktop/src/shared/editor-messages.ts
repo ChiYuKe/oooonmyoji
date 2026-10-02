@@ -334,6 +334,8 @@ export interface ClipboardMessage {
 }
 
 export type EditorMessage =
+  | { type: 'openAiSettings' }
+  | { type: 'aiSuggestions'; requestId: string; request: import('./ai-assistant').AiSuggestionRequest }
   | { type: 'createReusableFunction'; requestId: string; name: string; text: string }
   | { type: 'getEditingLibrary' }
   | { type: 'updateEditingLibrary'; change: import('./editing-library').EditingLibraryChange }
@@ -374,6 +376,8 @@ export type EditorMessage =
   | ClipboardWriteMessage;
 
 export const EDITOR_MESSAGE_TYPES = [
+  'openAiSettings',
+  'aiSuggestions',
   'createReusableFunction',
   'getEditingLibrary',
   'updateEditingLibrary',

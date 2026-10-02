@@ -7,9 +7,13 @@
  */
 
 import type { RuntimeResourceProgress, RuntimeResourceStatus, RuntimeResourceVariantId } from '../shared/contracts';
+import { createAiSettings } from './ai-settings';
 
 export interface SettingsPanelDeps {
   api: {
+    getAiSettings: import('../shared/contracts').OnmyojiDesktopApi['getAiSettings'];
+    saveAiSettings: import('../shared/contracts').OnmyojiDesktopApi['saveAiSettings'];
+    testAiConnection: import('../shared/contracts').OnmyojiDesktopApi['testAiConnection'];
     getDebugSettings(): Promise<{ enabled: boolean; annotateScreenshots: boolean }>;
     updateDebugSettings(settings: { enabled: boolean; annotateScreenshots: boolean }): Promise<{ enabled: boolean; annotateScreenshots: boolean }>;
     getRuntimeResourceStatus(): Promise<RuntimeResourceStatus>;
@@ -35,6 +39,7 @@ export interface SettingsPanelController {
   restoreSessionOnStart(): boolean;
   /** 打开设置面板：同步控件状态并按需刷新 Debug 设置。 */
   openSettingsPanel(): void;
+  openAiSettingsPanel(): void;
   refreshDebugSettings(): Promise<void>;
   /** 按当前自动刷新开关重建实例轮询定时器。 */
   restartInstanceRefresh(): void;
@@ -46,6 +51,8 @@ export interface SettingsPanelController {
 
 export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelController {
   const { api, contentBrowser, showToast, showPanel, refreshInstances } = deps;
+  const aiSettings = createAiSettings(api);
+  const aiTab = document.querySelector<HTMLButtonElement>('#settings-tab-ai');
   const refreshIntervalMs = deps.refreshIntervalMs ?? 5000;
   const contentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
   const autoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
@@ -138,6 +145,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
   }
 
   function openSettingsPanel(): void {
+    void aiSettings.refresh();
     contentView.value = contentBrowser.getView();
     autoRefresh.checked = autoRefreshInstances;
     defaultWorkflow.checked = loadDefaultWorkflowOnStart;
@@ -244,6 +252,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     loadDefaultWorkflowOnStart: () => loadDefaultWorkflowOnStart,
     restoreSessionOnStart: () => restoreSessionOnStart,
     openSettingsPanel,
+    openAiSettingsPanel: () => { openSettingsPanel(); aiTab?.click(); },
     refreshDebugSettings,
     restartInstanceRefresh,
     bind,

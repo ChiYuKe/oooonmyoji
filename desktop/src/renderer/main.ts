@@ -660,6 +660,7 @@ async function resolveExternalChangeDraft(uri: string): Promise<'local' | 'disk'
 }
 
 const editorHost = createEditorHost({
+  openAiSettings: () => settings.openAiSettingsPanel(),
   api,
   workspace,
   detailsFrame,

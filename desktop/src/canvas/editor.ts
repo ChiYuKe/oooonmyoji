@@ -45,6 +45,7 @@ import { createCanvasHitTest } from './interactions/hit-test';
 import { createInputBridge } from './interactions/input-bridge';
 import { createCanvasInlineEditor } from './interactions/inline-editor';
 import { createNodeNameEditor } from './interactions/node-name-editor';
+import { createCardAiAssistant } from './interactions/ai-assistant';
 import { createTestNodeInserter } from './state/test-node-insertion';
 import { createValueCardEditor } from './interactions/value-card-editor';
 import { createCanvasPointer } from './interactions/pointer';
@@ -604,6 +605,13 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     return true;
   }
   const ReusableFunctions = createReusableFunctions({ state, bridge, mutate, toast });
+  const CardAi = createCardAiAssistant({
+    state, bridge, nodeById: (id) => viewNodeById(id) || nodeById(id), toast,
+    rename: (node, name) => {
+      if (isProjectedGroupNode(node)) renameGroup(node._nodeGroupId || node.id, name);
+      else mutate(() => { nodeById(node.id).name = name; });
+    },
+  });
   const Efficiency = createEfficiencyTools({
     state, bridge, nodes, actionLabel, fieldLabel, typeNames: TYPE_NAMES, mutate,
     clearParameterLiteralCache: (nodeId, name) => clearParameterLiteralCache(nodeId, name),
@@ -880,6 +888,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, UI, $, el, nodeById: (id) => viewNodeById(id) || nodeById(id), hideAssetPathPreview, types: TYPES, typeNames: TYPE_NAMES, typeLabels: TYPE_LABEL,
     renameNodeGroup: renameGroup, execPinNames, addExecPin, renameExecPin, removeExecPin,
     changeNodeType, mutate, deleteSelection,
+    openAiSuggestions: (node) => CardAi.open(node),
     renderers: inspectorRenderers,
   });
   const {
@@ -1033,6 +1042,7 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
   });
   const { openParamEditor, closeInlineEditor, setParamLiteral, refreshInlineEditor } = InlineEditor;
   const NodeNameEditor = createNodeNameEditor({
+    openAiSuggestions: (node) => CardAi.open(node),
     state, wrap, el, position: viewPosition, renameGroup,
     derivedTitle: (node) => derivedNodeTitle(node, { referenceTitle }),
     renameNode: (id, value) => {

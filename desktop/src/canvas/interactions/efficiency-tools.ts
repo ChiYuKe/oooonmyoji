@@ -3,6 +3,7 @@ import type { CanvasBridge } from '../bridge';
 import { editingDialog, editingElement as el } from '../ui/editing-dialog';
 import { planParameterReplacement, replacementStillCurrent } from '../model/parameter-replacement';
 import { nodeReferenceValidator, parameterValueAccepted } from '../model/parameter-edits';
+import { attachAiNodePicker } from './ai-node-picker';
 
 export interface CreationContext { connection?: any; reference?: any; point?: { x: number; y: number } }
 export interface CreationChoice { id: string; title: string; type: string; action?: string; params?: Record<string, unknown>; preset?: ActionPreset; description?: string; reusable?: boolean }
@@ -91,6 +92,10 @@ export function createEfficiencyTools(deps: EfficiencyDeps) {
     const inScope = (choice: CreationChoice) => !(scope.value === 'presets' && !choice.preset
       || scope.value === 'functions' && !choice.reusable || scope.value === 'favorites' && !favorite(choice)
       || scope.value === 'recent' && !library.recent.includes(choice.id));
+    dialog.insertBefore(attachAiNodePicker({
+      state: deps.state, bridge: deps.bridge, context, dialog, overlay, close, create,
+      choices: () => choices().filter(choice => inScope(choice) && (!choice.action || catalog().byName(choice.action)) && deps.accept(choice, context)),
+    }), hint);
     const render = () => {
       if (!overlay.isConnected) { redraw = undefined; return; }
       const words = input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);

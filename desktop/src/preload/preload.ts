@@ -21,6 +21,10 @@ import type {
 } from '../shared/contracts';
 
 const api: OnmyojiDesktopApi = {
+  getAiSettings: () => ipcRenderer.invoke('ai:settings'),
+  saveAiSettings: (value) => ipcRenderer.invoke('ai:save-settings', value),
+  testAiConnection: () => ipcRenderer.invoke('ai:test'),
+  getAiSuggestions: (value) => ipcRenderer.invoke('ai:suggest', value),
   openWorkflowTest: (init) => ipcRenderer.invoke('test:open', init),
   workflowTestInit: () => ipcRenderer.invoke('test:init'),
   workflowTestImages: () => ipcRenderer.invoke('test:images'),

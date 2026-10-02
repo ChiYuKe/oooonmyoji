@@ -30,7 +30,25 @@
 .editing-replacement-row pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; font-size: 12px; }
 .editing-error { color: var(--red, #ee7777); }
 .editing-asset-path { overflow-wrap: anywhere; }
+.ai-node-panel { flex-shrink: 0; min-width: 0; max-height: 48vh; overflow: auto; padding: 12px; background: var(--ui-field); border: 1px solid var(--ui-line); border-radius: 7px; }
+.ai-node-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ai-node-controls input { flex: 1; width: auto; min-width: 160px; }
+.ai-node-controls button { flex-shrink: 0; min-height: 30px; color: var(--ui-text); }
+.ai-node-reference { margin-top: 8px; font-size: 11px; color: var(--ui-muted); }
+.ai-node-reference summary { cursor: pointer; overflow-wrap: anywhere; }
+.ai-node-reference > :not(summary) { margin-top: 8px; }
+.ai-node-reference .ai-card-images { max-height: 110px; overflow: auto; }
+.ai-node-image-toggle { display: flex; gap: 6px; align-items: center; }
+.ai-node-status { margin-top: 8px !important; font-size: 11px; color: var(--ui-muted); }
+.ai-node-results { max-height: 210px; overflow: auto; margin-top: 8px; }
+.ai-node-result { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--ui-line); }
+.ai-node-result > div { flex: 1; min-width: 0; }
+.ai-node-result strong { font-size: 12px; }
+.ai-node-result p { color: var(--ui-muted); font-size: 11px; overflow-wrap: anywhere; }
+.ai-node-result > button { flex-shrink: 0; }
+.ai-node-panel [hidden] { display: none !important; }
 @media (max-width: 650px) {
+  .ai-node-controls .ai-node-generate { width: 100%; }
   .editing-choice { flex-wrap: wrap; }
   .editing-choice-main { flex-basis: 100%; }
   .editing-replacement-controls { grid-template-columns: 1fr 1fr; }
@@ -69,3 +87,83 @@
   .workflow-history-body { grid-template-columns: 155px minmax(0,1fr); }
   .node-search-head { flex-wrap: wrap; }
 }
+.ai-card-overlay { box-sizing: border-box; padding: 24px; }
+.ai-card-dialog { box-sizing: border-box; width: min(540px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; padding: 18px; gap: 12px; border-radius: 10px; font-size: 12px; }
+.ai-card-dialog > * { flex-shrink: 0; min-width: 0; }
+/* AI 弹窗里的滚动区域用 8px 细滚动条：画布窗口默认落到系统滚动条（滑块浅色、两端带箭头），
+ * 和详细信息面板、下拉列表的 8px 细条不一致（见 workflow-editor.css 与 ui.css 的同名规则）。
+ * 滑块颜色沿用 theme.css 的全局取值（深色 #505050、悬停 #686868），浅色主题照 editor-light.css
+ * 既有取值在这里补一份，免得落到系统默认滑块上。 */
+:is(.ai-card-dialog, .ai-card-dialog *, .ai-node-panel, .ai-node-panel *)::-webkit-scrollbar { width: 8px; height: 8px; }
+:is(.ai-card-dialog, .ai-card-dialog *, .ai-node-panel, .ai-node-panel *)::-webkit-scrollbar-button { display: none; }
+:is(.ai-card-dialog, .ai-card-dialog *, .ai-node-panel, .ai-node-panel *)::-webkit-scrollbar-track { background: transparent; }
+:is(.ai-card-dialog, .ai-card-dialog *, .ai-node-panel, .ai-node-panel *)::-webkit-scrollbar-thumb { border-radius: 4px; }
+:root[data-theme="light"] :is(.ai-card-dialog, .ai-card-dialog *, .ai-node-panel, .ai-node-panel *)::-webkit-scrollbar-thumb { background: #e2e2e2; }
+:root[data-theme="light"] :is(.ai-card-dialog, .ai-card-dialog *, .ai-node-panel, .ai-node-panel *)::-webkit-scrollbar-thumb:hover { background: #d9d9d9; }
+.ai-card-scope { border: 1px solid var(--ui-line); border-radius: 6px; padding: 8px 10px; color: var(--ui-muted); }
+.ai-card-scope summary { cursor: pointer; font-size: 11px; }
+.ai-card-scope-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
+.ai-card-scope-controls label { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+.ai-card-scope-controls select { width: auto; min-height: 26px; font-size: 11px; }
+.ai-card-scope-content { max-height: 230px; overflow: auto; margin-top: 10px; }
+.ai-card-neighbors { overflow-wrap: anywhere; margin-bottom: 6px; line-height: 1.5; }
+.ai-card-images { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ai-card-images figure { margin: 0; min-width: 0; padding: 6px; background: var(--ui-field); border-radius: 4px; }
+.ai-card-images img { width: 100%; height: 64px; object-fit: contain; }
+.ai-card-images figcaption { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-card-scope-note { font-size: 10px; line-height: 1.5; margin-top: 8px; }
+.ai-card-dialog [hidden] { display: none !important; }
+.ai-card-dialog .editing-dialog-head { flex-wrap: nowrap; gap: 12px; }
+.ai-card-dialog .editing-dialog-head strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.ai-card-dialog .editing-dialog-head > button { min-height: 26px; padding: 3px 8px; background: transparent; color: var(--ui-muted); }
+.ai-card-mark { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--ui-surface); color: var(--ui-text); font-size: 17px; }
+.ai-card-context { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-field); }
+.ai-card-eyebrow { color: var(--ui-muted); font-size: 10px; }
+.ai-card-context-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ai-card-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 3px; background: var(--ui-field); border: 1px solid var(--ui-line); border-radius: 6px; }
+.ai-card-modes .ai-card-mode { min-width: 0; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ui-muted); font-size: 12px; }
+.ai-card-mode[aria-pressed="true"] { background: var(--ui-selected); color: var(--ui-text); box-shadow: 0 1px 3px #0002; }
+.ai-card-description { color: var(--ui-muted); font-size: 11px; }
+.ai-card-field { display: flex; flex-direction: column; gap: 7px; }
+.ai-card-field-caption { display: flex; align-items: center; gap: 7px; font-weight: 500; }
+.ai-card-field-caption > span { font-size: 10px; font-weight: 400; color: var(--ui-muted); }
+.ai-card-dialog .ai-card-instruction { height: 80px; min-height: 80px; max-height: 160px; resize: vertical; padding: 9px 10px; font: inherit; line-height: 1.6; border-radius: 6px; }
+.ai-card-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-card-presets .ai-card-preset { min-height: 25px; padding: 3px 9px; border: 1px solid var(--ui-line); border-radius: 20px; background: transparent; color: var(--ui-muted); font-size: 11px; }
+.ai-card-preset:hover:not(:disabled) { color: var(--ui-text); background: var(--ui-hover); }
+.ai-card-controls, .ai-card-apply { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ai-card-shortcut, .ai-card-selection-hint { color: var(--ui-muted); font-size: 10px; line-height: 1.5; }
+.ai-card-dialog .ai-card-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex-shrink: 0; min-height: 32px; padding: 6px 16px; border: 1px solid transparent; border-radius: 5px; background: var(--ui-focus); color: var(--ui-panel); font-weight: 600; font-size: 12px; }
+.ai-card-primary:hover:not(:disabled) { filter: brightness(1.12); }
+.ai-card-primary:disabled { opacity: .45; }
+.ai-card-feedback { padding: 8px 10px; border-radius: 5px; background: var(--ui-field); color: var(--ui-muted); font-size: 11px; overflow-wrap: anywhere; }
+.ai-card-feedback[data-kind="error"] { color: var(--ui-danger); border-left: 2px solid var(--ui-danger); }
+.ai-card-feedback[data-kind="success"] { padding: 0; background: transparent; }
+.ai-card-results { display: flex; flex-direction: column; gap: 7px; }
+.ai-card-result-heading { color: var(--ui-muted); font-size: 11px; margin-bottom: 2px; }
+.ai-card-results .ai-card-candidate { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 10px 12px; text-align: left; white-space: normal; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-field); color: var(--ui-text); }
+.ai-card-candidate:hover { background: var(--ui-hover); }
+.ai-card-candidate[aria-pressed="true"] { border-color: var(--ui-focus); background: var(--ui-selected); }
+.ai-card-choice-indicator { box-sizing: border-box; flex-shrink: 0; width: 14px; height: 14px; padding: 3px; border: 1px solid var(--ui-muted); border-radius: 50%; }
+.ai-card-candidate[aria-pressed="true"] .ai-card-choice-indicator { border-color: var(--ui-focus); background: var(--ui-focus); box-shadow: inset 0 0 0 3px var(--ui-selected); }
+.ai-card-choice-name { overflow-wrap: anywhere; line-height: 1.5; }
+.ai-card-advice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-field); }
+.ai-card-advice-number { display: inline-grid; place-items: center; flex-shrink: 0; width: 19px; height: 19px; border-radius: 4px; background: var(--ui-surface); color: var(--ui-muted); font-size: 10px; }
+.ai-card-advice p { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.ai-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--ui-line); padding-top: 11px; color: var(--ui-muted); font-size: 10px; }
+.ai-card-footer > span { line-height: 1.5; }
+.ai-card-footer .ai-card-settings { flex-shrink: 0; padding: 0; min-height: 22px; border: 0; background: transparent; color: var(--ui-muted); font-size: 11px; }
+.ai-card-settings:hover { color: var(--ui-text); text-decoration: underline; }
+.ai-card-dialog :is(button, textarea):focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+.ai-card-primary.is-loading::before { content: ''; box-sizing: border-box; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ai-card-spin .8s linear infinite; }
+@keyframes ai-card-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ai-card-primary.is-loading::before { animation: none; } }
+@media (max-width: 480px) {
+  .ai-card-overlay { padding: 12px 10px; align-items: flex-start; }
+  .ai-card-dialog { padding: 14px; gap: 10px; max-height: calc(100dvh - 24px); border-radius: 8px; }
+  .ai-card-shortcut { display: none; }
+  .ai-card-controls .ai-card-primary { width: 100%; }
+  .ai-card-footer { align-items: flex-start; }
+}
+.inline-name-ai { flex: none; padding: 0 4px; min-height: 0; height: 100%; font-size: 10px; }
+.inline-node-name-input { min-width: 0; flex: 1; }

@@ -16,6 +16,7 @@ export interface NodeNameEditorDeps {
    */
   derivedTitle?(node: any): string;
   nodeWidth: number;
+  openAiSuggestions?(node: any): void;
 }
 
 export interface CanvasNodeNameEditor {
@@ -128,9 +129,15 @@ export function createNodeNameEditor(deps: NodeNameEditorDeps): CanvasNodeNameEd
       input.placeholder = String(deps.derivedTitle?.(node) || nodeDisplayTitle(node));
     }
     input.spellcheck = false;
-    input.setAttribute('aria-label', '节点组名称');
+    input.setAttribute('aria-label', group ? '节点组名称' : '卡片名称');
     shell.appendChild(input);
     const editor: ActiveNameEditor = { node, targetId, group, initial: input.value.trim(), shell, input, closed: false };
+    if (deps.openAiSuggestions) {
+      const ai = document.createElement('button'); ai.type = 'button'; ai.className = 'inline-name-ai'; ai.textContent = 'AI'; ai.title = '获取 AI 命名与参数建议'; ai.setAttribute('aria-label', ai.title);
+      ai.addEventListener('pointerdown', event => event.preventDefault());
+      ai.addEventListener('click', () => { commit(editor); deps.openAiSuggestions?.(node); });
+      shell.append(ai);
+    }
     document.body.appendChild(shell);
     active = editor;
     positionEditor(editor);

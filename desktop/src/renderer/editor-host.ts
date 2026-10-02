@@ -28,6 +28,7 @@ export interface EditorHostDeps {
   openContentBrowserSearch: () => void;
   openReferences: (uri: string) => void;
   openWorkflowHistory?: (uri: string) => void;
+  openAiSettings?: () => void;
   /** 打开「变量引用」面板，列出谁在引用某个变量。 */
   showVariableReferences?: (data: VariableReferencesData, source: VariableReferencesSource) => void;
   /** 影响范围确认弹窗：改名等操作先亮出影响清单，返回 true 表示确认继续。 */
@@ -91,6 +92,17 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
     const targetUri = sourceUri ?? workspace.activeUri();
     try {
       switch (message.type) {
+        case 'openAiSettings': deps.openAiSettings?.(); return;
+        case 'aiSuggestions': {
+          try {
+            if (typeof message.requestId !== 'string') throw new Error('AI 请求无效');
+            const result = await api.getAiSuggestions(message.request);
+            workspace.postToFrame(sourceFrame, { type: 'aiSuggestionsResult', requestId: message.requestId, result });
+          } catch (error) {
+            workspace.postToFrame(sourceFrame, { type: 'aiSuggestionsResult', requestId: message.requestId, error: errorMessage(error) });
+          }
+          break;
+        }
         case 'createReusableFunction': {
           try {
             if (!sourceUri || typeof message.requestId !== 'string' || typeof message.name !== 'string' || typeof message.text !== 'string') throw new Error('功能创建请求无效');

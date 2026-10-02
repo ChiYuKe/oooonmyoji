@@ -256,6 +256,7 @@
               <button id="settings-tab-appearance" class="settings-nav-item active" role="tab" aria-selected="true" aria-controls="settings-page-appearance" data-settings-page="appearance">外观</button>
               <button id="settings-tab-interface" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-interface" data-settings-page="interface" tabindex="-1">界面</button>
               <button id="settings-tab-runtime" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-runtime" data-settings-page="runtime" tabindex="-1">运行</button>
+              <button id="settings-tab-ai" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-ai" data-settings-page="ai" tabindex="-1">AI 助手</button>
               <button id="settings-tab-shortcuts" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-shortcuts" data-settings-page="shortcuts" tabindex="-1">快捷键</button>
               <button id="settings-tab-about" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-about" data-settings-page="about" tabindex="-1">关于</button>
             </div>
@@ -313,6 +314,16 @@
                 <input id="settings-debug-annotate" class="ui-checkbox" type="checkbox" aria-label="标注 Debug 截图">
               </label>
               <p id="settings-debug-status" class="settings-footnote" role="status"></p>
+            </section>
+            <section id="settings-page-ai" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-ai">
+              <h2>AI 助手</h2><p class="settings-intro">为卡片提供命名、参数建议，并根据流程推荐待创建的节点。修改后自动保存，支持兼容 Chat Completions 的 AI 服务。</p>
+              <label class="settings-row"><span class="settings-row-copy"><strong>启用 AI 建议</strong><small>仅在点击“获取建议”时请求服务。</small></span><input id="settings-ai-enabled" class="ui-checkbox" type="checkbox"></label>
+              <label class="settings-row"><span class="settings-row-copy"><strong>接口地址</strong><small>填写服务商提供的基础地址（包含版本路径），或完整的 /chat/completions 地址。</small></span><input id="settings-ai-url" class="ui-input" type="url" placeholder="https://服务商地址/v1" autocomplete="off"></label>
+              <label class="settings-row"><span class="settings-row-copy"><strong>模型名称</strong><small>填写服务商支持的对话模型标识。</small></span><input id="settings-ai-model" class="ui-input" type="text" placeholder="模型标识" autocomplete="off" maxlength="200"></label>
+              <label class="settings-row"><span class="settings-row-copy"><strong>API Key</strong><small>密钥在本机加密保存；留空保留已保存的密钥。</small></span><input id="settings-ai-key" class="ui-input" type="password" placeholder="输入 API Key" autocomplete="off" maxlength="4096"></label>
+              <div class="settings-ai-actions"><button id="settings-ai-test" type="button">测试连接</button><button id="settings-ai-clear" type="button">移除已保存的密钥</button></div>
+              <p id="settings-ai-status" class="settings-footnote" role="status"></p>
+              <p class="settings-footnote">获取建议会将当前卡片、所列上下游节点、你填写的要求及勾选的模板图片发送给配置的服务商，可能产生 API 费用。可在建议窗口查看参考范围、关闭图片发送；发送图片需使用支持图片输入的模型。建议需由你确认选取；AI 不会自动执行工作流。</p>
             </section>
             <section id="settings-page-shortcuts" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-shortcuts">
               <h2>快捷键</h2><p class="settings-intro">点击按键组合后按下新快捷键即可修改，修改立即生效并自动保存。</p>

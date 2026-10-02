@@ -69,8 +69,11 @@ test('restyled renderer initializes, edits a case, steps through results and use
   const text = emitRuntimeDocument({schema_version:4,id:'test',version:'1.0.0',description:'识别按钮',resolution:[1920,1080],root:'root',inputs:{},variables:{},nodes:[{id:'root',type:'root',children:['find']},{id:'find',type:'task',name:'识别按钮',action:'vision.match_template',params:{template:'button.png',threshold:0.85}}]});
   let listener, request, maximizeListener, stored = {}, added;
   const commands = [], windows = [];
+  const workflowUri = `file:///E:/Project/${encodeURIComponent('其他游戏')}/oooonmyoji/workflows/${encodeURIComponent('御魂组队_队长.owf')}`;
   const api = {
-    workflowTestInit: async()=>({uri:'test.owf',text,instanceId:'mumu-0',nodeIds:['find']}),
+    // 真实工作流 uri 来自主进程的 `pathToFileURL()`：非 ASCII 文件名在里面是百分号编码，
+    // 标题栏必须显示解码后的名字（回归：曾经直接 split uri，显示成一串 `%E5%BE%A1…`）。
+    workflowTestInit: async()=>({uri:workflowUri,text,instanceId:'mumu-0',nodeIds:['find']}),
     bootstrap: async()=>({catalog:[{name:'vision.match_template',parameters:{threshold:{type:'number'}}}],instances:[{id:'mumu-0'}]}),
     readLayout:key=>stored[key], writeLayout:(key,value)=>stored[key]=value,
     onWorkflowTestEvent:fn=>listener=fn, workflowTestStart:async value=>request=value,
@@ -90,6 +93,7 @@ test('restyled renderer initializes, edits a case, steps through results and use
   await tick();
   const get = id=>elements.get(id);
   assert.equal(get('start').disabled,false);
+  assert.equal(get('workflow-name').textContent,'御魂组队_队长.owf','标题栏显示解码后的工作流文件名');
   assert.equal(get('workflow-config').hidden,true);
   assert.equal(get('node-lab').hidden,false);
   const labThreshold=get('lab-parameters').querySelectorAll('input').find(item=>item.type==='number');

@@ -21,6 +21,17 @@ const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', classNam
 };
 const pretty = (value: unknown): string => JSON.stringify(value, null, 2) ?? '—';
 const stateLabel = (value: string): string => ({ succeeded: '成功', failed: '失败', cancelled: '已停止', branch_miss: '分支未命中', running: '执行中' }[value] || value);
+// 工作流 uri 是 `pathToFileURL()` 出来的 file:// URL：非 ASCII 文件名在里面是百分号编码，
+// 直接取最后一段会把「御魂组队_队长.owf」显示成 `%E5%BE%A1…owf`。显示前一律先解码，
+// 解码失败（文件名里本来就有 `%` 号）时退回原串。
+const displayFileUri = (uri: string): string => {
+  const label = uri.split(/[\\/]/).pop() || '';
+  try {
+    return decodeURIComponent(label);
+  } catch {
+    return label;
+  }
+};
 type RecordValue = Record<string, any>;
 type SavedCase = Omit<WorkflowTestRequest, 'text' | 'uri' | 'instanceId' | 'images'>;
 let init: WorkflowTestInit;
@@ -721,7 +732,7 @@ async function initialize(value: WorkflowTestInit): Promise<void> {
   area('variables').value = '{}'; area('outputs').value = '{}'; input('rounds').value = '1'; input('single-step').checked = false;
   select('mode').value = 'live'; input('case-name').value = ''; $('image-list').textContent = '尚未选择截图';
   button('report').disabled = true;
-  $('workflow-name').textContent = value.uri.split(/[\\/]/).pop() || graph.id || '当前工作流';
+  $('workflow-name').textContent = displayFileUri(value.uri) || graph.id || '当前工作流';
   $('workflow-name').title = `${graph.description || graph.id || ''}\n使用打开测试台时的编辑快照，重新打开可更新。`;
   const bootstrap = await api.bootstrap(); catalog = bootstrap.catalog;
   labDrafts = {}; labDraft = { action: '', name: '', params: {} }; input('action-search').value = '';

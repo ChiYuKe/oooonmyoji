@@ -951,6 +951,14 @@
   旧入口与共享子流程已移除（过时测试同步清理）。
 
 ### 修复
+- **节点试验台标题栏把工作流文件名显示成一串 `%E5%BE%A1…`**：工作流 uri 是主进程
+  `pathToFileURL(file).toString()` 出来的 file:// URL，非 ASCII 文件名在里面是百分号编码，
+  而工具栏直接 `value.uri.split(/[\\/]/).pop()` 取最后一段，于是 `御魂组队_队长.owf` 显示成
+  `%E5%BE%A1%E9%AD%82%E7%BB%84%E9%98%9F_%E9%98%9F%E9%95%BF.owf`（文件本身没问题，
+  同名的画布标签页与其他窗口早就解码显示，只有这一处漏了）。现在统一走
+  `displayFileUri()`：取最后一段后 `decodeURIComponent`，解码失败（文件名里本来就有 `%` 号）
+  退回原串。回归用例钉在 `workflow-test-renderer.test.cjs`（把测试 uri 换成真实的
+  百分号编码 file:// URL 并断言标题栏显示中文名）。
 - **御魂组队工作流回归可编译的规范形式**：`御魂组队_队员.owf` 的 `state_machine` 节点残留了一段
   `cases:` 块——状态机按 `case.<下标>` 连边、状态名只在 `states` 里声明，节点上写 `cases`
   编译期直接报错，已删除；`御魂组队.owf` 规范化为 emit 不动点（删多余空行、省略默认引脚

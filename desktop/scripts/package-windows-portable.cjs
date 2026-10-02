@@ -3,6 +3,7 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { isSecretFile } = require('./secret-guard.cjs');
 
 const desktopRoot = path.resolve(__dirname, '..');
 const projectRoot = path.resolve(desktopRoot, '..');
@@ -26,6 +27,7 @@ function run(command, args) {
 
 function copy(source, target, filter) {
   requirePath(source, '打包来源');
+  if (isSecretFile(source)) return;
   if (filter && !filter(source)) return;
   const stat = fs.lstatSync(source);
   if (stat.isDirectory()) {

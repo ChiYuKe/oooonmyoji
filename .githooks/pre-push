@@ -1,0 +1,3 @@
+#!/bin/sh
+node desktop/scripts/check-secrets.cjs --staged || exit 1
+node desktop/scripts/check-secrets.cjs --history || exit 1

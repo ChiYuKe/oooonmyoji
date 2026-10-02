@@ -1,6 +1,14 @@
 # 安装一次：pre-commit install
 # 手动全量检查：pre-commit run --all-files
 repos:
+  - repo: local
+    hooks:
+      - id: check-secrets
+        name: Check staged files for credentials
+        entry: node desktop/scripts/check-secrets.cjs --staged
+        language: system
+        pass_filenames: false
+        always_run: true
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.7
     hooks:

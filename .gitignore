@@ -32,3 +32,15 @@ desktop/release/
 desktop/%SystemDrive%/
 /%SystemDrive%/
 .workbuddy-ai/
+
+# Credentials stay local, including encrypted AI settings and temporary/backup copies.
+ai-settings.json*
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+credentials.json
+secrets.json

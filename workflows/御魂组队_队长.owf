@@ -21,19 +21,17 @@ workflow souls_party_captain
       description: |
         开战循环的轮数预算（状态机的一轮 = 一次「识别当前画面 + 执行该状态的处理子图」）。
         一场战斗通常吃掉几轮，默认 20 大致对应十几到二十场。
-    ref:
-      type: any
   variables: {}
   _inputParams:
     emit_invite_signal: [signal, target_instance]
     wait_member_joined: [timeout_seconds]
   node root_1 root 御魂组队队长入口
-    at: [3208, -392]
+    at: [4710, 0]
   node sequence_7 sequence 等待协战队伍房间
-    at: [872, 416]
+    at: [872, 668]
     decorators: []
   node task_1 task 等待「协战队伍」标题
-    at: [0, 646]
+    at: [-24, 1080]
     action: vision.wait_template
     params:
       template: assets/templates/souls/party/floor-team-button.png
@@ -43,25 +41,25 @@ workflow souls_party_captain
       roi: [0, 0, 500, 107]
       threshold: 0.8
   node condition_1 condition 已在协战队伍房间
-    at: [1743, 646]
+    at: [1743, 1086]
   node task_2 task 占位日志：不在协战房间
-    at: [2328, 1064]
+    at: [1912, 1264]
     action: core.log
     params:
       message: 这是假
   node break_2 break 取等待结果（房间标题）
-    at: [1040, 680]
+    at: [584, 1128]
   node task_3 task 等待队伍空位（＋）
-    at: [332, 1564]
+    at: [332, 2004]
     action: vision.wait_any
     params:
       templates: [assets/templates/task_1-templates.png]
       roi: [638, 6, 668, 910]
       timeout_seconds: 3
   node sequence_8 sequence 邀请好友「鱼不鲤窝」入队
-    at: [1162, 1064]
+    at: [1536, 1272]
   node task_4 task 点空位打开邀请列表
-    at: [664, 1564]
+    at: [664, 2004]
     action: input.tap_match
     params:
       verify_gone: true
@@ -69,11 +67,11 @@ workflow souls_party_captain
       random_offset: 20
       disappeared_state_timeout_seconds: 1
   node sequence_9 sequence 首轮：建队·邀人·开战·结算
-    at: [2511, 208]
+    at: [2864, 438]
     decorator do_once
       reset_on_failure: false
   node task_5 task 等待好友「鱼不鲤窝」出现
-    at: [996, 1564]
+    at: [996, 2004]
     action: vision.wait_template
     params:
       template: assets/templates/task_4-templates.png
@@ -81,7 +79,7 @@ workflow souls_party_captain
       timeout_seconds: 3
       roi: [476, 121, 962, 817]
   node task_6 task 点击选中「鱼不鲤窝」
-    at: [1328, 1564]
+    at: [1328, 2004]
     action: input.tap_match
     params:
       verify_gone: false
@@ -89,7 +87,7 @@ workflow souls_party_captain
       disappeared_state_timeout_seconds: 1
       random_interval: [0.2, 0.5]
   node task_7 task 等待「邀请」按钮
-    at: [1660, 1564]
+    at: [1660, 2004]
     action: vision.wait_template
     params:
       template: assets/templates/task_6-template.png
@@ -97,7 +95,7 @@ workflow souls_party_captain
       timeout_seconds: 3
       roi: [522, 756, 888, 175]
   node task_8 task 点「邀请」发出组队邀请
-    at: [1992, 1564]
+    at: [1992, 2004]
     action: input.tap_match
     params:
       verify_gone: true
@@ -105,9 +103,9 @@ workflow souls_party_captain
       disappeared_state_timeout_seconds: 1
       random_interval: [0.2, 0.5]
   node sequence_10 sequence 等队友入队
-    at: [3000, 416]
-  node task_9 task 等待队友入队（名字条）
-    at: [2656, 646]
+    at: [2944, 688]
+  node task_9 task 等待队伍成员加入（允许超时）
+    at: [2656, 1088]
     action: vision.wait_template
     params:
       template: assets/templates/wait_for_party_slot_filled-template.png
@@ -117,11 +115,11 @@ workflow souls_party_captain
       roi: [718, 102, 469, 191]
       threshold: 0.8
   node condition_2 condition 队友已入队
-    at: [3320, 646]
+    at: [3320, 1086]
   node break_3 break 取等待结果（队友入队）
-    at: [3020, 646]
+    at: [3024, 1088]
   node task_10 task 点「挑战」开战（首轮）
-    at: [3652, 1564]
+    at: [3600, 1472]
     action: input.tap_match
     params:
       verify_gone: true
@@ -132,7 +130,7 @@ workflow souls_party_captain
       attempts: 5
       delay_seconds: 0.1
   node task_11 task 等待「挑战」可点（首轮）
-    at: [3000, 1560]
+    at: [2936, 1472]
     action: vision.wait_template
     params:
       template: assets/templates/wait_floor_from_map_1-template.png
@@ -143,17 +141,17 @@ workflow souls_party_captain
       threshold: 0.8
     decorators: []
   node sequence_11 sequence 首轮：点「挑战」开战
-    at: [3320, 1064]
+    at: [3264, 1280]
   node task_12 task 点击前稍等一秒
-    at: [3336, 1464]
+    at: [3264, 1472]
     action: core.sleep
     params:
       seconds: 1
     decorators: []
   node sequence_12 sequence 战斗结束：结算收尾
-    at: [4150, 416]
+    at: [4856, 668]
   node task_13 task 等待「点击屏幕继续」
-    at: [3832, 1056]
+    at: [4008, 1024]
     action: vision.wait_any
     params:
       templates:
@@ -162,7 +160,7 @@ workflow souls_party_captain
       roi: [602, 778, 806, 302]
       timeout_seconds: 60
   node task_14 task 点击「点击屏幕继续」
-    at: [4176, 1056]
+    at: [4344, 1024]
     action: input.tap_match
     params:
       verify_gone: true
@@ -178,9 +176,9 @@ workflow souls_party_captain
       attempts: 5
       delay_seconds: 0.2
   node sequence_1 sequence 结算第一屏
-    at: [4008, 656]
+    at: [4192, 856]
   node task_15 task 等待暗色八角图标
-    at: [4568, 1296]
+    at: [4672, 1024]
     action: vision.wait_template
     params:
       template: assets/templates/wait_for_empty_party_slot_2-template.png
@@ -189,7 +187,7 @@ workflow souls_party_captain
       roi: [757, 485, 461, 104]
       allow_timeout: true
   node task_16 task 点击暗色八角图标
-    at: [5112, 1280]
+    at: [5008, 1024]
     action: input.tap_match
     params:
       verify_gone: true
@@ -200,9 +198,9 @@ workflow souls_party_captain
       attempts: 5
       delay_seconds: 0.1
   node sequence_2 sequence 结算第二屏
-    at: [4424, 744]
+    at: [4856, 856]
   node task_17 task 等待蓝色对勾标记
-    at: [6112, 1280]
+    at: [5336, 1024]
     action: vision.wait_template
     params:
       template: assets/templates/wait_for_empty_party_slot_3-template.png
@@ -211,7 +209,7 @@ workflow souls_party_captain
       roi: [739, 476, 433, 117]
       allow_timeout: true
   node task_18 task 点击「确定」关弹窗
-    at: [7040, 1616]
+    at: [5992, 1464]
     action: input.tap_match
     params:
       verify_gone: true
@@ -222,13 +220,13 @@ workflow souls_party_captain
       attempts: 5
       delay_seconds: 0.1
   node sequence_3 sequence 确认队友仍在队伍
-    at: [4960, 680]
+    at: [5600, 856]
   node break_1 break 取等待结果（队友对勾）
-    at: [6448, 1368]
+    at: [5616, 1024]
   node condition_3 condition 队友仍在队伍
-    at: [6784, 1256]
+    at: [5888, 1024]
   node task_19 task 等待「确定」按钮
-    at: [6688, 1656]
+    at: [5664, 1464]
     action: vision.wait_template
     params:
       template: assets/templates/wait_for_empty_party_slot_4-template.png
@@ -237,14 +235,14 @@ workflow souls_party_captain
       roi: [946, 561, 371, 164]
       allow_timeout: true
   node sequence_4 sequence 关掉结算弹窗
-    at: [6792, 1432]
+    at: [5840, 1248]
   node sequence_5 sequence 主循环（按运行轮数重复）
-    at: [3216, -192]
+    at: [4710, 208]
     decorator repeat
   node sequence_6 sequence 每轮：回房间再开一场
-    at: [5568, 192]
+    at: [6557, 438]
   node task_20 task 等待回到协战队伍房间
-    at: [5616, 360]
+    at: [6308, 668]
     action: vision.wait_template
     params:
       template: assets/templates/souls/party/floor-team-button.png
@@ -254,11 +252,11 @@ workflow souls_party_captain
       roi: [0, 0, 500, 107]
       threshold: 0.8
   node condition_4 condition 已回到协战队伍房间
-    at: [6320, 456]
+    at: [6880, 664]
   node break_4 break 取等待结果（回到房间）
-    at: [5896, 416]
+    at: [6608, 664]
   node task_21 task 点「挑战」开战（续场）
-    at: [7016, 824]
+    at: [6972, 1504]
     action: input.tap_match
     params:
       verify_gone: true
@@ -274,7 +272,7 @@ workflow souls_party_captain
       attempts: 5
       delay_seconds: 0.1
   node task_22 task 等待「挑战」可点（续场）
-    at: [6616, 856]
+    at: [6640, 1504]
     action: vision.wait_template
     params:
       template: assets/templates/wait_floor_from_map_1-template.png
@@ -285,7 +283,19 @@ workflow souls_party_captain
       threshold: 0.8
     decorators: []
   node sequence_13 sequence 续场：点「挑战」开战
-    at: [6584, 664]
+    at: [6808, 1088]
+  node group_entry_1 group_entry
+    at: [336, 1832]
+  node group_entry_2 group_entry
+    at: [664, 1832]
+  node group_entry_3 group_entry
+    at: [1000, 1832]
+  node group_entry_4 group_entry
+    at: [1328, 1832]
+  node group_entry_5 group_entry
+    at: [1664, 1832]
+  node group_entry_6 group_entry
+    at: [1992, 1832]
   var inputs.运行轮数
   edges:
     break_2:out.found -> condition_1:condition
@@ -310,12 +320,12 @@ workflow souls_party_captain
     sequence_7:then.1 -> condition_1
     condition_1:true -> sequence_8
     condition_1:false -> task_2
-    sequence_8 -> task_3
-    sequence_8:then.1 -> task_4
-    sequence_8:then.2 -> task_5
-    sequence_8:then.3 -> task_6
-    sequence_8:then.4 -> task_7
-    sequence_8:then.5 -> task_8
+    sequence_8 -> group_entry_1
+    sequence_8:then.1 -> group_entry_2
+    sequence_8:then.2 -> group_entry_3
+    sequence_8:then.3 -> group_entry_4
+    sequence_8:then.4 -> group_entry_5
+    sequence_8:then.5 -> group_entry_6
     sequence_9 -> sequence_7
     sequence_9:then.1 -> sequence_10
     sequence_9:then.2 -> sequence_12
@@ -344,3 +354,27 @@ workflow souls_party_captain
     condition_4:true -> sequence_13
     sequence_13 -> task_22
     sequence_13:then.1 -> task_21
+    group_entry_1 -> task_3
+    group_entry_2 -> task_4
+    group_entry_3 -> task_5
+    group_entry_4 -> task_6
+    group_entry_5 -> task_7
+    group_entry_6 -> task_8
+  group node_group_1 "节点组 1"
+    nodeIds:
+      - task_3
+      - task_4
+      - task_5
+      - task_6
+      - task_7
+      - task_8
+      - group_entry_1
+      - group_entry_2
+      - group_entry_3
+      - group_entry_4
+      - group_entry_5
+      - group_entry_6
+    pins: []
+    pinPolicy: explicit-v1
+    at: [1552, 1560]
+    variablesAt: [-16, 2008]

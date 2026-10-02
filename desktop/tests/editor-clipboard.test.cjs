@@ -6,8 +6,8 @@ const assert = require('node:assert/strict');
 const {createEditorHost} = require('../dist-test-renderer/renderer/editor-host.js');
 
 function payload(id = 'a') {
-  // 壳层保存/广播的是规范化之后的剪贴板（`parseCanvasClipboard` 会补上 keepEdges）。
-  return {version: 1, sourceUri: 'file:///w/a.json', nodes: [{id}], layout: {[id]: {x: 1, y: 2}}, variables: [], cards: [], keepEdges: false};
+  // 壳层保存/广播的是规范化之后的剪贴板（`parseCanvasClipboard` 会补上 edgeWaypoints）。
+  return {version: 1, sourceUri: 'file:///w/a.json', nodes: [{id}], layout: {[id]: {x: 1, y: 2}}, variables: [], cards: [], edgeWaypoints: []};
 }
 
 function harness() {

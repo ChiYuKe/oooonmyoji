@@ -283,9 +283,20 @@ export interface CanvasClipboardCard {
   y: number;
 }
 
+/** 剪贴板里那一段内部的执行边上的手工折点（UE Knot）；世界坐标，粘贴时跟着整组偏移。 */
+export interface CanvasClipboardEdgeWaypoint {
+  from: { node: string; pin: string };
+  to: { node: string; pin: string };
+  waypoints: Array<{ x: number; y: number }>;
+}
+
 /**
  * 画布剪贴板：节点卡片连同它们引用到的输入/变量与变量卡片一起搬运。
  * 存在壳层里，所以同一窗口的任意画布（含弹出到独立窗口的面板）共用同一份剪贴板。
+ *
+ * 节点之间的连线不单独记：执行边就在节点的 `children` / `ports` / `cases[].child` /
+ * `default_child` 上，粘贴时按「两端都在剪贴板里」筛选重建；只有手工折点在文档旁表里，
+ * 需要 `edgeWaypoints` 单独搬一次。
  */
 export interface CanvasClipboardPayload {
   /** 结构版本；换结构时同步改 parseCanvasClipboard。 */
@@ -301,14 +312,13 @@ export interface CanvasClipboardPayload {
   /** 这些变量在源画布上的卡片。 */
   cards: CanvasClipboardCard[];
   /**
-   * 粘贴时是否重建节点之间的执行连线。
+   * 被复制那一段**内部**执行边上的手工折点。
    *
-   * **复制**为 false：粘出来的是一张张干净的卡片（参数、变量绑定与节点输出引用照旧），
-   * 连线自己接——否则复制一次就等于凭空多出一份连在一起的子图。
-   * **剪切**为 true：剪切 + 粘贴是「搬走这一段」，子树内部的连线要跟着回来
-   * （对外的父连线在剪切时已经断掉，本来就不在剪贴板里）。
+   * 连线本身由节点上的 `children` / `ports` / `cases[].child` / `default_child` 承载，
+   * 折点却存在文档旁表 `_edgeWaypoints` 里（按边的身份记），所以要单独搬一次：
+   * 不搬的话「带着连线」的副本会重新自动走线，线形和源图不一样。
    */
-  keepEdges: boolean;
+  edgeWaypoints: CanvasClipboardEdgeWaypoint[];
 }
 
 /** 画布 → 壳层：把刚复制的卡片交给壳层保管（并广播给其他画布）。 */
@@ -428,6 +438,20 @@ function isClipboardCard(value: unknown): value is CanvasClipboardCard {
     && Number.isFinite(record.x) && Number.isFinite(record.y);
 }
 
+function isClipboardEnd(value: unknown): value is { node: string; pin: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.node === 'string' && record.node.length > 0 && typeof record.pin === 'string' && record.pin.length > 0;
+}
+
+function isClipboardWaypoint(value: unknown): value is CanvasClipboardEdgeWaypoint {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return isClipboardEnd(record.from) && isClipboardEnd(record.to)
+    && Array.isArray(record.waypoints) && record.waypoints.length > 0
+    && record.waypoints.every((point: any) => Number.isFinite(point?.x) && Number.isFinite(point?.y));
+}
+
 /**
  * 通信边界校验：壳层转发过来的剪贴板必须是本版本的结构。
  * 缺字段就补齐、非法条目直接丢掉，画布只管用它粘贴，不再自己判结构。
@@ -447,7 +471,7 @@ export function parseCanvasClipboard(value: unknown): CanvasClipboardPayload | u
     layout,
     variables: Array.isArray(record.variables) ? record.variables.filter(isClipboardVariable) : [],
     cards: Array.isArray(record.cards) ? record.cards.filter(isClipboardCard) : [],
-    // 缺字段按「不带连线」处理：来源不同版本时也符合「粘贴只带节点」的预期。
-    keepEdges: record.keepEdges === true,
+    // 缺字段按「没有手工折点」处理：来源不同版本时最多丢掉走线形状，连线照旧重建。
+    edgeWaypoints: Array.isArray(record.edgeWaypoints) ? record.edgeWaypoints.filter(isClipboardWaypoint) : [],
   };
 }

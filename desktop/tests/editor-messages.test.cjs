@@ -55,9 +55,19 @@ test('画布剪贴板边界：版本与节点数组必需，缺字段补齐、�
   assert.equal(parsed.nodes.length, 2);
   assert.deepEqual(parsed.layout, {a: {x: 1, y: 2}});
   assert.deepEqual(parsed.variables, [{scope: 'inputs', name: '运行轮次', definition: {type: 'integer'}}]);
-  assert.equal(parsed.keepEdges, false, '缺字段按「粘贴不带连线」处理');
-  assert.equal(parseCanvasClipboard({version: 1, nodes: [{id: 'a'}], keepEdges: true}).keepEdges, true, '剪切过来的剪贴板保留连线');
+  assert.deepEqual(parsed.edgeWaypoints, [], '缺字段按「没有手工折点」处理');
   assert.deepEqual(parsed.cards, [{scope: 'inputs', name: '运行轮次', x: 10, y: 20}], '名字为空/坐标非数字的卡片丢掉');
+
+  // 手工折点：两端与坐标都要合法，坏条目直接丢，不能让画布粘出一条烂边。
+  const waypoint = {from: {node: 'a', pin: 'then.0'}, to: {node: 'b', pin: 'in'}, waypoints: [{x: 8, y: 16}]};
+  const kept = parseCanvasClipboard({version: 1, nodes: [{id: 'a'}], edgeWaypoints: [
+    waypoint,
+    {from: {node: 'a', pin: 'then.0'}, to: {node: 'b', pin: 'in'}, waypoints: []},
+    {from: {node: ''}, to: {node: 'b', pin: 'in'}, waypoints: [{x: 0, y: 0}]},
+    {from: {node: 'a', pin: 'then.0'}, to: {node: 'b', pin: 'in'}, waypoints: [{x: 'x', y: 0}]},
+    'junk',
+  ]});
+  assert.deepEqual(kept.edgeWaypoints, [waypoint]);
 
   // 缺 layout / sourceUri / 变量时补成空集合，画布不用自己兜底。
   const minimal = parseCanvasClipboard({version: 1, nodes: [{id: 'a'}]});
@@ -65,4 +75,5 @@ test('画布剪贴板边界：版本与节点数组必需，缺字段补齐、�
   assert.deepEqual(minimal.layout, {});
   assert.deepEqual(minimal.variables, []);
   assert.deepEqual(minimal.cards, []);
+  assert.deepEqual(minimal.edgeWaypoints, []);
 });

@@ -190,24 +190,79 @@ test('判断节点：真/假口各接一个子节点，口位与 children 对齐
   assert.equal(Object.hasOwn(condition, 'ports'), false);
 });
 
-test('复制粘贴只复制选中的节点：子孙节点与执行连线都不带', () => {
+test('复制粘贴只复制选中的节点：未选中的子孙节点不带，选中两端之间的连线跟着来', () => {
   const h = harness(tree());
   h.state.raw.nodes[3].params = {value: {ref: 'nodes.a.output.value'}, literal: 3};
+  h.state.raw._layout = {seq: {x: 0, y: 0}, a: {x: 0, y: 112}, b: {x: 0, y: 224}};
   h.state.selected = new Set(['seq', 'b']);
   assert.equal(h.commands.copySelection(), true);
   h.commands.pasteClipboard({x: 40, y: 40});
   const copy = h.state.raw.nodes.find((node) => node.id === 'sequence_1');
   assert.ok(copy);
-  assert.deepEqual(copy.children, [], '执行连线不带过来：children 清空，自己接');
+  assert.deepEqual(copy.children, ['task_1'], '两端都在剪贴板里的连线（seq → b）跟着副本走');
   assert.deepEqual([...h.state.selected].sort(), ['sequence_1', 'task_1'], '只粘贴明确选中的两个节点，不自动复制未选中的子孙节点');
   assert.equal(h.state.raw.nodes.some((node) => node.id === 'task_2'), false, '未选中的后代节点不会复制');
-  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'task_1').params, {literal: 3},
-    '指向另一个节点的引用也摘掉，字面量照旧');
-  assert.deepEqual(h.toasts.at(-1), ['已粘贴 2 个节点（没带连线）', false]);
+  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'task_1').params,
+    {value: {ref: 'nodes.a.output.value'}, literal: 3},
+    '同文档粘贴：指向批外节点（a）的引用照旧成立（a 还在图里），字面量照旧');
+  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'root').children, ['seq'], '对外的父连线不会粘到新卡片上');
+  assert.deepEqual(h.toasts.at(-1), ['已粘贴 2 个节点', false]);
+});
+
+test('复制父 + 子：整段连线跟着来，手工折点一起搬并按新 id 重算引脚', () => {
+  const raw = {
+    root: 'root',
+    nodes: [
+      {id: 'root', type: 'root', children: ['seq']},
+      {id: 'seq', type: 'sequence', children: ['a', 'b']},
+      {id: 'a', type: 'task', action: 'core.capture', params: {}},
+      {id: 'b', type: 'task', action: 'core.capture', params: {}},
+    ],
+    _layout: {seq: {x: 0, y: 0}, a: {x: 0, y: 112}, b: {x: 0, y: 224}},
+    // b 在源图上是第二支（then.1），但这次只复制「seq + b」：副本里它变成第一支（then.0）。
+    _edgeWaypoints: [{from: {node: 'seq', pin: 'then.1'}, to: {node: 'b', pin: 'in'}, waypoints: [{x: 96, y: 168}]}],
+  };
+  const h = harness(raw);
+  h.state.selected = new Set(['seq', 'b']);
+  h.commands.copySelection();
+  h.commands.pasteClipboard({x: 400, y: 300});
+
+  const copy = h.state.raw.nodes.find((node) => node.id === 'sequence_1');
+  assert.deepEqual(copy.children, ['task_1'], '父 + 子一起复制时连线跟着来');
+  assert.deepEqual(h.state.raw._edgeWaypoints, [
+    {from: {node: 'seq', pin: 'then.1'}, to: {node: 'b', pin: 'in'}, waypoints: [{x: 96, y: 168}]},
+    {from: {node: 'sequence_1', pin: 'then.0'}, to: {node: 'task_1', pin: 'in'}, waypoints: [{x: 496, y: 468}]},
+  ], '折点跟着整组偏移，引脚按重建后的结构重算（then.1 → then.0）');
+});
+
+test('复制只带批内连线：父节点没被复制时，子节点粘出来还是一张干净的卡片', () => {
+  const h = harness(tree());
+  h.state.selected = new Set(['b']);
+  h.commands.copySelection();
+  h.commands.pasteClipboard({x: 400, y: 300});
+  const copy = h.state.raw.nodes.find((node) => node.id === 'task_1');
+  assert.equal(Object.hasOwn(copy, 'children'), false, 'task 是叶子，本来就该没有 children 字段');
+  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'seq').children, ['a', 'b'], '源图不受影响');
+});
+
+test('复制父 + 子：批内的节点输出引用接到副本上（画布上那条数据引用线）', () => {
+  const h = harness({root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['wait']},
+    {id: 'wait', type: 'task', action: 'core.capture', params: {template: 'invite.png'}},
+    {id: 'click', type: 'task', action: 'core.capture', params: {match: {ref: 'nodes.wait.output.match'}, threshold: 0.9}},
+  ], _layout: {wait: {x: 0, y: 0}, click: {x: 0, y: 112}}});
+  h.state.selected = new Set(['wait', 'click']);
+  h.commands.copySelection();
+  h.commands.pasteClipboard({x: 400, y: 300});
+
+  // 两张 task 之间不可能有执行边：它们之间那条线就是这条节点输出引用。
+  const copy = h.state.raw.nodes.find((node) => node.id === 'task_2');
+  assert.deepEqual(copy.params, {match: {ref: 'nodes.task_1.output.match'}, threshold: 0.9},
+    '引用按新 id 接到副本上，副本内部那条线跟着来');
 });
 
 test('复制粘贴保留变量绑定：它是「取值来自哪个变量」，不是节点之间的线', () => {
-  const h = harness({
+  const source = harness({
     root: 'root',
     nodes: [
       {id: 'root', type: 'root', children: ['a']},
@@ -220,45 +275,107 @@ test('复制粘贴保留变量绑定：它是「取值来自哪个变量」，�
     _variableCards: {var__inputs__模板: {name: '模板', scope: 'inputs', x: 0, y: 0}},
     _layout: {a: {x: 0, y: 0}, src: {x: 0, y: 300}},
   });
+  source.state.docUri = 'file:///w/a.json';
+  source.state.selected = new Set(['a']);
+  source.commands.copySelection();
+  const payload = JSON.parse(JSON.stringify(source.state.clipboard));
+
+  // 跨文档粘贴：src 不在目标文档里，节点引用摘掉，变量绑定与字面量照旧。
+  const target = harness({root: 'root', nodes: [{id: 'root', type: 'root', children: []}], _layout: {}});
+  target.state.docUri = 'file:///w/b.json';
+  target.state.clipboard = payload;
+  target.commands.pasteClipboard({x: 400, y: 300});
+  const copy = target.state.raw.nodes.find((node) => node.id === 'task_1');
+  assert.deepEqual(copy.params, {template: {ref: 'inputs.模板'}, threshold: 0.9},
+    '摘掉指向批外节点 src 的引用；变量绑定与字面量照旧');
+  assert.equal(target.state.raw._variableLinks['task_1:template'], Object.keys(target.state.raw._variableCards)[0],
+    '副本的变量绑定仍然接着卡片');
+});
+
+test('同文档粘贴：批外引用照旧成立，跨文档才摘掉', () => {
+  const raw = {root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['a']},
+    {id: 'a', type: 'task', action: 'core.capture', params: {match: {ref: 'nodes.src.output.match'}}},
+    {id: 'src', type: 'task', action: 'core.capture', params: {}},
+  ], _layout: {a: {x: 0, y: 0}, src: {x: 0, y: 300}}};
+
+  const h = harness(JSON.parse(JSON.stringify(raw)));
+  h.state.docUri = 'file:///w/a.json';
   h.state.selected = new Set(['a']);
   h.commands.copySelection();
   h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'task_1');
-  assert.deepEqual(copy.params, {template: {ref: 'inputs.模板'}, threshold: 0.9},
-    '摘掉指向 src 的引用；变量绑定与字面量照旧');
-  assert.equal(h.state.raw._variableLinks['task_1:template'], 'var__inputs__模板', '副本的变量绑定仍然接着卡片');
+  assert.deepEqual(h.state.raw.nodes.find((node) => node.id === 'task_1').params,
+    {match: {ref: 'nodes.src.output.match'}},
+    '同一个文档里 src 还在，副本保留这条引用（画布上就是那条数据引用线）');
+
+  const other = harness(JSON.parse(JSON.stringify(raw)));
+  other.state.docUri = 'file:///w/b.json';
+  other.state.clipboard = JSON.parse(JSON.stringify(h.state.clipboard));
+  other.commands.pasteClipboard({x: 400, y: 300});
+  assert.deepEqual(other.state.raw.nodes.find((node) => node.id === 'task_1').params, {},
+    '跨文档粘贴：目标里没有 src，引用摘掉，参数回到「未配置」');
 });
 
-test('复制粘贴判断节点不再带口位（连线不带过来）', () => {
-  const h = harness({root: 'root', nodes: [
+test('复制粘贴判断节点：子节点一起复制才带口位，否则连线不带', () => {
+  const raw = {root: 'root', nodes: [
     {id: 'root', type: 'root', children: ['judge']},
     {id: 'judge', type: 'condition', expression: true, children: ['on_false'], ports: ['false']},
     {id: 'on_false', type: 'task', action: 'core.capture', params: {}},
-  ], _layout: {root: {x: 0, y: 0}, judge: {x: 0, y: 112}, on_false: {x: 0, y: 224}}});
-  h.state.selected = new Set(['judge']);
-  h.commands.copySelection();
-  h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'condition_1');
-  assert.deepEqual(copy.children, [], '判断节点粘出来是空的，口位也就没有意义');
-  assert.equal(Object.hasOwn(copy, 'ports'), false, 'ports 与 children 一起清掉，不会留一个对不上的口位');
-  assert.equal(copy.expression, true, '表达式这类配置照旧带过来');
+  ], _layout: {root: {x: 0, y: 0}, judge: {x: 0, y: 112}, on_false: {x: 0, y: 224}, judge2: {x: 0, y: 400}}};
+
+  // 只选判断节点：子节点没跟着走，口位与连线一起清掉。
+  const alone = harness(JSON.parse(JSON.stringify(raw)));
+  alone.state.selected = new Set(['judge']);
+  alone.commands.copySelection();
+  alone.commands.pasteClipboard({x: 400, y: 300});
+  const bare = alone.state.raw.nodes.find((node) => node.id === 'condition_1');
+  assert.deepEqual(bare.children, [], '子节点没被复制，连线不带过来');
+  assert.equal(Object.hasOwn(bare, 'ports'), false, 'ports 与 children 一起清掉，不会留一个对不上的口位');
+  assert.equal(bare.expression, true, '表达式这类配置照旧带过来');
+
+  // 判断节点 + 假口那个子节点一起选：连线与口位都跟着走，不会漂到真口。
+  const together = harness(JSON.parse(JSON.stringify(raw)));
+  together.state.selected = new Set(['judge', 'on_false']);
+  together.commands.copySelection();
+  together.commands.pasteClipboard({x: 400, y: 300});
+  const wired = together.state.raw.nodes.find((node) => node.id === 'condition_1');
+  assert.deepEqual(wired.children, ['task_1'], '两端都在剪贴板里的分支边跟着来');
+  assert.deepEqual(wired.ports, ['false'], '口位跟着子节点走，仍然挂在假口上');
 });
 
-test('复制粘贴 switch 不再带 cases.child 与 default_child', () => {
+test('复制粘贴 switch：分支下标不动，子节点 id 重映射，default_child 跟着走', () => {
   const h = harness({root: 'root', nodes: [
     {id: 'root', type: 'root', children: ['pick']},
     {id: 'pick', type: 'switch', expression: {'ref': 'inputs.状态'}, children: ['case_a', 'fallback'],
      cases: [{value: 'a', child: 'case_a'}], default_child: 'fallback'},
     {id: 'case_a', type: 'task', action: 'core.capture', params: {}},
     {id: 'fallback', type: 'task', action: 'core.capture', params: {}},
-  ], _layout: {pick: {x: 0, y: 0}}});
+  ], _layout: {pick: {x: 0, y: 0}, case_a: {x: 0, y: 112}, fallback: {x: 0, y: 224}}});
+
+  // 只选 switch：批外的分支退化成只有取值的空分支，不会指向旧 id。
   h.state.selected = new Set(['pick']);
   h.commands.copySelection();
   h.commands.pasteClipboard({x: 400, y: 300});
-  const copy = h.state.raw.nodes.find((node) => node.id === 'switch_1');
-  assert.deepEqual(copy.children, [], '分支连线不带过来');
-  assert.deepEqual(copy.cases, [{value: 'a'}], '分支取值保留，指向子节点的字段清掉（不会指向旧 id）');
-  assert.equal(Object.hasOwn(copy, 'default_child'), false);
+  const bare = h.state.raw.nodes.find((node) => node.id === 'switch_1');
+  assert.deepEqual(bare.children, [], '分支连线不带过来');
+  assert.deepEqual(bare.cases, [{value: 'a'}], '分支取值保留，指向子节点的字段清掉（不会指向旧 id）');
+  assert.equal(Object.hasOwn(bare, 'default_child'), false);
+
+  // switch + 默认分支一起选：连线、default_child 都接到副本上。
+  const wired = harness({root: 'root', nodes: [
+    {id: 'root', type: 'root', children: ['pick']},
+    {id: 'pick', type: 'switch', expression: {'ref': 'inputs.状态'}, children: ['fallback'],
+     cases: [{value: 'a', child: 'case_a'}], default_child: 'fallback'},
+    {id: 'case_a', type: 'task', action: 'core.capture', params: {}},
+    {id: 'fallback', type: 'task', action: 'core.capture', params: {}},
+  ], _layout: {pick: {x: 0, y: 0}, fallback: {x: 0, y: 224}}});
+  wired.state.selected = new Set(['pick', 'fallback']);
+  wired.commands.copySelection();
+  wired.commands.pasteClipboard({x: 400, y: 300});
+  const copy = wired.state.raw.nodes.find((node) => node.id === 'switch_1');
+  assert.deepEqual(copy.children, ['task_1'], '默认分支的连线跟着来');
+  assert.deepEqual(copy.cases, [{value: 'a'}], 'case_a 没被复制，这一支留空；下标不动，case 位不会错位');
+  assert.equal(copy.default_child, 'task_1', 'default_child 指向副本而不是旧 id');
 });
 
 test('剪切粘贴保留子树内部连线与数据绑定（搬走这一段）', () => {
@@ -316,6 +433,7 @@ test('复制把节点、布局与引用到的变量/卡片一起交给壳层（�
   assert.deepEqual(payload.layout, {a: {x: 10, y: 20}});
   assert.deepEqual(payload.variables, [{scope: 'inputs', name: '运行轮次', definition: {type: 'integer', default: 3}}]);
   assert.deepEqual(payload.cards, [{scope: 'inputs', name: '运行轮次', x: 100, y: 200}]);
+  assert.deepEqual(payload.edgeWaypoints, [], '没有手工折点的边不用往剪贴板里塞东西');
 });
 
 test('跨画布粘贴：目标文档补上被引用的输入与变量卡片，并按新节点 id 接线', () => {

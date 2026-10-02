@@ -6,12 +6,13 @@
  * 所有文档修改都通过注入的 mutate（History）完成，命令本身不渲染。
  */
 import type { CanvasState } from './canvas-state';
-import type { CanvasClipboardCard, CanvasClipboardPayload, CanvasClipboardVariable } from '../../shared/editor-messages';
+import type { CanvasClipboardCard, CanvasClipboardEdgeWaypoint, CanvasClipboardPayload, CanvasClipboardVariable } from '../../shared/editor-messages';
 import { reconcileVariableLinks } from '../model/variable-links';
 import {
   CONDITION_PORT_LABELS, conditionChildOf, conditionPortsOf, isConditionPort, type ConditionPort,
 } from '../model/exec-ports';
 import { isGroupBoundaryNode } from '../model/node-groups';
+import { EDGE_WAYPOINTS_KEY, structuralPinOf } from '../model/edge-waypoints';
 import { NODE_TYPES } from '../../shared/workflow/types';
 import { nextNodeId } from '../../shared/workflow/node-identifiers';
 
@@ -25,7 +26,8 @@ export interface PointerPoint {
  *
  * 变量/输入绑定（`inputs.…` / `variables.…`）形状一样，但它表达的是「这个参数的取值来源
  * 是哪个变量」，跨画布粘贴时还要靠它把变量定义与卡片一起带过去（`clipboardCarry`），
- * 所以复制时**保留**；只有节点 → 节点的引用是「复制一次就凭空多一份接线」的元凶。
+ * 所以复制时**保留**。节点 → 节点的引用则是卡片之间那条数据引用线：目标也在这批卡片里、
+ * 或粘回同一个文档时保留，粘到别的工作流（目标不在）才由 `detachNodeRefs` 摘掉。
  */
 function isNodeRefBinding(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -33,17 +35,32 @@ function isNodeRefBinding(value: unknown): boolean {
   return Object.keys(record).length === 1 && typeof record.ref === 'string' && record.ref.startsWith('nodes.');
 }
 
+/** 节点引用指向的节点 id（`nodes.<id>.output…`）；不是节点引用返回 null。 */
+function nodeRefTarget(value: unknown): string | null {
+  if (!isNodeRefBinding(value)) return null;
+  const match = /^nodes\.([^.]+)\./.exec(String((value as { ref: string }).ref));
+  return match ? match[1] : null;
+}
+
 /**
  * 摘掉一棵配置里指向别的节点的引用：参数对象里直接删掉这一项——参数回到「未配置」，
  * 而不是留一个空对象被 schema 判为类型不符；数组元素换成 `null` 保住操作数位
  * （`{eq: [{ref: 'nodes.a.output.value'}, 'settlement']}` → `{eq: [null, 'settlement']}`，
  * 与手写未绑定的操作数同形）。
+ *
+ * `keep` 给出「哪些目标节点放过」：跨文档粘贴时传 `idMap.has`，目标也在这一批里的引用留着
+ * （`remap` 会把它接到副本上），指向批外的照旧摘掉。
  */
-function detachNodeRefs(value: unknown): void {
+function detachNodeRefs(value: unknown, keep?: (nodeId: string) => boolean): void {
+  const detached = (item: unknown): boolean => {
+    const target = nodeRefTarget(item);
+    if (target === null) return false;
+    return !(keep && keep(target));
+  };
   if (Array.isArray(value)) {
     value.forEach((item, index) => {
-      if (isNodeRefBinding(item)) { value[index] = null; return; }
-      detachNodeRefs(item);
+      if (detached(item)) { value[index] = null; return; }
+      detachNodeRefs(item, keep);
     });
     return;
   }
@@ -51,8 +68,8 @@ function detachNodeRefs(value: unknown): void {
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     const item = record[key];
-    if (isNodeRefBinding(item)) { delete record[key]; continue; }
-    detachNodeRefs(item);
+    if (detached(item)) { delete record[key]; continue; }
+    detachNodeRefs(item, keep);
   }
 }
 
@@ -460,12 +477,15 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
   }
 
   /**
-   * 把指定节点打包成剪贴板内容（节点 + 布局 + 引用到的变量与卡片），并存进画布状态。
+   * 把指定节点打包成剪贴板内容（节点 + 布局 + 连线上的手工折点 + 引用到的变量与卡片），
+   * 并存进画布状态。
    *
-   * `keepEdges` 决定粘贴时是否重建子树内部的执行连线：复制为 false（只带卡片），
-   * 剪切为 true（搬走这一段，结构跟着回来）。
+   * 复制与剪切打包的是**同一份结构**：粘贴时只重建「两端都在剪贴板里」的连线
+   * （见 `pasteClipboard`），所以复制一张卡片仍然是一张干净的卡片，复制「父 + 子」
+   * 才把它们之间的线一起带过来；指向批外节点的引用由粘贴侧按「是不是粘回同一个文档」
+   * 决定留不留（同一个文档里目标还在，粘到别的工作流就摘掉）。
    */
-  function captureSelection(ids: Set<string>, keepEdges: boolean): CanvasClipboardPayload {
+  function captureSelection(ids: Set<string>): CanvasClipboardPayload {
     const copied = clone(nodes().filter((node) => ids.has(node.id)));
     const copiedLayout: Record<string, { x: number; y: number }> = {};
     for (const id of ids) {
@@ -473,6 +493,12 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       if (position) copiedLayout[id] = { x: position.x, y: position.y };
     }
     const { variables, cards } = clipboardCarry(ids);
+    // 手工折点（UE Knot）存在文档旁表里、边的两端按节点 id 记：只搬两端都在这一批里的，
+    // 落在文档里的坐标照旧，粘贴时再跟着整组一起偏移。
+    const table = state.raw && Array.isArray(state.raw[EDGE_WAYPOINTS_KEY]) ? state.raw[EDGE_WAYPOINTS_KEY] : [];
+    const edgeWaypoints: CanvasClipboardEdgeWaypoint[] = table
+      .filter((entry: any) => ids.has(entry?.from?.node) && ids.has(entry?.to?.node))
+      .map((entry: any) => clone(entry));
     const payload: CanvasClipboardPayload = {
       version: 1,
       sourceUri: String(state.docUri || ''),
@@ -480,7 +506,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       layout: copiedLayout,
       variables,
       cards,
-      keepEdges,
+      edgeWaypoints,
     };
     state.clipboard = payload;
     // 交给壳层：同一窗口的其他画布（含弹出面板）会同步到同一份剪贴板。
@@ -517,14 +543,14 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
     return `card_${index}`;
   }
 
-  /** 只复制当前选中的节点；粘贴时落下卡片，连线不带过去。 */
+  /** 复制当前选中的节点；它们之间的连线跟着副本走（对外的连线不带）。 */
   function copySelection(): boolean {
     const ids = new Set([...state.selected].filter((id) => id !== state.raw?.root && nodeById(id)?.type !== 'root'));
     if (ids.size === 0) {
       toast('请先选择要复制的节点', true);
       return false;
     }
-    captureSelection(ids, false);
+    captureSelection(ids);
     toast(`已复制 ${ids.size} 个节点`);
     return true;
   }
@@ -536,7 +562,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       toast('请先选择要剪切的节点', true);
       return false;
     }
-    captureSelection(ids, true);
+    captureSelection(ids);
     mutate(() => {
       state.raw!.nodes = nodes().filter((node) => !ids.has(node.id));
       for (const node of nodes()) if (Array.isArray(node.children)) node.children = node.children.filter((id: string) => !ids.has(id));
@@ -551,6 +577,9 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
   /**
    * 粘贴剪贴板内容：生成新 ID、重映射 children/refs、放置到目标位置（默认鼠标处）。
    * 剪贴板来自壳层，所以这里粘的可能是**另一个画布**复制的卡片：一起把变量定义与变量卡片补过去。
+   *
+   * 执行连线只重建**两端都在剪贴板里**的那些：父节点没被复制时，子节点就是一张干净的
+   * 根卡片，不会指回旧 id（跨文档也不会挂空）；两端都在的线连着手工折点一起回来。
    */
   function pasteClipboard(at?: PointerPoint): boolean {
     const payload = state.clipboard;
@@ -574,7 +603,10 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       minY = Math.min(...positions.map((p) => p.y));
     }
     const target = at || state.mouse || null;
-    const keepEdges = payload.keepEdges === true;
+    // 批外引用（`{ref: 'nodes.<别的节点>.output…'}`）：粘回同一个文档时目标节点还在，
+    // 引用照旧成立——画布上那就是卡片之间那条数据引用线；粘到别的工作流时目标不在，
+    // 摘掉（参数回到「未配置」），不会留下指向不存在节点的引用。
+    const sameDocument = !payload.sourceUri || payload.sourceUri === String(state.docUri || '');
     let dx = 40;
     let dy = 40;
     if (target && Number.isFinite(target.x) && Number.isFinite(target.y)) {
@@ -595,17 +627,9 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       for (const src of payload.nodes) {
         const copy = clone(src);
         copy.id = idMap.get(src.id);
-        if (!keepEdges) {
-          // 复制粘贴只带卡片自己：连的线不带过来。结构字段（children / ports /
-          // switch 的 cases.child 与 default_child）全部清空，参数里指向别的节点的引用
-          // 也一并摘掉——变量/输入绑定与字面量照旧（前者是「取值来自哪个变量」，
-          // 跨画布粘贴还要靠它把变量定义带过去）。
-          if (Array.isArray(copy.children)) copy.children = [];
-          delete copy.ports;
-          if (Array.isArray(copy.cases)) copy.cases = copy.cases.map((item: any) => ({ value: item ? item.value : undefined }));
-          delete copy.default_child;
-          detachNodeRefs(copy);
-        } else if (Array.isArray(copy.children)) {
+        // 结构字段（children / ports / switch 与状态机的 cases.child / default_child）：
+        // 留下指向同批节点的那些，指回旧 id 的一律清掉。
+        if (Array.isArray(copy.children)) {
           // 判断节点的 ports 与 children 对齐：children 被过滤时口位要一起筛。
           const ports = copy.type === 'condition' ? conditionPortsOf(src) : null;
           const kept = copy.children.map((id: string, index: number) => ({ id, port: ports ? ports[index] : undefined })).filter((item: { id: string }) => idMap.has(item.id));
@@ -615,11 +639,45 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
             if (nextPorts.length) copy.ports = nextPorts; else delete copy.ports;
           }
         }
+        if (Array.isArray(copy.cases)) {
+          // 分支按**原来的下标**留着（`case.<下标>` 的引脚就是这么算的），没被复制的
+          // 分支退化成只有取值的空分支，自己再接子节点。
+          copy.cases = copy.cases.map((entry: any) => {
+            const next: Record<string, unknown> = { value: entry ? entry.value : undefined };
+            const child = entry && typeof entry.child === 'string' ? idMap.get(entry.child) : undefined;
+            if (child) next.child = child;
+            return next;
+          });
+        }
+        const fallback = typeof copy.default_child === 'string' ? idMap.get(copy.default_child) : undefined;
+        if (fallback) copy.default_child = fallback; else delete copy.default_child;
+        // 跨文档粘贴时摘掉指向批外节点的数据引用；批内的留给 remap 接成新 id
+        // （同文档粘贴也走这里：批外目标还在，引用照旧成立）。
+        if (!sameDocument) detachNodeRefs(copy, (id) => idMap.has(id));
         remap(copy);
         const base = payload.layout[src.id] || { x: 0, y: 0 };
         layout()[copy.id] = { x: base.x + dx, y: base.y + dy };
         nodes().push(copy);
         created.push(copy.id);
+      }
+      // 线回来了，线上的手工折点也要回来：折点存在文档旁表里、按边的身份记，
+      // 不搬的话副本会重新自动走线，线形和源图不一样。引脚按**重建后**的结构重算
+      // （children 被筛过时下标会变），并跟着整组偏移。
+      const restored = (payload.edgeWaypoints || []).flatMap((entry) => {
+        const from = idMap.get(entry?.from?.node);
+        const to = idMap.get(entry?.to?.node);
+        if (!from || !to) return [];
+        const parent = nodeById(from);
+        if (!parent || !Array.isArray(parent.children) || !parent.children.includes(to)) return [];
+        return [{
+          from: { node: from, pin: structuralPinOf(parent, to) },
+          to: { node: to, pin: 'in' },
+          waypoints: entry.waypoints.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+        }];
+      });
+      if (restored.length) {
+        const table: any[] = Array.isArray(state.raw![EDGE_WAYPOINTS_KEY]) ? state.raw![EDGE_WAYPOINTS_KEY] : (state.raw![EDGE_WAYPOINTS_KEY] = []);
+        table.push(...restored);
       }
       state.selected = new Set(created);
       deps.onNodesCreated?.(created);
@@ -629,7 +687,7 @@ export function createCanvasCommands(deps: CommandsDeps): CanvasCommands {
       // 不补上的话同一个绑定会出现两种说法（新节点只显示「引用」）。
       reconcileVariableLinks(state.raw);
     });
-    toast(keepEdges ? `已粘贴 ${idMap.size} 个节点` : `已粘贴 ${idMap.size} 个节点（没带连线）`);
+    toast(`已粘贴 ${idMap.size} 个节点`);
     return true;
   }
 

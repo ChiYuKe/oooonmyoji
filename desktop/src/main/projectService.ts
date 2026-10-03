@@ -823,9 +823,9 @@ export class ProjectService {
     if (!filename || filename === '.' || filename === '..') filename = 'workflow-layout.png';
     if (!/\.png$/i.test(filename)) filename += '.png';
     const result = await dialog.showSaveDialog(owner, {
-      title: '导出完整工作流画布',
+      title: request.purpose === 'share' ? '保存式神图鉴分享图片' : '导出完整工作流画布',
       defaultPath: path.join(this.workflowRoot, filename),
-      buttonLabel: '导出',
+      buttonLabel: request.purpose === 'share' ? '保存' : '导出',
       filters: [{ name: 'PNG 图片', extensions: ['png'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });

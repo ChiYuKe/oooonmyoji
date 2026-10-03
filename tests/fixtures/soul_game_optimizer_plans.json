@@ -1,0 +1,539 @@
+{
+  "description": "Captured gear for the four game plans in the score discrepancy screenshot; player and gear identifiers removed.",
+  "base": {
+    "attack": 4154,
+    "hp": 11734.76,
+    "defense": 493.92,
+    "speed": 112,
+    "crit": 0.12,
+    "critDamage": 1.5,
+    "hit": 0,
+    "resist": 0
+  },
+  "result": {
+    "instanceId": "regression",
+    "fetchedAt": "2026-10-03T01:23:25.000Z",
+    "source": "memory",
+    "total": 9,
+    "failed": 0,
+    "warnings": [],
+    "souls": [
+      {
+        "id": "gear-1",
+        "itemId": 180001,
+        "suitId": 300030,
+        "position": null,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": true,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "attackAdditionVal",
+          "label": "攻击",
+          "value": 486,
+          "percent": false,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "debuffEnhance",
+            "label": "效果命中",
+            "value": 0.0696150702715473,
+            "percent": true,
+            "rolls": 2
+          },
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.1480908995103807,
+            "percent": true,
+            "rolls": 4
+          },
+          {
+            "name": "defenseAdditionRate",
+            "label": "防御加成",
+            "value": 0.055728208529523295,
+            "percent": true,
+            "rolls": 2
+          },
+          {
+            "name": "attackAdditionVal",
+            "label": "攻击",
+            "value": 26.0240041949908,
+            "percent": false,
+            "rolls": 1
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-2",
+        "itemId": 120006,
+        "suitId": 300030,
+        "position": 2,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": true,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "attackAdditionRate",
+          "label": "攻击加成",
+          "value": 0.55,
+          "percent": true,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "attackAdditionRate",
+            "label": "攻击加成",
+            "value": 0.15810435642952525,
+            "percent": true,
+            "rolls": 6
+          },
+          {
+            "name": "critRateAdditionVal",
+            "label": "暴击",
+            "value": 0.029744792976472464,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.03645000527138876,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "speedAdditionVal",
+            "label": "速度",
+            "value": 2.4610083958700657,
+            "percent": false,
+            "rolls": 1
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-3",
+        "itemId": 130006,
+        "suitId": 300030,
+        "position": 3,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": true,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "defenseAdditionVal",
+          "label": "防御",
+          "value": 104,
+          "percent": false,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "critRateAdditionVal",
+            "label": "暴击",
+            "value": 0.051676390943532505,
+            "percent": true,
+            "rolls": 2
+          },
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.10472250724002806,
+            "percent": true,
+            "rolls": 3
+          },
+          {
+            "name": "attackAdditionRate",
+            "label": "攻击加成",
+            "value": 0.024665360956008194,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "attackAdditionVal",
+            "label": "攻击",
+            "value": 48.132203922261844,
+            "percent": false,
+            "rolls": 2
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-4",
+        "itemId": 140006,
+        "suitId": 300031,
+        "position": 4,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": false,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "attackAdditionRate",
+          "label": "攻击加成",
+          "value": 0.55,
+          "percent": true,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "maxHpAdditionVal",
+            "label": "生命",
+            "value": 101.18846380734716,
+            "percent": false,
+            "rolls": 1
+          },
+          {
+            "name": "speedAdditionVal",
+            "label": "速度",
+            "value": 4.90384375381897,
+            "percent": false,
+            "rolls": 2
+          },
+          {
+            "name": "maxHpAdditionRate",
+            "label": "生命加成",
+            "value": 0.1142548453607431,
+            "percent": true,
+            "rolls": 4
+          },
+          {
+            "name": "attackAdditionVal",
+            "label": "攻击",
+            "value": 24.762229675000498,
+            "percent": false,
+            "rolls": 1
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-5",
+        "itemId": 150006,
+        "suitId": 300030,
+        "position": 5,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": false,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "maxHpAdditionVal",
+          "label": "生命",
+          "value": 2052,
+          "percent": false,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.18756928609713439,
+            "percent": true,
+            "rolls": 5
+          },
+          {
+            "name": "debuffResist",
+            "label": "效果抵抗",
+            "value": 0.07285608652010142,
+            "percent": true,
+            "rolls": 2
+          },
+          {
+            "name": "maxHpAdditionRate",
+            "label": "生命加成",
+            "value": 0.02683191552300414,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "critRateAdditionVal",
+            "label": "暴击",
+            "value": 0.02555247799138173,
+            "percent": true,
+            "rolls": 1
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-6",
+        "itemId": 160006,
+        "suitId": 300031,
+        "position": 6,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": false,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "critRateAdditionVal",
+          "label": "暴击",
+          "value": 0.55,
+          "percent": true,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "debuffResist",
+            "label": "效果抵抗",
+            "value": 0.03579454658580697,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "defenseAdditionRate",
+            "label": "防御加成",
+            "value": 0.02763478776959659,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "attackAdditionVal",
+            "label": "攻击",
+            "value": 69.36973095360317,
+            "percent": false,
+            "rolls": 3
+          },
+          {
+            "name": "maxHpAdditionRate",
+            "label": "生命加成",
+            "value": 0.10541536226563149,
+            "percent": true,
+            "rolls": 4
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-7",
+        "itemId": 110006,
+        "suitId": 300030,
+        "position": 1,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": false,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "attackAdditionVal",
+          "label": "攻击",
+          "value": 486,
+          "percent": false,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "speedAdditionVal",
+            "label": "速度",
+            "value": 8.073934237475227,
+            "percent": false,
+            "rolls": 3
+          },
+          {
+            "name": "maxHpAdditionRate",
+            "label": "生命加成",
+            "value": 0.025366376749939152,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.06941883588286031,
+            "percent": true,
+            "rolls": 2
+          },
+          {
+            "name": "attackAdditionRate",
+            "label": "攻击加成",
+            "value": 0.0816306843278274,
+            "percent": true,
+            "rolls": 3
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-8",
+        "itemId": 130006,
+        "suitId": 300030,
+        "position": 3,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": false,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "defenseAdditionVal",
+          "label": "防御",
+          "value": 104,
+          "percent": false,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.1051747797032882,
+            "percent": true,
+            "rolls": 3
+          },
+          {
+            "name": "debuffResist",
+            "label": "效果抵抗",
+            "value": 0.14640096913554743,
+            "percent": true,
+            "rolls": 4
+          },
+          {
+            "name": "maxHpAdditionRate",
+            "label": "生命加成",
+            "value": 0.02959549665653193,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "defenseAdditionVal",
+            "label": "防御",
+            "value": 4.094330353774286,
+            "percent": false,
+            "rolls": 1
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      },
+      {
+        "id": "gear-9",
+        "itemId": 180005,
+        "suitId": 300030,
+        "position": null,
+        "stars": 6,
+        "level": 15,
+        "locked": true,
+        "equipped": false,
+        "discarded": false,
+        "mainAttribute": {
+          "name": "maxHpAdditionVal",
+          "label": "生命",
+          "value": 2052,
+          "percent": false,
+          "rolls": 1
+        },
+        "subAttributes": [
+          {
+            "name": "debuffEnhance",
+            "label": "效果命中",
+            "value": 0.10758427484833895,
+            "percent": true,
+            "rolls": 3
+          },
+          {
+            "name": "debuffResist",
+            "label": "效果抵抗",
+            "value": 0.03936192864430462,
+            "percent": true,
+            "rolls": 1
+          },
+          {
+            "name": "critPowerAdditionVal",
+            "label": "暴击伤害",
+            "value": 0.14920880852868115,
+            "percent": true,
+            "rolls": 4
+          },
+          {
+            "name": "attackAdditionVal",
+            "label": "攻击",
+            "value": 23.371463231113623,
+            "percent": false,
+            "rolls": 1
+          }
+        ],
+        "intrinsicAttributes": [],
+        "attributesComplete": true
+      }
+    ]
+  },
+  "tables": {
+    "init": {
+      "110006": {
+        "equipType": 11
+      },
+      "120006": {
+        "equipType": 12
+      },
+      "130006": {
+        "equipType": 13
+      },
+      "140006": {
+        "equipType": 14
+      },
+      "150006": {
+        "equipType": 15
+      },
+      "160006": {
+        "equipType": 16
+      },
+      "180001": {
+        "equipType": 11
+      },
+      "180005": {
+        "equipType": 15
+      }
+    }
+  },
+  "expected": [
+    {
+      "score": "20038.98",
+      "attack": "10136.9",
+      "speed": "119.36",
+      "crit": "107.7",
+      "critDamage": "197.7",
+      "hp": "16780.6",
+      "hit": "7.0"
+    },
+    {
+      "score": "19835.75",
+      "attack": "10450.0",
+      "speed": "127.44",
+      "crit": "107.7",
+      "critDamage": "189.8",
+      "hp": "17078.3",
+      "hit": "0.0"
+    },
+    {
+      "score": "19745.80",
+      "attack": "9986.3",
+      "speed": "119.36",
+      "crit": "102.5",
+      "critDamage": "197.7",
+      "hp": "17127.9",
+      "hit": "7.0"
+    },
+    {
+      "score": "19695.43",
+      "attack": "10160.3",
+      "speed": "119.36",
+      "crit": "105.1",
+      "critDamage": "193.8",
+      "hp": "16465.7",
+      "hit": "17.7"
+    }
+  ]
+}

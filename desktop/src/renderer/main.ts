@@ -104,6 +104,8 @@ import { createInstancePicker, instanceLabel } from './instance-picker';
 import { createTitlebarMenus } from './titlebar-menus';
 import { installTeamBuilderResizer } from './team-builder-layout';
 import { installSoulCalculator } from './soul-calculator';
+import { installSoulOptimizer } from './soul-optimizer-view';
+import SoulOptimizerWorker from './soul-optimizer-worker?worker';
 import { openWorkflowHistory } from './workflow-history';
 import { parseEditorMessage } from '../shared/editor-messages';
 import { WORKFLOW_SUFFIX, parseDocument } from '../shared/workflow/graph-dsl';
@@ -892,9 +894,18 @@ function openAboutPage(): void {
 
 let disposeTeamBuilderResizer: (() => void) | undefined;
 let disposeSoulCalculator: (() => void) | undefined;
+let disposeSoulOptimizer: (() => void) | undefined;
 
 function bindUi(): void {
-  disposeSoulCalculator = installSoulCalculator(document.querySelector<HTMLElement>('#team-builder-soul-calculator')!, api);
+  // 御魂配装和设置/概览一样是工作台里的可停靠面板；点击工具栏「配装计算」时由停靠布局把它显示到前面。
+  const soulOptimizer = installSoulOptimizer(
+    document.querySelector<HTMLElement>('#module-soul-optimizer')!,
+    api,
+    () => new SoulOptimizerWorker(),
+    { open: () => workbenchFrame?.show('soulOptimizer') },
+  );
+  disposeSoulOptimizer = soulOptimizer.dispose;
+  disposeSoulCalculator = installSoulCalculator(document.querySelector<HTMLElement>('#team-builder-soul-calculator')!, api, soulOptimizer);
   disposeTeamBuilderResizer = installTeamBuilderResizer(
     document.querySelector<HTMLElement>('#module-onmyoji-team-builder')!,
     document.querySelector<HTMLElement>('#team-builder-resizer')!,
@@ -1191,6 +1202,7 @@ window.addEventListener('beforeunload', () => {
   settings.dispose();
   disposeTeamBuilderResizer?.();
   disposeSoulCalculator?.();
+  disposeSoulOptimizer?.();
   lifecycle.suppressRemovals();
   sharedPanelDockBridge?.dispose();
   docking?.dispose();

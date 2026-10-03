@@ -45,6 +45,7 @@
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="onmyojiTeamBuilder" aria-checked="false"><span>阴阳师阵容配队</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="soulOptimizer" aria-checked="false"><span>御魂配装</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="referenceViewer" aria-checked="false"><span>引用查看器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="variableReferences" aria-checked="false"><span>变量引用</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
@@ -254,6 +255,8 @@
 
         <section id="module-reference-viewer" class="dock-module reference-viewer-module" aria-label="引用查看器"></section>
 
+        <section id="module-soul-optimizer" class="dock-module soul-optimizer-module" aria-label="御魂配装"></section>
+
         <section id="module-onmyoji-team-builder" class="dock-module onmyoji-team-builder-module" aria-label="阴阳师阵容配队">
           <aside id="team-builder-sidebar" class="team-builder-sidebar">
             <header class="team-builder-pane-header">栏目</header>
@@ -265,40 +268,84 @@
           <section class="team-builder-content" aria-label="阵容内容">
             <header class="team-builder-pane-header">御魂计算</header>
             <div id="team-builder-soul-calculator" class="team-builder-content-body soul-calculator" role="tabpanel" aria-labelledby="team-builder-tab-soul-calculator">
-              <div class="soul-toolbar">
-                <label for="soul-instance">模拟器实例</label>
-                <select id="soul-instance" aria-label="选择获取御魂的实例"><option value="">请选择实例</option></select>
-                <button id="soul-refresh" type="button">刷新实例</button>
-                <button id="soul-fetch" type="button" disabled>获取御魂</button>
-                <button id="soul-cancel" type="button" hidden>取消获取</button>
-              </div>
-              <div class="soul-status-area">
-                <p id="soul-status" role="status" aria-live="polite">选择实例后，点击“获取御魂”读取当前角色的背包。</p>
-                <progress id="soul-progress" aria-label="御魂读取进度" hidden></progress>
-                <p id="soul-summary" class="soul-summary"></p>
+              <div class="soul-source">
+                <div class="soul-toolbar">
+                  <label for="soul-instance">模拟器实例</label>
+                  <select id="soul-instance" aria-label="选择获取御魂的实例"><option value="">请选择实例</option></select>
+                  <button id="soul-refresh" type="button">刷新实例</button>
+                  <button id="soul-fetch" type="button" disabled>获取御魂</button>
+                  <button id="soul-cancel" type="button" hidden>取消获取</button>
+                  <div class="soul-sort-controls" role="group" aria-label="御魂排序">
+                    <label for="soul-sort">排序</label>
+                    <select id="soul-sort" aria-label="御魂排序方式">
+                      <option value="default">默认顺序</option>
+                      <optgroup label="基础信息"><option value="level">等级</option><option value="stars">星级</option></optgroup>
+                    </select>
+                    <button id="soul-sort-direction" type="button" aria-label="排序方向：从高到低" title="从高到低，点击切换为从低到高" disabled>↓</button>
+                  </div>
+                </div>
+                <div class="soul-status-area">
+                  <p id="soul-status" role="status" aria-live="polite">选择实例后，点击“获取御魂”读取当前角色的背包。</p>
+                  <progress id="soul-progress" aria-label="御魂读取进度" hidden></progress>
+                  <p id="soul-summary" class="soul-summary"></p>
+                </div>
               </div>
               <div class="soul-filters">
-                <input id="soul-search" type="search" placeholder="搜索御魂名称、套装编号或 ID" aria-label="搜索御魂" />
-                <select id="soul-stars" aria-label="按星级筛选"><option value="">全部星级</option><option value="6">六星</option><option value="5">五星</option><option value="4">四星</option><option value="3">三星</option><option value="2">二星</option><option value="1">一星</option></select>
-                <select id="soul-state" aria-label="按状态筛选"><option value="">全部状态</option><option value="locked">已锁定</option><option value="equipped">已装备</option><option value="discarded">已弃置</option></select>
+                <label class="soul-search-field">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
+                  <input id="soul-search" type="search" placeholder="搜索御魂名称、套装编号或 ID" aria-label="搜索御魂" />
+                </label>
+                <div id="soul-active-filters" class="soul-active-filters" aria-label="已选筛选条件" hidden></div>
+                <button id="soul-filter-toggle" type="button" aria-expanded="false" aria-controls="soul-filter-panel">筛选</button>
               </div>
               <div class="soul-results-layout">
-              <div class="soul-results">
-                <div id="soul-empty" class="soul-empty">尚未获取御魂数据</div>
-                <table id="soul-table" hidden>
-                  <caption class="sr-only">所选实例的御魂背包</caption>
-                  <thead><tr><th>御魂</th><th>位置</th><th>星级</th><th>等级</th><th>主属性</th><th>副属性</th><th>状态</th><th>御魂 ID</th></tr></thead>
-                  <tbody id="soul-rows"></tbody>
-                </table>
+                <div class="soul-results">
+                  <div id="soul-empty" class="soul-empty">尚未获取御魂数据</div>
+                  <ul id="soul-grid" class="soul-grid" aria-label="所选实例的御魂背包" hidden></ul>
+                </div>
+                <aside id="soul-filter-drawer" class="soul-filter-drawer" aria-labelledby="soul-filter-title" hidden>
+                  <header class="soul-window-header"><strong id="soul-filter-title">筛选</strong><button id="soul-filter-close" type="button" aria-label="关闭筛选">×</button></header>
+                  <div id="soul-filter-panel" class="soul-filter-panel">
+                    <div class="soul-filter-heading"><p id="soul-filter-summary" aria-live="polite">全部御魂</p><button id="soul-filter-reset" type="button" disabled>清空条件</button></div>
+                    <p class="soul-filter-help">同组可多选，满足任意一项</p>
+                    <section class="soul-filter-group"><h4>类型</h4>
+                      <details id="soul-type-picker" class="soul-type-picker"><summary id="soul-suit-label">全部类型</summary>
+                        <input id="soul-type-search" type="search" placeholder="查找御魂类型" aria-label="查找御魂类型" />
+                        <div id="soul-type-options" class="soul-type-options"></div>
+                      </details>
+                    </section>
+                    <section class="soul-filter-group"><h4>位置</h4><div class="soul-choice-options" data-soul-choice="soul-position" aria-label="位置"></div></section>
+                    <section class="soul-filter-group"><h4>星级</h4><div class="soul-choice-options" data-soul-choice="soul-stars" aria-label="星级"></div></section>
+                    <section class="soul-filter-group"><h4>等级</h4><div class="soul-choice-options" data-soul-choice="soul-level" aria-label="等级"></div></section>
+                    <section class="soul-filter-group"><h4>状态</h4><div class="soul-choice-options" data-soul-choice="soul-state" aria-label="状态"></div></section>
+                    <section class="soul-filter-group"><h4>主属性</h4><div class="soul-choice-options" data-soul-choice="soul-main-attribute" aria-label="主属性"></div></section>
+                    <section class="soul-filter-group"><h4>固有属性</h4><div class="soul-choice-options" data-soul-choice="soul-intrinsic-attribute" aria-label="固有属性"></div></section>
+                    <section class="soul-filter-group soul-sub-group"><h4>副属性</h4><div class="soul-sub-controls"><p class="soul-sub-legend">○ 必须包含　× 不得包含</p><div id="soul-sub-attributes" class="soul-attribute-options"></div></div></section>
+                    <section class="soul-filter-group"><h4>条数</h4><div class="soul-choice-options" data-soul-choice="soul-sub-count" aria-label="副属性条数"></div></section>
+                  </div>
+                </aside>
               </div>
-              <aside id="soul-detail" class="soul-detail" aria-label="御魂详细属性"><p>选择一条御魂查看详情</p></aside>
+              <div id="soul-detail-window" class="soul-detail-window" popover="manual" role="tooltip">
+                <header class="soul-window-header"><strong>御魂详情</strong></header>
+                <div id="soul-detail" class="soul-detail"><p>选择一条御魂查看详情</p></div>
               </div>
-              <footer class="soul-pagination">
-                <span id="soul-page-info">0 条御魂</span>
-                <button id="soul-prev" type="button" disabled>上一页</button>
-                <button id="soul-next" type="button" disabled>下一页</button>
+              <div hidden aria-hidden="true">
+                <select id="soul-stars" aria-label="按星级筛选"><option value="">全部星级</option><option value="6">六星</option><option value="5">五星</option><option value="4">四星</option><option value="3">三星</option><option value="2">二星</option><option value="1">一星</option></select>
+                <select id="soul-state" aria-label="按状态筛选"><option value="">全部状态</option><option value="locked">已锁定</option><option value="unlocked">未锁定</option><option value="equipped">已装备</option><option value="unequipped">未装备</option><option value="discarded">已弃置</option><option value="kept">未弃置</option></select>
+                <select id="soul-suit"><option value="">全部类型</option></select>
+                <select id="soul-position"><option value="">全部位置</option><option value="1">壹号位</option><option value="2">贰号位</option><option value="3">叁号位</option><option value="4">肆号位</option><option value="5">伍号位</option><option value="6">陆号位</option></select>
+                <select id="soul-level"><option value="">全部等级</option><option value="0-2">+0～+2</option><option value="3-5">+3～+5</option><option value="6-8">+6～+8</option><option value="9-11">+9～+11</option><option value="12-14">+12～+14</option><option value="15">+15</option></select>
+                <select id="soul-sub-count" aria-label="按副属性条数筛选"><option value="">全部条数</option><option value="0">副属性 0 条</option><option value="1">副属性 1 条</option><option value="2">副属性 2 条</option><option value="3">副属性 3 条</option><option value="4">副属性 4 条</option></select>
+                <select id="soul-main-attribute"><option value="">全部主属性</option></select>
+                <select id="soul-intrinsic-attribute"><option value="">全部固有属性</option></select>
+              </div>
+              <footer class="soul-result-count">
+                <span id="soul-count">0 条御魂</span>
+                <details class="soul-note">
+                  <summary>数据说明</summary>
+                  <p>属性按游戏面板数值显示，未加载的属性标记为待解析。当前仅包含背包御魂，不包含收纳库存。图标来自藏宝阁官方资源；数据按实例保存在本地，打开即载入上次结果。</p>
+                </details>
               </footer>
-              <p class="soul-note">已解析的属性按游戏面板数值显示；未加载的属性会标记为待解析。暂不包含收纳库存，图标图片尚未解包。</p>
             </div>
           </section>
         </section>

@@ -96,7 +96,9 @@ const api: OnmyojiDesktopApi = {
   getDebugSettings: () => ipcRenderer.invoke('runtime:get-debug-settings'),
   updateDebugSettings: (settings: RuntimeDebugSettings) => ipcRenderer.invoke('runtime:update-debug-settings', settings),
   listInstances: () => ipcRenderer.invoke('runtime:list-instances'),
+  listSoulInstances: () => ipcRenderer.invoke('souls:list-instances'),
   fetchSouls: (instanceId) => ipcRenderer.invoke('souls:fetch', instanceId),
+  loadSouls: (instanceId) => ipcRenderer.invoke('souls:load', instanceId),
   cancelSoulFetch: (instanceId) => ipcRenderer.invoke('souls:cancel', instanceId),
   onSoulFetchProgress: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, value: import('../shared/souls').SoulFetchProgress) => listener(value);
@@ -107,6 +109,7 @@ const api: OnmyojiDesktopApi = {
   readAssetData: (paths) => ipcRenderer.invoke('project:read-asset-data', paths),
   saveTemplate: (request: SaveTemplateRequest) => ipcRenderer.invoke('project:save-template', request),
   saveCanvas: (request: SaveCanvasRequest) => ipcRenderer.invoke('project:save-canvas', request),
+  copyImageToClipboard: (dataUrl) => ipcRenderer.invoke('project:copy-image', dataUrl),
   captureRoi: (request: RoiCaptureRequest) => ipcRenderer.invoke('runtime:capture-roi', request),
   checkTemplate: (request: TemplateCheckRequest) => ipcRenderer.invoke('runtime:check-template', request),
   openVisionTest: (instanceId: string) => ipcRenderer.invoke('tools:open-vision-test', instanceId),

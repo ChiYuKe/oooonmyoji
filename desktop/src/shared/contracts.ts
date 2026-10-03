@@ -52,6 +52,13 @@ export interface RuntimeInstance {
   displayName?: string;
 }
 
+/** Only the soul browser includes offline instances with validated local caches. */
+export interface SoulInstance extends RuntimeInstance {
+  online: boolean;
+  cachedAt?: string;
+  cachedCount?: number;
+}
+
 export interface ActionSpec {
   name: string;
   version: string;
@@ -349,6 +356,7 @@ export interface SaveTemplateRequest {
 export interface SaveCanvasRequest {
   filename: string;
   dataUrl: string;
+  purpose?: 'share';
 }
 
 /** 引用查看器：引用图中一个节点（工作流 / 模板图片 / 奖励目录 / 其他）。 */
@@ -486,13 +494,16 @@ export interface OnmyojiDesktopApi {
   getDebugSettings(): Promise<RuntimeDebugSettings>;
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
+  listSoulInstances(): Promise<SoulInstance[]>;
   fetchSouls(instanceId: string): Promise<SoulSnapshot | null>;
+  loadSouls(instanceId: string): Promise<SoulSnapshot | null>;
   cancelSoulFetch(instanceId: string): Promise<void>;
   onSoulFetchProgress(listener: (progress: SoulFetchProgress) => void): () => void;
   listAssets(): Promise<AssetImage[]>;
   readAssetData(paths: string[]): Promise<Array<{ path: string; dataUrl: string }>>;
   saveTemplate(request: SaveTemplateRequest): Promise<string>;
   saveCanvas(request: SaveCanvasRequest): Promise<string | undefined>;
+  copyImageToClipboard(dataUrl: string): Promise<void>;
   captureRoi(request: RoiCaptureRequest): Promise<RoiCaptureResult>;
   checkTemplate(request: TemplateCheckRequest): Promise<TemplateCheckResult>;
   /** 打开（或聚焦）独立的模拟器画面测试工具窗口。 */

@@ -178,6 +178,36 @@
 :root[data-theme="light"] .soul-status-area .error {
     color: var(--danger, #885050)
 }
+:root[data-theme="light"] .soul-card[data-stars="6"] {
+    --soul-rarity: #6d5a3f
+}
+:root[data-theme="light"] .soul-card[data-stars="5"] {
+    --soul-rarity: #696969
+}
+:root[data-theme="light"] .soul-card[data-stars="4"] {
+    --soul-rarity: #4c5f6d
+}
+:root[data-theme="light"] .soul-position-portrait[data-stars="6"] {
+    --soul-slot-color: #6f5a3c
+}
+:root[data-theme="light"] .soul-position-portrait[data-stars="5"] {
+    --soul-slot-color: #645772
+}
+:root[data-theme="light"] .soul-position-portrait[data-stars="4"] {
+    --soul-slot-color: #4c5f6d
+}
+:root[data-theme="light"] .soul-card-badges .soul-card-equipped {
+    color: #585858
+}
+:root[data-theme="light"] .soul-card-badges .soul-card-lock {
+    color: #4c4c4c
+}
+:root[data-theme="light"] .soul-card-badges .soul-card-discarded {
+    color: #755555
+}
+:root[data-theme="light"] .soul-effect-number, :root[data-theme="light"] .effect-number {
+    color: #48606e
+}
 :root[data-theme="light"] .module-command-strip {
     border-bottom: 1px solid #e8e8e8;
     background: var(--dock-panel-background, #ededed)
@@ -1509,6 +1539,12 @@
 }
 :root[data-theme="light"] .vision-browser-item-name {
     color: #383838
+}
+:root[data-theme="light"] .soul-optimizer::backdrop {
+    background: rgba(0, 0, 0, 0.333)
+}
+:root[data-theme="light"] .soul-optimizer [data-ui="status"].error {
+    color: #875151
 }
 :root[data-theme="light"] {
     --ui-bg: #f3f3f3;

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AiAssistant } from './aiAssistant';
 import { SoulService } from './soulService';
 import { loadAiImage } from './ai-images';
+import { copyPngToClipboard } from './clipboardImage';
 import { pathToFileURL } from 'node:url';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -14,6 +15,7 @@ import {
   ipcMain,
   net,
   nativeImage,
+  clipboard,
   safeStorage,
   nativeTheme,
   protocol,
@@ -429,18 +431,26 @@ function registerIpc(): void {
   ipcMain.handle('project:read-asset-data', (_event, paths: string[]) => project.readAssetData(paths));
   ipcMain.handle('project:save-template', (_event, request: SaveTemplateRequest) => project.saveTemplate(request));
   ipcMain.handle('project:save-canvas', (event, request: SaveCanvasRequest) => project.saveCanvas(ownerWindow(event), request));
+  ipcMain.handle('project:copy-image', (event, dataUrl: unknown) => {
+    ownerWindow(event);
+    return copyPngToClipboard(dataUrl, items => clipboard.write(items), nativeImage.createFromDataURL);
+  });
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
+  ipcMain.handle('souls:list-instances', async () => souls!.listInstances(await runtime.listInstances()));
   ipcMain.handle('souls:fetch', async (_event, instanceId: unknown) => {
     if (typeof instanceId !== 'string' || !(await runtime.listInstances()).some((item) => item.id === instanceId)) {
       throw new Error('所选实例已离线，请刷新实例列表');
     }
-    if (runtime.running || workflowTestService?.running) throw new Error('请先停止工作流或节点测试，再获取御魂');
     return souls!.fetch(instanceId);
+  });
+  // 载入上次保存的快照：实例可以已经离线，所以这里不校验在线状态。
+  ipcMain.handle('souls:load', (_event, instanceId: unknown) => {
+    if (typeof instanceId !== 'string' || !instanceId) throw new Error('请选择有效的模拟器实例');
+    return souls!.load(instanceId);
   });
   ipcMain.handle('souls:cancel', (_event, instanceId: unknown) => typeof instanceId === 'string' ? souls?.cancel(instanceId) : undefined);
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
-    if (souls?.running) throw new Error('正在获取御魂，请等待完成或取消后再运行工作流');
     if (workflowTestService?.usingDevice) throw new Error('脚本测试正在运行，请先停止测试');
     // 每次用户重新启动工作流时，先清掉日志面板中上次运行的记录。
     _event.sender.send('runtime:log-clear');
@@ -473,7 +483,6 @@ function registerIpc(): void {
     return result.filePaths;
   });
   ipcMain.handle('test:start', (event, request: WorkflowTestRequest) => {
-    if (souls?.running) throw new Error('正在获取御魂，请等待完成或取消后再运行节点测试');
     testOwner(event);
     if (request.mode === 'live' && (runtime.running || visionTestStream?.running)) throw new Error('请先停止正在运行的脚本或画面测试');
     if (request.images?.some((file) => !workflowTestImages.has(path.resolve(file)))) throw new Error('请通过选择截图按钮重新选择文件');

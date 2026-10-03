@@ -50,7 +50,7 @@ import { SHARED_PANEL_DEFINITIONS } from './docking/shared-panels';
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
-export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'referenceViewer' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulOptimizer' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -243,6 +243,16 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     initialHeight: 720,
     minimumWidth: 320,
     minimumHeight: 220,
+  },
+  soulOptimizer: {
+    title: '御魂配装',
+    moduleElementId: 'module-soul-optimizer',
+    reference: 'onmyojiTeamBuilder',
+    direction: 'within',
+    initialWidth: 1000,
+    initialHeight: 760,
+    minimumWidth: 320,
+    minimumHeight: 240,
   },
   variableReferences: {
     ...SHARED_PANEL_DEFINITIONS.variableReferences,

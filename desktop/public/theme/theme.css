@@ -17,6 +17,8 @@
   --blue: #bfbfbf; --blue-strong: #eeeeee; --accent: var(--ui-focus);
   --button: #4a4a4a; --button-hover: #595959;
   --green: #8bc6a4; --red: #ed9098; --yellow: #dbbc7e;
+  --hero-rarity-ur: #e6a0b6; --hero-rarity-sp: #e4ab80; --hero-rarity-ssr: #dbbc7e;
+  --hero-rarity-sr: #baa5df; --hero-rarity-r: #8ebfdb; --hero-rarity-n: #b3b8bf;
   --success: var(--green); --danger: var(--red); --warning: var(--yellow); --info: var(--blue);
   --wire: #aaaaaa; --grid: rgba(255,255,255,.035); --canvas-grid: rgba(255,255,255,.05);
   --content-folder-icon: #d0d0d0; --content-folder-tile: #303030;
@@ -111,6 +113,8 @@
   --panel: var(--ui-panel); --panel-2: var(--ui-surface); --border: #c3ccd4; --border-soft: var(--ui-line);
   --text: var(--ui-text); --fg: var(--ui-text); --muted: var(--ui-muted); --status: var(--light-chrome);
   --blue: #27698f; --blue-strong: #27698f; --green: #397747; --red: #a63e46; --yellow: #806323;
+  --hero-rarity-ur: #a54066; --hero-rarity-sp: #a15b28; --hero-rarity-ssr: #806323;
+  --hero-rarity-sr: #7550a4; --hero-rarity-r: #27698f; --hero-rarity-n: #5e6b76;
   --success: #397747; --danger: #a63e46; --warning: #806323; --info: #386c88;
   --wire: #8192a0; --grid: rgba(67,86,103,.045);
   --content-folder-icon: #515b64; --content-folder-tile: #e4e8eb;
@@ -388,3 +392,5 @@
 :root[data-theme] #inspector-body .parameter-bound-note { color: var(--ui-muted); }
 :root[data-theme] #inspector-body .section-header:hover { background: var(--ui-hover); }
 :root[data-theme] #inspector-body .danger:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-danger) 12%, var(--ui-panel)); color: var(--ui-danger); }
+:root[data-theme="light"] .shikigami-owned-addition,
+:root[data-theme="light"] .shikigami-owned-soul-attributes .soul-sub-attribute .soul-detail-attribute-value { color: #27698f; }

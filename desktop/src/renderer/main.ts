@@ -103,6 +103,7 @@ import { createEditorHost } from './editor-host';
 import { createInstancePicker, instanceLabel } from './instance-picker';
 import { createTitlebarMenus } from './titlebar-menus';
 import { installTeamBuilderResizer } from './team-builder-layout';
+import { installTeamBuilderPages } from './shikigami-atlas';
 import { installSoulCalculator } from './soul-calculator';
 import { installSoulOptimizer } from './soul-optimizer-view';
 import SoulOptimizerWorker from './soul-optimizer-worker?worker';
@@ -895,6 +896,7 @@ function openAboutPage(): void {
 let disposeTeamBuilderResizer: (() => void) | undefined;
 let disposeSoulCalculator: (() => void) | undefined;
 let disposeSoulOptimizer: (() => void) | undefined;
+let disposeTeamBuilderPages: (() => void) | undefined;
 
 function bindUi(): void {
   // 御魂配装和设置/概览一样是工作台里的可停靠面板；点击工具栏「配装计算」时由停靠布局把它显示到前面。
@@ -906,6 +908,7 @@ function bindUi(): void {
   );
   disposeSoulOptimizer = soulOptimizer.dispose;
   disposeSoulCalculator = installSoulCalculator(document.querySelector<HTMLElement>('#team-builder-soul-calculator')!, api, soulOptimizer);
+  disposeTeamBuilderPages = installTeamBuilderPages(document.querySelector<HTMLElement>('#module-onmyoji-team-builder')!, api);
   disposeTeamBuilderResizer = installTeamBuilderResizer(
     document.querySelector<HTMLElement>('#module-onmyoji-team-builder')!,
     document.querySelector<HTMLElement>('#team-builder-resizer')!,
@@ -1203,6 +1206,7 @@ window.addEventListener('beforeunload', () => {
   disposeTeamBuilderResizer?.();
   disposeSoulCalculator?.();
   disposeSoulOptimizer?.();
+  disposeTeamBuilderPages?.();
   lifecycle.suppressRemovals();
   sharedPanelDockBridge?.dispose();
   docking?.dispose();

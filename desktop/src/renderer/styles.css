@@ -569,6 +569,7 @@ select option:checked { color: #fff; }
 .soul-card.selected::after, .shikigami-atlas-card[aria-pressed="true"]::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--content-selection-border); }
 .soul-calculator .soul-card:focus-visible, .shikigami-atlas .shikigami-atlas-card:focus-visible { outline: none; background: var(--surface-hover); }
 .soul-card:focus-visible .soul-card-name { text-decoration: underline; text-underline-offset: 3px; }
+.shikigami-atlas-card:focus-visible .shikigami-atlas-card-name { text-decoration: underline; text-underline-offset: 3px; }
 .soul-card-top { display: flex; justify-content: space-between; align-items: center; width: 100%; height: 18px; font-size: 11px; }
 .soul-card-level { color: var(--muted); font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums; }
 .soul-card-position { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 2px; background: var(--surface); color: var(--muted); }
@@ -636,7 +637,7 @@ select option:checked { color: #fff; }
   min-height: 0;
   overflow: auto;
 }
-.team-builder-categories { padding: 6px; }
+.team-builder-categories { display: flex; flex-direction: column; gap: 6px; padding: 8px 6px; }
 .team-builder-category {
   width: 100%;
   min-height: 30px;
@@ -655,6 +656,124 @@ select option:checked { color: #fff; }
 .team-builder-category:focus-visible {
   outline: 1px solid var(--ui-focus, var(--blue));
   outline-offset: -1px;
+}
+.team-builder-content > [role="tabpanel"][hidden] { display: none !important; }
+.shikigami-atlas { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow: hidden; background: var(--dock-panel-background, var(--surface)); container-type: inline-size; }
+.shikigami-atlas button, .shikigami-atlas input { font: inherit; font-size: 12px; color: var(--text); }
+.shikigami-atlas button { cursor: pointer; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 4px; }
+.shikigami-atlas button:hover { background: var(--surface-hover); }
+.shikigami-atlas button[aria-pressed="true"] { border-color: var(--content-selection-frame); background: var(--content-selection-surface); color: var(--content-selection-text); }
+.shikigami-atlas button:focus-visible, .shikigami-atlas input:focus-visible { outline: 2px solid var(--ui-focus, var(--blue)); outline-offset: 2px; }
+.shikigami-atlas-toolbar { display: flex; align-items: center; gap: 14px; flex: none; }
+.shikigami-atlas-search { display: flex; align-items: center; gap: 9px; flex: 0 1 260px; min-width: 160px; padding: 7px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: var(--muted); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.shikigami-atlas-search:hover, .shikigami-atlas-search:focus-within { background: var(--surface-hover); }
+.shikigami-atlas-search input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 0; }
+.shikigami-atlas .shikigami-atlas-search input:focus-visible { outline: none; }
+.shikigami-atlas-search input::placeholder { color: var(--muted); }
+.shikigami-atlas-toolbar > span { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.shikigami-atlas-toolbar > button { padding: 6px 14px; flex: none; }
+.soul-optimizer.shikigami-share { width: min(1320px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 0; }
+.shikigami-share[open] { display: flex; flex-direction: column; }
+.shikigami-share .soul-optimizer-header { padding: 16px 20px; flex: none; }
+.shikigami-share-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 20px; flex: none; border-bottom: 1px solid var(--border-soft); }
+.shikigami-share-toolbar label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.shikigami-share-toolbar select { min-width: 90px; }
+.shikigami-share-toolbar > span { margin-left: auto; color: var(--muted); font-size: 11px; }
+.shikigami-share-preview { min-height: 120px; overflow: auto; padding: 16px; background: var(--surface-raised); scrollbar-gutter: stable; }
+.shikigami-share-preview canvas { display: block; width: 100%; height: auto; box-shadow: 0 2px 8px #0002; }
+@media (max-width: 650px) {
+  .soul-optimizer.shikigami-share { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .shikigami-share .soul-optimizer-header, .shikigami-share-toolbar { padding: 12px; }
+  .shikigami-share-toolbar { gap: 8px; }
+  .shikigami-share-toolbar > span { margin-left: 0; flex-basis: 100%; }
+  .shikigami-share-preview { padding: 8px; }
+}
+.shikigami-atlas-warehouse { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; }
+.shikigami-atlas-warehouse label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.shikigami-atlas-warehouse select { width: 220px; max-width: 100%; }
+.shikigami-atlas-warehouse > span { font-size: 11px; color: var(--muted); }
+.shikigami-atlas-ownership-status { margin: 0; flex: none; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.shikigami-atlas-ownership-status.is-error { color: var(--danger, #df8a7d); }
+.shikigami-atlas-rarities select { margin-left: auto; min-width: 120px; }
+.shikigami-atlas-card-ownership { order: -1; margin-right: auto; max-width: calc(100% - 27px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 9px; border-radius: 2px; padding: 1px 2px; background: var(--surface); }
+.shikigami-atlas-card-ownership.is-owned, .shikigami-atlas-owned { color: #94b9a7; }
+.hero-rarity { color: var(--hero-rarity-color, var(--muted)); font-weight: 600; }
+.hero-rarity[data-rarity="6"] { --hero-rarity-color: var(--hero-rarity-ur); }
+.hero-rarity[data-rarity="5"] { --hero-rarity-color: var(--hero-rarity-sp); }
+.hero-rarity[data-rarity="4"] { --hero-rarity-color: var(--hero-rarity-ssr); }
+.hero-rarity[data-rarity="3"] { --hero-rarity-color: var(--hero-rarity-sr); }
+.hero-rarity[data-rarity="2"] { --hero-rarity-color: var(--hero-rarity-r); }
+.hero-rarity[data-rarity="1"] { --hero-rarity-color: var(--hero-rarity-n); }
+.shikigami-atlas-rarities { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.shikigami-atlas-rarities button { min-width: 48px; height: 29px; padding: 4px 12px; border-color: transparent; background: var(--surface-raised); color: color-mix(in srgb, var(--text) 85%, var(--muted)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.shikigami-atlas .shikigami-atlas-rarities button[aria-pressed="true"], .shikigami-atlas .shikigami-atlas-rarities button:active { border-color: transparent; background: var(--ui-selected, var(--surface-hover)); color: var(--content-selection-text); font-weight: 500; }
+.shikigami-atlas-rarities button:focus-visible { outline: none; background: var(--ui-selected, var(--surface-hover)); text-decoration: underline; text-underline-offset: 3px; }
+.shikigami-atlas-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; flex: 1; min-height: 0; }
+.shikigami-atlas-list { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.shikigami-atlas-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; padding: 10px; align-content: start; }
+.shikigami-atlas-card { min-width: 0; text-align: center; }
+.shikigami-atlas-card-top { display: flex; justify-content: flex-end; align-items: center; width: 100%; height: 18px; flex: none; }
+.shikigami-atlas-card-rarity { display: inline-grid; place-items: center; min-width: 24px; height: 19px; padding: 0 3px; border-radius: 2px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.shikigami-atlas-card .soul-picker-portrait { flex: none; width: 48px; height: 48px; margin: 4px 0; }
+.shikigami-atlas-card-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; width: 100%; min-height: 32px; max-height: 32px; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; font-weight: 500; line-height: 16px; }
+.shikigami-atlas-card-meta { display: flex; justify-content: center; align-items: center; gap: 4px; align-self: stretch; flex: none; margin-top: auto; min-height: 18px; padding-top: 4px; border-top: 1px solid var(--border-soft); }
+.shikigami-atlas-card-meta small { padding: 0 2px; border-radius: 2px; background: var(--surface); color: var(--muted); font-size: 10px; line-height: 14px; white-space: nowrap; }
+.shikigami-atlas-detail { min-width: 0; overflow: auto; padding: 16px; background: color-mix(in srgb, var(--surface-raised) 40%, var(--surface)); border: 0; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); }
+.shikigami-atlas-detail-heading { display: flex; align-items: center; gap: 12px; }
+.shikigami-atlas-detail-heading .soul-picker-portrait { width: 56px; height: 56px; flex: none; }
+.shikigami-atlas-detail-heading small { font-size: 11px; color: var(--muted); }
+.shikigami-atlas-detail-heading h2 { font-size: 15px; margin: 5px 0 0; font-weight: 500; }
+.shikigami-atlas-caption { font-size: 11px; color: var(--muted); line-height: 1.65; margin: 15px 0 0; }
+.shikigami-atlas-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); margin: 16px 0 0; padding: 18px 0; }
+.shikigami-atlas-stats dt { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+.shikigami-atlas-stats dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.shikigami-atlas-empty { grid-column: 1 / -1; text-align: center; padding: 35px 10px; font-size: 12px; color: var(--muted); }
+.shikigami-atlas-detail section[hidden] { display: none; }
+.shikigami-atlas-detail-views { display: flex; gap: 6px; margin-top: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.shikigami-atlas-detail-views button { padding: 6px 16px; border-color: transparent; color: var(--muted); }
+.shikigami-atlas .shikigami-atlas-detail-views button[aria-pressed="true"] { border-color: transparent; background: var(--surface-hover); color: var(--text); }
+.shikigami-skill-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 18px; }
+.shikigami-skill-buttons button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 10px 4px; border-color: transparent; background: color-mix(in srgb, var(--surface-raised) 40%, var(--surface)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; transition: background-color 120ms ease; }
+.shikigami-atlas .shikigami-skill-buttons button:hover { background: var(--surface-raised); }
+.shikigami-atlas .shikigami-skill-buttons button[aria-pressed="true"] { border-color: transparent; background: var(--surface-hover); color: var(--text); }
+.shikigami-skill-buttons button[aria-pressed="true"]::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--content-selection-border); }
+.shikigami-atlas-detail button:focus-visible { outline: none; background: var(--surface-hover); text-decoration: underline; text-underline-offset: 3px; }
+.shikigami-skill-icon { display: grid; place-items: center; position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; overflow: hidden; font-size: 20px; flex: none; background: var(--surface); }
+.shikigami-skill-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.shikigami-skill-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.shikigami-skill-heading h3 { font-size: 13px; font-weight: 500; margin: 0; }
+.shikigami-skill-cost { font-size: 10px; padding: 2px 5px; color: var(--muted); background: var(--surface); border: 0; border-radius: 2px; }
+.shikigami-skill-description { font-size: 12px; line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; margin: 12px 0; }
+.shikigami-atlas .shikigami-skill-term { display: inline; padding: 0; border: 0; border-radius: 0; background: transparent; color: #8ebfdb; font: inherit; font-weight: 600; line-height: inherit; text-align: inherit; vertical-align: baseline; white-space: inherit; text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 55%, transparent); cursor: help; }
+.shikigami-atlas .shikigami-skill-term:hover, .shikigami-atlas .shikigami-skill-term:focus-visible { outline: none; background: transparent; text-decoration-style: solid; }
+.shikigami-term-tooltip { position: fixed; inset: auto; margin: 0; padding: 14px 16px; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; border: 0; border-radius: 4px; background: var(--surface-raised); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18); font-size: 12px; line-height: 1.8; }
+.shikigami-term-tooltip:popover-open { display: block; }
+.shikigami-term-definition + .shikigami-term-definition { border-top: 1px solid var(--border-soft); margin-top: 10px; padding-top: 10px; }
+.shikigami-term-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 5px; }
+.shikigami-term-heading strong { font-size: 13px; font-weight: 600; }
+.shikigami-term-heading span { color: var(--muted); font-size: 10px; }
+.shikigami-term-definition p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.shikigami-skill-content h4 { font-size: 11px; font-weight: 500; color: var(--muted); margin: 18px 0 8px; }
+.shikigami-skill-upgrades { list-style: none; padding: 0; margin: 0; }
+.shikigami-skill-upgrades li { font-size: 11px; line-height: 1.85; padding: 7px 0; border-bottom: 1px solid var(--border-soft); white-space: pre-line; overflow-wrap: anywhere; }
+.shikigami-skill-upgrade-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 10px; align-items: baseline; }
+.shikigami-skill-upgrade-level { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shikigami-skill-extra { margin-top: 14px; background: var(--surface); border: 0; border-radius: 4px; }
+.shikigami-skill-extra summary { cursor: pointer; padding: 10px; font-size: 12px; }
+.shikigami-skill-extra summary .shikigami-skill-icon { display: inline-grid; width: 28px; height: 28px; font-size: 12px; vertical-align: middle; margin-right: 8px; }
+.shikigami-skill-extra > div { padding: 8px 12px; border-top: 1px solid var(--border-soft); }
+@media (prefers-reduced-motion: reduce) { .shikigami-skill-buttons button { transition: none; } }
+@container (max-width: 650px) {
+  .shikigami-atlas-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
+  .shikigami-atlas-detail { order: -1; padding: 12px; max-height: 340px; }
+  .shikigami-atlas-detail-heading .soul-picker-portrait { width: 44px; height: 44px; }
+  .shikigami-atlas-detail-heading h2 { font-size: 14px; margin-top: 4px; }
+  .shikigami-atlas-stats { gap: 10px 14px; padding: 10px 0; margin-top: 10px; }
+  .shikigami-atlas-stats > div { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+  .shikigami-atlas-stats dt { margin: 0; font-size: 10px; }
+  .shikigami-atlas-stats dd { font-size: 12px; }
+  .shikigami-atlas-caption { margin-top: 8px; font-size: 10px; }
+  .shikigami-atlas-toolbar { flex-wrap: wrap; gap: 7px; }
 }
 .lineup-browser { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow: hidden; background: var(--dock-panel-background, var(--surface)); container-type: inline-size; }
 .lineup-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; margin: 0; }
@@ -1655,6 +1774,8 @@ body:has(.menu-root.open) .onmyoji-workbench-dockview .dv-tabs-and-actions-conta
 .content-context-menu button:hover { background: #094771; color: #fff; }
 .content-context-menu button svg { width: 13px; height: 13px; color: var(--blue); flex: 0 0 13px; }
 .content-context-menu button:hover svg { color: #fff; }
+.content-context-menu.shikigami-atlas-context-menu { inset: auto; margin: 0; max-width: calc(100vw - 12px); }
+.shikigami-atlas-context-menu button:hover, .shikigami-atlas-context-menu button:focus-visible { outline: none; background: var(--ui-selected, var(--surface-hover)); color: var(--content-selection-text, var(--text)); }
 .content-context-separator { height: 1px; margin: 4px 1px; background: var(--border-soft); }
 
 /* 侧栏变量右键菜单：与内容浏览器菜单保持同一套工作台视觉。 */
@@ -2117,7 +2238,13 @@ body:has(.menu-root.open) .onmyoji-workbench-dockview .dv-tabs-and-actions-conta
 .soul-optimizer-configuration > summary strong { font-size: 12px; color: var(--text); }
 .soul-optimizer-configuration > summary span { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); }
 /* Every disclosure in this module visibly responds to its open state. */
+.soul-note > summary, .shikigami-skill-extra > summary, .soul-optimizer details > summary { display: flex; align-items: center; gap: 10px; list-style: none; }
+.soul-note > summary::-webkit-details-marker, .shikigami-skill-extra > summary::-webkit-details-marker, .soul-optimizer details > summary::-webkit-details-marker { display: none; }
+.soul-note > summary::before, .shikigami-skill-extra > summary::before, .soul-optimizer details > summary::before { content: ''; flex: 0 0 auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 140ms ease; }
+.soul-note[open] > summary::before, .shikigami-skill-extra[open] > summary::before, .soul-optimizer details[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
 .soul-note[open] > summary { color: var(--text); }
+.shikigami-skill-extra > summary .shikigami-skill-icon { margin-right: 0; }
+@media (prefers-reduced-motion: reduce) { .soul-note > summary::before, .shikigami-skill-extra > summary::before, .soul-optimizer details > summary::before { transition: none; } }
 .soul-optimizer-hero { border: 1px solid transparent; border-radius: 4px; background: var(--optimizer-card); box-shadow: var(--optimizer-shadow); padding: 14px; margin-bottom: 16px; }
 .soul-optimizer-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
 .soul-optimizer-section-heading h3 { margin: 0; }
@@ -2348,3 +2475,91 @@ dialog.soul-optimizer[open] { animation: optimizer-enter 140ms ease-out; }
   .soul-range-footer > span { font-size: 10px; margin-right: 0; }
 }
 
+.soul-optimizer.shikigami-owned-detail { width: min(1100px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 40px); padding: 0; }
+.shikigami-owned-detail .soul-optimizer-header { padding: 16px 20px; }
+.shikigami-owned-detail .shikigami-atlas-detail-heading { margin: 0; }
+.shikigami-owned-detail .shikigami-atlas-detail-heading h2 { font-size: 16px; }
+.shikigami-owned-body { min-height: 0; overflow: auto; padding: 0 20px 20px; }
+.shikigami-owned-detail[open] { display: flex; flex-direction: column; }
+.shikigami-owned-group { margin-top: 14px; border-radius: 5px; background: var(--surface-raised); padding: 16px; box-shadow: 0 2px 4px #0002; }
+.shikigami-owned-group-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
+.shikigami-owned-group h3 { margin: 0; font-size: 14px; }
+.shikigami-owned-group h4 { margin: 18px 0 9px; font-size: 11px; font-weight: 500; color: var(--muted); }
+.shikigami-owned-quantity { font-size: 18px; color: var(--text); }
+.shikigami-owned-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.shikigami-owned-badges span { background: var(--surface); padding: 3px 7px; border-radius: 3px; color: var(--muted); font-size: 11px; }
+.shikigami-owned-skills { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.shikigami-owned-skill { display: flex; align-items: center; gap: 10px; min-width: 0; background: var(--surface); border-radius: 4px; padding: 10px 12px; }
+.shikigami-owned-skill .shikigami-skill-icon { width: 38px; height: 38px; flex-shrink: 0; }
+.shikigami-owned-skill > div { display: grid; gap: 4px; min-width: 0; font-size: 12px; }
+.shikigami-owned-skill > div > span { overflow-wrap: anywhere; }
+.shikigami-owned-skill strong { color: var(--effect-number-color, #8ebfdb); }
+.shikigami-owned-loadout { display: grid; grid-template-columns: minmax(0, 1fr) 284px; gap: 18px; align-items: start; }
+.shikigami-owned-loadout > section { min-width: 0; }
+.shikigami-owned-panel { display: grid; grid-template-columns: 1fr; gap: 0; padding: 8px 12px; border-radius: 4px; background: var(--surface); }
+.shikigami-owned-panel table + table thead { display: none; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) th { text-align: left; font-weight: 400; color: var(--muted); }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) thead th { font-size: 10px; padding: 4px 0 8px; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) th:first-child { width: 30%; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) th:not(:first-child), :is(.shikigami-owned-panel, .soul-plan-panel-table) td { text-align: right; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) tbody th, :is(.shikigami-owned-panel, .soul-plan-panel-table) td { height: 28px; border-top: 1px solid var(--border-soft); }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) strong { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shikigami-owned-addition, .soul-panel-addition { color: #8ebfdb; }
+.shikigami-owned-total, .soul-panel-total { color: var(--green); }
+.shikigami-owned-panel-note { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.shikigami-owned-equipment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.shikigami-owned-equipment.is-empty { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.shikigami-owned-soul { min-width: 0; border-radius: 4px; background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.shikigami-owned-soul-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.shikigami-owned-soul-heading > small { white-space: nowrap; }
+.shikigami-owned-soul-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.shikigami-owned-soul-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.shikigami-owned-soul small { font-size: 10px; color: var(--muted); }
+.shikigami-owned-soul .soul-position-portrait { width: 36px; height: 36px; }
+.shikigami-owned-empty-slot { color: var(--muted); font-size: 11px; }
+.shikigami-owned-soul.is-empty { min-height: 64px; justify-content: center; }
+.shikigami-owned-soul-attributes { overflow-wrap: anywhere; }
+.shikigami-owned-soul-attributes .soul-detail-badges { margin: 0 0 8px; }
+.shikigami-owned-soul-attributes .soul-detail-main { padding-top: 6px; }
+.shikigami-owned-soul-attributes .soul-main-attribute { min-height: 26px; font-size: 11px; }
+.shikigami-owned-soul-attributes .soul-sub-attribute { min-height: 23px; font-size: 11px; gap: 5px; }
+.shikigami-owned-soul-attributes .soul-detail-attribute-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.shikigami-owned-soul-attributes .soul-sub-attribute .soul-detail-attribute-value { color: #8ebfdb; }
+.shikigami-owned-soul-attributes .soul-intrinsic-attributes { margin-top: 6px; padding-top: 6px; }
+.shikigami-owned-soul-attributes .soul-intrinsic-attribute { font-size: 11px; min-height: 23px; }
+.shikigami-owned-soul-attributes .soul-detail-pending { margin: 5px 0; font-size: 10px; }
+.shikigami-owned-soul-id { margin-top: auto; padding-top: 6px; color: var(--muted); font-size: 10px; }
+.shikigami-owned-soul-id summary { width: fit-content; }
+.shikigami-owned-soul-id small, .shikigami-owned-soul-id code { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 10px; }
+.shikigami-owned-set-effects { display: grid; gap: 10px; }
+.shikigami-owned-set-effects > div { padding: 10px 12px; border-radius: 4px; background: var(--surface); }
+.shikigami-owned-set-effects strong { font-size: 11px; }
+.shikigami-owned-set-effects p { margin: 5px 0 0; font-size: 11px; line-height: 1.7; color: var(--muted); }
+.shikigami-owned-identities { margin-top: 12px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.shikigami-owned-identities summary { cursor: pointer; }
+.shikigami-owned-identities code { display: block; margin-top: 6px; }
+.shikigami-owned-empty { padding: 16px; background: var(--surface-raised); border-radius: 4px; line-height: 1.8; }
+@media (max-width: 1120px) {
+  .shikigami-owned-loadout { grid-template-columns: 1fr; gap: 0; }
+  .shikigami-owned-overview { order: -1; }
+  .shikigami-owned-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .shikigami-owned-panel table + table thead { display: table-header-group; }
+  .shikigami-owned-set-effects { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  .soul-optimizer.shikigami-owned-detail { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .shikigami-owned-detail .soul-optimizer-header { padding: 12px; }
+  .shikigami-owned-body { padding: 0 12px 12px; }
+  .shikigami-owned-group { padding: 12px; }
+  .shikigami-owned-group-heading { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+  .shikigami-owned-badges { grid-column: 1 / -1; grid-row: 2; }
+  .shikigami-owned-quantity { grid-column: 2; grid-row: 1; }
+  .shikigami-owned-share-button { grid-column: 3; grid-row: 1; }
+  .shikigami-owned-equipment { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shikigami-owned-equipment.is-empty { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .shikigami-owned-soul { padding: 10px; }
+  .shikigami-owned-panel { grid-template-columns: 1fr; gap: 0; }
+  .shikigami-owned-panel table + table thead { display: none; }
+  .shikigami-owned-set-effects { grid-template-columns: 1fr; }
+}

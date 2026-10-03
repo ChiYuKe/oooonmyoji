@@ -1,5 +1,8 @@
 import type { AppearanceTheme } from './appearance';
 import type { SoulSnapshot, SoulFetchProgress } from './souls';
+import type { HeroOwnershipSnapshot, HeroOwnershipProgress } from './hero-ownership';
+import type { HeroBaseRequest } from './hero-panel';
+import type { Panel } from './soul-optimizer';
 import type { LineupExternalSource, LineupSearchRequest, LineupSearchResponse } from './lineups';
 import type { ActionCardRow } from './parameter-types';
 import type { WorkflowTestInit, WorkflowTestRequest, WorkflowTestEvent, TestCommand, TestNodeDraft, TestNodeTransfer, TestNodeAdded } from './workflow-testing';
@@ -496,6 +499,12 @@ export interface OnmyojiDesktopApi {
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
   listSoulInstances(): Promise<SoulInstance[]>;
+  listHeroInstances(): Promise<SoulInstance[]>;
+  loadHeroOwnership(instanceId: string): Promise<HeroOwnershipSnapshot | null>;
+  loadHeroBasePanel(request: HeroBaseRequest): Promise<Panel | null>;
+  detectHeroOwnership(instanceId: string): Promise<HeroOwnershipSnapshot | null>;
+  cancelHeroDetection(instanceId: string): Promise<void>;
+  onHeroDetectionProgress(listener: (progress: HeroOwnershipProgress) => void): () => void;
   searchLineups(request: LineupSearchRequest): Promise<LineupSearchResponse>;
   openLineupPost(bvid: string): Promise<void>;
   openLineupUrl(source: LineupExternalSource, url: string): Promise<void>;

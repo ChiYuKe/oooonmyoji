@@ -2,6 +2,8 @@ import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTh
 import path from 'node:path';
 import { AiAssistant } from './aiAssistant';
 import { SoulService } from './soulService';
+import { HeroOwnershipService } from './heroOwnershipService';
+import { HeroPanelService } from './heroPanelService';
 import { searchLineups } from './lineupService';
 import { NGA_BOARD_URL } from './ngaLineupService';
 import { loadAiImage } from './ai-images';
@@ -81,6 +83,8 @@ let benchmarkWindow: BrowserWindow | undefined;
 let project: ProjectService;
 let runtime: RuntimeService;
 let souls: SoulService | undefined;
+let heroOwnership: HeroOwnershipService | undefined;
+let heroPanels: HeroPanelService | undefined;
 let rendererServer: Server | undefined;
 let rendererBaseUrl = '';
 let visionTestWindow: BrowserWindow | undefined;
@@ -441,6 +445,18 @@ function registerIpc(): void {
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
   ipcMain.handle('souls:list-instances', async () => souls!.listInstances(await runtime.listInstances()));
+  ipcMain.handle('heroes:list-instances', async () => heroOwnership!.listInstances(await souls!.listInstances(await runtime.listInstances())));
+  ipcMain.handle('heroes:load', (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('请选择有效的模拟器实例');
+    return heroOwnership!.load(id);
+  });
+  ipcMain.handle('heroes:base-panel', (_event, request: unknown) => heroPanels!.load(request));
+  ipcMain.handle('heroes:detect', async (_event, id: unknown) => {
+    if (typeof id !== 'string' || !(await runtime.listInstances()).some(item => item.id === id)) throw new Error('所选实例已离线，请启动模拟器后刷新实例');
+    if (runtime.running || workflowTestService?.running || souls?.running) throw new Error('请先停止工作流、节点测试或御魂获取，再检测仓库');
+    return heroOwnership!.fetch(id);
+  });
+  ipcMain.handle('heroes:cancel', (_event, id: unknown) => typeof id === 'string' ? heroOwnership?.cancel(id) : undefined);
   ipcMain.handle('lineups:search', (_event, request: unknown) => searchLineups(request));
   ipcMain.handle('lineups:open-post', async (_event, bvid: unknown) => {
     if (typeof bvid !== 'string' || !/^BV[0-9A-Za-z]{10}$/.test(bvid)) throw new Error('阵容来源链接无效');
@@ -497,6 +513,7 @@ function registerIpc(): void {
     if (typeof instanceId !== 'string' || !(await runtime.listInstances()).some((item) => item.id === instanceId)) {
       throw new Error('所选实例已离线，请刷新实例列表');
     }
+    if (runtime.running || workflowTestService?.running || heroOwnership?.running) throw new Error('请先停止工作流、节点测试或仓库检测，再获取御魂');
     return souls!.fetch(instanceId);
   });
   // 载入上次保存的快照：实例可以已经离线，所以这里不校验在线状态。
@@ -506,6 +523,7 @@ function registerIpc(): void {
   });
   ipcMain.handle('souls:cancel', (_event, instanceId: unknown) => typeof instanceId === 'string' ? souls?.cancel(instanceId) : undefined);
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
+    if (souls?.running || heroOwnership?.running) throw new Error('正在读取游戏数据，请等待完成或取消后再运行工作流');
     if (workflowTestService?.usingDevice) throw new Error('脚本测试正在运行，请先停止测试');
     // 每次用户重新启动工作流时，先清掉日志面板中上次运行的记录。
     _event.sender.send('runtime:log-clear');
@@ -538,6 +556,7 @@ function registerIpc(): void {
     return result.filePaths;
   });
   ipcMain.handle('test:start', (event, request: WorkflowTestRequest) => {
+    if (souls?.running || heroOwnership?.running) throw new Error('正在读取游戏数据，请等待完成或取消后再运行节点测试');
     testOwner(event);
     if (request.mode === 'live' && (runtime.running || visionTestStream?.running)) throw new Error('请先停止正在运行的脚本或画面测试');
     if (request.images?.some((file) => !workflowTestImages.has(path.resolve(file)))) throw new Error('请通过选择截图按钮重新选择文件');
@@ -835,6 +854,11 @@ async function initializeRuntimeServices(projectRoot: string): Promise<void> {
   project = new ProjectService(projectRoot);
   runtime = new RuntimeService(project);
   souls = new SoulService(projectRoot);
+  heroOwnership = new HeroOwnershipService(projectRoot);
+  heroPanels = new HeroPanelService(projectRoot, net.fetch.bind(net));
+  heroOwnership.on('progress', progress => {
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('heroes:progress', progress);
+  });
   souls.on('progress', (progress) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) window.webContents.send('souls:progress', progress);
@@ -975,6 +999,7 @@ app.on('before-quit', (event) => {
   void (async () => {
     try {
       await souls?.dispose();
+      await heroOwnership?.dispose();
       await runtime?.dispose();
       await workflowTestService?.dispose();
     } finally {

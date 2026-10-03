@@ -97,6 +97,16 @@ const api: OnmyojiDesktopApi = {
   updateDebugSettings: (settings: RuntimeDebugSettings) => ipcRenderer.invoke('runtime:update-debug-settings', settings),
   listInstances: () => ipcRenderer.invoke('runtime:list-instances'),
   listSoulInstances: () => ipcRenderer.invoke('souls:list-instances'),
+  listHeroInstances: () => ipcRenderer.invoke('heroes:list-instances'),
+  loadHeroOwnership: (instanceId) => ipcRenderer.invoke('heroes:load', instanceId),
+  loadHeroBasePanel: (request) => ipcRenderer.invoke('heroes:base-panel', request),
+  detectHeroOwnership: (instanceId) => ipcRenderer.invoke('heroes:detect', instanceId),
+  cancelHeroDetection: (instanceId) => ipcRenderer.invoke('heroes:cancel', instanceId),
+  onHeroDetectionProgress: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: import('../shared/hero-ownership').HeroOwnershipProgress) => listener(value);
+    ipcRenderer.on('heroes:progress', handler);
+    return () => ipcRenderer.removeListener('heroes:progress', handler);
+  },
   searchLineups: (request) => ipcRenderer.invoke('lineups:search', request),
   openLineupPost: (bvid) => ipcRenderer.invoke('lineups:open-post', bvid),
   openLineupUrl: (source, url) => ipcRenderer.invoke('lineups:open-url', source, url),

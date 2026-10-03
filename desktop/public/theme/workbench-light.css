@@ -208,6 +208,15 @@
 :root[data-theme="light"] .soul-effect-number, :root[data-theme="light"] .effect-number {
     color: #48606e
 }
+:root[data-theme="light"] .shikigami-atlas-ownership-status.is-error {
+    color: var(--danger, #84524a)
+}
+:root[data-theme="light"] .shikigami-atlas-card-ownership.is-owned, :root[data-theme="light"] .shikigami-atlas-owned {
+    color: #535353
+}
+:root[data-theme="light"] .shikigami-atlas .shikigami-skill-term {
+    color: #48606e
+}
 :root[data-theme="light"] .lineup-status[data-state="error"] {
     color: var(--error, #82524f)
 }
@@ -1554,6 +1563,15 @@
 }
 :root[data-theme="light"] .soul-optimizer [data-ui="status"].error {
     color: #875151
+}
+:root[data-theme="light"] .shikigami-owned-skill strong {
+    color: var(--effect-number-color, #48606e)
+}
+:root[data-theme="light"] .shikigami-owned-addition, :root[data-theme="light"] .soul-panel-addition {
+    color: #48606e
+}
+:root[data-theme="light"] .shikigami-owned-soul-attributes .soul-sub-attribute .soul-detail-attribute-value {
+    color: #48606e
 }
 :root[data-theme="light"] {
     --ui-bg: #f3f3f3;

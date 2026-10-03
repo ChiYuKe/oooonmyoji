@@ -1,5 +1,6 @@
 """Resolve soul names and exact attributes from the running client's config tables."""
 from collections import OrderedDict
+from pathlib import Path
 
 LABELS = {
     "attackAdditionVal": "攻击", "defenseAdditionVal": "防御", "maxHpAdditionVal": "生命",
@@ -56,12 +57,34 @@ def client_tables(objects, equip_module):
     return result
 
 
-def enrich(soul, record, tables):
+ICON_DIRECTORY = "assets/soul-icons"
+
+
+def icon_url(suit_id: int | None, icon_root: Path | None) -> str | None:
+    """Renderer URL for a suit icon, or None when it was not downloaded.
+
+    图标取自藏宝阁官方资源（``https://cbg-yys.res.netease.com/game_res/suit/<套装编号>.png``），
+    以套装编号命名存放在项目 ``assets/soul-icons/`` 下，经桌面端 ``onmyoji-resource://`` 协议读取。
+    """
+    if icon_root is None or not isinstance(suit_id, int):
+        return None
+    relative = f"{ICON_DIRECTORY}/{suit_id}.png"
+    if not (icon_root / relative).is_file():
+        return None
+    return f"onmyoji-resource://project/{relative}"
+
+
+def enrich(soul, record, tables, icon_root=None):
     init = tables.get("init", {}).get(soul["itemId"], {})
+    # Reward/special items such as 180001 do not encode their slot in the ten-thousands digit.
+    # The client's init table explicitly records slots 1..6 as equipType 11..16.
+    equip_type = init.get("equipType")
+    if type(equip_type) is int and 11 <= equip_type <= 16:
+        soul["position"] = equip_type - 10
     suit = tables.get("suits", {}).get(soul["suitId"], {})
     soul["name"] = suit.get("suit_n") or f"套装 {soul['suitId']}"
     soul["iconKey"] = suit.get("icon")
-    soul["iconUrl"] = None
+    soul["iconUrl"] = icon_url(soul.get("suitId"), icon_root)
     soul["mainAttribute"] = None
     base = init.get("base_attr", [])
     index = soul["baseAttributeIndex"]

@@ -1,0 +1,632 @@
+[
+ {
+  "suitId": 300002,
+  "name": "雪幽魂",
+  "icon": "hscard_0002",
+  "file": "300002.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300002.png",
+  "bytes": 17203,
+  "sha256": "af1b4bd7f59c2c155e8b77eb89e26b676fd1848f852566686fa8b072bb712a88"
+ },
+ {
+  "suitId": 300003,
+  "name": "地藏像",
+  "icon": "hscard_0003",
+  "file": "300003.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300003.png",
+  "bytes": 14811,
+  "sha256": "78db9dc002462367952d323052214bc50492e2a8e3afd86400b18b0f61e45485"
+ },
+ {
+  "suitId": 300004,
+  "name": "蝠翼",
+  "icon": "hscard_0004",
+  "file": "300004.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300004.png",
+  "bytes": 17864,
+  "sha256": "4975aa1a6d2b888e8244bd6c10ea4e05c9d988763a01331ade4df189a1fb6bf8"
+ },
+ {
+  "suitId": 300006,
+  "name": "涅槃之火",
+  "icon": "hscard_0006",
+  "file": "300006.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300006.png",
+  "bytes": 15466,
+  "sha256": "fb180ecbcf816665fd12766009a750cce55c26961775ffba11189584c790d2b7"
+ },
+ {
+  "suitId": 300007,
+  "name": "三味",
+  "icon": "hscard_0007",
+  "file": "300007.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300007.png",
+  "bytes": 18878,
+  "sha256": "564fdc5bb3c985c22e11a7ec78042246e7c4f3b5cdf017c0d96c130f6b051415"
+ },
+ {
+  "suitId": 300008,
+  "name": "魍魉之匣",
+  "icon": "hscard_0008",
+  "file": "300008.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300008.png",
+  "bytes": 16649,
+  "sha256": "bac0c86080afd4869939c02061e9f4141ebdf1c65c39a35c2b4b486cd5562a80"
+ },
+ {
+  "suitId": 300009,
+  "name": "被服",
+  "icon": "hscard_0009",
+  "file": "300009.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300009.png",
+  "bytes": 16885,
+  "sha256": "0438734b84cd81bad26ad6be8a3b886781ab3de993cca761e973d081ebc1f031"
+ },
+ {
+  "suitId": 300010,
+  "name": "招财猫",
+  "icon": "hscard_0010",
+  "file": "300010.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300010.png",
+  "bytes": 17765,
+  "sha256": "a8f6f5178bdf58e02cbd7fb58a4a4ccbcb866d77eb2dd1c1eaefd5083ed641ca"
+ },
+ {
+  "suitId": 300011,
+  "name": "反枕",
+  "icon": "hscard_0011",
+  "file": "300011.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300011.png",
+  "bytes": 16619,
+  "sha256": "335955acbce60bf4a6dc71dd26ceef8061caa08802de492e3877d49d8b512b43"
+ },
+ {
+  "suitId": 300012,
+  "name": "轮入道",
+  "icon": "hscard_0012",
+  "file": "300012.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300012.png",
+  "bytes": 18393,
+  "sha256": "2a43aa799ed4b435ea85789fc28eec124513db0d3b529d7c11c7efd55ff2f53f"
+ },
+ {
+  "suitId": 300013,
+  "name": "日女巳时",
+  "icon": "hscard_0013",
+  "file": "300013.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300013.png",
+  "bytes": 18476,
+  "sha256": "edb3604f3a890fd1589d9945eb14f9b29056aa0ae186a86e27eade31acb1b1d9"
+ },
+ {
+  "suitId": 300014,
+  "name": "镜姬",
+  "icon": "hscard_0014",
+  "file": "300014.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300014.png",
+  "bytes": 17656,
+  "sha256": "5e23e8c8a0c41ddb24cf4526b9a217f41ac4ba916741b577812610528d7d8dfd"
+ },
+ {
+  "suitId": 300015,
+  "name": "钟灵",
+  "icon": "hscard_0015",
+  "file": "300015.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300015.png",
+  "bytes": 17637,
+  "sha256": "f9dbb028a1625bc8f36bcefd9da1b7fde98c56b926e4b527ecdf54240bf3ff23"
+ },
+ {
+  "suitId": 300018,
+  "name": "狰",
+  "icon": "hscard_0018",
+  "file": "300018.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300018.png",
+  "bytes": 16727,
+  "sha256": "6a1c71b234dff5b2a7fbffe1466c3d9a67fdf6a45a4e53b3c3398387e6522080"
+ },
+ {
+  "suitId": 300019,
+  "name": "火灵",
+  "icon": "hscard_0019",
+  "file": "300019.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300019.png",
+  "bytes": 17241,
+  "sha256": "2ab27be4c80618a63bd4e38c8ce10d1739685916050b428cd52e521ccaab6e0f"
+ },
+ {
+  "suitId": 300020,
+  "name": "鸣屋",
+  "icon": "hscard_0020",
+  "file": "300020.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300020.png",
+  "bytes": 18468,
+  "sha256": "aad7d3a8532216e5058a78fc76259681739158622691ea69a0f983b2f5c4b618"
+ },
+ {
+  "suitId": 300021,
+  "name": "薙魂",
+  "icon": "hscard_0021",
+  "file": "300021.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300021.png",
+  "bytes": 15898,
+  "sha256": "db3ad4fec4dc7429b6b70d18f15fdf5ffddfe3ccca590abd10fe2797ad98c631"
+ },
+ {
+  "suitId": 300022,
+  "name": "心眼",
+  "icon": "hscard_0022",
+  "file": "300022.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300022.png",
+  "bytes": 16936,
+  "sha256": "6b526224e234dd01fb687ba815e9e77b902824c213c9ef8ed34f10b4b8cccbaf"
+ },
+ {
+  "suitId": 300023,
+  "name": "木魅",
+  "icon": "hscard_0023",
+  "file": "300023.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300023.png",
+  "bytes": 18348,
+  "sha256": "af25e0921248c60c5d6caab4b90dddd1118220db2ba4b5e919e52d57593db64c"
+ },
+ {
+  "suitId": 300024,
+  "name": "树妖",
+  "icon": "hscard_0024",
+  "file": "300024.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300024.png",
+  "bytes": 16850,
+  "sha256": "c57a97b6a19b2c73caebcfd06ddf570ee26ae2b1dfee3c0c92ac7c364e74f471"
+ },
+ {
+  "suitId": 300026,
+  "name": "网切",
+  "icon": "hscard_0026",
+  "file": "300026.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300026.png",
+  "bytes": 17043,
+  "sha256": "1b64a24163348424e36e0f93a0479ac4c7b5b4dc020b78b435a220b94eef8d5c"
+ },
+ {
+  "suitId": 300027,
+  "name": "阴摩罗",
+  "icon": "hscard_0027",
+  "file": "300027.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300027.png",
+  "bytes": 18018,
+  "sha256": "a9712385aeffd82eae56541ab28ea978ff151a6fa3497047635e2121368a7201"
+ },
+ {
+  "suitId": 300029,
+  "name": "伤魂鸟",
+  "icon": "hscard_0029",
+  "file": "300029.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300029.png",
+  "bytes": 17266,
+  "sha256": "0a8d5bfaf1eb4fe85334648b065f11141dc59a41fc610208c16aaff272a61a83"
+ },
+ {
+  "suitId": 300030,
+  "name": "破势",
+  "icon": "hscard_0030",
+  "file": "300030.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300030.png",
+  "bytes": 16197,
+  "sha256": "ba22a53a0f37da4f3154636ee14027443bce6b5d5b9ee73fe4f4be557168062c"
+ },
+ {
+  "suitId": 300031,
+  "name": "镇墓兽",
+  "icon": "hscard_0031",
+  "file": "300031.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300031.png",
+  "bytes": 17852,
+  "sha256": "5794412cd33f906150747924b6d6af85d71943038043d2335d96f2f16594616b"
+ },
+ {
+  "suitId": 300032,
+  "name": "珍珠",
+  "icon": "hscard_0032",
+  "file": "300032.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300032.png",
+  "bytes": 18484,
+  "sha256": "4e10fbd07f0f1b9f7ade26f3284378eac03ef10d39c1b8aebc328f2c83b08b51"
+ },
+ {
+  "suitId": 300033,
+  "name": "骰子鬼",
+  "icon": "hscard_0033",
+  "file": "300033.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300033.png",
+  "bytes": 17394,
+  "sha256": "e8904fb1725e2cd5f4308dabad6565e4a248eb18df32a03c74ff403c8b84207d"
+ },
+ {
+  "suitId": 300034,
+  "name": "蚌精",
+  "icon": "hscard_0034",
+  "file": "300034.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300034.png",
+  "bytes": 17087,
+  "sha256": "1921b21f093efb9f77950aef3a2f9812eac0c7ba7021e9ca56bfcf5a84bc5e24"
+ },
+ {
+  "suitId": 300035,
+  "name": "魅妖",
+  "icon": "hscard_0035",
+  "file": "300035.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300035.png",
+  "bytes": 17052,
+  "sha256": "598b7ae714eb7c5ab1d791341b4d6c23e3a7926c4bc3a67b75b0ae5835104050"
+ },
+ {
+  "suitId": 300036,
+  "name": "针女",
+  "icon": "hscard_0036",
+  "file": "300036.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300036.png",
+  "bytes": 17056,
+  "sha256": "a1b248fa4920be75109f8517f8700b57f4a473b25d49caf9b33dffcdfba1b176"
+ },
+ {
+  "suitId": 300039,
+  "name": "返魂香",
+  "icon": "hscard_0005",
+  "file": "300039.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300039.png",
+  "bytes": 18648,
+  "sha256": "6c995c9b36c26ba98045b757dd7f5070fed3f49863b9908cf38562415fbbab3f"
+ },
+ {
+  "suitId": 300048,
+  "name": "狂骨",
+  "icon": "hscard_0048",
+  "file": "300048.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300048.png",
+  "bytes": 5259,
+  "sha256": "3f43878537f268c45b02d0bf740ff2df74eaf6dd481d30fff28879b62319d62a"
+ },
+ {
+  "suitId": 300049,
+  "name": "幽谷响",
+  "icon": "hscard_0049",
+  "file": "300049.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300049.png",
+  "bytes": 5275,
+  "sha256": "aaf3dd10c9d4d688615f9365954a162680b97da8ac83d703fe1fc9bf8d36facc"
+ },
+ {
+  "suitId": 300050,
+  "name": "土蜘蛛",
+  "icon": "hscard_0050",
+  "file": "300050.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300050.png",
+  "bytes": 5626,
+  "sha256": "142c4e606a8767a79bf69f88605b834ccf1d00c4903dd52387ad45972aeb92ba"
+ },
+ {
+  "suitId": 300051,
+  "name": "胧车",
+  "icon": "hscard_0051",
+  "file": "300051.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300051.png",
+  "bytes": 5825,
+  "sha256": "22170eabe83b6d9566f2fce2310eb15d3ec1a20c7040f5c2a9b9f81706e44240"
+ },
+ {
+  "suitId": 300052,
+  "name": "荒骷髅",
+  "icon": "hscard_0052",
+  "file": "300052.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300052.png",
+  "bytes": 5456,
+  "sha256": "5af15f1fc0b6d7926c76b789d3db2847eb119a9a6f88e67c8058b522cee1fa0c"
+ },
+ {
+  "suitId": 300053,
+  "name": "地震鲶",
+  "icon": "hscard_0053",
+  "file": "300053.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300053.png",
+  "bytes": 5406,
+  "sha256": "6bf26b484555c4a013d06e56ae35fe632677b4db15de39e1e67f6a1e3f9c94c5"
+ },
+ {
+  "suitId": 300054,
+  "name": "蜃气楼",
+  "icon": "hscard_0054",
+  "file": "300054.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300054.png",
+  "bytes": 5507,
+  "sha256": "62ce14e021921636d55b1a8cc5e7f945c5bcdfac98300eeaa41c736cc4e7ddc9"
+ },
+ {
+  "suitId": 300055,
+  "name": "片叶之苇",
+  "icon": "hscard_0084_1",
+  "file": "300055.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300055.png",
+  "bytes": 5584,
+  "sha256": "630c43d53afe78bb45f617ba8e67987413ccb138e9e52c1c730052e1a2cc1107"
+ },
+ {
+  "suitId": 300056,
+  "name": "尘冢",
+  "icon": "hscard_0085_1",
+  "file": "300056.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300056.png",
+  "bytes": 5654,
+  "sha256": "e4a3d922ff73f03a9ed59c69e23f5e78c2a3d889ab96dbe32c4f4c517b33a971"
+ },
+ {
+  "suitId": 300057,
+  "name": "油赤子",
+  "icon": "hscard_0086_1",
+  "file": "300057.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300057.png",
+  "bytes": 5712,
+  "sha256": "4e68f0eea7c24889026c0591e33b9a3420153eaa00628850121258168f7a6d0f"
+ },
+ {
+  "suitId": 300058,
+  "name": "夜啼石",
+  "icon": "hscard_0087_1",
+  "file": "300058.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300058.png",
+  "bytes": 5381,
+  "sha256": "db0ccc5678769d6f3cd0b1b69ed3728eaefac80fa926fa2e34baef99052365c9"
+ },
+ {
+  "suitId": 300059,
+  "name": "夜送犬",
+  "icon": "hscard_0088_1",
+  "file": "300059.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300059.png",
+  "bytes": 5428,
+  "sha256": "9670f2e8f69d22707a4f13276e8aa24f883298b2174a364ca03584de966d91b6"
+ },
+ {
+  "suitId": 300060,
+  "name": "雨降",
+  "icon": "hscard_0089_1",
+  "file": "300060.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300060.png",
+  "bytes": 5321,
+  "sha256": "c06a9127a595d593ec0fa758795bf09fddb0d7b5471664bb7386d22eb2358bfa"
+ },
+ {
+  "suitId": 300073,
+  "name": "飞缘魔",
+  "icon": "hscard_0059",
+  "file": "300073.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300073.png",
+  "bytes": 5436,
+  "sha256": "602810b70760c5a41b646c906de81c9f3e24c56d1d9df8938363b41a28daa6b4"
+ },
+ {
+  "suitId": 300074,
+  "name": "兵主部",
+  "icon": "hscard_0060",
+  "file": "300074.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300074.png",
+  "bytes": 5152,
+  "sha256": "d93f70023bcd9659c012189a626d61ceb26686a6021d4c43e87c2297a2a020e6"
+ },
+ {
+  "suitId": 300075,
+  "name": "青女房",
+  "icon": "hscard_0061",
+  "file": "300075.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300075.png",
+  "bytes": 5240,
+  "sha256": "c24a31a6a8cc5e5ef8e817d8c562f64b1f3c5f310e2f0d76d9664b2842e22665"
+ },
+ {
+  "suitId": 300076,
+  "name": "涂佛",
+  "icon": "hscard_0062",
+  "file": "300076.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300076.png",
+  "bytes": 4848,
+  "sha256": "b342cc21b9a2ae9ef82b0ed0927b65acd22a60a9332d6bee5dfae0bac8236fca"
+ },
+ {
+  "suitId": 300077,
+  "name": "鬼灵歌伎",
+  "icon": "hscard_0063",
+  "file": "300077.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300077.png",
+  "bytes": 5392,
+  "sha256": "3cafd9b1ad9fb588faf882b26ec8dc3aa634e3c50a65dd1580ffed924fa547e8"
+ },
+ {
+  "suitId": 300079,
+  "name": "遗念火",
+  "icon": "hscard_0064_1",
+  "file": "300079.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300079.png",
+  "bytes": 5388,
+  "sha256": "a9c85175a3639ebfe277399b7e6d640e923c44ae15792db7f8afc97b4e9756d5"
+ },
+ {
+  "suitId": 300080,
+  "name": "共潜",
+  "icon": "hscard_0065_1",
+  "file": "300080.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300080.png",
+  "bytes": 4988,
+  "sha256": "4c77f4dd42aa17da54477e3c9a92857d4dcf7adee63f0134e011dd3707ca5e78"
+ },
+ {
+  "suitId": 300081,
+  "name": "恶楼",
+  "icon": "hscard_0066_1",
+  "file": "300081.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300081.png",
+  "bytes": 5741,
+  "sha256": "7c598cd4de5c14cb104b89cd7aa84dca625164c0434831147c1cc1483d60b6b6"
+ },
+ {
+  "suitId": 300082,
+  "name": "贝吹坊",
+  "icon": "hscard_0067_1",
+  "file": "300082.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300082.png",
+  "bytes": 4842,
+  "sha256": "7536d172b3cecc36b82ea98dcc29eeee76c8b08e70d5a2168c63bc5eeb10ed11"
+ },
+ {
+  "suitId": 300083,
+  "name": "海月火玉",
+  "icon": "hscard_0068_1",
+  "file": "300083.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300083.png",
+  "bytes": 5135,
+  "sha256": "35822e240f05afd09c874e203222aa72d0fe113533bde822df3c95d543900241"
+ },
+ {
+  "suitId": 300084,
+  "name": "出世螺",
+  "icon": "hscard_0069_1",
+  "file": "300084.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300084.png",
+  "bytes": 5548,
+  "sha256": "79e8448153d0e6ae0bce6f33603226fa2a7d9d996360571a2aed5c5dec9df5ae"
+ },
+ {
+  "suitId": 300085,
+  "name": "火之车",
+  "icon": "hscard_0070_1",
+  "file": "300085.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300085.png",
+  "bytes": 4320,
+  "sha256": "ba79fd6364332de6bfd1b9deb5263afea2ce004e5e192cd1501abc763a4e00b0"
+ },
+ {
+  "suitId": 300086,
+  "name": "隐念",
+  "icon": "hscard_0071_1",
+  "file": "300086.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300086.png",
+  "bytes": 4403,
+  "sha256": "c334f685aff8cff666dc80f637eaaeb2a75a4957c5474d220ce751e141d41f55"
+ },
+ {
+  "suitId": 300087,
+  "name": "叠叩",
+  "icon": "hscard_0072_1",
+  "file": "300087.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300087.png",
+  "bytes": 4720,
+  "sha256": "4e82514672c8e038638b850a87a9fe1daf697ae85f76eb304eead47b3b9c44a2"
+ },
+ {
+  "suitId": 300088,
+  "name": "应声虫",
+  "icon": "hscard_0073_1",
+  "file": "300088.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300088.png",
+  "bytes": 4179,
+  "sha256": "92643af2d20dfb059c47d82182aca599effad647e18070f0c713b977396c2985"
+ },
+ {
+  "suitId": 300089,
+  "name": "元兴寺",
+  "icon": "hscard_0074_1",
+  "file": "300089.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300089.png",
+  "bytes": 3997,
+  "sha256": "3b1c5b325d98117c8a4fea96e0390b5701e4649001852d008ffb7a61678e972d"
+ },
+ {
+  "suitId": 300090,
+  "name": "钓瓶火",
+  "icon": "hscard_0075_1",
+  "file": "300090.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300090.png",
+  "bytes": 3995,
+  "sha256": "17d408bee6310f6051b4edd2f645d4ab43ed49399fb33f543eef23395492e3bc"
+ },
+ {
+  "suitId": 300091,
+  "name": "夜荒魂",
+  "icon": "hscard_0055",
+  "file": "300091.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300091.png",
+  "bytes": 15676,
+  "sha256": "b27a798101487fcd63abf433a0574de94a92efb3349cec74d74db0f1a7f7457a"
+ },
+ {
+  "suitId": 300092,
+  "name": "无刀取",
+  "icon": "hscard_0076_1",
+  "file": "300092.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300092.png",
+  "bytes": 19978,
+  "sha256": "27d25efe98d0b8a690963e6b92f481ac15977bc00d0ba14cfe53f7d466051130"
+ },
+ {
+  "suitId": 300093,
+  "name": "奉海图",
+  "icon": "hscard_0077_1",
+  "file": "300093.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300093.png",
+  "bytes": 5232,
+  "sha256": "d48e611567413a127b979565fde2644ac2d67c70b6ff7963a9422295a0c66ce5"
+ },
+ {
+  "suitId": 300094,
+  "name": "八咫镜",
+  "icon": "hscard_0078_1",
+  "file": "300094.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300094.png",
+  "bytes": 5485,
+  "sha256": "562028212f4d7095ac8917ddd03e3f351050d0b6f03a12d0350e1fb97567f9a2"
+ },
+ {
+  "suitId": 300095,
+  "name": "天羽羽斩",
+  "icon": "hscard_0079_1",
+  "file": "300095.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300095.png",
+  "bytes": 5508,
+  "sha256": "3edfffa70eb37a8a32c24dce7707ddc877f9674ddea364d1cf971ec590a36cd5"
+ },
+ {
+  "suitId": 300096,
+  "name": "预言星盘",
+  "icon": "hscard_0080_1",
+  "file": "300096.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300096.png",
+  "bytes": 5496,
+  "sha256": "2ed722abc62be306549b963668976d409723df59266fe2a518d749807508fc87"
+ },
+ {
+  "suitId": 300097,
+  "name": "月之石",
+  "icon": "hscard_0081_1",
+  "file": "300097.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300097.png",
+  "bytes": 5247,
+  "sha256": "26e717baa5f92e7cb5d2c84718e40687ede8458f42e040ea0906eb40d011447f"
+ },
+ {
+  "suitId": 300098,
+  "name": "纺缘锤",
+  "icon": "hscard_0082_1",
+  "file": "300098.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300098.png",
+  "bytes": 5487,
+  "sha256": "5248c4807ef9b79d557d248b357fd5dc811d97eee5b55267c0abe65e151f9a6d"
+ },
+ {
+  "suitId": 300099,
+  "name": "稻荷穗箭",
+  "icon": "hscard_0083_1",
+  "file": "300099.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300099.png",
+  "bytes": 5355,
+  "sha256": "6cf13c06ea5938af7c1893c038812956def4efddec294380a3baf6656feec767"
+ }
+]

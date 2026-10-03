@@ -125,7 +125,7 @@ def normalize_record(uid, record):
     }
 
 
-def acquire(adb, package, instance_id, output, progress):
+def acquire(adb, package, instance_id, output, progress, icon_root=None):
     with temporary_root(adb, progress):
         progress("正在定位当前角色的御魂背包")
         report = process_report(adb, package)
@@ -176,17 +176,23 @@ def acquire(adb, package, instance_id, output, progress):
             raise ValueError("读取期间角色发生变化，请重新获取")
         progress("正在解析御魂名称和详细属性")
         tables = client_tables(o, modules["com.Equip"])
-        detailed = [enrich(normalize_record(uid, rec), rec, tables) for uid, rec in records.items()]
+        detailed = [enrich(normalize_record(uid, rec), rec, tables, icon_root) for uid, rec in records.items()]
         result = {"instanceId": instance_id, "fetchedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                   "total": total, "souls": detailed,
-                  "failed": len(errors), "warnings": ["暂不包含收纳库存；尚未加载的属性表会标记为待解析；图标图片尚未解包。"],
+                  "failed": len(errors), "warnings": ["暂不包含收纳库存；尚未加载的属性表会标记为待解析；图标取自藏宝阁官方资源，未收录的套装不显示图标。"],
                   "source": "memory"}
         raw_export = {"report": report, "result": result, "records": records, "errors": errors, "tables": tables}
     # Publish only after permissions have been restored successfully.
+    # ``output`` 存界面直接用的快照（体积小、下次打开即载入），原始导出单独落盘备查。
     adb.check()
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_suffix(".tmp")
-    temporary.write_text(json.dumps(raw_export, ensure_ascii=True, allow_nan=False), encoding="utf-8")
-    temporary.replace(output)
+    _write_json(output, result)
+    _write_json(output.with_name("raw.json"), raw_export)
     return result
+
+
+def _write_json(destination: Path, value: object) -> None:
+    temporary = destination.with_name(f"{destination.name}.tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=True, allow_nan=False), encoding="utf-8")
+    temporary.replace(destination)

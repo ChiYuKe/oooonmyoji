@@ -15,7 +15,7 @@ def emit(event):
     print(json.dumps(event, ensure_ascii=True, allow_nan=False), flush=True)
 
 
-def main():
+def main(acquirer=acquire, label="御魂"):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--instance", required=True)
@@ -33,7 +33,7 @@ def main():
 
     def check():
         if cancelled.is_set(): raise Cancelled()
-        if time.monotonic() > deadline: raise ValueError("获取御魂超时，请稍后重试")
+        if time.monotonic() > deadline: raise ValueError(f"读取{label}超时，请稍后重试")
 
     def progress(message, completed=None, total=None):
         emit({"type": "progress", "instanceId": args.instance, "message": message,
@@ -49,7 +49,10 @@ def main():
         adb = Adb(resolve_adb_path(config), instance.adb_serial, check)
         if ":" in instance.adb_serial:
             adb.command("connect", instance.adb_serial)
-        result = acquire(adb, instance.package or DEFAULT_PACKAGE, instance.id, args.output, progress)
+        if acquirer is acquire:
+            result = acquirer(adb, instance.package or DEFAULT_PACKAGE, instance.id, args.output, progress, icon_root=config.root_dir)
+        else:
+            result = acquirer(adb, instance.package or DEFAULT_PACKAGE, instance.id, args.output, progress)
         emit({"type": "result", "result": result})
     except Cancelled:
         emit({"type": "cancelled"})

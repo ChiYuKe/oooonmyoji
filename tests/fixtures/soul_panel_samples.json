@@ -1,0 +1,317 @@
+{
+  "yinmoluo": {
+    "base_rindex": 0,
+    "equipId": 110006,
+    "garbage": false,
+    "inHero": false,
+    "lock": true,
+    "qua": 6,
+    "rattr": [
+      [
+        "attackAdditionVal",
+        0.8521331807388381
+      ],
+      [
+        "debuffEnhance",
+        0.9752438963485203
+      ],
+      [
+        "critRateAdditionVal",
+        0.9794605957059631
+      ],
+      [
+        "speedAdditionVal",
+        0.9411017654524672
+      ],
+      [
+        "speedAdditionVal",
+        0.8037039088795085
+      ],
+      [
+        "speedAdditionVal",
+        0.9703762806299866
+      ],
+      [
+        "speedAdditionVal",
+        0.98285767940082
+      ],
+      [
+        "speedAdditionVal",
+        0.992033906536766
+      ],
+      [
+        "speedAdditionVal",
+        0.8426674969197414
+      ]
+    ],
+    "single_attr": null,
+    "strengthenedBaseAttrValue": 486.0,
+    "strongLevel": 15,
+    "suitId": 300027
+  },
+  "rinv": {
+    "base_rindex": 0,
+    "equipId": 110006,
+    "garbage": false,
+    "inHero": true,
+    "lock": true,
+    "qua": 6,
+    "rattr": [
+      [
+        "speedAdditionVal",
+        0.9404394666532552
+      ],
+      [
+        "maxHpAdditionRate",
+        0.9141143986099505
+      ],
+      [
+        "defenseAdditionRate",
+        0.8280457941774361
+      ],
+      [
+        "attackAdditionRate",
+        0.9279810718446488
+      ],
+      [
+        "speedAdditionVal",
+        0.8293894647866105
+      ],
+      [
+        "maxHpAdditionRate",
+        0.8398309130095271
+      ],
+      [
+        "speedAdditionVal",
+        0.9729837690074599
+      ],
+      [
+        "speedAdditionVal",
+        0.9474474978930497
+      ],
+      [
+        "attackAdditionRate",
+        0.8655967969404856
+      ]
+    ],
+    "single_attr": null,
+    "strengthenedBaseAttrValue": 486.0,
+    "strongLevel": 15,
+    "suitId": 300013
+  },
+  "tables": {
+    "random": {
+      "6": {
+        "rang_rand": [
+          0.8,
+          1.0
+        ],
+        "rate": [
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10
+        ],
+        "id": 6,
+        "total_rate": 110,
+        "attr_list": [
+          [
+            "maxHpAdditionVal",
+            114,
+            10
+          ],
+          [
+            "defenseAdditionVal",
+            5,
+            20
+          ],
+          [
+            "attackAdditionVal",
+            27,
+            30
+          ],
+          [
+            "maxHpAdditionRate",
+            0.03,
+            40
+          ],
+          [
+            "defenseAdditionRate",
+            0.03,
+            50
+          ],
+          [
+            "attackAdditionRate",
+            0.03,
+            60
+          ],
+          [
+            "speedAdditionVal",
+            3,
+            70
+          ],
+          [
+            "critRateAdditionVal",
+            0.03,
+            80
+          ],
+          [
+            "critPowerAdditionVal",
+            0.04,
+            90
+          ],
+          [
+            "debuffEnhance",
+            0.04,
+            100
+          ],
+          [
+            "debuffResist",
+            0.04,
+            110
+          ]
+        ]
+      }
+    },
+    "init": {
+      "110006": {
+        "base_attr_v": [
+          81.0,
+          14.0,
+          342.0
+        ],
+        "icon": "icon_fuwen001",
+        "isstrength": 0,
+        "equipType": 11,
+        "card_exp": 1750,
+        "card_gold": 3500,
+        "name": "\u968f\u673a6\u661f\u5fa1\u9b42",
+        "quality": 6,
+        "loot_model": "gouyu",
+        "base_attr": [
+          [
+            "attackAdditionVal",
+            19
+          ],
+          [
+            "defenseAdditionVal",
+            19
+          ],
+          [
+            "maxHpAdditionVal",
+            19
+          ]
+        ],
+        "rand_count": [
+          2,
+          4
+        ],
+        "shss_exp": 1750,
+        "id": 110006,
+        "trade_price": -1,
+        "shss_gold": 0,
+        "rand_rep": 0,
+        "base_attr_v_rr": [
+          1.0,
+          1.0
+        ],
+        "rand_id": 6,
+        "desc": "\u9632\u5fa1\u62a4\u7b26\u00b7\u58f9",
+        "single_attr": 0
+      }
+    },
+    "suits": {
+      "300027": {
+        "itemid": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "id": 300027,
+        "release": 1,
+        "suit_card_list": [
+          0,
+          0,
+          0,
+          300027
+        ],
+        "suit_n": "\u9634\u6469\u7f57",
+        "suit_num": 4,
+        "icon": "hscard_0027",
+        "suit_attr_list": [
+          [],
+          [
+            [
+              "attackAdditionRate",
+              0.15
+            ]
+          ],
+          [],
+          []
+        ],
+        "suitAttrDesc": [
+          [],
+          [],
+          [],
+          [
+            "\u51fb\u8d25\u76ee\u6807\u65f6\uff0c\u83b7\u5f973\u70b9\u9b3c\u706b\u3002"
+          ]
+        ],
+        "way": "\u63a2\u7d22\u526f\u672c-\u7b2c\u4e09\u7ae0\n\u5fa1\u9b42\u526f\u672c-\u5468\u4e09\uff08\u4e3b\uff09/\u516d/\u65e5\n\u5546\u5e97-\u79d8\u9b42\u5c4b\n\u5176\u4ed6\u76f8\u5173\u6d3b\u52a8\u968f\u673a\u6389\u843d",
+        "short_id": 19,
+        "type": 1,
+        "bodyicon": "scard_0027"
+      },
+      "300013": {
+        "itemid": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "id": 300013,
+        "release": 1,
+        "suit_card_list": [
+          0,
+          0,
+          0,
+          300013
+        ],
+        "suit_n": "\u65e5\u5973\u5df3\u65f6",
+        "suit_num": 4,
+        "icon": "hscard_0013",
+        "suit_attr_list": [
+          [],
+          [
+            [
+              "defenseAdditionRate",
+              0.3
+            ]
+          ],
+          [],
+          []
+        ],
+        "suitAttrDesc": [
+          [],
+          [],
+          [],
+          [
+            "\u9020\u6210\u4f24\u5bb3\u65f6\uff0c\u670920%\u6982\u7387\u51fb\u9000\u76ee\u680730%\u884c\u52a8\u6761\uff0c\u82e5\u5176\u5e26\u6709\u589e\u76ca\u72b6\u6001\u3001\u5370\u8bb0\uff0c\u89e6\u53d1\u6982\u7387\u63d0\u534710%\u3002"
+          ]
+        ],
+        "way": "\u63a2\u7d22\u526f\u672c-\u7b2c\u4e8c\u5341\u4e94\u7ae0\n\u5fa1\u9b42\u526f\u672c-\u5468\u4e94\uff08\u4e3b\uff09/\u516d/\u65e5\n\u5546\u5e97-\u79d8\u9b42\u5c4b\n\u5176\u4ed6\u76f8\u5173\u6d3b\u52a8\u968f\u673a\u6389\u843d",
+        "short_id": 10,
+        "type": 1,
+        "bodyicon": "scard_0013"
+      }
+    }
+  }
+}

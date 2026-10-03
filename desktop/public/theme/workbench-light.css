@@ -208,6 +208,15 @@
 :root[data-theme="light"] .soul-effect-number, :root[data-theme="light"] .effect-number {
     color: #48606e
 }
+:root[data-theme="light"] .lineup-status[data-state="error"] {
+    color: var(--error, #82524f)
+}
+:root[data-theme="light"] .lineup-status[data-state="warning"] {
+    color: var(--warning, #6a5b3d)
+}
+:root[data-theme="light"] .lineup-empty[data-state="error"] {
+    color: var(--error, #82524f)
+}
 :root[data-theme="light"] .module-command-strip {
     border-bottom: 1px solid #e8e8e8;
     background: var(--dock-panel-background, #ededed)

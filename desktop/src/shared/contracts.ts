@@ -1,5 +1,6 @@
 import type { AppearanceTheme } from './appearance';
 import type { SoulSnapshot, SoulFetchProgress } from './souls';
+import type { LineupExternalSource, LineupSearchRequest, LineupSearchResponse } from './lineups';
 import type { ActionCardRow } from './parameter-types';
 import type { WorkflowTestInit, WorkflowTestRequest, WorkflowTestEvent, TestCommand, TestNodeDraft, TestNodeTransfer, TestNodeAdded } from './workflow-testing';
 
@@ -495,6 +496,10 @@ export interface OnmyojiDesktopApi {
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
   listSoulInstances(): Promise<SoulInstance[]>;
+  searchLineups(request: LineupSearchRequest): Promise<LineupSearchResponse>;
+  openLineupPost(bvid: string): Promise<void>;
+  openLineupUrl(source: LineupExternalSource, url: string): Promise<void>;
+  openLineupSource(source: LineupExternalSource, keyword: string): Promise<void>;
   fetchSouls(instanceId: string): Promise<SoulSnapshot | null>;
   loadSouls(instanceId: string): Promise<SoulSnapshot | null>;
   cancelSoulFetch(instanceId: string): Promise<void>;

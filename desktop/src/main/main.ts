@@ -2,6 +2,8 @@ import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTh
 import path from 'node:path';
 import { AiAssistant } from './aiAssistant';
 import { SoulService } from './soulService';
+import { searchLineups } from './lineupService';
+import { NGA_BOARD_URL } from './ngaLineupService';
 import { loadAiImage } from './ai-images';
 import { copyPngToClipboard } from './clipboardImage';
 import { pathToFileURL } from 'node:url';
@@ -37,6 +39,7 @@ import type {
   VisionCommand,
   VisionStreamEvent,
 } from '../shared/contracts';
+import type { LineupExternalSource } from '../shared/lineups';
 import { chooseRuntimeInstance } from './core/runtimeInstances';
 import {
   clampLiveViewInterval,
@@ -438,6 +441,58 @@ function registerIpc(): void {
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
   ipcMain.handle('souls:list-instances', async () => souls!.listInstances(await runtime.listInstances()));
+  ipcMain.handle('lineups:search', (_event, request: unknown) => searchLineups(request));
+  ipcMain.handle('lineups:open-post', async (_event, bvid: unknown) => {
+    if (typeof bvid !== 'string' || !/^BV[0-9A-Za-z]{10}$/.test(bvid)) throw new Error('阵容来源链接无效');
+    await shell.openExternal(`https://www.bilibili.com/video/${bvid}/`);
+  });
+  ipcMain.handle('lineups:open-url', async (_event, source: unknown, rawUrl: unknown) => {
+    const allowedHosts: Record<LineupExternalSource, string[]> = {
+      bilibili: ['www.bilibili.com'],
+      'netease-community': ['ds.163.com'],
+      'netease-official': ['yys.163.com', 'yys.16163.com'],
+      weibo: ['weibo.com', 'www.weibo.com'],
+      nga: ['nga.cn', 'www.nga.cn', 'nga.178.com', 'bbs.nga.cn'],
+    };
+    if (typeof source !== 'string' || !Object.prototype.hasOwnProperty.call(allowedHosts, source) || typeof rawUrl !== 'string') throw new Error('阵容来源链接无效');
+    let url: URL;
+    try { url = new URL(rawUrl); } catch { throw new Error('阵容来源链接无效'); }
+    if (url.protocol !== 'https:' || !allowedHosts[source as LineupExternalSource].includes(url.hostname.toLowerCase())) throw new Error('阵容来源链接无效');
+    await shell.openExternal(url.href);
+  });
+  ipcMain.handle('lineups:open-source', async (_event, source: unknown, keyword: unknown) => {
+    const sources: LineupExternalSource[] = ['bilibili', 'netease-community', 'netease-official', 'weibo', 'nga'];
+    if (typeof source !== 'string' || !sources.includes(source as LineupExternalSource)) throw new Error('阵容来源无效');
+    const term = typeof keyword === 'string' ? keyword.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
+    const q = `阴阳师 ${term} 阵容`.trim();
+    if (source === 'nga') {
+      await shell.openExternal(NGA_BOARD_URL);
+      return;
+    }
+    if (source === 'netease-community') {
+      await shell.openExternal('https://ds.163.com/topic/%E9%98%B4%E9%98%B3%E5%B8%88/');
+      return;
+    }
+    if (source === 'bilibili') {
+      const searchUrl = new URL('https://search.bilibili.com/all');
+      searchUrl.searchParams.set('keyword', q);
+      searchUrl.searchParams.set('order', 'pubdate');
+      await shell.openExternal(searchUrl.toString());
+      return;
+    }
+    if (source === 'weibo') {
+      const searchUrl = new URL('https://s.weibo.com/weibo');
+      searchUrl.searchParams.set('q', q);
+      await shell.openExternal(searchUrl.toString());
+      return;
+    }
+    const url = new URL('https://www.baidu.com/s');
+    const sourceQuery = {
+      'netease-official': `site:yys.163.com ${q}`,
+    };
+    url.searchParams.set('wd', sourceQuery[source as keyof typeof sourceQuery]);
+    await shell.openExternal(url.toString());
+  });
   ipcMain.handle('souls:fetch', async (_event, instanceId: unknown) => {
     if (typeof instanceId !== 'string' || !(await runtime.listInstances()).some((item) => item.id === instanceId)) {
       throw new Error('所选实例已离线，请刷新实例列表');

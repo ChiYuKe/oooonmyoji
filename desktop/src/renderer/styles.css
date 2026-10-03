@@ -994,9 +994,11 @@ select option:checked { color: #fff; }
 body:not(.dockview-dragging) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   -webkit-app-region: drag;
 }
-/* Native window dragging ignores DOM stacking order. An open titlebar menu
-   overlaps this tab strip, so suspend its drag region until the menu closes. */
-body:has(.menu-root.open) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
+/* Native window dragging ignores DOM stacking order: the drag region is
+   hit-tested natively, so it swallows clicks on anything painted above it.
+   An open titlebar menu or a modal dialog overlaps this tab strip, so suspend
+   its drag region until they close. */
+body:has(.menu-root.open, dialog[open]) .onmyoji-workbench-dockview .dv-tabs-and-actions-container {
   -webkit-app-region: no-drag;
 }
 .onmyoji-workbench-dockview .dv-resize-container .dv-tabs-and-actions-container,

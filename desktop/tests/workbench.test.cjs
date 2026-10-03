@@ -262,3 +262,13 @@ test('content browser keeps draft editing and flat entry order', () => {
   assert.equal(withHiddenRename[0].item.path, 'workflows/hidden.json');
   assert.equal(withHiddenRename[0].editing, true);
 });
+
+test('模态弹窗打开时暂停工作区标签条的拖动区（原生拖动区会吞掉盖在其上的弹窗按钮点击）', () => {
+  const css = read('src/renderer/styles.css');
+  require('postcss').parse(css);
+  // 标签条平时整条都是窗口拖动区。
+  assert.match(css, /body:not\(\.dockview-dragging\)\s+\.onmyoji-workbench-dockview\s+\.dv-tabs-and-actions-container\s*\{[^}]*-webkit-app-region:\s*drag/);
+  // 原生拖动区的命中测试不看 DOM 堆叠顺序，也不会被顶层元素（<dialog> 弹窗）覆盖，
+  // 于是标签条范围内的弹窗按钮点击会被当成窗口拖动吞掉；打开期间必须先关掉拖动区。
+  assert.match(css, /body:has\(\.menu-root\.open,\s*dialog\[open\]\)\s+\.onmyoji-workbench-dockview\s+\.dv-tabs-and-actions-container\s*\{[^}]*-webkit-app-region:\s*no-drag/);
+});

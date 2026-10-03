@@ -101,7 +101,8 @@ import { createRoiPicker } from './roi-picker';
 import { createSidebar } from './panels/sidebar';
 import { createEditorHost } from './editor-host';
 import { createInstancePicker, instanceLabel } from './instance-picker';
-import { createTitlebarMenus } from './titlebar-menus';
+import { createTitlebarMenus, installTitlebarMenuBar } from './titlebar-menus';
+import { installToolMenus } from './tool-menus';
 import { installTeamBuilderResizer } from './team-builder-layout';
 import { installTeamBuilderPages } from './shikigami-atlas';
 import { installSoulCalculator } from './soul-calculator';
@@ -980,26 +981,7 @@ function bindUi(): void {
       if (button.dataset.layoutCommand === 'reset') lifecycle.resetDockLayout();
     });
   });
-  document.querySelectorAll<HTMLButtonElement>('.menu-trigger').forEach((trigger) => {
-    trigger.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const root = trigger.closest<HTMLElement>('.menu-root')!;
-      const shouldOpen = !root.classList.contains('open');
-      closeTitlebarMenus();
-      root.classList.toggle('open', shouldOpen);
-      trigger.setAttribute('aria-expanded', String(shouldOpen));
-    });
-    trigger.closest<HTMLElement>('.menu-root')!.addEventListener('mouseenter', () => {
-      if (!document.querySelector('.menu-root.open')) return;
-      closeTitlebarMenus();
-      const root = trigger.closest<HTMLElement>('.menu-root')!;
-      root.classList.add('open');
-      trigger.setAttribute('aria-expanded', 'true');
-    });
-  });
-  document.querySelectorAll<HTMLElement>('.titlebar-dropdown').forEach((menu) => {
-    menu.addEventListener('click', () => closeTitlebarMenus());
-  });
+  installTitlebarMenuBar(closeTitlebarMenus);
   document.querySelectorAll<HTMLElement>('[data-window-command]').forEach((button) => {
     button.addEventListener('click', () => {
       if (button.dataset.windowCommand === 'minimize') void api.minimizeWindow();
@@ -1032,6 +1014,8 @@ function bindUi(): void {
   document.querySelector('#window-maximize')!.addEventListener('click', async () => updateMaximizedState(await api.toggleMaximizeWindow()));
   document.querySelector('#window-close')!.addEventListener('click', () => void api.closeWindow());
   instancePicker.install(() => selectedInstance);
+  installToolMenus(closeTitlebarMenus);
+  document.querySelector('#instance-select')!.addEventListener('click', closeTitlebarMenus);
   overview.bind();
   contentBrowser.bind();
   document.addEventListener('click', closeTitlebarMenus);

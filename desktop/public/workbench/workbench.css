@@ -6,7 +6,7 @@
 #module-workbench .tool-command svg { width: 14px; height: 14px; flex-basis: 14px; stroke-width: 1.8; }
 #module-workbench .tool-command-label { display: inline; color: inherit; font-size: 11px; line-height: 16px; }
 #module-workbench :is(.tool-command,.tool-menu-trigger):hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-text); }
-#module-workbench :is(.tool-command,.tool-menu-trigger):focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
+#module-workbench :is(.tool-command,.tool-menu-trigger):focus-visible { outline: 0; background: var(--ui-hover); text-decoration: underline; text-underline-offset: 3px; }
 #module-workbench #run-button { background: #35576e; color: #edf4f8; padding-inline: 10px; }
 #module-workbench #run-button:hover:not(:disabled) { background: #41677e; }
 #module-workbench #save-button { background: var(--ui-surface); }
@@ -15,15 +15,56 @@
 #module-workbench .instance-picker { flex: 0 1 128px; width: 128px; min-width: 80px; height: 26px; }
 #module-workbench .instance-select { display: flex; flex-direction: row; align-items: center; gap: 6px; width: 100%; height: 26px; padding: 0 20px 0 7px; background: var(--ui-surface); color: var(--ui-text); border: 0; }
 #module-workbench .instance-select-label { color: inherit; text-align: left; font-size: 11px; line-height: 16px; }
-#module-workbench .instance-select:focus-visible { outline: 1px solid var(--ui-focus); outline-offset: -1px; }
+#module-workbench .instance-select:focus-visible { outline: 0; background: var(--ui-hover); text-decoration: underline; text-underline-offset: 3px; }
 #module-workbench .instance-select-icon { width: 14px; height: 14px; }
 #module-workbench .instance-picker-chevron { top: 50%; right: 6px; bottom: auto; width: 12px; height: 12px; transform: translateY(-50%); }
 #module-workbench .instance-picker.open .instance-picker-chevron { transform: translateY(-50%) rotate(180deg); }
 .tool-overflow { position: relative; flex: 0 0 auto; }
 .tool-menu-trigger { list-style: none; user-select: none; }
 .tool-menu-trigger::-webkit-details-marker { display: none; }
-.tool-menu { position: absolute; z-index: 1100; top: calc(100% + 5px); left: 0; display: grid; min-width: 154px; padding: 4px; border: 1px solid var(--ui-line); border-radius: 4px; background: var(--ui-panel); box-shadow: 0 8px 20px #0004; }
+.tool-menu { position: absolute; z-index: 1100; top: calc(100% + 5px); left: 0; display: grid; gap: 3px; min-width: 154px; padding: 4px; }
 #module-workbench .tool-menu .tool-command { width: 100%; justify-content: flex-start; height: 28px; }
+
+/* Shell dropdowns share a quiet surface and small, consistent interaction changes. */
+#module-workbench :is(.tool-command,.tool-menu-trigger,.instance-select),
+.menu-trigger, :is(.titlebar-dropdown,.desktop-more-menu,.instance-menu) button, select {
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+#module-workbench .tool-overflow[open] > .tool-menu-trigger,
+#module-workbench #more-button[aria-expanded="true"],
+#module-workbench .instance-picker.open .instance-select,
+#module-workbench :is(.tool-command,.tool-menu-trigger,.instance-select):active:not(:disabled) {
+  background: var(--ui-selected); color: var(--ui-text);
+}
+#module-workbench .instance-select:hover:not(:disabled) { background: var(--ui-hover); }
+:root[data-theme] #module-workbench #run-button:active:not(:disabled) { background: var(--ui-selected); }
+.tool-menu-chevron {
+  flex: 0 0 6px; width: 6px; height: 6px; margin-left: 3px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  color: var(--ui-muted); transform: translateY(-2px) rotate(45deg);
+  transition: transform 140ms ease;
+}
+.tool-overflow[open] > .tool-menu-trigger .tool-menu-chevron { transform: translateY(2px) rotate(225deg); }
+:root[data-theme] :is(.tool-menu,.titlebar-dropdown,.desktop-more-menu,.instance-menu) {
+  padding: 4px; border: 0; border-radius: 4px; background: var(--ui-surface);
+  color: var(--ui-text); box-shadow: 0 8px 24px #0005, 0 2px 6px #0003;
+  animation: shell-menu-enter 140ms ease-out;
+}
+:root[data-theme] :is(.titlebar-dropdown,.desktop-more-menu,.instance-menu) button { border-radius: 3px; color: var(--ui-text); }
+:root[data-theme] :is(.titlebar-dropdown,.desktop-more-menu,.instance-menu) button:active { background: var(--ui-selected); }
+:root[data-theme] .instance-option.selected { background: var(--ui-selected); color: var(--ui-text); }
+@supports (appearance: base-select) {
+  :root[data-theme] select::picker(select) { border: 0; border-radius: 4px; background: var(--ui-surface); color: var(--ui-text); box-shadow: 0 8px 24px #0005, 0 2px 6px #0003; animation: shell-menu-enter 140ms ease-out; }
+  :root[data-theme] select option { border-radius: 3px; color: var(--ui-text); transition: background-color 120ms ease; }
+  :root[data-theme] select option:checked { background: var(--ui-selected); color: var(--ui-text); }
+}
+@keyframes shell-menu-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  #module-workbench :is(.tool-command,.tool-menu-trigger,.instance-select,.instance-picker-chevron),
+  .menu-trigger, .tool-menu-chevron, :is(.titlebar-dropdown,.desktop-more-menu,.instance-menu) button,
+  select, select option { transition: none; }
+  :root[data-theme] :is(.tool-menu,.titlebar-dropdown,.desktop-more-menu,.instance-menu), :root[data-theme] select::picker(select) { animation: none; }
+}
 
 /* Variable library: one aligned name/type row, scope explained once per group. */
 /* Palette and hierarchy use the same flat sidebar rhythm. */

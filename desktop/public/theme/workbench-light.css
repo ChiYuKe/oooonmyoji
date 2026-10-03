@@ -103,9 +103,6 @@
 :root[data-theme="light"] .app-tooltip-preview-path {
     color: #4c4c4c
 }
-:root[data-theme="light"] select::picker-icon {
-    color: #606060
-}
 :root[data-theme="light"] select::picker(select) {
     border: 1px solid #dbdbdb;
     background: #ededed
@@ -141,6 +138,9 @@
 }
 :root[data-theme="light"] .instance-option-check {
     color: #456170
+}
+:root[data-theme="light"] .instance-menu-heading {
+    color: #4f4f4f
 }
 :root[data-theme="light"] .tool-strip {
     border-bottom: 2px solid #e7e7e7;

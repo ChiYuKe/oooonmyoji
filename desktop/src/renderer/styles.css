@@ -292,7 +292,9 @@ select {
   align-items: center;
 }
 select:hover, select:focus, select:open { background: var(--surface-hover); }
-select::picker-icon { color: #9aa3ad; }
+select::picker-icon { content: ''; flex: 0 0 auto; align-self: center; width: 6px; height: 6px; margin-inline: auto 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; color: var(--muted); transform: translateY(-2px) rotate(45deg); transition: transform 140ms ease; }
+select:open::picker-icon { transform: translateY(2px) rotate(225deg); }
+@media (prefers-reduced-motion: reduce) { select::picker-icon { transition: none; } }
 select::picker(select) {
   appearance: base-select;
   margin-top: 4px;
@@ -386,6 +388,7 @@ select option:checked { color: #fff; }
 .instance-option-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .instance-option-check { width: 12px; margin-left: auto; color: #8fc8e7; font-size: 11px; text-align: center; visibility: hidden; }
 .instance-option.selected .instance-option-check { visibility: visible; }
+.instance-menu-heading { padding: 5px 8px 4px; color: #aeb4bb; font-size: 11px; font-weight: 600; }
 .instance-menu.soul-instance-menu { max-width: min(360px, calc(100vw - 16px)); }
 .dirty-indicator { width: 7px; height: 7px; border-radius: 50%; background: transparent; }
 .dirty-indicator.dirty { background: var(--yellow); }
@@ -468,6 +471,7 @@ select option:checked { color: #fff; }
 .soul-calculator .soul-toolbar select:open { background: var(--ui-selected, var(--surface-hover)); }
 .soul-calculator .soul-toolbar > button:active:not(:disabled), .soul-calculator .soul-sort-controls > button:active:not(:disabled), .soul-calculator .soul-filters > button:active:not(:disabled), .soul-calculator .soul-active-chip:active:not(:disabled) { background: var(--ui-selected, var(--surface-hover)); }
 /* Style the native picker in Chromium's top layer, keeping native selection and keyboard behavior. */
+@supports (appearance: base-select) {
   .soul-calculator :is(#soul-instance, #soul-sort), .soul-calculator :is(#soul-instance, #soul-sort)::picker(select) { appearance: base-select; }
   .soul-calculator :is(#soul-instance, #soul-sort)::picker(select) { padding: 6px; border: 0; border-radius: 4px; background: var(--surface-raised); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18); max-height: min(360px, calc(100vh - 24px)); overflow: auto; font-size: 12px; }
   .soul-calculator :is(#soul-instance, #soul-sort) option { min-height: 30px; padding: 6px 9px; border-radius: 3px; color: var(--text); background: transparent; font-size: 12px; font-weight: 400; }

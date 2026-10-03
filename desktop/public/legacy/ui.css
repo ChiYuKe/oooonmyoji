@@ -155,13 +155,18 @@
 .ui-dropdown-button::after {
   content: '';
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  width: 6px;
+  height: 6px;
   align-self: center;
-  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M4.2 6.2L8 10l3.8-3.8z' fill='%23a8a8a8'/></svg>") center / contain no-repeat;
-  transition: transform .12s ease;
+  margin: 0 3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  color: var(--ui-muted);
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 140ms ease;
 }
-.ui-dropdown.open .ui-dropdown-button::after { transform: rotate(180deg); }
+.ui-dropdown.open .ui-dropdown-button::after { transform: translateY(2px) rotate(225deg); }
+@keyframes ui-dropdown-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 
 /* 卡片参数行的行内编辑器：纯 SVG 画布没有原生控件，浮层贴在参数行上。
  * 层级低于右键菜单（260）与 toast（300），高于画布浮层（200）。

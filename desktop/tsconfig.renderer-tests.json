@@ -10,6 +10,7 @@
   },
   "include": [
     "src/renderer/titlebar-menus.ts",
+    "src/renderer/tool-menus.ts",
     "src/renderer/team-builder-layout.ts",
     "src/renderer/shikigami-atlas.ts",
     "src/renderer/soul-calculator.ts",

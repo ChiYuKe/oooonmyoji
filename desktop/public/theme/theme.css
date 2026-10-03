@@ -375,6 +375,7 @@
 :root[data-theme] .dockview-popout-host .popout-titlebar { border-color: var(--ui-line); }
 :root[data-theme] .dockview-popout-host :is(.popout-title, .popout-window-controls button) { color: var(--ui-text); }
 :root[data-theme] .dockview-popout-host .popout-window-controls button:not(:last-child):hover { background: var(--ui-hover); color: var(--ui-text); }
+/* 顶置按钮：按住状态要压过上面的通用按钮配色（含悬停）。 */
 :root[data-theme] .dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container { background-color: var(--dock-tab-row-background); }
 
 /* Nested inspector values belong to the UI palette, not graph node palettes. */
@@ -392,5 +393,43 @@
 :root[data-theme] #inspector-body .parameter-bound-note { color: var(--ui-muted); }
 :root[data-theme] #inspector-body .section-header:hover { background: var(--ui-hover); }
 :root[data-theme] #inspector-body .danger:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-danger) 12%, var(--ui-panel)); color: var(--ui-danger); }
+
+/* Shared dropdowns also appear inside editor frames and settings panels. */
+:root[data-theme] :is(.content-context-menu, .sidebar-context-menu) {
+  padding: 4px; border: 0; border-radius: 4px; background: var(--ui-surface);
+  color: var(--ui-text); box-shadow: 0 8px 24px #0005, 0 2px 6px #0003;
+  animation: context-menu-enter 140ms ease-out;
+}
+:root[data-theme] :is(.content-context-menu, .sidebar-context-menu) > button {
+  min-height: 28px; padding: 6px 10px; border: 0; border-radius: 3px;
+  background: transparent; color: var(--ui-text); box-shadow: none; outline: 0;
+  font: inherit; font-size: 12px; line-height: 18px;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+:root[data-theme] :is(.content-context-menu, .sidebar-context-menu) > button:hover { background: var(--ui-hover); color: var(--ui-text); }
+:root[data-theme] :is(.content-context-menu, .sidebar-context-menu) > button:is(:active, :focus-visible) { background: var(--ui-selected); color: var(--ui-text); }
+:root[data-theme] :is(.content-context-menu, .sidebar-context-menu) > button:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+:root[data-theme] :is(.content-context-menu button svg, .sidebar-context-menu-icon) { color: var(--ui-muted); }
+:root[data-theme] :is(.content-context-menu, .sidebar-context-menu) > button:is(:hover, :focus-visible) :is(svg, .sidebar-context-menu-icon) { color: var(--ui-text); }
+@keyframes context-menu-enter { from { opacity: 0; } to { opacity: 1; } }
+:root[data-theme] .ui-dropdown-button { border-radius: 4px; box-shadow: none; transition: background-color 120ms ease, color 120ms ease; }
+:root[data-theme] .ui-dropdown.open .ui-dropdown-button,
+:root[data-theme] .ui-dropdown-button:active:not(:disabled) { background: var(--ui-selected); }
+:root[data-theme] .ui-dropdown-button:focus-visible,
+:root[data-theme] #inspector-body .ui-dropdown-button:focus-visible { outline: 0; text-decoration: underline; text-underline-offset: 3px; }
+:root[data-theme] .ui-dropdown-list { padding: 4px; border: 0; border-radius: 4px; background: var(--ui-surface); box-shadow: 0 8px 24px #0005, 0 2px 6px #0003; animation: ui-dropdown-enter 140ms ease-out; }
+:root[data-theme] .ui-dropdown-item { border-radius: 3px; transition: background-color 120ms ease, color 120ms ease; }
+:root[data-theme] .ui-dropdown-item:focus-visible { outline: 0; background: var(--ui-selected); text-decoration: underline; text-underline-offset: 3px; }
+/* Keep selected and hovered neighbors visually separate, including menus in editor frames. */
+:root[data-theme] :is(.tool-menu,.titlebar-dropdown,.desktop-more-menu,.instance-menu,.content-context-menu,.sidebar-context-menu,.context-menu,.context-menu-list) > button + button,
+:root[data-theme] .ui-dropdown-item + .ui-dropdown-item,
+:root[data-theme] select option + option { margin-top: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme] :is(.ui-dropdown-button,.ui-dropdown-item), .ui-dropdown-button::after { transition: none; }
+  :root[data-theme] .ui-dropdown-list { animation: none; }
+  :root[data-theme] :is(.content-context-menu, .sidebar-context-menu) { animation: none; }
+  :root[data-theme] :is(.content-context-menu, .sidebar-context-menu) > button { transition: none; }
+}
 :root[data-theme="light"] .shikigami-owned-addition,
+:root[data-theme="light"] .soul-panel-addition,
 :root[data-theme="light"] .shikigami-owned-soul-attributes .soul-sub-attribute .soul-detail-attribute-value { color: #27698f; }

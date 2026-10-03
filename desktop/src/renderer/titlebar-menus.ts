@@ -4,6 +4,37 @@ export interface TitlebarMenus {
   toggleMore(button: HTMLButtonElement): void;
 }
 
+/**
+ * Wire the title bar menu bar: click toggles a menu, hovering the bar while a menu is open
+ * switches to that menu, and the open menu closes once the pointer leaves it — like a native
+ * menu bar. Moving onto another menu keeps the bar active instead of just dismissing it.
+ */
+export function installTitlebarMenuBar(close: () => void): void {
+  document.querySelectorAll<HTMLElement>('.menu-root').forEach((root) => {
+    const trigger = root.querySelector<HTMLButtonElement>('.menu-trigger');
+    if (!trigger) return;
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const shouldOpen = !root.classList.contains('open');
+      close();
+      root.classList.toggle('open', shouldOpen);
+      trigger.setAttribute('aria-expanded', String(shouldOpen));
+    });
+    root.addEventListener('mouseenter', () => {
+      if (!document.querySelector('.menu-root.open')) return;
+      close();
+      root.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+    });
+    root.addEventListener('pointerleave', (event) => {
+      if (event.pointerType !== 'mouse' || !root.classList.contains('open')) return;
+      if (event.relatedTarget instanceof Element && event.relatedTarget.closest('.menu-root')) return;
+      close();
+    });
+    root.querySelectorAll<HTMLElement>('.titlebar-dropdown').forEach((menu) => menu.addEventListener('click', close));
+  });
+}
+
 export interface TitlebarMenuOptions {
   runtimeEdgePreviewEnabled?(): boolean;
 }
@@ -93,7 +124,7 @@ export function createTitlebarMenus(onAction: (type: string) => void, options: T
     menu.style.top = `${top}px`;
 
     const dismiss = (event: Event): void => {
-      if (menu.contains(event.target as Node) || event.target === button) return;
+      if (menu.contains(event.target as Node) || button.contains(event.target as Node)) return;
       closeMore();
     };
     const keyHandler = (event: KeyboardEvent): void => {
@@ -117,7 +148,7 @@ export function createTitlebarMenus(onAction: (type: string) => void, options: T
 
   function toggleMore(button: HTMLButtonElement): void {
     if (moreMenu) closeMore();
-    else showMore(button);
+    else { close(); showMore(button); }
   }
 
   return { close, toggleMore };

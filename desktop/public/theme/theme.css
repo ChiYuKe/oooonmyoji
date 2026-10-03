@@ -376,6 +376,8 @@
 :root[data-theme] .dockview-popout-host :is(.popout-title, .popout-window-controls button) { color: var(--ui-text); }
 :root[data-theme] .dockview-popout-host .popout-window-controls button:not(:last-child):hover { background: var(--ui-hover); color: var(--ui-text); }
 /* 顶置按钮：按住状态要压过上面的通用按钮配色（含悬停）。 */
+:root[data-theme] .dockview-popout-host .popout-window-controls button[aria-pressed="true"],
+:root[data-theme] .dockview-popout-host .popout-window-controls button[aria-pressed="true"]:hover { background: var(--ui-hover); color: var(--ui-focus); }
 :root[data-theme] .dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container { background-color: var(--dock-tab-row-background); }
 
 /* Nested inspector values belong to the UI palette, not graph node palettes. */

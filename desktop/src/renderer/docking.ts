@@ -26,6 +26,7 @@ import { createElement, ExternalLink } from 'lucide';
 import {
   LAYOUT_STORAGE_KEY,
   WORKBENCH_LAYOUT_STORAGE_KEY,
+  POPOUT_ALWAYS_ON_TOP_STORAGE_KEY,
   clearPersistedLayout,
   persistLayout,
   readPersistedLayout,
@@ -46,7 +47,21 @@ import {
   registerOutsidePopoutGesture,
   installTabStripWindowDragToggle,
 } from './docking/gestures';
+import { installPopoutAlwaysOnTop } from './docking/popout-topmost';
 import { SHARED_PANEL_DEFINITIONS } from './docking/shared-panels';
+import type { PopoutTopmostStorage } from './docking/popout-topmost';
+
+/** 顶置偏好读写：JSON 存在布局存储里，两套 dockview 实例共用同一份。 */
+const popoutTopmostStorage = (): PopoutTopmostStorage => ({
+  read: () => {
+    try {
+      return JSON.parse(readPersistedLayout(POPOUT_ALWAYS_ON_TOP_STORAGE_KEY) ?? '{}') as Record<string, boolean>;
+    } catch {
+      return {};
+    }
+  },
+  write: (flags) => persistLayout(POPOUT_ALWAYS_ON_TOP_STORAGE_KEY, JSON.stringify(flags)),
+});
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
@@ -652,6 +667,7 @@ export function createDockingWorkspace(
     temporaryDragLayout = active;
     if (!active) saveLayout();
   });
+  const popoutTopmostDisposable = installPopoutAlwaysOnTop(api, popoutTopmostStorage());
 
   return {
     dockviewApi: api,
@@ -684,6 +700,7 @@ export function createDockingWorkspace(
     resetLayout,
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
+      popoutTopmostDisposable.dispose();
       sourceGroupVacancyDisposable.dispose();
       dockBackDisposable.dispose();
       saveLayout();
@@ -847,6 +864,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     if (!active) saveLayout();
   });
   const dockBackDisposable = registerDockBackGesture(api);
+  const popoutTopmostDisposable = installPopoutAlwaysOnTop(api, popoutTopmostStorage());
 
   return {
     dockviewApi: api,
@@ -877,6 +895,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     resetLayout,
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
+      popoutTopmostDisposable.dispose();
       sourceGroupVacancyDisposable.dispose();
       dockBackDisposable.dispose();
       saveLayout();

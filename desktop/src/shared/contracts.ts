@@ -452,6 +452,9 @@ export interface OnmyojiDesktopApi {
   toggleMaximizeWindow(): Promise<boolean>;
   closeWindow(): Promise<void>;
   isWindowMaximized(): Promise<boolean>;
+  /** 独立弹窗「顶置」：让当前 BrowserWindow 总在最前。 */
+  setAlwaysOnTop(flag: boolean): Promise<void>;
+  isAlwaysOnTop(): Promise<boolean>;
   readLayout(key: string): string | null;
   getTheme(): AppearanceTheme;
   setTheme(theme: AppearanceTheme): AppearanceTheme;

@@ -43,6 +43,7 @@
     "src/renderer/docking/layout.ts",
     "src/renderer/docking/documents.ts",
     "src/renderer/docking/gestures.ts",
+    "src/renderer/docking/popout-topmost.ts",
     "src/renderer/docking/shared-panels.ts",
     "src/canvas/editor.ts",
     "src/canvas/bridge.ts",

@@ -656,6 +656,8 @@ function registerShellIpc(): void {
   });
   ipcMain.handle('window:close', (event) => ownerWindow(event).close());
   ipcMain.handle('window:is-maximized', (event) => ownerWindow(event).isMaximized());
+  ipcMain.handle('window:set-always-on-top', (event, flag: unknown) => { ownerWindow(event).setAlwaysOnTop(Boolean(flag)); });
+  ipcMain.handle('window:is-always-on-top', (event) => ownerWindow(event).isAlwaysOnTop());
   ipcMain.on('appearance:read', (event) => { event.returnValue = readTheme(); });
   ipcMain.on('appearance:write', (event, value: unknown) => {
     if (isAppearanceTheme(value)) writeLayout(THEME_STORE_KEY, value);

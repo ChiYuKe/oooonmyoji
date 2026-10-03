@@ -297,6 +297,9 @@
     background: #f5e4e5;
     color: #232323
 }
+:root[data-theme="light"] .dockview-popout-host .popout-window-controls button[aria-pressed="true"] {
+    background: #eaeaea
+}
 :root[data-theme="light"] .tree-row {
     color: #373737
 }

@@ -5,10 +5,10 @@
  */
 import 'dockview/dist/styles/dockview.css';
 import './styles.css';
-import { createIcons, Minus, Square, X } from 'lucide';
+import { createIcons, Minus, Pin, Square, X } from 'lucide';
 
 document.body.classList.add('dockview-popout-host');
-createIcons({ icons: { Minus, Square, X } });
+createIcons({ icons: { Minus, Pin, Square, X } });
 
 const installCustomTooltips = (): void => {
   window.StudioTooltip?.install({
@@ -30,6 +30,33 @@ document.querySelector('#popout-close')?.addEventListener('click', () => void po
 const sendToOpener = (data: Record<string, unknown>): void => {
   window.opener?.postMessage({ ...data, source: 'dockview-popout' }, '*');
 };
+
+// 顶置按钮：总在最前的状态由主进程窗口持有，这里只负责切换与回报。
+// 加载完成后向主窗口报到，主窗口按面板 id 回发偏好；点按钮时也回报一次，
+// 让停靠控制器把偏好记下来，弹窗下次打开（含布局恢复）时自动顶置。
+const pinButton = document.querySelector<HTMLButtonElement>('#popout-always-on-top');
+const applyPinState = (pinned: boolean): void => {
+  if (!pinButton) return;
+  pinButton.setAttribute('aria-pressed', String(pinned));
+  pinButton.title = pinned ? '取消顶置' : '顶置';
+  pinButton.setAttribute('aria-label', pinButton.title);
+};
+let pinned = false;
+const applyAlwaysOnTop = (flag: boolean): void => {
+  pinned = flag; applyPinState(flag);
+  void popoutApi.setAlwaysOnTop(flag);
+};
+void popoutApi.isAlwaysOnTop().then((flag) => { pinned = flag; applyPinState(flag); });
+pinButton?.addEventListener('click', () => {
+  applyAlwaysOnTop(!pinned);
+  sendToOpener({ type: 'popoutAlwaysOnTop', flag: pinned });
+});
+window.addEventListener('message', (event) => {
+  const data = event.data as Record<string, unknown> | undefined;
+  if (data?.source !== 'dockview-main' || data.type !== 'popoutTopmost') return;
+  applyAlwaysOnTop(Boolean(data.flag));
+});
+sendToOpener({ type: 'popoutReady' });
 
 const relayFrameMessage = (event: MessageEvent<Record<string, unknown>>): void => {
   if (event.data?.source !== 'legacy-editor' && event.data?.source !== 'legacy-editor-state') return;

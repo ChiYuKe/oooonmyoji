@@ -1028,6 +1028,7 @@ body:has(.menu-root.open, dialog[open]) .onmyoji-workbench-dockview .dv-tabs-and
 .dockview-popout-host .popout-window-controls button { width: 42px; height: 100%; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #aeb5be; }
 .dockview-popout-host .popout-window-controls button:hover { background: #252a30; color: #f1f5f8; }
 .dockview-popout-host .popout-window-controls button:last-child:hover { background: #b43d45; color: #fff; }
+.dockview-popout-host .popout-window-controls button[aria-pressed="true"] { background: #252a30; color: var(--ui-focus); }
 .dockview-popout-host .popout-window-controls svg { width: 13px; height: 13px; stroke-width: 1.7; }
 .dockview-popout-host .dv-popout-window { top: 28px !important; width: 100vw !important; height: calc(100vh - 28px) !important; }
 .dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container { padding-top: 6px; border-bottom: 0 !important; box-sizing: border-box; }

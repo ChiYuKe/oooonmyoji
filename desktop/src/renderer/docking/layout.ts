@@ -8,6 +8,8 @@ import type { DroptargetOverlayModel } from 'dockview';
  * 因此通过版本号让这次结构调整使用新的默认布局。 */
 export const LAYOUT_STORAGE_KEY = 'onmyoji-studio.dock-layout.v10';
 export const WORKBENCH_LAYOUT_STORAGE_KEY = 'onmyoji-studio.workbench-layout.v10';
+/** 独立弹窗「顶置」偏好：面板 id → 是否总在最前。 */
+export const POPOUT_ALWAYS_ON_TOP_STORAGE_KEY = 'onmyoji-studio.popout-always-on-top';
 
 // A tab is one merge target. Dockview still uses the cursor's left/right half
 // internally to decide the insertion order, but a half-width preview makes it

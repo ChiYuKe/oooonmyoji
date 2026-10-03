@@ -1147,6 +1147,10 @@ async function start(): Promise<void> {
     bootstrap = bootstrapData;
     contentBrowser.setCatalog(assets, folders);
     settings.readSettings();
+    // 工作台布局是持久化的，设置面板可能在重启后被直接还原成打开状态；这条路径不经过
+    // openSettingsPanel()，所以补一次同步，否则面板停在 DOM 初始值（AI 设置、启动行为与
+    // 调试开关看着都像没保存）。
+    if (workbenchFrame?.isOpen('settings')) settings.refreshPanelData();
     renderWorkflowSelect(bootstrap.workflows);
     renderInstances(bootstrap.instances);
     overview.reconcileSelection(true);

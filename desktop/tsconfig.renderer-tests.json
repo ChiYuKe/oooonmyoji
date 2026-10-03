@@ -38,6 +38,7 @@
     "src/renderer/overview/card.ts",
     "src/renderer/editor-host.ts",
     "src/renderer/ai-settings.ts",
+    "src/renderer/settings-panel.ts",
     "src/renderer/document-lifecycle.ts",
     "src/renderer/docking/layout.ts",
     "src/renderer/docking/documents.ts",

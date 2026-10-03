@@ -40,6 +40,11 @@ export interface SettingsPanelController {
   /** 打开设置面板：同步控件状态并按需刷新 Debug 设置。 */
   openSettingsPanel(): void;
   openAiSettingsPanel(): void;
+  /**
+   * 面板已经显示着时同步控件与各分类页数据（重启后由工作台布局直接还原出来的
+   * 设置面板走的就是这条路），不改变面板显隐也不抢焦点。
+   */
+  refreshPanelData(): void;
   refreshDebugSettings(): Promise<void>;
   /** 按当前自动刷新开关重建实例轮询定时器。 */
   restartInstanceRefresh(): void;
@@ -53,6 +58,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
   const { api, contentBrowser, showToast, showPanel, refreshInstances } = deps;
   const aiSettings = createAiSettings(api);
   const aiTab = document.querySelector<HTMLButtonElement>('#settings-tab-ai');
+  const settingsNav = document.querySelector<HTMLElement>('#module-settings .settings-nav');
   const refreshIntervalMs = deps.refreshIntervalMs ?? 5000;
   const contentView = document.querySelector<HTMLSelectElement>('#settings-content-view')!;
   const autoRefresh = document.querySelector<HTMLInputElement>('#settings-auto-refresh')!;
@@ -144,14 +150,51 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     }
   }
 
-  function openSettingsPanel(): void {
-    void aiSettings.refresh();
+  /**
+   * 面板控件与各分类页数据在"面板该显示什么"这件事上的唯一出处。
+   *
+   * 设置面板的显隐归工作台布局（重启会直接还原成打开状态），分类页的切换归
+   * public/settings/settings.js。这两条路径都不读配置，所以面板显示出来之后必须有人
+   * 读一次；否则页面停在 DOM 初始值上——AI 设置、启动行为与调试开关看着都像没保存。
+   */
+  function loadPanelData(): void {
     contentView.value = contentBrowser.getView();
     autoRefresh.checked = autoRefreshInstances;
     defaultWorkflow.checked = loadDefaultWorkflowOnStart;
     restoreSession.checked = restoreSessionOnStart;
+    void aiSettings.refresh();
     void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
     void refreshRuntimeResources().catch((error) => showToast(`读取运行环境失败：${String(error)}`, true));
+  }
+
+  /** 单个分类页的数据：切到哪一页就读哪一页，不做没人看的请求。 */
+  function refreshPage(page: string | undefined): void {
+    if (page === 'ai') void aiSettings.refresh();
+    else if (page === 'interface') contentView.value = contentBrowser.getView();
+    else if (page === 'runtime') {
+      void refreshDebugSettings().catch((error) => showToast(`读取 Debug 设置失败：${String(error)}`));
+      void refreshRuntimeResources().catch((error) => showToast(`读取运行环境失败：${String(error)}`, true));
+    }
+  }
+
+  function selectedPage(): string | undefined {
+    return settingsNav?.querySelector<HTMLElement>('[data-settings-page][aria-selected="true"]')?.dataset.settingsPage;
+  }
+
+  /** settings.js 认的换页按键；其余按键不该触发读配置。 */
+  const NAV_KEYS = ['ArrowUp', 'ArrowDown', 'Home', 'End'];
+
+  function syncSelectedPage(event: Event): void {
+    if (event.type === 'keydown' && !NAV_KEYS.includes((event as KeyboardEvent).key)) return;
+    const target = event.target as HTMLElement | null;
+    // 设置面板可能被移到独立窗口，跨文档用 instanceof 判断会失败。
+    if (event.type === 'click' && (typeof target?.closest !== 'function' || !target.closest('[data-settings-page]'))) return;
+    // settings.js 的处理器绑在按钮上，先于这里的委托执行，读到的已是切换后的选中状态。
+    refreshPage(selectedPage());
+  }
+
+  function openSettingsPanel(): void {
+    loadPanelData();
     showPanel();
   }
 
@@ -238,6 +281,10 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
         }
       })();
     });
+    // 分类页的显隐由 public/settings/settings.js 只切 hidden 类，数据得跟着页面读一次。
+    // 点击与方向键换页都走这里；settings.js 的处理器绑在按钮上，先于这份委托执行。
+    settingsNav?.addEventListener('click', syncSelectedPage);
+    settingsNav?.addEventListener('keydown', syncSelectedPage);
   }
 
   const stopResourceProgress = api.onRuntimeResourceProgress((event) => {
@@ -253,6 +300,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanelContr
     restoreSessionOnStart: () => restoreSessionOnStart,
     openSettingsPanel,
     openAiSettingsPanel: () => { openSettingsPanel(); aiTab?.click(); },
+    refreshPanelData: loadPanelData,
     refreshDebugSettings,
     restartInstanceRefresh,
     bind,

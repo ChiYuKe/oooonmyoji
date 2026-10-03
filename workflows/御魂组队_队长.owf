@@ -239,6 +239,7 @@ workflow souls_party_captain
   node sequence_5 sequence 主循环（按运行轮数重复）
     at: [4710, 208]
     decorator repeat
+      count: 20
   node sequence_6 sequence 每轮：回房间再开一场
     at: [6557, 438]
   node task_20 task 等待回到协战队伍房间
@@ -296,7 +297,6 @@ workflow souls_party_captain
     at: [1664, 1832]
   node group_entry_6 group_entry
     at: [1992, 1832]
-  var inputs.运行轮数
   edges:
     break_2:out.found -> condition_1:condition
     task_1:out -> break_2:ref
@@ -311,7 +311,6 @@ workflow souls_party_captain
     task_19:out.matches.0 -> task_18:match
     task_17:out -> break_1:ref
     break_1:out.found -> condition_3:condition
-    var__inputs__运行轮数:out -> sequence_5:decorators.0.count
     break_4:out.found -> condition_4:condition
     task_20:out -> break_4:ref
     task_22:out.matches.0 -> task_21:match

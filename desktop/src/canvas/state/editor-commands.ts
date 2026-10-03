@@ -8,6 +8,7 @@ import type { CanvasState } from '../state/canvas-state';
 import { BOOL_JUDGE_COMPARISON_OPERATORS, boolJudgeShape } from '../model/exec-ports';
 import { parameterLiteralCache, parameterLiteralCacheKey } from './literal-cache';
 import { isStandardNodeId, remapNodeIdentifiers } from '../../shared/workflow/node-identifiers';
+import { defaultAt as variableDefaultAt } from '../model/variable-system';
 
 export interface EditorCommandsDeps {
   state: Omit<CanvasState, 'raw'> & { raw: any };
@@ -47,10 +48,28 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
   }
 
   /**
-   * 解除某个端口（键为 `nodeId:param`，实例子输入为 `nodeId:runs.N.inputs.param`）的变量绑定。
-   * 绑定前的字面量若已缓存则恢复，否则直接移除引用（参数回落到定义默认值）。
+   * 解除某个端口（键为 `nodeId:param`，实例子输入为 `nodeId:runs.N.inputs.param`，
+   * 装饰器参数为 `nodeId:decorators.N.field`）的变量绑定。
+   * 普通参数优先恢复缓存字面量；装饰器按绑定默认值恢复，避免清除引用时改变其行为。
    * 返回这次是否真的释放了一处引用，调用方据此给出提示。
    */
+  function restoreDecoratorBinding(decorator: any, field: string, ref: string): void {
+    const fallback = variableDefaultAt(state.raw, ref);
+    if (fallback !== undefined) {
+      decorator[field] = clone(fallback);
+      return;
+    }
+    const defaults: Record<string, unknown> = {
+      count: 1,
+      attempts: 2,
+      delay_seconds: 0,
+      reset_on_failure: false,
+      seconds: decorator.type === 'timeout' ? 10 : 1,
+    };
+    if (Object.prototype.hasOwnProperty.call(defaults, field)) decorator[field] = defaults[field];
+    else delete decorator[field];
+  }
+
   function releasePinBinding(key: string): boolean {
     const separator = typeof key === 'string' ? key.indexOf(':') : -1;
     if (separator < 0) return false;
@@ -65,6 +84,15 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
         return true;
       }
       return false;
+    }
+    const decoratorMatch = /^decorators\.(\d+)\.([^.]+)$/.exec(param);
+    if (decoratorMatch) {
+      const decorator = Array.isArray(node.decorators) ? node.decorators[Number(decoratorMatch[1])] : null;
+      const field = decoratorMatch[2];
+      const binding = decorator && decorator[field];
+      if (!decorator || !binding || typeof binding !== 'object' || Array.isArray(binding) || typeof binding.ref !== 'string') return false;
+      restoreDecoratorBinding(decorator, field, binding.ref);
+      return true;
     }
     const nested = param.startsWith('inputs.');
     const name = nested ? param.slice('inputs.'.length) : param;
@@ -82,10 +110,10 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
    * 删除变量卡片。画布连接优先：没有卡片再引用该变量的端口会同步解除绑定，
    * 同一变量若还有别的卡片存活，则把连线改指到存活卡片上（绑定保留）。
    *
-   * 另外要收敛**孤儿引用**：参数里的 `{ref}` 与连线映射是两份记录，
+   * 另外要收敛**孤儿引用**：参数、装饰器和实例输入里的 `{ref}` 与连线映射是两份记录，
    * `_variableLinks` 可能已经丢了这一项（旧文档、手工改过的 JSON、映射与引用不同步），
    * 此时光看映射是找不到它的。剩下来的引用会指向已经不存在的变量，
-   * 卡片上继续显示「已连接」——所以删除卡片时按份数扫一遍参数，把引用清掉。
+   * 卡片上继续显示「已连接」——所以删除卡片时按份数扫一遍参数、装饰器和实例输入，把引用清掉。
    */
   function removeVariableCards(ids: any): void {
     const targets = [...new Set(Array.isArray(ids) ? ids : [])]
@@ -145,23 +173,36 @@ export function createEditorCommands(deps: EditorCommandsDeps) {
     let cleared = 0;
     const links = variableLinks();
     for (const node of nodes()) {
-      if (!node || !node.params || typeof node.params !== 'object' || Array.isArray(node.params)) continue;
-      for (const [name, value] of Object.entries(node.params)) {
-        if (isOrphanRef(value, refs)) {
-          delete node.params[name];
-          delete links[`${node.id}:${name}`];
-          cleared += 1;
-        }
-      }
-      const nested = node.params.inputs;
-      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-        for (const [name, value] of Object.entries(nested)) {
+      if (!node) continue;
+      if (node.params && typeof node.params === 'object' && !Array.isArray(node.params)) {
+        for (const [name, value] of Object.entries(node.params)) {
           if (isOrphanRef(value, refs)) {
-            delete nested[name];
-            delete links[`${node.id}:inputs.${name}`];
+            delete node.params[name];
+            delete links[`${node.id}:${name}`];
             cleared += 1;
           }
         }
+        const nested = node.params.inputs;
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+          for (const [name, value] of Object.entries(nested)) {
+            if (isOrphanRef(value, refs)) {
+              delete nested[name];
+              delete links[`${node.id}:inputs.${name}`];
+              cleared += 1;
+            }
+          }
+        }
+      }
+      if (Array.isArray(node.decorators)) {
+        node.decorators.forEach((decorator: any, index: number) => {
+          if (!decorator || typeof decorator !== 'object' || Array.isArray(decorator)) return;
+          for (const [field, value] of Object.entries(decorator)) {
+            if (!isOrphanRef(value, refs)) continue;
+            restoreDecoratorBinding(decorator, field, (value as any).ref);
+            delete links[`${node.id}:decorators.${index}.${field}`];
+            cleared += 1;
+          }
+        });
       }
       if (!Array.isArray(node.runs)) continue;
       node.runs.forEach((run: any, index: number) => {

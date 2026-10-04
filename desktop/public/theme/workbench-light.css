@@ -1573,6 +1573,18 @@
 :root[data-theme="light"] .soul-optimizer [data-ui="status"].error {
     color: #875151
 }
+:root[data-theme="light"] .soul-target-stats [data-kind="goal"] strong {
+    color: #48606e
+}
+:root[data-theme="light"] .soul-target-plan-heading > strong:last-child {
+    color: var(--hero-rarity-r, #48606e)
+}
+:root[data-theme="light"] .soul-target-slot[data-projected="true"] .soul-target-slot-state {
+    color: var(--hero-rarity-r, #48606e)
+}
+:root[data-theme="light"] .soul-target-panel-values strong {
+    color: var(--hero-rarity-r, #48606e)
+}
 :root[data-theme="light"] .shikigami-owned-skill strong {
     color: var(--effect-number-color, #48606e)
 }

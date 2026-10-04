@@ -7,9 +7,11 @@ import { appendEffectNumbers } from './effect-text';
 import { planPanelAddition, renderSoulPanelTable } from './soul-panel-table';
 import { installSoulPlanShare } from './soul-plan-share';
 import type { ImageShareApi } from './image-share';
+import { suitMechanicRanges } from '../shared/soul-substat-standard';
+import type { SubstatContext } from '../shared/soul-substat-standard';
 
-export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], preview: (anchor: HTMLElement, soul: SoulRecord) => void, closePreview: () => void, shareApi?: ImageShareApi): {
-  show(plan: SoulPlan, hero: HeroProfile | undefined, snapshot: SoulSnapshot | undefined, base?: Panel, objective?: OptimizationOptions['objective']): void;
+export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], preview: (anchor: HTMLElement, soul: SoulRecord, context?: SubstatContext) => void, closePreview: () => void, shareApi?: ImageShareApi): {
+  show(plan: SoulPlan, hero: HeroProfile | undefined, snapshot: SoulSnapshot | undefined, base?: Panel, objective?: OptimizationOptions['objective'], ranges?:OptimizationOptions['ranges']): void;
   close(): void; dispose(): void;
 } {
   const doc = root.ownerDocument;
@@ -32,7 +34,7 @@ export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], p
   dialog.addEventListener('close', closePreview);
   dialog.querySelector('.soul-plan-detail-body')!.addEventListener('scroll', closePreview, { passive: true });
   return {
-    show(plan, hero, snapshot, base, objective): void {
+    show(plan, hero, snapshot, base, objective, ranges): void {
       share.close();
       closePreview(); el('ring').replaceChildren(); el('panel').replaceChildren(); el('sets').replaceChildren();
       el('note').textContent = `${hero?.name ?? '收藏方案'} · ${objective ? OPTIMIZATION_OBJECTIVES[objective].label : '原方案'}评分 `;
@@ -40,6 +42,9 @@ export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], p
       const center = add(el('ring'), 'div', '', 'soul-plan-hero');
       if (hero) { appendPickerPortrait(center, 'hero', hero.id, hero.name); add(center, 'strong', hero.name); }
       else add(center, 'strong', '六件配装');
+      add(center, 'small', `${plan.ids.length} 件御魂`);
+      const gear=plan.ids.flatMap(id=>snapshot?.souls.find(soul=>soul.id===id)??[]);
+      const context:SubstatContext={objective,ranges:suitMechanicRanges(gear,ranges??{}),panel:plan.panel,gear,heroName:hero?.name};
       for (const [index, id] of plan.ids.entries()) {
         const soul = snapshot?.souls.find(item => item.id === id);
         const button = doc.createElement('button'); button.type = 'button'; button.dataset.soulId = id; button.dataset.position = String(index + 1); button.className = 'soul-plan-ring-soul';
@@ -48,8 +53,8 @@ export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], p
         if (soul) button.append(createSoulPositionPortrait(doc, soul, false));
         add(button, 'span', soul?.name ?? '当前背包中未找到');
         if (soul) {
-          button.addEventListener('pointerenter', () => preview(button, soul)); button.addEventListener('pointerleave', closePreview);
-          button.addEventListener('focus', () => preview(button, soul)); button.addEventListener('blur', closePreview);
+          button.addEventListener('pointerenter', () => preview(button, soul,context)); button.addEventListener('pointerleave', closePreview);
+          button.addEventListener('focus', () => preview(button, soul,context)); button.addEventListener('blur', closePreview);
         }
         el('ring').append(button);
       }

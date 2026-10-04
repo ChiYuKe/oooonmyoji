@@ -12,6 +12,8 @@ import { installSoulRangeEditor } from './soul-range-editor';
 import { installSoulDetailWindow } from './soul-detail-window';
 import { renderSoulDetail } from './soul-detail-render';
 import type { ImageShareApi } from './image-share';
+import { renderSoulTarget } from './soul-target-view';
+import { installSoulTargetRange } from './soul-target-range';
 
 const heroes: HeroProfile[] = soulCatalog.heroes;
 const suits: SuitProfile[] = soulCatalog.suits;
@@ -66,6 +68,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
         </div>
         <p class="soul-optimizer-hint">按所选指标搜索和评分，属性限制同时生效。包含主、副、固有属性及两件套面板加成；不计技能、敌方防御和条件触发特效。计算使用完整背包，与浏览筛选独立。</p>
       </fieldset></details><div class="soul-optimizer-actions"><button type="button" data-action="reset">重置条件</button><button type="submit" data-action="start">开始计算</button><button type="button" data-action="cancel" hidden>停止计算</button><p data-ui="status" role="status" aria-live="polite">设置条件后开始计算。</p></div></form>
+      <details class="soul-target-section" data-ui="target-section" aria-labelledby="soul-target-title" open><summary class="soul-target-toggle"><h3 id="soul-target-title">目标评分分析</h3></summary><div class="soul-target-content"><div class="soul-target-heading"><div class="soul-target-context"><p data-ui="target-note">选择原方案，分析达到目标所需的有效副属性。</p><label class="soul-target-source-picker">分析原方案<select data-ui="target-source" aria-label="分析原方案" disabled></select></label></div><fieldset class="soul-target-range" data-ui="target-range" aria-labelledby="soul-target-range-label"><div id="soul-target-range-label" class="soul-target-range-title">目标评分范围 <small>选填 · <span data-ui="target-unit"></span></small></div><div class="soul-range-values"><label>下限<input data-ui="target" type="number" min="0" step="any" placeholder="不限下限" aria-label="目标评分下限" aria-describedby="soul-target-range-hint"></label><span aria-hidden="true">—</span><label>上限<input data-ui="target-max" type="number" min="0" step="any" placeholder="不限上限" aria-label="目标评分上限" aria-describedby="soul-target-range-hint"></label></div><div class="soul-range-slider-row"><button type="button" data-target-adjust="minus" aria-label="减少当前端点">−</button><div class="soul-range-slider" data-ui="target-slider"><div class="soul-range-track"></div><input type="range" data-ui="target-min-slider"><input type="range" data-ui="target-max-slider"></div><button type="button" data-target-adjust="plus" aria-label="增加当前端点">+</button></div><div class="soul-range-scale"><span>0</span><span data-ui="target-scale"></span></div><p id="soul-target-range-hint" class="soul-target-range-hint">留空表示不限，输入数值可扩展滑条刻度。</p></fieldset><div data-ui="target-analysis" aria-live="polite"></div></div></div></details>
       <section class="soul-optimizer-results"><div class="soul-optimizer-result-toolbar"><div><h3>计算方案 <span data-ui="result-total"></span></h3><p data-ui="result-note"></p></div><label>当前方案排序<select data-ui="result-sort" aria-label="当前计算方案排序" disabled><option value="score">评分最高</option><option value="attack">攻击最高</option><option value="speed">速度最高</option><option value="crit">暴击最高</option><option value="critDamage">暴击伤害最高</option><option value="hp">生命最高</option><option value="defense">防御最高</option><option value="hit">效果命中最高</option><option value="resist">效果抵抗最高</option></select></label></div><div data-ui="results" class="soul-optimizer-plan-grid"><p class="soul-optimizer-empty">这里会展示符合条件的六件御魂方案。</p></div></section>
       <details class="soul-optimizer-saved"><summary>收藏方案 <span data-ui="saved-total"></span></summary><div data-ui="saved" class="soul-optimizer-plan-grid"></div></details>
     </div>`;
@@ -110,6 +113,12 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   let ranges: OptimizationOptions['ranges'] = {};
   let resultObjective: OptimizationOptions['objective'] = 'damage', resultHero = selectedHero;
   let resultBase: Panel | undefined;
+  let resultOptions: OptimizationOptions | undefined, resultStatus: SearchResult['status'] = 'complete';
+  let targetTimer: ReturnType<typeof setTimeout> | undefined;
+  let targetPlanIndex = 0;
+  const targetRange = installSoulTargetRange(el('target-range'), () => select('objective').value as OptimizationObjective,
+    () => { clearTimeout(targetTimer); targetTimer = setTimeout(renderTarget, 250); },
+    () => { clearTimeout(targetTimer); renderTarget(); });
   const planDetail = installSoulPlanDetail(host, suits, preview, closePreview, api);
   const picker = installOptimizerPicker(host, { heroes, suits, hero: () => selectedHero, suit: kind => select(kind).value, snapshot: () => snapshot,
     chooseHero: id => { heroSelect.value = String(id); heroSelect.dispatchEvent(new Event('change', { bubbles: true })); },
@@ -150,6 +159,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     const objective = OPTIMIZATION_OBJECTIVES[select('objective').value as OptimizationOptions['objective']];
     el('configuration-summary').textContent = `${selectedHero.name} · ${sets} · ${objective.label}`;
     el('objective-note').textContent = objective.description;
+    targetRange.refresh();
   };
   addOption(select('four'), '', '不限四件套'); addOption(select('two'), '', '不限两件套');
   const bonusGroup = doc.createElement('optgroup'); bonusGroup.label = '两件套属性'; select('two').append(bonusGroup);
@@ -176,7 +186,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       for (const input of mainInputs(position)) input.checked = wanted.includes(input.value);
     }
   };
-  select('objective').addEventListener('change', () => { applyObjectiveMains(select('objective').value as OptimizationObjective); changed(); });
+  select('objective').addEventListener('change', () => { targetRange.reset(); applyObjectiveMains(select('objective').value as OptimizationObjective); changed(); });
   const renderRanges = (): void => {
     el('ranges').replaceChildren(); const keys = Object.keys(ranges) as PanelKey[];
     action('add-range').textContent = keys.length ? `已限制 ${keys.length} 项属性` : '添加属性限制';
@@ -205,8 +215,28 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       onlySix: field('six').checked, onlyMaxLevel: field('max').checked, unequipped: field('unequipped').checked, excludeDiscarded: field('kept').checked,
       excludedIds: [...new Set([...el('exclusions').querySelectorAll<HTMLInputElement>('input:checked')].flatMap(input => saved.find(plan => plan.key === input.value)?.plan.ids ?? []))], seconds: Number(select('seconds').value), limit: Number(select('limit').value) };
   };
-  const clearResults = (): void => { results = []; el('results').replaceChildren(); el('result-note').textContent = ''; el('result-total').textContent = ''; select('result-sort').disabled = true; action('start').textContent = '开始计算'; };
-  function changed(): void { updateConfigurationSummary(); updateSuitSelections(); updateHeroPanel(); renderRanges(); if (results.length && !running) { clearResults(); setStatus('条件已更改，请重新计算。'); } }
+  const renderTarget = (): void => {
+    const host = el('target-analysis'); host.replaceChildren(); delete host.dataset.achieved;
+    el('target-note').textContent = '查看选定方案的实际副词条收益和评分差距。+15 御魂属性已固定，提升评分需要换装。';
+    const source = select('target-source'); source.replaceChildren(); source.disabled = !results.length;
+    results.forEach((plan, index) => addOption(source, String(index), `方案 ${index + 1} · ${formatPlanScore(plan.score, resultObjective)}`));
+    source.value = String(targetPlanIndex);
+    let target: ReturnType<typeof targetRange.read>;
+    try { target = targetRange.read(); } catch (error) {
+      appendText(host, 'p', error instanceof Error ? error.message : String(error), 'soul-target-error'); return;
+    }
+    if (!target) return;
+    if (!results.length || !resultOptions || !snapshot) {
+      appendText(host, 'p', running ? '计算完成后会自动分析目标差距。' : '请先计算出符合条件的方案，再选择要分析的原方案。', 'soul-target-note'); return;
+    }
+    try {
+      renderSoulTarget(host, target, results[targetPlanIndex] ?? results[0], snapshot.souls, suits, resultOptions, resultStatus,
+        plan => planDetail.show(plan, resultHero, snapshot, resultBase, resultObjective,resultOptions?.ranges),resultHero.name);
+    } catch (error) { appendText(host, 'p', error instanceof Error ? error.message : String(error), 'soul-target-error'); }
+  };
+  select('target-source').addEventListener('change', () => { targetPlanIndex = Number(select('target-source').value); renderTarget(); });
+  const clearResults = (): void => { results = []; targetPlanIndex = 0; el('results').replaceChildren(); el('result-note').textContent = ''; el('result-total').textContent = ''; select('result-sort').disabled = true; action('start').textContent = '开始计算'; renderTarget(); };
+  function changed(): void { updateConfigurationSummary(); updateSuitSelections(); updateHeroPanel(); renderRanges(); if (results.length && !running) { clearResults(); setStatus('条件已更改，请重新计算。'); } else renderTarget(); }
   const setRunning = (value: boolean): void => { running = value; el<HTMLFieldSetElement>('settings').disabled = value; action('start').disabled = value; action('reset').disabled = value; action('cancel').hidden = !value; action('cancel').disabled = false; for (const button of el('saved').querySelectorAll('button')) button.disabled = value; };
   const stop = (): void => { cancelled = true; worker?.postMessage({ type: 'cancel' }); };
   const persist = (): void => api.writeLayout(savedKey(), JSON.stringify(saved));
@@ -214,7 +244,8 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     const card = doc.createElement('article'); card.className = 'soul-optimizer-plan';
     card.dataset.score = String(plan.score); card.dataset.planIds = plan.ids.join('|');
     const heading = appendText(card, 'div', '', 'soul-optimizer-section-heading'); appendText(heading, 'strong', label);
-    if (onSave || onRemove) { const button = doc.createElement('button'); button.type = 'button'; button.dataset.action = onSave ? 'save-plan' : 'delete-plan'; button.textContent = onSave ? (alreadySaved ? '已收藏' : '收藏方案') : '删除'; button.disabled = alreadySaved; button.addEventListener('click', () => { (onSave ?? onRemove)!(); if (onSave) { button.disabled = true; button.textContent = '已收藏'; } }); heading.append(button); }
+    const headingActions = appendText(heading, 'div', '', 'soul-optimizer-plan-heading-actions');
+    if (onSave || onRemove) { const button = doc.createElement('button'); button.type = 'button'; button.dataset.action = onSave ? 'save-plan' : 'delete-plan'; button.textContent = onSave ? (alreadySaved ? '已收藏' : '收藏方案') : '删除'; button.disabled = alreadySaved; button.addEventListener('click', () => { (onSave ?? onRemove)!(); if (onSave) { button.disabled = true; button.textContent = '已收藏'; } }); headingActions.append(button); }
     const rating = appendText(card, 'div', '', 'soul-optimizer-plan-rating');
     appendText(rating, 'span', '评分');
     const score = formatPlanScore(plan.score, objective);
@@ -231,7 +262,13 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     if (!plan.suits.length) appendText(sets, 'span', '散件');
     const stats = appendText(card, 'div', '', 'soul-optimizer-plan-stats');
     for (const key of ['attack', 'speed', 'crit', 'critDamage', 'hp', 'defense', 'hit', 'resist'] as const) { const stat = appendText(stats, 'span', ''); stat.dataset.panel = key; appendText(stat, 'small', PANEL_LABELS[key]); appendText(stat, 'strong', format(key, plan.panel[key])); }
-    const view = doc.createElement('button'); view.type = 'button'; view.dataset.action = 'view-plan'; view.className = 'soul-plan-view-button'; view.textContent = '查看配装详情 ↗'; view.addEventListener('click', () => planDetail.show(plan, hero, snapshot, base, objective)); card.append(view);
+    const planRanges=results.includes(plan)?resultOptions?.ranges:undefined;
+    const actions = appendText(card, 'div', '', 'soul-optimizer-plan-actions');
+    const view = doc.createElement('button'); view.type = 'button'; view.dataset.action = 'view-plan'; view.className = 'soul-plan-view-button'; view.textContent = '查看配装详情 ↗'; view.addEventListener('click', () => planDetail.show(plan, hero, snapshot, base, objective,planRanges)); actions.append(view);
+    if (results.includes(plan)) {
+      const analyze = doc.createElement('button'); analyze.type = 'button'; analyze.dataset.action = 'analyze-plan'; analyze.textContent = '分析当前方案';
+      analyze.addEventListener('click', () => { targetPlanIndex = results.indexOf(plan); renderTarget(); el<HTMLDetailsElement>('target-section').open = true; el('target-section').scrollIntoView({ block: 'start' }); field('target').focus(); }); actions.append(analyze);
+    }
     const details = doc.createElement('details'); details.className = 'soul-optimizer-plan-details'; appendText(details, 'summary', '查看六件御魂'); card.append(details);
     const list = appendText(details, 'div', '', 'soul-optimizer-plan-souls');
     for (const [index, id] of plan.ids.entries()) {
@@ -270,6 +307,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   const progress = (value: SearchProgress): void => setStatus(`正在搜索 · ${value.elapsed.toFixed(1)} 秒 · 已检查 ${value.visited.toLocaleString()} 个节点 · 找到 ${value.found.toLocaleString()} 个可行组合`);
   const finish = (result: SearchResult): void => {
     setRunning(false); worker?.terminate(); worker = undefined; results = result.plans;
+    resultStatus = result.status; renderTarget();
     const phase = { complete: '搜索完成', timeout: '已到搜索时限，尚未完成全部搜索', cancelled: '已停止，尚未完成全部搜索' }[result.status];
     setStatus(`${phase} · ${result.elapsed.toFixed(1)} 秒 · ${result.plans.length} 个方案${result.skipped ? ` · ${result.skipped} 条属性不完整或套装未知的御魂未参与` : ''}`);
     el('result-note').textContent = result.status === 'complete' ? '符合条件的最优方案' : '当前找到的方案 · 可增加时长重新计算';
@@ -286,10 +324,10 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     if (!snapshot || running) return;
     let config: OptimizationOptions;
     try { config = options(); } catch (error) { setStatus(String(error instanceof Error ? error.message : error), true); return; }
-    resultHero = selectedHero; resultBase = { ...config.base }; resultObjective = config.objective; updateConfigurationSummary();
+    resultHero = selectedHero; resultBase = { ...config.base }; resultObjective = config.objective; resultOptions = config; updateConfigurationSummary();
     const token = ++generation; cancelled = false; closePreview(); setRunning(true); setStatus('正在准备御魂组合…');
     clearResults();
-    const failed = (message: string): void => { if (token !== generation || disposed) return; setRunning(false); worker?.terminate(); worker = undefined; setStatus(`计算失败：${message}`, true); };
+    const failed = (message: string): void => { if (token !== generation || disposed) return; setRunning(false); worker?.terminate(); worker = undefined; renderTarget(); setStatus(`计算失败：${message}`, true); };
     if (createWorker) {
       try {
         worker = createWorker();
@@ -309,6 +347,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     if (running) return;
     select('four').value = ''; select('two').value = ''; select('objective').value = 'damage'; select('seconds').value = '30'; select('limit').value = '20';
     manualMainPositions.clear();
+    targetRange.reset(); renderTarget();
     field('six').checked = true; field('max').checked = true; field('unequipped').checked = false; field('kept').checked = true; ranges = {};
     for (const input of el('main').querySelectorAll<HTMLInputElement>('input')) input.checked = SOUL_SLOT_DEFAULT_MAIN_ATTRIBUTES[Number(input.dataset.position)]?.includes(input.value) ?? false;
     for (const input of el('exclusions').querySelectorAll<HTMLInputElement>('input')) input.checked = false;
@@ -334,7 +373,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   el('saved').addEventListener('change', changed);
   select('result-sort').addEventListener('change', renderResults);
   body.addEventListener('scroll', closePreview, { passive: true });
-  populateHeroes(); applyHero(); renderSaved(); updateConfigurationSummary(); updateSuitSelections(); renderRanges();
+  populateHeroes(); applyHero(); renderSaved(); updateConfigurationSummary(); updateSuitSelections(); renderRanges(); renderTarget();
   // 面板可能被用户收起或直接关掉：停靠视图会把模块元素挪回隐藏的模块仓库，
   // 模态选择器若仍开着就会悬在页面顶层，所以面板不可见时先把它们收掉。
   const visibility = new IntersectionObserver(entries => {
@@ -371,6 +410,6 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     },
     setInstanceSelectionHandler(handler): void { instanceSelectionHandler = handler; },
     open,
-    dispose(): void { disposed = true; generation++; stop(); worker?.terminate(); instancePicker.dispose(); picker.dispose(); planDetail.dispose(); rangeEditor.dispose(); visibility.disconnect(); detailWindow.dispose(); panel.remove(); },
+    dispose(): void { disposed = true; generation++; clearTimeout(targetTimer); stop(); worker?.terminate(); instancePicker.dispose(); picker.dispose(); planDetail.dispose(); rangeEditor.dispose(); visibility.disconnect(); detailWindow.dispose(); panel.remove(); },
   };
 }

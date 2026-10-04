@@ -8,7 +8,7 @@ const read = file => fs.readFileSync(path.join(base, file), 'utf8');
 test('「御魂配装」注册为工作台可停靠面板（与设置/概览同层），并配了窗口菜单项', () => {
   const docking = read('src/renderer/docking.ts');
   // 面板 id 进入 WorkbenchPanelId 联合类型，定义里带模块元素与默认停靠位置。
-  assert.match(docking, /export type WorkbenchPanelId = 'workflow' \| 'overview' \| 'settings' \| 'onmyojiTeamBuilder' \| 'soulOptimizer' \| 'referenceViewer' \| SharedDockPanelId;/);
+  assert.match(docking, /export type WorkbenchPanelId = [^;]*'soulOptimizer'[^;]*SharedDockPanelId;/);
   assert.match(docking, /soulOptimizer:\s*\{\s*title: '御魂配装'/);
   assert.match(docking, /moduleElementId: 'module-soul-optimizer'/);
   assert.match(docking, /reference: 'onmyojiTeamBuilder',\s*direction: 'within'/);
@@ -47,7 +47,7 @@ test('配装面板本身不再创建模态弹窗：无 dialog/showModal/关闭�
 test('主进程装配：配装面板实例化进模块元素，计算器只拿到控制器；卸载时一起释放', () => {
   const main = read('src/renderer/main.ts');
   assert.match(main, /installSoulOptimizer\(\s*document\.querySelector<HTMLElement>\('#module-soul-optimizer'\)!/);
-  assert.match(main, /\{ open: \(\) => workbenchFrame\?\.show\('soulOptimizer'\) \},?\s*\)/);
+  assert.match(main, /\{ open: \(\) => workbenchFrame\?\.show\('soulOptimizer'\), community: soulCommunity \},?\s*\)/);
   assert.match(main, /disposeSoulCalculator = installSoulCalculator\([\s\S]*?#team-builder-soul-calculator'\)!, api, soulOptimizer\)/);
   assert.match(main, /disposeSoulOptimizer\?\.\(\);/);
 });

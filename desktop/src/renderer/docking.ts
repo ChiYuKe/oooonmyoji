@@ -65,7 +65,7 @@ const popoutTopmostStorage = (): PopoutTopmostStorage => ({
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
-export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulOptimizer' | 'referenceViewer' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulOptimizer' | 'soulCommunityUpload' | 'soulCommunityComparison' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -265,6 +265,26 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     reference: 'onmyojiTeamBuilder',
     direction: 'within',
     initialWidth: 1000,
+    initialHeight: 760,
+    minimumWidth: 320,
+    minimumHeight: 240,
+  },
+  soulCommunityUpload: {
+    title: '上传御魂方案',
+    moduleElementId: 'module-soul-community-upload',
+    reference: 'soulOptimizer',
+    direction: 'right',
+    initialWidth: 760,
+    initialHeight: 480,
+    minimumWidth: 320,
+    minimumHeight: 220,
+  },
+  soulCommunityComparison: {
+    title: '社区方案比对',
+    moduleElementId: 'module-soul-community-comparison',
+    reference: 'soulOptimizer',
+    direction: 'right',
+    initialWidth: 1120,
     initialHeight: 760,
     minimumWidth: 320,
     minimumHeight: 240,

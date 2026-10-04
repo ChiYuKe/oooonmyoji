@@ -68,6 +68,9 @@
 :root[data-theme="light"] .menu-separator {
     background: #e2e2e2
 }
+:root[data-theme="light"] .titlebar-account-icon {
+    color: var(--titlebar-account-color, var(--hero-rarity-r, #48606e))
+}
 :root[data-theme="light"] .desktop-more-menu {
     border: 1px solid #dbdbdb;
     background: #ededed
@@ -1593,6 +1596,12 @@
 }
 :root[data-theme="light"] .shikigami-owned-soul-attributes .soul-sub-attribute .soul-detail-attribute-value {
     color: #48606e
+}
+:root[data-theme="light"] .soul-community {
+    --community-blue: var(--hero-rarity-r, #48606e)
+}
+:root[data-theme="light"] .soul-account-dialog::backdrop {
+    background: rgba(255, 255, 255, 0.4)
 }
 :root[data-theme="light"] {
     --ui-bg: #f3f3f3;

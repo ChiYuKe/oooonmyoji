@@ -14,6 +14,8 @@ import { renderSoulDetail } from './soul-detail-render';
 import type { ImageShareApi } from './image-share';
 import { renderSoulTarget } from './soul-target-view';
 import { installSoulTargetRange } from './soul-target-range';
+import type { SoulCommunityPanels } from './soul-community-view';
+import type { CommunityApi } from '../shared/soul-community';
 
 const heroes: HeroProfile[] = soulCatalog.heroes;
 const suits: SuitProfile[] = soulCatalog.suits;
@@ -22,11 +24,12 @@ const PERCENT = new Set<PanelKey>(['crit', 'critDamage', 'hit', 'resist']);
 const format = (key: PanelKey, value: number): string => PERCENT.has(key) ? `${(value * 100).toFixed(2)}%` : value.toFixed(2);
 interface SavedPlan { key: string; heroId: number; heroName: string; created: string; plan: SoulPlan; objective?: OptimizationOptions['objective']; base?: Panel }
 export type OptimizerWorkerFactory = () => Worker;
-interface OptimizerViewApi extends ImageShareApi { readLayout(key: string): string | null; writeLayout(key: string, value: string | null): void }
+interface OptimizerViewApi extends ImageShareApi, Partial<CommunityApi> { readLayout(key: string): string | null; writeLayout(key: string, value: string | null): void }
 
 export interface SoulOptimizerPanelHooks {
   /** 由停靠布局提供：把配装面板显示到前面。 */
   open?(): void;
+  community?: SoulCommunityPanels;
 }
 
 export interface SoulOptimizerPanel {
@@ -221,10 +224,13 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     const source = select('target-source'); source.replaceChildren(); source.disabled = !results.length;
     results.forEach((plan, index) => addOption(source, String(index), `方案 ${index + 1} · ${formatPlanScore(plan.score, resultObjective)}`));
     source.value = String(targetPlanIndex);
+    const communityContext = results.length && resultOptions && snapshot ? { hero: resultHero, plan: results[targetPlanIndex] ?? results[0], inventory: snapshot.souls, options: resultOptions } : undefined;
     let target: ReturnType<typeof targetRange.read>;
     try { target = targetRange.read(); } catch (error) {
+      community?.update(communityContext);
       appendText(host, 'p', error instanceof Error ? error.message : String(error), 'soul-target-error'); return;
     }
+    community?.update(communityContext ? { ...communityContext, target: target ?? undefined } : undefined);
     if (!target) return;
     if (!results.length || !resultOptions || !snapshot) {
       appendText(host, 'p', running ? '计算完成后会自动分析目标差距。' : '请先计算出符合条件的方案，再选择要分析的原方案。', 'soul-target-note'); return;
@@ -234,6 +240,12 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
         plan => planDetail.show(plan, resultHero, snapshot, resultBase, resultObjective,resultOptions?.ranges),resultHero.name);
     } catch (error) { appendText(host, 'p', error instanceof Error ? error.message : String(error), 'soul-target-error'); }
   };
+  const community = hooks.community;
+  const communityButton = doc.createElement('button'); communityButton.type = 'button'; communityButton.className = 'soul-target-community-button';
+  communityButton.dataset.action = 'open-community'; communityButton.textContent = '社区方案比对…';
+  communityButton.disabled = !community; communityButton.setAttribute('aria-controls', 'module-soul-community-comparison');
+  communityButton.addEventListener('click', () => { closePreview(); picker.close(); planDetail.close(); rangeEditor.close(); community?.show(communityButton); });
+  el('target-note').parentElement!.append(communityButton);
   select('target-source').addEventListener('change', () => { targetPlanIndex = Number(select('target-source').value); renderTarget(); });
   const clearResults = (): void => { results = []; targetPlanIndex = 0; el('results').replaceChildren(); el('result-note').textContent = ''; el('result-total').textContent = ''; select('result-sort').disabled = true; action('start').textContent = '开始计算'; renderTarget(); };
   function changed(): void { updateConfigurationSummary(); updateSuitSelections(); updateHeroPanel(); renderRanges(); if (results.length && !running) { clearResults(); setStatus('条件已更改，请重新计算。'); } else renderTarget(); }
@@ -245,6 +257,13 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     card.dataset.score = String(plan.score); card.dataset.planIds = plan.ids.join('|');
     const heading = appendText(card, 'div', '', 'soul-optimizer-section-heading'); appendText(heading, 'strong', label);
     const headingActions = appendText(heading, 'div', '', 'soul-optimizer-plan-heading-actions');
+    if (results.includes(plan)) {
+      const upload = doc.createElement('button'); upload.type = 'button'; upload.dataset.action = 'upload-plan'; upload.textContent = '上传方案';
+      upload.disabled = !community; upload.setAttribute('aria-label', `上传${label}`); upload.setAttribute('aria-controls', 'module-soul-community-upload');
+      upload.addEventListener('click', () => {
+        targetPlanIndex = results.indexOf(plan); renderTarget(); closePreview(); picker.close(); planDetail.close(); rangeEditor.close(); community?.show(upload, true);
+      }); headingActions.append(upload);
+    }
     if (onSave || onRemove) { const button = doc.createElement('button'); button.type = 'button'; button.dataset.action = onSave ? 'save-plan' : 'delete-plan'; button.textContent = onSave ? (alreadySaved ? '已收藏' : '收藏方案') : '删除'; button.disabled = alreadySaved; button.addEventListener('click', () => { (onSave ?? onRemove)!(); if (onSave) { button.disabled = true; button.textContent = '已收藏'; } }); headingActions.append(button); }
     const rating = appendText(card, 'div', '', 'soul-optimizer-plan-rating');
     appendText(rating, 'span', '评分');

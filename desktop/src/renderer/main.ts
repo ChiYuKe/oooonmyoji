@@ -107,6 +107,8 @@ import { installTeamBuilderResizer } from './team-builder-layout';
 import { installTeamBuilderPages } from './shikigami-atlas';
 import { installSoulCalculator } from './soul-calculator';
 import { installSoulOptimizer } from './soul-optimizer-view';
+import { installSoulCommunityPanels } from './soul-community-view';
+import { soulCatalog } from '../shared/soul-catalog-data';
 import SoulOptimizerWorker from './soul-optimizer-worker?worker';
 import { openWorkflowHistory } from './workflow-history';
 import { parseEditorMessage } from '../shared/editor-messages';
@@ -897,15 +899,24 @@ function openAboutPage(): void {
 let disposeTeamBuilderResizer: (() => void) | undefined;
 let disposeSoulCalculator: (() => void) | undefined;
 let disposeSoulOptimizer: (() => void) | undefined;
+let disposeSoulCommunity: (() => void) | undefined;
 let disposeTeamBuilderPages: (() => void) | undefined;
 
 function bindUi(): void {
+  const soulCommunity = installSoulCommunityPanels(
+    document.querySelector<HTMLElement>('#module-soul-community-comparison')!,
+    document.querySelector<HTMLElement>('#module-soul-community-upload')!,
+    api, soulCatalog.suits,
+    upload => workbenchFrame?.showFloating(upload ? 'soulCommunityUpload' : 'soulCommunityComparison'),
+    document.querySelector<HTMLButtonElement>('#user-account')!,
+  );
+  disposeSoulCommunity = soulCommunity.dispose;
   // 御魂配装和设置/概览一样是工作台里的可停靠面板；点击工具栏「配装计算」时由停靠布局把它显示到前面。
   const soulOptimizer = installSoulOptimizer(
     document.querySelector<HTMLElement>('#module-soul-optimizer')!,
     api,
     () => new SoulOptimizerWorker(),
-    { open: () => workbenchFrame?.show('soulOptimizer') },
+    { open: () => workbenchFrame?.show('soulOptimizer'), community: soulCommunity },
   );
   disposeSoulOptimizer = soulOptimizer.dispose;
   disposeSoulCalculator = installSoulCalculator(document.querySelector<HTMLElement>('#team-builder-soul-calculator')!, api, soulOptimizer);
@@ -1194,6 +1205,7 @@ window.addEventListener('beforeunload', () => {
   disposeTeamBuilderResizer?.();
   disposeSoulCalculator?.();
   disposeSoulOptimizer?.();
+  disposeSoulCommunity?.();
   disposeTeamBuilderPages?.();
   lifecycle.suppressRemovals();
   sharedPanelDockBridge?.dispose();

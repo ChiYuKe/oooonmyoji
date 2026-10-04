@@ -502,6 +502,17 @@ export interface OnmyojiDesktopApi {
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
   listSoulInstances(): Promise<SoulInstance[]>;
+  listCommunityBuilds(endpoint: string, query: import('./soul-community').CommunityQuery, options?: import('./soul-community').CommunityListOptions): Promise<import('./soul-community').CommunityPage>;
+  getCommunityAccount(endpoint: string): Promise<import('./soul-community').CommunityAccountState>;
+  renameCommunityAccount(endpoint: string, author: string): Promise<import('./soul-community').CommunityAccountState>;
+  startCommunityLogin(endpoint: string, legacyToken: string): Promise<import('./soul-community').CommunityLoginPrompt>;
+  pollCommunityLogin(endpoint: string): Promise<import('./soul-community').CommunityLoginResult>;
+  cancelCommunityLogin(endpoint: string): Promise<void>;
+  openCommunityLogin(endpoint: string): Promise<void>;
+  logoutCommunityAccount(endpoint: string): Promise<void>;
+  listCommunityOwnedBuilds(endpoint: string, cursor?: string): Promise<import('./soul-community').CommunityOwnedPage>;
+  uploadCommunityBuild(endpoint: string, build: import('./soul-community').CommunityBuild, deleteToken: string): Promise<{ id: string; createdAt: string; author: string }>;
+  deleteCommunityBuild(endpoint: string, id: string, deleteToken: string): Promise<void>;
   listHeroInstances(): Promise<SoulInstance[]>;
   loadHeroOwnership(instanceId: string): Promise<HeroOwnershipSnapshot | null>;
   loadHeroBasePanel(request: HeroBaseRequest): Promise<Panel | null>;

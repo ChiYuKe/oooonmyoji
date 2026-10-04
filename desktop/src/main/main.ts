@@ -2,6 +2,7 @@ import { isAppearanceTheme, themeColorScheme, themeBackground, type AppearanceTh
 import path from 'node:path';
 import { AiAssistant } from './aiAssistant';
 import { SoulService } from './soulService';
+import { listCommunityBuilds, uploadCommunityBuild, deleteCommunityBuild, getCommunityAccount, renameCommunityAccount, startCommunityLogin, pollCommunityLogin, cancelCommunityLogin, openCommunityLogin, logoutCommunityAccount, listCommunityOwnedBuilds } from './soulCommunityService';
 import { HeroOwnershipService } from './heroOwnershipService';
 import { HeroPanelService } from './heroPanelService';
 import { searchLineups } from './lineupService';
@@ -445,6 +446,17 @@ function registerIpc(): void {
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
   ipcMain.handle('souls:list-instances', async () => souls!.listInstances(await runtime.listInstances()));
+  ipcMain.handle('souls:community-list', (_event, endpoint: unknown, query: unknown, options: unknown) => listCommunityBuilds(endpoint, query, options));
+  ipcMain.handle('souls:community-account', (_event, endpoint: unknown) => getCommunityAccount(endpoint));
+  ipcMain.handle('souls:community-rename', (_event, endpoint: unknown, author: unknown) => renameCommunityAccount(endpoint, author));
+  ipcMain.handle('souls:community-login-start', (_event, endpoint: unknown, token: unknown) => startCommunityLogin(endpoint, token));
+  ipcMain.handle('souls:community-login-poll', (_event, endpoint: unknown) => pollCommunityLogin(endpoint));
+  ipcMain.handle('souls:community-login-cancel', (_event, endpoint: unknown) => cancelCommunityLogin(endpoint));
+  ipcMain.handle('souls:community-login-open', (_event, endpoint: unknown) => openCommunityLogin(endpoint));
+  ipcMain.handle('souls:community-logout', (_event, endpoint: unknown) => logoutCommunityAccount(endpoint));
+  ipcMain.handle('souls:community-owned', (_event, endpoint: unknown, cursor: unknown) => listCommunityOwnedBuilds(endpoint, cursor));
+  ipcMain.handle('souls:community-upload', (_event, endpoint: unknown, build: unknown, token: unknown) => uploadCommunityBuild(endpoint, build, token));
+  ipcMain.handle('souls:community-delete', (_event, endpoint: unknown, id: unknown, token: unknown) => deleteCommunityBuild(endpoint, id, token));
   ipcMain.handle('heroes:list-instances', async () => heroOwnership!.listInstances(await souls!.listInstances(await runtime.listInstances())));
   ipcMain.handle('heroes:load', (_event, id: unknown) => {
     if (typeof id !== 'string') throw new Error('请选择有效的模拟器实例');

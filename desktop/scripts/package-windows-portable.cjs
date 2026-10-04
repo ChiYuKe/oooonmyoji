@@ -4,6 +4,7 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { isSecretFile } = require('./secret-guard.cjs');
+const { folders: iconFolders, archive: iconArchive } = require('./build-icon-resources.cjs');
 
 const desktopRoot = path.resolve(__dirname, '..');
 const projectRoot = path.resolve(desktopRoot, '..');
@@ -63,6 +64,8 @@ function copyRuntimePackage(packageName, appRoot, copied = new Set()) {
 
 function projectFilter(source) {
   const name = path.basename(source);
+  const relative = path.relative(projectRoot, source).split(path.sep);
+  if (relative[0] === 'assets' && iconFolders.includes(relative[1])) return false;
   return name !== '__pycache__' && name !== '.pytest_cache' && !name.endsWith('.pyc');
 }
 
@@ -86,6 +89,7 @@ function directorySize(root) {
   return total;
 }
 
+requirePath(iconArchive, '图标资源包（请先执行 npm run build:icons）');
 if (!outputRoot.startsWith(`${releaseRoot}${path.sep}`)) throw new Error('拒绝清理 release 目录以外的路径');
 fs.rmSync(outputRoot, { recursive: true, force: true });
 
@@ -118,6 +122,7 @@ copyRuntimePackage('ajv', appRoot);
 for (const folder of ['assets', 'plugins', 'src', 'workflows']) {
   copy(path.join(projectRoot, folder), path.join(resourcesRoot, folder), projectFilter);
 }
+copy(iconArchive, path.join(resourcesRoot, 'resources', path.basename(iconArchive)));
 fs.mkdirSync(path.join(resourcesRoot, 'config'), { recursive: true });
 const exampleConfig = path.join(projectRoot, 'config', 'config.example.json');
 copy(exampleConfig, path.join(resourcesRoot, 'config', 'config.example.json'));

@@ -27,6 +27,11 @@ desktop/dist/
 desktop/dist-electron/
 desktop/dist-test-renderer/
 desktop/release/
+cloudflare/soul-community/node_modules/
+cloudflare/soul-community/.wrangler/
+cloudflare/soul-community/dist/
+# Generated application artwork; rebuilt from the local icon collection before packaging.
+/resources/onmyoji-icons.asar
 
 # Stray artifacts from scripts with unexpanded %SystemDrive% env var
 desktop/%SystemDrive%/

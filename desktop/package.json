@@ -8,9 +8,10 @@
     "test": "npm run build:electron && npm run build:renderer-tests && node --test tests/*.test.cjs",
     "dev": "npm run build:electron && concurrently -k -s first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env ONMYOJI_DESKTOP_DEV_URL=http://127.0.0.1:5173 electron .\"",
     "build:electron": "tsc -p tsconfig.electron.json",
+    "build:icons": "node scripts/build-icon-resources.cjs",
     "build:renderer-tests": "tsc -p tsconfig.renderer-tests.json",
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "build": "node scripts/build-light-palette.cjs && npm run typecheck && npm run build:electron && vite build",
+    "build": "npm run build:icons && node scripts/build-light-palette.cjs && npm run typecheck && npm run build:electron && vite build",
     "package:win": "npm run build && node scripts/package-windows-portable.cjs",
     "package:win:installer": "npm run build && node scripts/package-windows-installer.cjs",
     "package:win:initial": "npm run build && node scripts/package-initial-installer.cjs",
@@ -26,6 +27,7 @@
     "lucide": "^1.38.0"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "@types/node": "^24.0.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",

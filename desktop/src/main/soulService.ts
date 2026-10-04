@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events';
 import { parseRuntimeInstances, pythonUtf8Environment, resolvePythonRuntime } from './core/runtimeInstances';
 import type { RuntimeInstance, SoulInstance } from '../shared/contracts';
 import type { SoulSnapshot, SoulFetchProgress } from '../shared/souls';
+import { soulIconNames } from './iconResources';
 
 /**
  * 校验落盘或进程返回的御魂快照：实例必须一致、字段必须齐全。
@@ -100,8 +101,7 @@ export class SoulService extends EventEmitter<{ progress: [SoulFetchProgress] }>
 
   /** Icons are shared project assets; older instance snapshots may predate them. */
   private async resolveIcons(snapshot: SoulSnapshot): Promise<SoulSnapshot> {
-    const entries = await fs.readdir(path.join(this.projectRoot, 'assets', 'soul-icons'), { withFileTypes: true }).catch(() => []);
-    const icons = new Set(entries.filter(entry => entry.isFile()).map(entry => entry.name));
+    const icons = await soulIconNames(this.projectRoot);
     return { ...snapshot, souls: snapshot.souls.map(soul => {
       const available = Number.isSafeInteger(soul.suitId) && (soul.suitId ?? 0) > 0 && icons.has(`${soul.suitId}.png`);
       return { ...soul, iconUrl: available ? `onmyoji-resource://project/assets/soul-icons/${soul.suitId}.png` : null };

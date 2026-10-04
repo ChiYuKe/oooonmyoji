@@ -1,4 +1,6 @@
 import pathlib
+import json
+import struct
 import tempfile
 import unittest
 
@@ -6,6 +8,22 @@ from src.oooonmyoji.souls.details import ICON_DIRECTORY, enrich, icon_url
 
 
 class SoulIconUrlTests(unittest.TestCase):
+    def test_packed_icons_work_without_loose_source_files(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            archive = root / 'resources/onmyoji-icons.asar'
+            archive.parent.mkdir()
+            text = json.dumps({'files': {'soul-icons': {'files': {
+                '300022.png': {'size': 8, 'offset': '0'}}}}}).encode()
+            payload = struct.pack('<I', len(text)) + text
+            payload += b'\0' * (-len(payload) % 4)
+            header = struct.pack('<I', len(payload)) + payload
+            archive.write_bytes(struct.pack('<II', 4, len(header)) + header + b'\x89PNG\r\n\x1a\n')
+            self.assertEqual(icon_url(300022, root), 'onmyoji-resource://project/assets/soul-icons/300022.png')
+            self.assertIsNone(icon_url(999999, root))
+            archive.write_bytes(b'corrupt')
+            self.assertIsNone(icon_url(300022, root))
+
     def test_icon_url_points_at_the_project_resource(self):
         with tempfile.TemporaryDirectory() as folder:
             root = pathlib.Path(folder)

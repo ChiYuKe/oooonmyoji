@@ -40,6 +40,7 @@ import { WorkflowHistory } from './core/workflowHistory';
 import { ProjectEditingLibrary } from './core/editingLibrary';
 import { randomUUID } from 'node:crypto';
 import { functionOutputSchema } from '../shared/workflow/function-outputs';
+import { iconResourcePath, isIconSourcePath } from './iconResources';
 
 const IMAGE_MIME = new Map([
   ['.png', 'image/png'],
@@ -105,7 +106,7 @@ export class ProjectService {
       if (resource.protocol !== 'onmyoji-resource:' || resource.hostname !== 'project') return undefined;
       const relative = decodeURIComponent(resource.pathname).replace(/^[/\\]+/, '');
       const absolutePath = path.resolve(this.projectRoot, relative);
-      return isPathInside(this.projectRoot, absolutePath) ? absolutePath : undefined;
+      return isPathInside(this.projectRoot, absolutePath) ? iconResourcePath(this.projectRoot, relative) ?? absolutePath : undefined;
     } catch {
       return undefined;
     }
@@ -357,6 +358,7 @@ export class ProjectService {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const absolute = path.join(root, entry.name);
+        if (isIconSourcePath(path.relative(this.projectRoot, absolute))) continue;
         folders.add(path.relative(this.projectRoot, absolute).split(path.sep).join('/'));
         await visit(absolute);
       }
@@ -707,6 +709,7 @@ export class ProjectService {
       entries.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
       for (const entry of entries) {
         const absolutePath = path.join(directory, entry.name);
+        if (isIconSourcePath(path.relative(this.projectRoot, absolutePath))) continue;
         if (entry.isDirectory()) await visit(absolutePath);
         else if (entry.isFile() && IMAGE_MIME.has(path.extname(entry.name).toLowerCase())) {
           images.push({
@@ -775,9 +778,10 @@ export class ProjectService {
       const extension = path.extname(absolutePath).toLowerCase();
       if (!relative.startsWith('assets/') || !isPathInside(this.assetsRoot, absolutePath) || !IMAGE_MIME.has(extension)) continue;
       try {
-        const stat = await fs.promises.stat(absolutePath);
+        const resource = iconResourcePath(this.projectRoot, relative) ?? absolutePath;
+        const stat = await fs.promises.stat(resource);
         if (stat.size > 8 * 1024 * 1024) continue;
-        const bytes = await fs.promises.readFile(absolutePath);
+        const bytes = await fs.promises.readFile(resource);
         items.push({ path: relative, dataUrl: `data:${IMAGE_MIME.get(extension)};base64,${bytes.toString('base64')}` });
       } catch {
         // A missing thumbnail should not fail the complete canvas export.

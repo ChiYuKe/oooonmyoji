@@ -1,6 +1,7 @@
 """Resolve soul names and exact attributes from the running client's config tables."""
 from collections import OrderedDict
 from pathlib import Path
+from ..icon_resources import has_icon_resource
 
 LABELS = {
     "attackAdditionVal": "攻击", "defenseAdditionVal": "防御", "maxHpAdditionVal": "生命",
@@ -64,12 +65,12 @@ def icon_url(suit_id: int | None, icon_root: Path | None) -> str | None:
     """Renderer URL for a suit icon, or None when it was not downloaded.
 
     图标取自藏宝阁官方资源（``https://cbg-yys.res.netease.com/game_res/suit/<套装编号>.png``），
-    以套装编号命名存放在项目 ``assets/soul-icons/`` 下，经桌面端 ``onmyoji-resource://`` 协议读取。
+    发布时收纳于 ``resources/onmyoji-icons.asar``，兼容开发目录的散图和旧资源地址。
     """
     if icon_root is None or not isinstance(suit_id, int):
         return None
     relative = f"{ICON_DIRECTORY}/{suit_id}.png"
-    if not (icon_root / relative).is_file():
+    if not has_icon_resource(icon_root, relative):
         return None
     return f"onmyoji-resource://project/{relative}"
 

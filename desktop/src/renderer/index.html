@@ -45,6 +45,7 @@
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="onmyojiTeamBuilder" aria-checked="false"><span>阴阳师阵容配队</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="soulCalculator" aria-checked="false"><span>御魂计算</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="soulOptimizer" aria-checked="false"><span>御魂配装</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="soulCommunityUpload" aria-checked="false"><span>上传御魂方案</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="soulCommunityComparison" aria-checked="false"><span>社区方案比对</span><span class="menu-check">✓</span></button>
@@ -91,6 +92,7 @@
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">扩展</button>
           <div class="titlebar-dropdown" role="menu">
             <button type="button" role="menuitem" data-app-command="onmyojiTeamBuilder"><span>阴阳师阵容配队</span></button>
+            <button type="button" role="menuitem" data-app-command="soulCalculator"><span>御魂计算</span></button>
           </div>
         </div>
         <div class="menu-root">
@@ -266,25 +268,15 @@
         <section id="module-soul-community-upload" class="dock-module soul-community-module" aria-label="上传御魂方案"></section>
         <section id="module-soul-community-comparison" class="dock-module soul-community-module" aria-label="社区方案比对"></section>
 
-        <section id="module-onmyoji-team-builder" class="dock-module onmyoji-team-builder-module" aria-label="阴阳师阵容配队">
-          <aside id="team-builder-sidebar" class="team-builder-sidebar">
-            <header class="team-builder-pane-header">栏目</header>
-            <nav class="team-builder-categories" role="tablist" aria-orientation="vertical" aria-label="阵容栏目">
-              <button id="team-builder-tab-soul-calculator" class="team-builder-category" type="button" role="tab" aria-selected="true" aria-controls="team-builder-soul-calculator">御魂计算</button>
-              <button id="team-builder-tab-shikigami-atlas" class="team-builder-category" type="button" role="tab" aria-selected="false" aria-controls="team-builder-shikigami-atlas" tabindex="-1">式神图鉴</button>
-              <button id="team-builder-tab-lineup-browser" class="team-builder-category" type="button" role="tab" aria-selected="false" aria-controls="team-builder-lineup-browser" tabindex="-1">阵容配队</button>
-            </nav>
-          </aside>
-          <div id="team-builder-resizer" class="content-browser-resizer team-builder-resizer" role="separator" aria-orientation="vertical" aria-label="调整栏目宽度" aria-controls="team-builder-sidebar" tabindex="0"></div>
-          <section class="team-builder-content" aria-label="阵容内容">
-            <header class="team-builder-pane-header">御魂计算</header>
-            <div id="team-builder-soul-calculator" class="team-builder-content-body soul-calculator" role="tabpanel" aria-labelledby="team-builder-tab-soul-calculator">
+        <section id="module-soul-calculator" class="dock-module team-builder-content soul-calculator-module" aria-label="御魂计算">
+          <header class="team-builder-pane-header">御魂计算</header>
+            <div id="team-builder-soul-calculator" class="team-builder-content-body soul-calculator" role="region" aria-label="御魂计算">
               <div class="soul-source">
                 <div class="soul-toolbar">
                   <label for="soul-instance">模拟器实例</label>
                   <select id="soul-instance" aria-label="选择获取御魂的实例"><option value="">请选择实例</option></select>
                   <button id="soul-refresh" type="button">刷新实例</button>
-                  <button id="soul-fetch" type="button" disabled>获取御魂</button>
+                  <button id="soul-fetch" type="button" aria-describedby="soul-fetch-hint" disabled>获取御魂</button>
                   <button id="soul-cancel" type="button" hidden>取消获取</button>
                   <div class="soul-sort-controls" role="group" aria-label="御魂排序">
                     <label for="soul-sort">排序</label>
@@ -296,6 +288,7 @@
                   </div>
                 </div>
                 <div class="soul-status-area">
+                  <p id="soul-fetch-hint" class="soul-fetch-hint">获取前，请先将游戏界面切换到<strong>「御魂仓库」</strong>，再点击“获取御魂”。</p>
                   <p id="soul-status" role="status" aria-live="polite">选择实例后，点击“获取御魂”读取当前角色的背包。</p>
                   <progress id="soul-progress" aria-label="御魂读取进度" hidden></progress>
                   <p id="soul-summary" class="soul-summary"></p>
@@ -358,7 +351,20 @@
                 </details>
               </footer>
             </div>
-            <div id="team-builder-shikigami-atlas" class="team-builder-content-body shikigami-atlas" role="tabpanel" aria-labelledby="team-builder-tab-shikigami-atlas" hidden></div>
+        </section>
+
+        <section id="module-onmyoji-team-builder" class="dock-module onmyoji-team-builder-module" aria-label="阴阳师阵容配队">
+          <aside id="team-builder-sidebar" class="team-builder-sidebar">
+            <header class="team-builder-pane-header">栏目</header>
+            <nav class="team-builder-categories" role="tablist" aria-orientation="vertical" aria-label="阵容栏目">
+              <button id="team-builder-tab-shikigami-atlas" class="team-builder-category" type="button" role="tab" aria-selected="true" aria-controls="team-builder-shikigami-atlas">式神图鉴</button>
+              <button id="team-builder-tab-lineup-browser" class="team-builder-category" type="button" role="tab" aria-selected="false" aria-controls="team-builder-lineup-browser" tabindex="-1">阵容配队</button>
+            </nav>
+          </aside>
+          <div id="team-builder-resizer" class="content-browser-resizer team-builder-resizer" role="separator" aria-orientation="vertical" aria-label="调整栏目宽度" aria-controls="team-builder-sidebar" tabindex="0"></div>
+          <section class="team-builder-content" aria-label="阵容内容">
+            <header class="team-builder-pane-header">式神图鉴</header>
+            <div id="team-builder-shikigami-atlas" class="team-builder-content-body shikigami-atlas" role="tabpanel" aria-labelledby="team-builder-tab-shikigami-atlas"></div>
             <div id="team-builder-lineup-browser" class="team-builder-content-body lineup-browser" role="tabpanel" aria-labelledby="team-builder-tab-lineup-browser" hidden></div>
           </section>
         </section>

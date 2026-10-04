@@ -219,7 +219,7 @@ export function installSoulCalculator(root: HTMLElement, api: SoulApi, optimizer
     instance.disabled = refreshing || busy;
     refresh.disabled = refreshing || busy;
     fetch.disabled = refreshing || busy || !state.selectedId || state.offline;
-    fetch.title = state.offline ? '历史实例可查看缓存；启动模拟器并刷新实例后可重新获取' : '';
+    fetch.title = state.offline ? '历史实例可查看缓存；启动模拟器并刷新实例后可重新获取' : '请先将游戏界面切换到「御魂仓库」，再获取御魂';
     fetch.textContent = busy ? '正在获取…' : '获取御魂';
     cancel.hidden = !busy;
     progress.hidden = !busy;

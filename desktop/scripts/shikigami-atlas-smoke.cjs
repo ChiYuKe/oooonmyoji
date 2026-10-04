@@ -30,12 +30,12 @@ app.whenReady().then(async()=>{
     const container=document.getElementById('module-onmyoji-team-builder');
     window.disposeAtlas=installTeamBuilderPages(container);
     window.disposeResizer=installTeamBuilderResizer(container,document.getElementById('team-builder-resizer'),{readLayout:()=>null,writeLayout:()=>{}});
-    const soulTab=document.getElementById('team-builder-tab-soul-calculator'), atlasTab=document.getElementById('team-builder-tab-shikigami-atlas');
-    const atlas=document.getElementById('team-builder-shikigami-atlas'),soul=document.getElementById('team-builder-soul-calculator');
+    const lineupTab=document.getElementById('team-builder-tab-lineup-browser'), atlasTab=document.getElementById('team-builder-tab-shikigami-atlas');
+    const atlas=document.getElementById('team-builder-shikigami-atlas'),lineup=document.getElementById('team-builder-lineup-browser');
     const el=name=>atlas.querySelector('[data-atlas="'+name+'"]');
-    assert.equal(atlas.hidden,true);assert.equal(soul.hidden,false);
-    document.getElementById('soul-search').value='保留背包筛选';
-    atlasTab.click();assert.equal(soul.hidden,true);assert.equal(atlas.hidden,false);
+    assert.equal(atlas.hidden,false);assert.equal(lineup.hidden,true);
+    assert.equal(document.getElementById('team-builder-tab-soul-calculator'),null);
+    atlasTab.click();assert.equal(lineup.hidden,true);assert.equal(atlas.hidden,false);
     assert.equal(container.querySelector('.team-builder-content > header').textContent,'式神图鉴');
     assert.equal(el('cards').querySelectorAll('button').length,280);
     assert.equal(el('detail').querySelectorAll('dl > div').length,8);assert.equal(el('detail').querySelector('input'),null);
@@ -62,11 +62,10 @@ app.whenReady().then(async()=>{
     el('search').value='没有这个式神';el('search').dispatchEvent(new Event('input'));assert.equal(el('cards').querySelectorAll('button').length,0);assert.match(el('cards').textContent,/没有找到/);
     el('search').value='';el('search').dispatchEvent(new Event('input'));el('rarities').querySelector('[data-rarity="4"]').click();
     assert.ok(Array.from(el('cards').querySelectorAll('button')).every(card=>card.querySelector('small').textContent==='SSR'));
-    const count=el('cards').children.length;soulTab.click();assert.equal(atlas.hidden,true);assert.equal(soul.hidden,false);
-    assert.equal(document.getElementById('soul-search').value,'保留背包筛选');
-    soulTab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
+    const count=el('cards').children.length;lineupTab.click();assert.equal(atlas.hidden,true);assert.equal(lineup.hidden,false);
+    lineupTab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
     assert.equal(atlas.hidden,false);assert.equal(document.activeElement,atlasTab);assert.equal(el('cards').children.length,count);assert.match(el('detail').textContent,/桃花妖/);
-    atlasTab.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));assert.equal(soul.hidden,false);assert.equal(document.activeElement,soulTab);
+    atlasTab.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}));assert.equal(lineup.hidden,false);assert.equal(document.activeElement,lineupTab);
     atlasTab.click();el('cards').querySelector('[data-hero-id="389"]').click();
     el('detail').querySelector('[data-detail-view="skills"]').click();
     el('skills').querySelector('[data-skill-id="3892"]').click();
@@ -121,7 +120,7 @@ app.whenReady().then(async()=>{
     open(217);document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));assert.equal(menu(),null);
     open(217);atlas.querySelector('[data-atlas="list"]').dispatchEvent(new Event('scroll'));assert.equal(menu(),null);
     open(217);atlas.querySelector('[data-atlas="search"]').dispatchEvent(new Event('input'));assert.equal(menu(),null);
-    open(217);document.getElementById('team-builder-tab-soul-calculator').click();await Promise.resolve();assert.equal(menu(),null);
+    open(217);document.getElementById('team-builder-tab-lineup-browser').click();await Promise.resolve();assert.equal(menu(),null);
     document.getElementById('team-builder-tab-shikigami-atlas').click();
     document.body.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));assert.equal(menu(),null);
     card(217).dispatchEvent(new KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true,cancelable:true}));assert.ok(menu());
@@ -243,7 +242,7 @@ app.whenReady().then(async()=>{
     termEl().click();
   })()`);
   fs.writeFileSync(path.join(artifacts,'shikigami-term-tooltip-narrow-light.png'),(await win.webContents.capturePage()).toPNG());
-  await win.webContents.executeJavaScript(`document.getElementById('team-builder-tab-soul-calculator').click()`);
+  await win.webContents.executeJavaScript(`document.getElementById('team-builder-tab-lineup-browser').click()`);
   await new Promise(resolve=>setTimeout(resolve,100));
   if(await win.webContents.executeJavaScript('termOpen()'))throw Error('Hidden atlas must close its term tooltip');
   await win.webContents.executeJavaScript(`
@@ -258,6 +257,24 @@ app.whenReady().then(async()=>{
   await new Promise(resolve=>setTimeout(resolve,100));
   if(!await win.webContents.executeJavaScript(`Boolean(document.querySelector('.shikigami-atlas-context-menu')?.matches(':popover-open'))`))throw Error('Narrow menu must stay open while idle');
   fs.writeFileSync(path.join(artifacts,'shikigami-context-menu-narrow-light.png'),(await win.webContents.capturePage()).toPNG());
+  await win.webContents.executeJavaScript(`(async()=>{
+    const assert=require('node:assert/strict'),atlas=document.getElementById('team-builder-shikigami-atlas');
+    const parent=atlas.parentElement,next=atlas.nextSibling;
+    const outside=document.createElement('button');outside.textContent='点击检查';outside.style.cssText='position:fixed;left:0;top:0;width:40px;height:30px;z-index:9999';document.body.append(outside);
+    const share=atlas.querySelector('.shikigami-share:not(.shikigami-owned-share)');
+    atlas.querySelector('[data-atlas="share"]').click();assert.equal(share.matches(':modal'),true);
+    atlas.classList.add('hidden');await new Promise(resolve=>setTimeout(resolve,150));
+    assert.equal(share.open,false,'CSS-hidden atlas must release its modal');
+    assert.equal(document.elementFromPoint(10,10),outside,'Outside controls must receive mouse input');
+    atlas.classList.remove('hidden');await new Promise(resolve=>setTimeout(resolve,150));
+    atlas.querySelector('[data-atlas="share"]').click();assert.equal(share.matches(':modal'),true);
+    const store=document.createElement('div');store.className='workbench-module-store';document.body.append(store);store.append(atlas);
+    await new Promise(resolve=>setTimeout(resolve,150));
+    assert.equal(share.open,false,'Moving atlas into module storage must release its modal');
+    assert.equal(document.elementFromPoint(10,10),outside);
+    parent.insertBefore(atlas,next);store.remove();outside.remove();
+    await new Promise(resolve=>setTimeout(resolve,150));
+  })()`);
   await win.webContents.executeJavaScript(`window.disposeResizer();window.disposeAtlas();require('node:assert/strict').equal(document.querySelector('.shikigami-term-tooltip'),null);require('node:assert/strict').equal(document.querySelector('.shikigami-atlas-context-menu'),null)`);
   console.log(JSON.stringify({...result,localPortraits:true,localSkillIcons:true,missingExtraIconFallback:true,narrow,termHover:true,relatedDefinitions:true,termKeyboard:true,termLifecycle:true,termNarrowLayout:true,safeTermText:true,cardContextMenu:true,contextTargetDetails:true,contextKeyboard:true,contextDismissal:true,contextViewportBounds:true,contextCleanup:true}));
   win.destroy();app.quit();

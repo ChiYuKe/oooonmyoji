@@ -65,7 +65,7 @@ const popoutTopmostStorage = (): PopoutTopmostStorage => ({
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
-export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulOptimizer' | 'soulCommunityUpload' | 'soulCommunityComparison' | 'referenceViewer' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulCalculator' | 'soulOptimizer' | 'soulCommunityUpload' | 'soulCommunityComparison' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -259,10 +259,20 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     minimumWidth: 320,
     minimumHeight: 220,
   },
+  soulCalculator: {
+    title: '御魂计算',
+    moduleElementId: 'module-soul-calculator',
+    reference: 'workflow',
+    direction: 'within',
+    initialWidth: 1000,
+    initialHeight: 720,
+    minimumWidth: 320,
+    minimumHeight: 220,
+  },
   soulOptimizer: {
     title: '御魂配装',
     moduleElementId: 'module-soul-optimizer',
-    reference: 'onmyojiTeamBuilder',
+    reference: 'soulCalculator',
     direction: 'within',
     initialWidth: 1000,
     initialHeight: 760,
@@ -854,10 +864,13 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     onLayoutChange?.();
   };
 
+  const pendingPopouts = new Set<WorkbenchPanelId>();
   const popout = (panelId: WorkbenchPanelId): void => {
     if (panelId === 'workflow') return;
     const panel = api.getPanel(panelId);
-    if (!panel || panel.api.location.type === 'popout') return;
+    if (!panel) return;
+    if (panel.api.location.type === 'popout') { panel.group.api.getWindow().focus(); return; }
+    if (pendingPopouts.has(panelId)) return;
     const position = panelId === 'referenceViewer' ? {
       left: window.screenX + 72,
       top: window.screenY + 56,
@@ -868,10 +881,16 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
       top: window.screenY + 72,
       width: Math.min(760, Math.max(520, window.screen.availWidth - 160)),
       height: Math.min(560, Math.max(440, window.screen.availHeight - 144)),
+    } : panelId === 'soulCalculator' ? {
+      left: window.screenX + 80,
+      top: window.screenY + 56,
+      width: Math.min(1100, Math.max(320, window.screen.availWidth - 160)),
+      height: Math.min(800, Math.max(220, window.screen.availHeight - 112)),
     } : undefined;
-    void api.addPopoutGroup(panel, { popoutUrl: '/popout.html', position }).then((opened) => {
+    pendingPopouts.add(panelId);
+    void api.addPopoutGroup(panel, { popoutUrl: panelId === 'soulCalculator' ? '/popout.html?panel=soulCalculator' : '/popout.html', position }).then((opened) => {
       if (!opened) onPopoutFailure?.();
-    });
+    }).catch(() => onPopoutFailure?.()).finally(() => pendingPopouts.delete(panelId));
   };
 
   const popoutFailureDisposable = api.onDidOpenPopoutWindowFail(() => onPopoutFailure?.());

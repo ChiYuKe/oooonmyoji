@@ -192,6 +192,12 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
   const onViewportChange = (): void => closeContextMenu();
   const visibilityObserver = new MutationObserver(() => { if (root.closest('[hidden]')) { closeContextMenu(); ownedDetail.close(); shareView.close(); } });
   for (let parent: HTMLElement | null = root; parent; parent = parent.parentElement) visibilityObserver.observe(parent, { attributes: true, attributeFilter: ['hidden'] });
+  // Docking hides panels through CSS or moves them into the module store,
+  // without changing `hidden`. An invisible modal still blocks the document.
+  const panelVisibility = new IntersectionObserver(entries => {
+    if (!entries[0]?.isIntersecting) { closeContextMenu(); termView.close(); ownedDetail.close(); shareView.close(); }
+  });
+  panelVisibility.observe(root);
   root.addEventListener('contextmenu', onContextMenu); root.addEventListener('keydown', onCardKey);
   doc.addEventListener('pointerdown', onOutsidePointer, true); doc.addEventListener('focusin', onOutsideFocus, true);
   doc.addEventListener('keydown', onMenuKey, true); doc.addEventListener('scroll', onViewportChange, true);
@@ -293,7 +299,7 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
   updateControls(); showCacheStatus(); void refreshInstances();
   search.addEventListener('input', renderCards); renderCards(); renderDetail();
   return () => {
-    disposed = true; ++loadVersion; closeContextMenu(); visibilityObserver.disconnect();
+    disposed = true; ++loadVersion; closeContextMenu(); visibilityObserver.disconnect(); panelVisibility.disconnect();
     root.removeEventListener('contextmenu', onContextMenu); root.removeEventListener('keydown', onCardKey);
     doc.removeEventListener('pointerdown', onOutsidePointer, true); doc.removeEventListener('focusin', onOutsideFocus, true);
     doc.removeEventListener('keydown', onMenuKey, true); doc.removeEventListener('scroll', onViewportChange, true);
@@ -303,7 +309,7 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
   };
 }
 
-/** Keep both pages mounted so switching columns preserves backpack and atlas state. */
+/** Keep atlas and lineups mounted so switching columns preserves their state. */
 export function installTeamBuilderPages(container: HTMLElement, api: Pick<OnmyojiDesktopApi, 'searchLineups' | 'openLineupPost' | 'openLineupUrl' | 'openLineupSource' | 'readLayout' | 'writeLayout'> & Partial<OwnershipApi>): () => void {
   const tabs = [...container.querySelectorAll<HTMLButtonElement>('.team-builder-categories [role="tab"]')];
   const atlas = container.querySelector<HTMLElement>('#team-builder-shikigami-atlas')!;
@@ -316,7 +322,6 @@ export function installTeamBuilderPages(container: HTMLElement, api: Pick<Onmyoj
       container.querySelector<HTMLElement>(`#${item.getAttribute('aria-controls')}`)!.hidden = !active;
     }
     container.querySelector('.team-builder-content > .team-builder-pane-header')!.textContent = tab.textContent;
-    const preview = container.querySelector<HTMLElement>('#soul-detail-window'); if (preview?.matches(':popover-open')) preview.hidePopover();
     if (tab.id === 'team-builder-tab-lineup-browser') lineups.load();
   };
   const click = (event: Event): void => choose(event.currentTarget as HTMLButtonElement);

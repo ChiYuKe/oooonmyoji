@@ -11,7 +11,7 @@ test('「御魂配装」注册为工作台可停靠面板（与设置/概览同�
   assert.match(docking, /export type WorkbenchPanelId = [^;]*'soulOptimizer'[^;]*SharedDockPanelId;/);
   assert.match(docking, /soulOptimizer:\s*\{\s*title: '御魂配装'/);
   assert.match(docking, /moduleElementId: 'module-soul-optimizer'/);
-  assert.match(docking, /reference: 'onmyojiTeamBuilder',\s*direction: 'within'/);
+  assert.match(docking, /reference: 'soulCalculator',\s*direction: 'within'/);
   const html = read('src/renderer/index.html');
   // 模块元素放进工作台模块仓库；窗口菜单里可开关它。
   assert.match(html, /<section id="module-soul-optimizer" class="dock-module soul-optimizer-module" aria-label="御魂配装"><\/section>/);

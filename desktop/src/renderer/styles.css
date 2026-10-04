@@ -495,6 +495,8 @@ select option:checked { color: #fff; }
 .soul-calculator [hidden] { display: none !important; }
 .soul-calculator p { margin: 0; }
 .soul-status-area { display: grid; gap: 3px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.soul-status-area .soul-fetch-hint { color: var(--text); }
+.soul-fetch-hint strong { font-weight: 600; }
 .soul-status-area .error { color: var(--danger, #e68787); }
 .soul-status-area progress { width: 100%; height: 6px; accent-color: var(--blue); }
 .soul-summary, .soul-note { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }

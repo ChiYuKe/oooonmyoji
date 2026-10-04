@@ -765,8 +765,8 @@ function createWindow(): BrowserWindow {
       return isPopout ? {
         action: 'allow',
         overrideBrowserWindowOptions: {
-          width: 720,
-          height: 520,
+          width: parsed.searchParams.get('panel') === 'soulCalculator' ? 1100 : 720,
+          height: parsed.searchParams.get('panel') === 'soulCalculator' ? 800 : 520,
           minWidth: 320,
           minHeight: 220,
           frame: false,

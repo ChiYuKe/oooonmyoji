@@ -949,6 +949,10 @@ function bindUi(): void {
       if (button.dataset.appCommand === 'onmyojiTeamBuilder') {
         workbenchFrame?.showFloating('onmyojiTeamBuilder');
       }
+      if (button.dataset.appCommand === 'soulCalculator') {
+        workbenchFrame?.show('soulCalculator');
+        workbenchFrame?.popout('soulCalculator');
+      }
       if (button.dataset.appCommand === 'help') void openHelpReadme();
       if (button.dataset.appCommand === 'about') openAboutPage();
     });

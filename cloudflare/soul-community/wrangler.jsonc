@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "onmyoji-soul-community",
+  "account_id": "f189b3d800342db0eeffc51e06c67db5",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-04",
+  "vars": { "GITHUB_CLIENT_ID": "Ov23li8z5SD4vRigOGe1" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "onmyoji-soul-community",
+    "database_id": "9428958c-ac56-4e35-92db-ee10edf57bd2",
+    "migrations_dir": "migrations"
+  }],
+  "ratelimits": [
+    { "name": "READ_LIMITER", "namespace_id": "647562001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "WRITE_LIMITER", "namespace_id": "647562002", "simple": { "limit": 5, "period": 60 } },
+    { "name": "AUTH_LIMITER", "namespace_id": "647562003", "simple": { "limit": 60, "period": 60 } }
+  ]
+}

@@ -17,7 +17,7 @@ export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], p
   const doc = root.ownerDocument;
   const dialog = doc.createElement('dialog'); dialog.className = 'soul-optimizer soul-plan-detail'; dialog.id = 'soul-plan-detail';
   dialog.setAttribute('aria-labelledby', 'soul-plan-detail-title');
-  dialog.innerHTML = `<header class="soul-optimizer-header"><div><h2 id="soul-plan-detail-title">配装详情</h2><p data-plan="note"></p></div><button type="button" aria-label="关闭配装详情">×</button></header><div class="soul-plan-detail-body"><section class="soul-plan-equipment" aria-label="御魂装配"><h3>御魂装配</h3><div data-plan="ring" class="soul-plan-ring"></div></section><section class="soul-plan-overview" aria-label="属性与套装效果"><div data-plan="panel" class="soul-plan-panel"></div><div data-plan="sets" class="soul-plan-effects"></div></section></div>`;
+  dialog.innerHTML = `<header class="soul-optimizer-header"><div><h2 id="soul-plan-detail-title">配装详情</h2><p data-plan="note"></p></div><button type="button" aria-label="关闭配装详情">×</button></header><div class="soul-plan-detail-body"><section class="soul-plan-equipment" aria-label="御魂装配"><h3>御魂装配</h3><div data-plan="ring" class="soul-plan-ring"></div></section><section class="soul-plan-overview" aria-label="属性面板"><div data-plan="panel" class="soul-plan-panel"></div></section><section data-plan="sets" class="soul-plan-effects" aria-label="套装效果"></section></div>`;
   root.append(dialog);
   const share = installSoulPlanShare(root, shareApi);
   const shareButton = doc.createElement('button'); shareButton.type = 'button'; shareButton.dataset.planShare = ''; shareButton.textContent = '分享';
@@ -50,8 +50,10 @@ export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], p
         const button = doc.createElement('button'); button.type = 'button'; button.dataset.soulId = id; button.dataset.position = String(index + 1); button.className = 'soul-plan-ring-soul';
         button.setAttribute('aria-label', `${index + 1}号位 ${soul?.name ?? '当前背包中未找到'}，查看御魂详情`);
         add(button, 'small', `${index + 1} 号位 · +${soul?.level ?? '—'}`);
-        if (soul) button.append(createSoulPositionPortrait(doc, soul, false));
-        add(button, 'span', soul?.name ?? '当前背包中未找到');
+        const portrait = add(button, 'div', '', 'soul-plan-soul-portrait');
+        if (soul) portrait.append(createSoulPositionPortrait(doc, soul, false));
+        else add(portrait, 'span', '—');
+        add(button, 'span', soul?.name ?? '当前背包中未找到', 'soul-plan-soul-name');
         if (soul) {
           button.addEventListener('pointerenter', () => preview(button, soul,context)); button.addEventListener('pointerleave', closePreview);
           button.addEventListener('focus', () => preview(button, soul,context)); button.addEventListener('blur', closePreview);

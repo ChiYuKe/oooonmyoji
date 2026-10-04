@@ -64,7 +64,7 @@ export function installShikigamiOwnedDetail(root: HTMLElement, loadBase?: (reque
             const shareButton = add(meta, 'button', '分享', 'shikigami-owned-share-button') as HTMLButtonElement;
             shareButton.type = 'button'; shareButton.dataset.ownedShare = String(index);
             shareButton.setAttribute('aria-label', `分享${hero.name}配置 ${index + 1}`);
-            shareButton.addEventListener('click', () => share.show(article, heading, el('status').textContent ?? '', hero.name, shareButton));
+            shareButton.addEventListener('click', () => share.show(article, heading, hero.name, shareButton));
             add(article, 'h4', '技能等级'); const skills = add(article, 'div', '', 'shikigami-owned-skills');
             for (const skill of group.hero.skills) {
               const profile = skillNames.get(skill.id), item = add(skills, 'div', '', 'shikigami-owned-skill');

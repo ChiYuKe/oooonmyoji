@@ -57,7 +57,10 @@ app.whenReady().then(async()=>{
     assert.equal(Number(canvas.dataset.loadedPortraits),expectedArt.length);assert.ok(expectedArt.length>=5);assert.equal(canvas.width,2240);assert.ok(canvas.height>1500);
     for(const skill of source.querySelectorAll('.shikigami-owned-skill'))assert.ok(painted.includes(skill.querySelector(':scope > div > span').textContent),'complete skill name');
     for(const value of source.querySelectorAll('.soul-detail-attribute-value,.shikigami-owned-total,.shikigami-owned-addition'))assert.ok(painted.includes(value.textContent.trim()),'visible attribute '+value.textContent);
-    assert.ok(painted.includes('× 2'));CanvasRenderingContext2D.prototype.fillText=paint;
+    assert.ok(painted.includes('× 2'));
+    assert.ok(detail().querySelector('[data-owned="status"]').textContent.includes('离线实例'));
+    assert.ok(!painted.some(value=>/离线实例|已拥有|种配置|阴阳师 · 式神仓库配置/.test(value)),'share omits account summary and footer');
+    CanvasRenderingContext2D.prototype.fillText=paint;
     const swatch=document.createElement('canvas').getContext('2d');
     const normalize=color=>{swatch.fillStyle=color;return swatch.fillStyle;};
     const rgb=color=>{swatch.fillStyle=color;swatch.fillRect(0,0,1,1);return [...swatch.getImageData(0,0,1,1).data];};

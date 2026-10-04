@@ -217,6 +217,10 @@ app.whenReady().then(async () => {
     const overviewBox=planDetail.querySelector('.soul-plan-overview').getBoundingClientRect();
     assert.ok(equipmentBox.right+16<=overviewBox.left,'equipment is on the left with a clear column gap');
     assert.ok(Math.abs(equipmentBox.top-overviewBox.top)<1,'both columns align at the top');
+    assert.ok(Math.abs(equipmentBox.bottom-overviewBox.bottom)<1,'both columns align at the bottom');
+    const effectsBox=planDetail.querySelector('.soul-plan-effects').getBoundingClientRect();
+    assert.ok(effectsBox.top>=equipmentBox.bottom+12,'set effects form a separate footer');
+    assert.ok(Math.abs(effectsBox.left-equipmentBox.left)<1&&Math.abs(effectsBox.right-overviewBox.right)<1,'set effects span both columns');
     assert.deepEqual(Array.from(planDetail.querySelectorAll('[data-soul-id]'),b=>b.dataset.soulId),gear.map(s=>s.id),'ring shows all six actual pieces');
     const panel=planDetail.querySelector('[data-plan="panel"]');
     assert.deepEqual(Array.from(panel.querySelectorAll('thead th'),node=>node.textContent),['属性','御魂加成','总属性']);

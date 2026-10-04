@@ -4,14 +4,14 @@ export type OwnedShareApi = ImageShareApi;
 
 /** Snapshot the displayed configuration, including its resolved panel, without recalculating it. */
 export function installShikigamiOwnedShare(root: HTMLElement, api?: OwnedShareApi): {
-  show(article: HTMLElement, heading: HTMLElement, account: string, name: string, origin: HTMLElement): void;
+  show(article: HTMLElement, heading: HTMLElement, name: string, origin: HTMLElement): void;
   close(): void; dispose(): void;
 } {
   const doc = root.ownerDocument, win = doc.defaultView!;
   const preview = installImageShare(root, api, { className: 'shikigami-owned-share', title: '分享式神配置', caption: '完整展示技能等级、御魂装配和属性面板' });
   const text = (parent: ParentNode, selector: string): string => parent.querySelector(selector)?.textContent?.trim() ?? '';
   const all = (parent: ParentNode, selector: string): HTMLElement[] => [...parent.querySelectorAll<HTMLElement>(selector)];
-  const render = async (article: HTMLElement, heading: HTMLElement, account: string, name: string, active: () => boolean): Promise<HTMLCanvasElement | null> => {
+  const render = async (article: HTMLElement, heading: HTMLElement, name: string, active: () => boolean): Promise<HTMLCanvasElement | null> => {
     // Copy text before awaiting assets so changing the account cannot change this export.
     const source = article.cloneNode(true) as HTMLElement, identity = heading.cloneNode(true) as HTMLElement;
     const style = win.getComputedStyle(article), font = style.fontFamily;
@@ -66,8 +66,8 @@ export function installShikigamiOwnedShare(root: HTMLElement, api?: OwnedShareAp
     const effectRows = effects.map(effect => [text(effect, 'strong'), ...all(effect, 'p').flatMap(p => lines(p.textContent ?? '', panelWidth - 24))]);
     const panelHeight = 304 + lines(note, panelWidth).length * 20 + (effects.length ? 40 : 0) + effectRows.reduce((sum, lines) => sum + 24 + lines.length * 21 + gap, 0);
     const skills = all(source, '.shikigami-owned-skill'), skillRows = Math.max(1, Math.ceil(skills.length / 3));
-    const gearY = 220 + skillRows * 76, bodyHeight = Math.max(rowHeights[0] + gap + rowHeights[1], panelHeight);
-    const height = gearY + bodyHeight + 56;
+    const gearY = 192 + skillRows * 76, bodyHeight = Math.max(rowHeights[0] + gap + rowHeights[1], panelHeight);
+    const height = gearY + bodyHeight + 40;
     output.width = width * 2; output.height = height * 2; ctx.scale(2, 2);
     output.dataset.slots = String(rows.length); output.dataset.loadedPortraits = String(images.size);
     output.dataset.heroName = name; output.dataset.configuration = text(source, 'h3');
@@ -93,20 +93,19 @@ export function installShikigamiOwnedShare(root: HTMLElement, api?: OwnedShareAp
       }
       ctx.restore();
     };
-    box(0, 0, width, height, theme.background); box(margin - 8, 124, inner + 16, height - 148, theme.group);
+    box(0, 0, width, height, theme.background); box(margin - 8, 96, inner + 16, height - 120, theme.group);
     portrait(identity, margin, 24, 60, name); label(`${name} · 仓库配置`, margin + 76, 54, 22, theme.text, true);
-    label(account, margin, 106, 12, theme.muted, false, 'left', inner);
-    label(text(source, 'h3'), margin, 154, 15, theme.text, true);
+    label(text(source, 'h3'), margin, 126, 15, theme.text, true);
     let badgeX = margin + 78;
     for (const badge of all(source, '.shikigami-owned-badges span')) {
       const value = badge.textContent ?? ''; ctx.font = `11px ${font}`; const w = ctx.measureText(value).width + 16;
-      box(badgeX, 137, w, 24); label(value, badgeX + 8, 153, 11, theme.muted); badgeX += w + 6;
+      box(badgeX, 109, w, 24); label(value, badgeX + 8, 125, 11, theme.muted); badgeX += w + 6;
     }
-    label(text(source, '.shikigami-owned-quantity'), width - margin, 154, 18, theme.text, true, 'right');
-    label('技能等级', margin, 188, 12, theme.muted);
-    if (!skills.length) label('该式神无可显示的技能等级。', margin, 226, 12, theme.muted);
+    label(text(source, '.shikigami-owned-quantity'), width - margin, 126, 18, theme.text, true, 'right');
+    label('技能等级', margin, 160, 12, theme.muted);
+    if (!skills.length) label('该式神无可显示的技能等级。', margin, 198, 12, theme.muted);
     skills.forEach((skill, i) => {
-      const w = (inner - gap * 2) / 3, x = margin + i % 3 * (w + gap), y = 202 + Math.floor(i / 3) * 76;
+      const w = (inner - gap * 2) / 3, x = margin + i % 3 * (w + gap), y = 174 + Math.floor(i / 3) * 76;
       box(x, y, w, 64); const name = text(skill, ':scope > div > span'); portrait(skill, x + 12, y + 12, 40, name);
       label(name, x + 62, y + 27, 13, theme.text, false, 'left', w - 74); label(text(skill, 'strong'), x + 62, y + 49, 12, theme.accent, true);
     });
@@ -149,12 +148,11 @@ export function installShikigamiOwnedShare(root: HTMLElement, api?: OwnedShareAp
     ctx.font = `12px ${font}`; for (const line of lines(note, panelWidth)) { label(line, panelX, sy, 12, theme.muted); sy += 20; }
     if (effects.length) { sy += 18; label('套装效果', panelX, sy, 12, theme.muted); sy += 14; }
     effectRows.forEach(values => { box(panelX, sy, panelWidth, 24 + values.length * 21); values.forEach((line, i) => label(line, panelX + 12, sy + 22 + i * 21, 12, i ? theme.muted : theme.text, i === 0)); sy += 24 + values.length * 21 + gap; });
-    label('阴阳师 · 式神仓库配置', width - margin, height - 18, 11, theme.muted, false, 'right');
     return output;
   };
   return {
-    show(article, heading, account, name, origin): void {
-      preview.show(active => render(article, heading, account, name, active), `${name}-${text(article, 'h3')}-${new Date().toISOString().slice(0, 10)}.png`, origin);
+    show(article, heading, name, origin): void {
+      preview.show(active => render(article, heading, name, active), `${name}-${text(article, 'h3')}-${new Date().toISOString().slice(0, 10)}.png`, origin);
     }, close: preview.close, dispose: preview.dispose,
   };
 }

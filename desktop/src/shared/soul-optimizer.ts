@@ -1,5 +1,6 @@
 import type { SoulRecord } from './souls';
 import { SOUL_SLOT_MAIN_ATTRIBUTES, SOUL_SLOT_DEFAULT_MAIN_ATTRIBUTES } from './soul-slots';
+import { suitMechanicRanges } from './soul-substat-standard';
 
 export const PANEL_LABELS = { attack: '攻击', hp: '生命', defense: '防御', speed: '速度', crit: '暴击', critDamage: '暴击伤害', hit: '效果命中', resist: '效果抵抗' } as const;
 export type PanelKey = keyof typeof PANEL_LABELS;
@@ -105,6 +106,7 @@ export function evaluatePlan(souls: SoulRecord[], base: Panel, catalog: SuitProf
  */
 export async function optimizeSouls(souls: SoulRecord[], catalog: SuitProfile[], options: OptimizationOptions,
   progress: (value: SearchProgress) => void = () => {}, cancelled: () => boolean = () => false): Promise<SearchResult> {
+  options={...options,ranges:suitMechanicRanges(options.requirements.flatMap(requirement=>Array.from({length:requirement.count},()=>({suitId:requirement.suitId}))),options.ranges)};
   if (!Object.hasOwn(OPTIMIZATION_OBJECTIVES, options.objective)) throw new Error('请选择有效的效果指标');
   for (const value of Object.values(options.base)) if (!Number.isFinite(value) || value < 0) throw new Error('式神基础面板必须为非负数');
   for (const range of Object.values(options.ranges)) {

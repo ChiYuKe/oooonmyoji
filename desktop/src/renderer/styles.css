@@ -606,6 +606,20 @@ select option:checked { color: #fff; }
 .soul-detail-attribute-label { min-width: 0; overflow-wrap: anywhere; }
 .soul-detail-attribute-value { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 500; }
 .soul-detail-pending { color: var(--muted); font-size: 11px; }
+.soul-substat-summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.soul-substat-label { display: flex; align-items: center; gap: 7px; min-width: 0; }
+[data-substat-status] { --soul-substat-color: var(--muted); }
+[data-substat-status="core"] { --soul-substat-color: var(--green); }
+[data-substat-status="conditional"] { --soul-substat-color: var(--yellow); }
+[data-substat-status="low"] { --soul-substat-color: var(--hero-rarity-r, #8ebfdb); }
+[data-substat-status="pending"] { --soul-substat-color: var(--hero-rarity-sr, #baa5df); }
+:is(.soul-target-attributes, .soul-target-original-attributes) > li[data-substat-status] > :is(.soul-substat-label, strong) { color: var(--soul-substat-color); }
+.soul-substat-indicator { --substat-color: var(--soul-substat-color, var(--muted)); display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 4px; color: var(--substat-color); background: color-mix(in srgb, var(--substat-color) 10%, transparent); cursor: help; transition: background-color 140ms ease; }
+.soul-substat-indicator svg { display: block; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.soul-substat-indicator:is(:hover,:focus-visible) { background: color-mix(in srgb, var(--substat-color) 22%, transparent); }
+.soul-substat-indicator:focus-visible { outline: 1px solid var(--substat-color); outline-offset: 2px; }
+.soul-substat-count { width: auto; min-width: 30px; height: 20px; padding: 0 5px; gap: 4px; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .soul-substat-indicator { transition: none; } }
 .soul-intrinsic-attribute { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; color: var(--green); }
 .soul-intrinsic-attributes { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
 /* Match the visible numeral center; the font's line box sits slightly lower. */

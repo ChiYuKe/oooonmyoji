@@ -33,6 +33,7 @@ export function renderSoulDetail(doc: Document, detail: HTMLElement, selected?: 
   const subs = add(detail, 'div', '', 'soul-detail-subs');
   for (const attr of selected.subAttributes ?? []) {
     const row = attributeRow(subs, attr, 'soul-sub-attribute');
+    row.dataset.attribute = attr.name;
     if (attr.rolls > 1) {
       const badge = add(row, 'span', String(attr.rolls - 1), 'soul-upgrade-count');
       badge.setAttribute('aria-label', `强化 ${attr.rolls - 1} 次`);

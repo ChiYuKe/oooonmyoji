@@ -205,6 +205,12 @@
 :root[data-theme="light"] .soul-card-badges .soul-card-discarded {
     color: #755555
 }
+:root[data-theme="light"] [data-substat-status="low"] {
+    --soul-substat-color: var(--hero-rarity-r, #48606e)
+}
+:root[data-theme="light"] [data-substat-status="pending"] {
+    --soul-substat-color: var(--hero-rarity-sr, #635776)
+}
 :root[data-theme="light"] .soul-effect-number, :root[data-theme="light"] .effect-number {
     color: #48606e
 }

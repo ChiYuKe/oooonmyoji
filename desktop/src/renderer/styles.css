@@ -1305,8 +1305,32 @@ body:has(.menu-root.open, dialog[open]) .onmyoji-workbench-dockview .dv-tabs-and
 
 .status-bar { gap: 18px; padding: 0 9px; border-top: 3px solid #2e2e2e; background: var(--status); color: #cfcfcf; font-size: 10px; }
 .status-spacer { flex: 1; }
-.app-toast { position: fixed; z-index: 3000; left: 50%; bottom: 38px; max-width: min(520px, calc(100vw - 40px)); transform: translateX(-50%); padding: 8px 12px; border: 1px solid #343a40; border-left: 3px solid #3f7898; background: #20252a; box-shadow: 0 10px 24px rgba(0,0,0,.46); }
-.app-toast.error { border-color: #343a40; border-left-color: var(--red); color: #f0a2a7; }
+.app-toast {
+  position: fixed;
+  z-index: 3000;
+  left: 50%;
+  bottom: 38px;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 40px));
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition: opacity 180ms ease, transform 180ms ease, display 180ms allow-discrete;
+}
+.app-toast.error { color: var(--red); }
+.app-toast.hidden { opacity: 0; transform: translate(-50%, 8px); }
+@starting-style { .app-toast { opacity: 0; transform: translate(-50%, 8px); } }
+@media (prefers-reduced-motion: reduce) { .app-toast { transition: none; } }
 
 /* Settings composition is shared with popouts: public/settings/settings.css. */
 

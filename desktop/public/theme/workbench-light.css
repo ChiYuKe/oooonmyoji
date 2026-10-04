@@ -627,14 +627,6 @@
     border-top: 3px solid #e0e0e0;
     color: #343434
 }
-:root[data-theme="light"] .app-toast {
-    border: 1px solid #dcdcdc;
-    background: #ededed
-}
-:root[data-theme="light"] .app-toast.error {
-    border-color: #dcdcdc;
-    color: #7b5356
-}
 :root[data-theme="light"] .overview-module {
     background: #f3f3f3
 }

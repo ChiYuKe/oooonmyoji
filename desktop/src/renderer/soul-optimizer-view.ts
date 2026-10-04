@@ -304,13 +304,29 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     }
     parent.append(card);
   };
+  const syncResultFavorites = (): void => {
+    const savedIds = new Set(saved.filter(item => item.heroId === resultHero.id).map(item => item.plan.ids.join('|')));
+    for (const card of el('results').querySelectorAll<HTMLElement>('.soul-optimizer-plan')) {
+      const button = card.querySelector<HTMLButtonElement>('[data-action="save-plan"]');
+      if (!button) continue;
+      const alreadySaved = savedIds.has(card.dataset.planIds ?? '');
+      button.disabled = running || alreadySaved;
+      button.textContent = alreadySaved ? '已收藏' : '收藏方案';
+    }
+  };
   const renderSaved = (): void => {
     const excluded = new Set([...el('exclusions').querySelectorAll<HTMLInputElement>('input:checked')].map(i => i.value));
     el('exclusions').replaceChildren(); el('saved').replaceChildren(); el('saved-count').textContent = `${saved.length}`; el('saved-total').textContent = `${saved.length}`;
     if (!saved.length) { appendText(el('exclusions'), 'p', '收藏方案后，可在这里选择要排除的御魂。', 'soul-optimizer-hint'); return; }
     for (const item of saved) {
       const label = doc.createElement('label'); const input = doc.createElement('input'); input.type = 'checkbox'; input.value = item.key; input.checked = excluded.has(item.key); label.append(input, doc.createTextNode(`${item.heroName} · ${new Date(item.created).toLocaleString()}`)); el('exclusions').append(label);
-      renderPlan(el('saved'), item.plan, item.heroName, undefined, () => { if (running) return; saved = saved.filter(p => p.key !== item.key); persist(); renderSaved(); changed(); }, item.objective, false, heroes.find(hero => hero.id === item.heroId), item.base);
+      renderPlan(el('saved'), item.plan, item.heroName, undefined, () => {
+        if (running) return;
+        const wasExcluded = [...el('exclusions').querySelectorAll<HTMLInputElement>('input:checked')].some(input => input.value === item.key);
+        saved = saved.filter(p => p.key !== item.key); persist(); renderSaved(); syncResultFavorites();
+        // Keep the completed search and analysis as a snapshot. Removed exclusions affect the next search.
+        if (wasExcluded) setStatus('收藏已删除，已取消该方案的御魂排除；当前结果已保留，下次计算生效。');
+      }, item.objective, false, heroes.find(hero => hero.id === item.heroId), item.base);
     }
   };
   const renderResults = (): void => {

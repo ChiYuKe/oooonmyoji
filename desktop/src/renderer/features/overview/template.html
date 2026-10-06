@@ -1,0 +1,43 @@
+<section id="module-overview" class="dock-module overview-module" aria-label="脚本执行概览">
+          <header class="overview-toolbar">
+            <div class="overview-title">
+              <i data-lucide="workflow"></i>
+              <div><strong>脚本概览</strong><span>勾选脚本并按队列顺序执行</span></div>
+            </div>
+            <label class="overview-search">
+              <i data-lucide="search"></i>
+              <input id="overview-search" type="search" placeholder="搜索脚本名称或路径" aria-label="搜索脚本">
+            </label>
+            <label class="overview-instance-field">
+              <span>运行实例</span>
+              <select id="overview-instance-select" aria-label="概览运行实例"></select>
+            </label>
+            <button id="overview-refresh" class="overview-command secondary" type="button" title="刷新脚本列表"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+            <button id="overview-run" class="overview-command primary" type="button"><i data-lucide="play"></i><span>运行所选</span></button>
+            <button id="overview-stop" class="overview-command danger" type="button" disabled><i data-lucide="square"></i><span>停止队列</span></button>
+          </header>
+          <div class="overview-layout">
+            <section class="overview-library" aria-label="全部脚本">
+              <div class="overview-section-header">
+                <div><strong>全部脚本</strong><span id="overview-workflow-count">0 个</span></div>
+                <div class="overview-selection-actions">
+                  <button id="overview-select-all" type="button">全选</button>
+                  <button id="overview-clear" type="button">清空</button>
+                </div>
+              </div>
+              <div id="overview-workflow-grid" class="overview-workflow-grid"></div>
+              <div id="overview-empty" class="overview-empty hidden">没有匹配的脚本</div>
+            </section>
+            <aside class="overview-queue-panel" aria-label="执行顺序">
+              <div class="overview-section-header">
+                <div><strong>执行顺序</strong><span id="overview-selected-count">未选择脚本</span></div>
+              </div>
+              <div id="overview-queue" class="overview-queue"></div>
+              <div id="overview-queue-empty" class="overview-empty">勾选左侧卡片以建立执行队列</div>
+              <div class="overview-queue-summary">
+                <span id="overview-queue-status">等待选择</span>
+                <strong id="overview-queue-progress">0 / 0</strong>
+              </div>
+            </aside>
+          </div>
+        </section>

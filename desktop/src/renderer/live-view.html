@@ -83,11 +83,30 @@
 
           <section class="vision-card">
             <div class="vision-card-head">
+              <h3>步骤顺序</h3>
+              <span id="live-step-count" class="live-count">0</span>
+            </div>
+            <ol id="live-step-list" class="live-step-list"></ol>
+            <div id="live-step-empty" class="vision-muted">当前工作流没有任务步骤</div>
+            <div class="vision-muted">分支可能跳过步骤，循环可能重复执行。</div>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
               <h3>模板匹配</h3>
               <span id="live-match-count" class="live-count">0</span>
             </div>
             <ul id="live-match-list" class="vision-match-list"></ul>
             <div id="live-match-empty" class="vision-muted">这一步没有模板匹配结果</div>
+          </section>
+
+          <section class="vision-card">
+            <div class="vision-card-head">
+              <h3>消失状态检测</h3>
+              <span id="live-state-count" class="live-count">0</span>
+            </div>
+            <ul id="live-state-list" class="vision-match-list"></ul>
+            <div id="live-state-empty" class="vision-muted">这一步没有配置消失状态</div>
           </section>
 
           <section class="vision-card">
@@ -114,12 +133,12 @@
       <footer class="vision-statusbar">
         <span id="live-status">准备就绪</span>
         <span class="vision-status-spacer"></span>
-        <span>A 键冻结画面 · 每一步的匹配框 / ROI / OCR / 点击都来自运行时的实时判断</span>
+        <span>A 键冻结画面 · 状态候选、匹配框、ROI、OCR 和点击都来自当前运行步骤</span>
       </footer>
     </div>
 
     <div id="live-toast" class="app-toast hidden"></div>
   </div>
-  <script type="module" src="./live-view.ts"></script>
+  <script type="module" src="./tools/live-view/entry.ts"></script>
 </body>
 </html>

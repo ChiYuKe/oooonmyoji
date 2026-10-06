@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 const {app,BrowserWindow,protocol,net}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
 const root=path.resolve(__dirname,'..'),project=path.dirname(root),out=path.join(project,'artifacts/soul-ui');
@@ -11,7 +12,7 @@ app.whenReady().then(async()=>{
     const file=path.join(project,'assets',match[1]+'-icons',match[2]+'.png');
     return fs.existsSync(file)?net.fetch(pathToFileURL(file).href):new Response('',{status:404});
   });
-  const css=fs.readFileSync(path.join(root,'src/renderer/styles.css'),'utf8').replace(/^@import[^;]*;/,'');
+  const css=readExpandedCss(path.join(root,'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/,'');
   const palette=['workbench-light.css','theme.css'].map(name=>fs.readFileSync(path.join(root,'public/theme',name),'utf8')).join('\n');
   const file=path.join(out,'shikigami-owned-detail.html');
   fs.writeFileSync(file,`<!doctype html><html lang="zh-CN" data-theme="dark"><meta charset="UTF-8"><style>${css}\n${palette}\n#atlas{height:100vh}</style><body><section id="atlas" class="shikigami-atlas"></section></body></html>`);

@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Run via npm test (builds the renderer test output first).
 // 结构树已迁到 panels/sidebar.ts：直接用编译产物 + DOM 桩验证。
 const {test} = require('node:test');
@@ -47,7 +48,7 @@ globalThis.Node = Element;
 globalThis.CSS = { escape: (value) => value };
 
 test('palette groups retain each original add command exactly once', () => {
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
+  const html = readExpandedHtml(path.join(root, 'src/renderer/index.html'));
   const palette = html.slice(html.indexOf('<section id="module-palette"'), html.indexOf('<section id="module-variables"'));
   for (const command of ['addTask', 'addCondition', 'addSequence', 'addSelector', 'addParallel', 'addGenericParallel', 'addRepeatUntil', 'addBranch', 'addSwitch', 'addInstanceParallel']) assert.equal(palette.split(`data-editor-command="${command}"`).length - 1, 1);
   assert.equal((palette.match(/palette-group-heading/g) || []).length, 3);

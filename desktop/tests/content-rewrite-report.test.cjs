@@ -1,9 +1,10 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {contentRewriteReport} = require('../dist-test-renderer/renderer/content-browser/rewrite-report.js');
-const {showContentRewriteResult} = require('../dist-test-renderer/renderer/content-browser/rewrite-dialog.js');
+const {contentRewriteReport} = require('../dist-test-renderer/renderer/features/content-browser/rewrite-report.js');
+const {showContentRewriteResult} = require('../dist-test-renderer/renderer/features/content-browser/rewrite-dialog.js');
 
 /** 构造一次移动/重命名的返回结果，只覆盖本用例关心的字段。 */
 function result(overrides = {}) {
@@ -73,8 +74,8 @@ test('没有明细（或明细字段缺失/非法）时不产生副标题，调�
 
 test('内容浏览器在两个入口都用同一个报告函数，且弹窗、样式、浅色主题都已接上', () => {
   const root = path.join(__dirname, '..');
-  const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
-  const source = read('src/renderer/content-browser.ts');
+  const read = file => { const filename = path.join(root, file); if (file.startsWith('src/renderer/') && file.endsWith('.html')) return readExpandedHtml(filename); if (file === 'src/renderer/styles/workbench.css') return readExpandedCss(filename); return fs.readFileSync(filename, 'utf8'); };
+  const source = read('src/renderer/features/content-browser/index.ts');
   // 重命名与移动都要汇报明细，不能让某条路径只弹 toast。
   assert.equal((source.match(/reportContentRewrite\(result, '重命名', skipped\)/g) || []).length, 1);
   assert.equal((source.match(/reportContentRewrite\(result, '移动', skipped\)/g) || []).length, 1);
@@ -86,7 +87,7 @@ test('内容浏览器在两个入口都用同一个报告函数，且弹窗、�
   }
 
   // 明细列表要能滚动（长引用列表不撑破弹窗），并且浅色主题由生成器派生而不是手写。
-  const styles = read('src/renderer/styles.css');
+  const styles = read('src/renderer/styles/workbench.css');
   assert.match(styles, /\.content-rewrite-list \{[^}]*overflow: auto/);
   assert.match(styles, /\.content-rewrite-dialog \{[^}]*flex-direction: column/);
   const light = read('public/theme/workbench-light.css');
@@ -154,8 +155,8 @@ test('报告函数把明细铺进列表并打开弹窗，没有明细时只弹 t
 });
 
 test('文件夹改名：内部打开的工作流按新旧前缀搬到新路径，外部文档不动', () => {
-  const {contentFolderRelocations} = require('../dist-test-renderer/renderer/content-browser/items.js');
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/content-browser.ts'), 'utf8');
+  const {contentFolderRelocations} = require('../dist-test-renderer/renderer/features/content-browser/items.js');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/features/content-browser/index.ts'), 'utf8');
   const tabs = [
     {uri: 'file:///p/workflows/活动用/a.json'},
     {uri: 'file:///p/workflows/活动用/sub/b.json'},

@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 const {app,BrowserWindow,protocol,net,ipcMain,nativeImage}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{pathToFileURL}=require('node:url');
 const root=path.resolve(__dirname,'..'),project=path.dirname(root),out=path.join(project,'artifacts/soul-ui');
@@ -26,9 +27,9 @@ app.whenReady().then(async()=>{
     const png=nativeImage.createFromDataURL(saved);fs.writeFileSync(path.join(out,'shikigami-owned-share-export.png'),png.toPNG());
     return {calls,size:png.getSize()};
   });
-  const css=fs.readFileSync(path.join(root,'src/renderer/styles.css'),'utf8').replace(/^@import[^;]*;/,'');
+  const css=readExpandedCss(path.join(root,'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/,'');
   const palette=['workbench-light.css','theme.css'].map(n=>fs.readFileSync(path.join(root,'public/theme',n),'utf8')).join('\n');
-  const csp=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8').match(/<meta http-equiv="Content-Security-Policy"[^>]*>/)[0];
+  const csp=readExpandedHtml(path.join(root,'src/renderer/index.html')).match(/<meta http-equiv="Content-Security-Policy"[^>]*>/)[0];
   const font=pathToFileURL(path.join(root,'public/fonts/harmonyos-sans-sc/Regular.css')).href;
   const html=path.join(out,'shikigami-owned-share.html');
   fs.writeFileSync(html,`<!doctype html><html lang="zh-CN" data-theme="dark"><meta charset="UTF-8">${csp}<link rel="stylesheet" href="${font}"><style>${css}\n${palette}\n#atlas{height:100vh}</style><body><section id="atlas" class="shikigami-atlas"></section></body></html>`);

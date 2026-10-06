@@ -12,7 +12,7 @@ const host=new Element('section');
 const body=new Element('body');
 global.document={createElement:t=>new Element(t),createElementNS:(_,t)=>new Element(t),createTextNode:t=>Object.assign(new Element('text'),{textContent:t}),body,querySelector:s=>s==='#module-reference-viewer'?host:null};
 global.window={requestAnimationFrame:f=>{f();return 1;},setTimeout:()=>0,clearTimeout:()=>{}};
-const {createReferenceViewer,previewTextLines}=require('../dist-test-renderer/renderer/reference-viewer.js');
+const {createReferenceViewer,previewTextLines}=require('../dist-test-renderer/renderer/ui/reference-viewer.js');
 const resource=(name,kind='asset')=>({name,path:'assets/'+name,kind,exists:true});
 const graph={target:resource('<target>.json','workflow'),referencedBy:[],references:[{target:resource('one.png'),contexts:['a']},{target:resource('two.json','workflow'),contexts:['b']}]};
 const previewOf=async(path)=>path.endsWith('.png')?{kind:'image',path,uri:'onmyoji-resource://project/'+path}:{kind:'text',path,text:`# ${path}\n`,truncated:false};

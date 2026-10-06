@@ -1,0 +1,302 @@
+.soul-substat-summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.soul-substat-label { display: flex; align-items: center; gap: 7px; min-width: 0; }
+[data-substat-status] { --soul-substat-color: var(--muted); }
+[data-substat-status="core"] { --soul-substat-color: var(--green); }
+[data-substat-status="conditional"] { --soul-substat-color: var(--yellow); }
+[data-substat-status="low"] { --soul-substat-color: var(--hero-rarity-r, #8ebfdb); }
+[data-substat-status="pending"] { --soul-substat-color: var(--hero-rarity-sr, #baa5df); }
+:is(.soul-target-attributes, .soul-target-original-attributes) > li[data-substat-status] > :is(.soul-substat-label, strong) { color: var(--soul-substat-color); }
+.soul-substat-indicator { --substat-color: var(--soul-substat-color, var(--muted)); display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 4px; color: var(--substat-color); background: color-mix(in srgb, var(--substat-color) 10%, transparent); cursor: help; transition: background-color 140ms ease; }
+.soul-substat-indicator svg { display: block; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.soul-substat-indicator:is(:hover,:focus-visible) { background: color-mix(in srgb, var(--substat-color) 22%, transparent); }
+.soul-substat-indicator:focus-visible { outline: 1px solid var(--substat-color); outline-offset: 2px; }
+.soul-substat-count { width: auto; min-width: 30px; height: 20px; padding: 0 5px; gap: 4px; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .soul-substat-indicator { transition: none; } }
+.soul-intrinsic-attribute { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; color: var(--green); }
+.soul-intrinsic-attributes { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+/* Match the visible numeral center; the font's line box sits slightly lower. */
+.soul-upgrade-count { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding-top: 1px; transform: translateY(-1px); border-radius: 50%; background: var(--yellow); color: var(--surface); font-size: 10px; font-weight: 700; line-height: 1; }
+.soul-detail-effects { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+.soul-set-effect { color: var(--muted); font-size: 11px; line-height: 1.8; }
+.soul-effect-number, .effect-number { color: #8ebfdb; font-weight: 600; font-variant-numeric: tabular-nums; }
+.soul-set-effect + .soul-set-effect { margin-top: 6px; }
+.soul-detail-id { display: grid; gap: 2px; font-size: 10px; overflow-wrap: anywhere; color: var(--muted); margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+.soul-detail-record-id { font-size: 9px; font-variant-numeric: tabular-nums; }
+.soul-calculator { container-type: inline-size; }
+@container (max-width: 760px) {
+  .soul-results-layout { flex-direction: column; }
+  .soul-results { flex: 1 1 45%; min-height: 80px; }
+  .soul-filter-drawer { flex: 1 1 55%; width: 100%; }
+}
+.soul-empty { display: grid; place-items: center; min-height: 120px; padding: 20px; color: var(--muted); text-align: center; }
+.soul-result-count { display: flex; align-items: center; justify-content: space-between; flex: 0 0 24px; gap: 12px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--muted); }
+.soul-note { position: relative; line-height: 1.6; }
+.soul-note summary { cursor: pointer; list-style: none; padding: 2px 0; }
+.soul-note summary:hover { color: var(--text); }
+.soul-calculator .soul-note p { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 2; width: min(320px, calc(100vw - 32px)); padding: 12px; border: 0; border-radius: 4px; background: var(--surface-raised); box-shadow: 0 4px 16px rgba(0,0,0,.25); color: var(--text); }
+.team-builder-pane-header {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ui-line, var(--border));
+  color: var(--muted);
+  font-size: 12px;
+}
+.team-builder-categories, .team-builder-content-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.team-builder-categories { display: flex; flex-direction: column; gap: 6px; padding: 8px 6px; }
+.team-builder-category {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.team-builder-category[aria-current="page"] { background: var(--vscode-list-activeSelectionBackground, var(--surface-raised)); }
+.shikigami-atlas { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow: hidden; background: var(--dock-panel-background, var(--surface)); container-type: inline-size; }
+.shikigami-atlas button, .shikigami-atlas input { font: inherit; font-size: 12px; color: var(--text); }
+.shikigami-atlas button { cursor: pointer; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 4px; }
+.shikigami-atlas button:hover { background: var(--surface-hover); }
+.shikigami-atlas button[aria-pressed="true"] { border-color: var(--content-selection-frame); background: var(--content-selection-surface); color: var(--content-selection-text); }
+.shikigami-atlas button:focus-visible, .shikigami-atlas input:focus-visible { outline: 2px solid var(--ui-focus, var(--blue)); outline-offset: 2px; }
+.shikigami-atlas-toolbar { display: flex; align-items: center; gap: 14px; flex: none; }
+.shikigami-atlas-search { display: flex; align-items: center; gap: 9px; flex: 0 1 260px; min-width: 160px; padding: 7px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: var(--muted); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.shikigami-atlas-search:hover, .shikigami-atlas-search:focus-within { background: var(--surface-hover); }
+.shikigami-atlas-search input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 0; }
+.shikigami-atlas .shikigami-atlas-search input:focus-visible { outline: none; }
+.shikigami-atlas-search input::placeholder { color: var(--muted); }
+.shikigami-atlas-toolbar > span { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.shikigami-atlas-toolbar > button { padding: 6px 14px; flex: none; }
+.soul-optimizer.shikigami-share { width: min(1320px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 0; }
+.shikigami-share[open] { display: flex; flex-direction: column; }
+.shikigami-share .soul-optimizer-header { padding: 16px 20px; flex: none; }
+.shikigami-share-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 20px; flex: none; border-bottom: 1px solid var(--border-soft); }
+.shikigami-share-toolbar label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.shikigami-share-toolbar select { min-width: 90px; }
+.shikigami-share-toolbar > span { margin-left: auto; color: var(--muted); font-size: 11px; }
+.shikigami-share-preview { min-height: 120px; overflow: auto; padding: 16px; background: var(--surface-raised); scrollbar-gutter: stable; }
+.shikigami-share-preview canvas { display: block; width: 100%; height: auto; box-shadow: 0 2px 8px #0002; }
+@media (max-width: 650px) {
+  .soul-optimizer.shikigami-share { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .shikigami-share .soul-optimizer-header, .shikigami-share-toolbar { padding: 12px; }
+  .shikigami-share-toolbar { gap: 8px; }
+  .shikigami-share-toolbar > span { margin-left: 0; flex-basis: 100%; }
+  .shikigami-share-preview { padding: 8px; }
+}
+.shikigami-atlas-warehouse { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; }
+.shikigami-atlas-warehouse label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.shikigami-atlas-warehouse select { width: 220px; max-width: 100%; }
+.shikigami-atlas-warehouse > span { font-size: 11px; color: var(--muted); }
+.shikigami-atlas-ownership-status { margin: 0; flex: none; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.shikigami-atlas-ownership-status.is-error { color: var(--danger, #df8a7d); }
+.shikigami-atlas-rarities select { margin-left: auto; min-width: 120px; }
+.shikigami-atlas-card-ownership { order: -1; margin-right: auto; max-width: calc(100% - 27px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 9px; border-radius: 2px; padding: 1px 2px; background: var(--surface); }
+.shikigami-atlas-card-ownership.is-owned, .shikigami-atlas-owned { color: #94b9a7; }
+.hero-rarity { color: var(--hero-rarity-color, var(--muted)); font-weight: 600; }
+.hero-rarity[data-rarity="6"] { --hero-rarity-color: var(--hero-rarity-ur); }
+.hero-rarity[data-rarity="5"] { --hero-rarity-color: var(--hero-rarity-sp); }
+.hero-rarity[data-rarity="4"] { --hero-rarity-color: var(--hero-rarity-ssr); }
+.hero-rarity[data-rarity="3"] { --hero-rarity-color: var(--hero-rarity-sr); }
+.hero-rarity[data-rarity="2"] { --hero-rarity-color: var(--hero-rarity-r); }
+.hero-rarity[data-rarity="1"] { --hero-rarity-color: var(--hero-rarity-n); }
+.shikigami-atlas-rarities { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.shikigami-atlas-rarities button { min-width: 48px; height: 29px; padding: 4px 12px; border-color: transparent; background: var(--surface-raised); color: color-mix(in srgb, var(--text) 85%, var(--muted)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.shikigami-atlas .shikigami-atlas-rarities button[aria-pressed="true"], .shikigami-atlas .shikigami-atlas-rarities button:active { border-color: transparent; background: var(--ui-selected, var(--surface-hover)); color: var(--content-selection-text); font-weight: 500; }
+.shikigami-atlas-rarities button:focus-visible { outline: none; background: var(--ui-selected, var(--surface-hover)); text-decoration: underline; text-underline-offset: 3px; }
+.shikigami-atlas-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; flex: 1; min-height: 0; }
+.shikigami-atlas-list { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.shikigami-atlas-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; padding: 10px; align-content: start; }
+.shikigami-atlas-card { min-width: 0; text-align: center; }
+.shikigami-atlas-card-top { display: flex; justify-content: flex-end; align-items: center; width: 100%; height: 18px; flex: none; }
+.shikigami-atlas-card-rarity { display: inline-grid; place-items: center; min-width: 24px; height: 19px; padding: 0 3px; border-radius: 2px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.shikigami-atlas-card .soul-picker-portrait { flex: none; width: 48px; height: 48px; margin: 4px 0; }
+.shikigami-atlas-card-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; width: 100%; min-height: 32px; max-height: 32px; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; font-weight: 500; line-height: 16px; }
+.shikigami-atlas-card-meta { display: flex; justify-content: center; align-items: center; gap: 4px; align-self: stretch; flex: none; margin-top: auto; min-height: 18px; padding-top: 4px; border-top: 1px solid var(--border-soft); }
+.shikigami-atlas-card-meta small { padding: 0 2px; border-radius: 2px; background: var(--surface); color: var(--muted); font-size: 10px; line-height: 14px; white-space: nowrap; }
+.shikigami-atlas-detail { min-width: 0; overflow: auto; padding: 16px; background: color-mix(in srgb, var(--surface-raised) 40%, var(--surface)); border: 0; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); }
+.shikigami-atlas-detail-heading { display: flex; align-items: center; gap: 12px; }
+.shikigami-atlas-detail-heading .soul-picker-portrait { width: 56px; height: 56px; flex: none; }
+.shikigami-atlas-detail-heading small { font-size: 11px; color: var(--muted); }
+.shikigami-atlas-detail-heading h2 { font-size: 15px; margin: 5px 0 0; font-weight: 500; }
+.shikigami-atlas-caption { font-size: 11px; color: var(--muted); line-height: 1.65; margin: 15px 0 0; }
+.shikigami-atlas-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); margin: 16px 0 0; padding: 18px 0; }
+.shikigami-atlas-stats dt { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+.shikigami-atlas-stats dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.shikigami-atlas-empty { grid-column: 1 / -1; text-align: center; padding: 35px 10px; font-size: 12px; color: var(--muted); }
+.shikigami-atlas-detail section[hidden] { display: none; }
+.shikigami-atlas-detail-views { display: flex; gap: 6px; margin-top: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.shikigami-atlas-detail-views button { padding: 6px 16px; border-color: transparent; color: var(--muted); }
+.shikigami-atlas .shikigami-atlas-detail-views button[aria-pressed="true"] { border-color: transparent; background: var(--surface-hover); color: var(--text); }
+.shikigami-skill-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 18px; }
+.shikigami-skill-buttons button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 10px 4px; border-color: transparent; background: color-mix(in srgb, var(--surface-raised) 40%, var(--surface)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; transition: background-color 120ms ease; }
+.shikigami-atlas .shikigami-skill-buttons button:hover { background: var(--surface-raised); }
+.shikigami-atlas .shikigami-skill-buttons button[aria-pressed="true"] { border-color: transparent; background: var(--surface-hover); color: var(--text); }
+.shikigami-skill-buttons button[aria-pressed="true"]::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--content-selection-border); }
+.shikigami-atlas-detail button:focus-visible { outline: none; background: var(--surface-hover); text-decoration: underline; text-underline-offset: 3px; }
+.shikigami-skill-icon { display: grid; place-items: center; position: relative; width: 48px; height: 48px; border: 0; border-radius: 50%; overflow: hidden; font-size: 20px; flex: none; background: var(--surface); }
+.shikigami-skill-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.shikigami-skill-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.shikigami-skill-heading h3 { font-size: 13px; font-weight: 500; margin: 0; }
+.shikigami-skill-cost { font-size: 10px; padding: 2px 5px; color: var(--muted); background: var(--surface); border: 0; border-radius: 2px; }
+.shikigami-skill-description { font-size: 12px; line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; margin: 12px 0; }
+.shikigami-atlas .shikigami-skill-term { display: inline; padding: 0; border: 0; border-radius: 0; background: transparent; color: #8ebfdb; font: inherit; font-weight: 600; line-height: inherit; text-align: inherit; vertical-align: baseline; white-space: inherit; text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 55%, transparent); cursor: help; }
+.shikigami-atlas .shikigami-skill-term:hover, .shikigami-atlas .shikigami-skill-term:focus-visible { outline: none; background: transparent; text-decoration-style: solid; }
+.shikigami-term-tooltip { position: fixed; inset: auto; margin: 0; padding: 14px 16px; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; border: 0; border-radius: 4px; background: var(--surface-raised); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18); font-size: 12px; line-height: 1.8; }
+.shikigami-term-tooltip:popover-open { display: block; }
+.shikigami-term-definition + .shikigami-term-definition { border-top: 1px solid var(--border-soft); margin-top: 10px; padding-top: 10px; }
+.shikigami-term-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 5px; }
+.shikigami-term-heading strong { font-size: 13px; font-weight: 600; }
+.shikigami-term-heading span { color: var(--muted); font-size: 10px; }
+.shikigami-term-definition p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.shikigami-skill-content h4 { font-size: 11px; font-weight: 500; color: var(--muted); margin: 18px 0 8px; }
+.shikigami-skill-upgrades { list-style: none; padding: 0; margin: 0; }
+.shikigami-skill-upgrades li { font-size: 11px; line-height: 1.85; padding: 7px 0; border-bottom: 1px solid var(--border-soft); white-space: pre-line; overflow-wrap: anywhere; }
+.shikigami-skill-upgrade-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 10px; align-items: baseline; }
+.shikigami-skill-upgrade-level { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shikigami-skill-extra { margin-top: 14px; background: var(--surface); border: 0; border-radius: 4px; }
+.shikigami-skill-extra summary { cursor: pointer; padding: 10px; font-size: 12px; }
+.shikigami-skill-extra summary .shikigami-skill-icon { display: inline-grid; width: 28px; height: 28px; font-size: 12px; vertical-align: middle; margin-right: 8px; }
+.shikigami-skill-extra > div { padding: 8px 12px; border-top: 1px solid var(--border-soft); }
+@media (prefers-reduced-motion: reduce) { .shikigami-skill-buttons button { transition: none; } }
+@container (max-width: 650px) {
+  .shikigami-atlas-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
+  .shikigami-atlas-detail { order: -1; padding: 12px; max-height: 340px; }
+  .shikigami-atlas-detail-heading .soul-picker-portrait { width: 44px; height: 44px; }
+  .shikigami-atlas-detail-heading h2 { font-size: 14px; margin-top: 4px; }
+  .shikigami-atlas-stats { gap: 10px 14px; padding: 10px 0; margin-top: 10px; }
+  .shikigami-atlas-stats > div { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+  .shikigami-atlas-stats dt { margin: 0; font-size: 10px; }
+  .shikigami-atlas-stats dd { font-size: 12px; }
+  .shikigami-atlas-caption { margin-top: 8px; font-size: 10px; }
+  .shikigami-atlas-toolbar { flex-wrap: wrap; gap: 7px; }
+}
+.module-command-strip { flex: 0 0 28px; display: flex; align-items: center; gap: 6px; padding: 0 5px 0 8px; border-bottom: 1px solid #151617; background: var(--dock-panel-background, #242424); }
+.module-context { min-width: 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.panel-action { width: 26px; height: 26px; margin-left: auto; padding: 0; display: grid; place-items: center; }
+.panel-content { min-height: 0; flex: 1; overflow: auto; }
+
+.onmyoji-dockview,
+.dockview-popout-host {
+  /* Slate's minor tabs are compact and sit directly on top of their stack. */
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  /* UE-style panel hierarchy: a dark tab well, with the active tab visually
+     connected to the panel surface below it. */
+  --dv-group-view-background-color: #242424;
+  --dock-tab-row-background: #191a1c;
+  --dock-panel-background: #242424;
+  --dock-panel-header-background: #242424;
+  --dv-tabs-and-actions-container-background-color: var(--dock-tab-row-background);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--dock-panel-header-background);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--dock-panel-header-background);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--dock-tab-row-background);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--dock-tab-row-background);
+  --dv-tab-divider-color: #2d3034;
+  --dv-separator-border: #181a1c;
+  --dv-active-sash-color: transparent;
+  --dv-drag-over-background-color: rgba(63, 143, 196, .16);
+  --dv-drag-over-border: 1px solid #4b88aa;
+  --dv-edge-dock-indicator-color: #4ca8df;
+  --dv-floating-titlebar-height: 24px;
+  --dv-floating-titlebar-background-color: #202020;
+  --dv-floating-border: 1px solid #444;
+  --dv-floating-box-shadow: 0 14px 34px rgba(0, 0, 0, .58);
+}
+.onmyoji-dockview .dv-groupview { border: 0; }
+.onmyoji-dockview .dv-split-view-container.dv-horizontal > .dv-view-container > .dv-view:not(:first-child)::before { width: 3px; }
+.onmyoji-dockview .dv-split-view-container.dv-vertical > .dv-view-container > .dv-view:not(:first-child)::before { height: 3px; }
+.onmyoji-dockview .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash,
+.dockview-popout-host .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash { width: 8px; }
+.onmyoji-dockview .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash,
+.dockview-popout-host .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash { height: 8px; }
+/* 分隔条（sash）默认透明；鼠标靠近或拖动时亮线点亮，提示该边缘可拖拽。
+   dockview 按 4px 宽度把 sash 定位在“边界 - 2px”处，3px 分隔线正好落在 sash 内部坐标 left/top 2px 处 */
+.onmyoji-dockview .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled)::after,
+.dockview-popout-host .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled)::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  background: #4ca8df;
+  box-shadow: 0 0 6px rgba(76, 168, 223, .25);
+  transition: opacity .08s ease-out;
+}
+.onmyoji-dockview .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash:not(.dv-disabled)::after,
+.dockview-popout-host .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash:not(.dv-disabled)::after { top: 0; bottom: 0; left: 2px; width: 3px; }
+.onmyoji-dockview .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash:not(.dv-disabled)::after,
+.dockview-popout-host .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash:not(.dv-disabled)::after { left: 0; right: 0; top: 2px; height: 3px; }
+.onmyoji-dockview .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled):hover::after,
+.onmyoji-dockview .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled):active::after,
+.dockview-popout-host .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled):hover::after,
+.dockview-popout-host .dv-split-view-container .dv-sash-container .dv-sash:not(.dv-disabled):active::after { opacity: .65; }
+/* 非激活标签悬停时背景变亮，提示可点击/可拖拽；激活标签保持原色 */
+.onmyoji-dockview .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-inactive-tab:hover,
+.onmyoji-dockview .dv-groupview.dv-inactive-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-inactive-tab:hover,
+.dockview-popout-host .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-inactive-tab:hover,
+.dockview-popout-host .dv-groupview.dv-inactive-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-inactive-tab:hover { background-color: #2b2b2b; }
+/* 标签关闭按钮（X）不加独立背景，仅靠图标变亮反馈；覆盖 dockview 默认的悬停灰底 */
+.onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action:hover,
+.dockview-popout-host .dv-tab .dv-default-tab .dv-default-tab-action:hover { background-color: transparent; }
+.onmyoji-dockview .dv-split-view-container.dv-horizontal > .dv-view-container > .dv-view:not(:first-child) .dv-tabs-and-actions-container { padding-left: 3px; }
+.onmyoji-dockview .dv-split-view-container.dv-vertical > .dv-view-container > .dv-view:not(:first-child) .dv-tabs-and-actions-container { padding-top: 8px; }
+.onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container { border-bottom: 1px solid #101112 !important; box-sizing: border-box !important; padding-top: 3px; }
+/* 标签栏永远画在面板内容层之上：dockview 把面板内容渲染成绝对定位的
+   `.dv-render-overlay`（z-index: 1）。拖动/弹出搬窗口之后它偶尔会被定位到分组顶部，
+   把标签栏整条盖住——用户看到的现象就是「标签页标签不见了」。
+   标签栏是分组里的 flex 项（z-index 对 flex 项有效），给它更高的层级就能兜住这种情况：
+   即使内容层错位，标签页依然可见。 */
+.onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container,
+.dockview-popout-host .dv-groupview > .dv-tabs-and-actions-container {
+  position: relative;
+  z-index: 2;
+}
+.onmyoji-dockview .dv-groupview > .dv-tabs-and-actions-container .dv-tab { border-top: 0 !important; }
+.onmyoji-dockview .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab,
+.dockview-popout-host .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tabs-container > .dv-tab.dv-active-tab {
+  background-color: var(--dock-panel-header-background);
+}
+/* The center viewport uses the darker editor surface; its active tab follows
+   that surface while side and bottom panels use the regular panel color. */
+.onmyoji-inner-dockview .dv-groupview:has(.editor-surface) > .dv-tabs-and-actions-container .dv-tab.dv-active-tab,
+.onmyoji-workbench-dockview .dv-groupview:has(.workbench-module) > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  background-color: #1b1b1b;
+}
+.onmyoji-dockview .dv-split-view-container > .dv-view-container > .dv-view:first-child .dv-tabs-and-actions-container,
+.dockview-theme-vs .dv-view:first-child .dv-tabs-and-actions-container { padding-top: 4px; }
+.onmyoji-dockview .dv-content-container { min-width: 0; min-height: 0; }
+.onmyoji-dockview .dv-active-group .module-command-strip,
+.onmyoji-dockview .dv-active-group .content-browser-toolbar { background: var(--dock-panel-header-background); }
+.onmyoji-dockview .dv-inactive-group .module-command-strip,
+.onmyoji-dockview .dv-inactive-group .content-browser-toolbar { background: var(--dock-panel-header-background); }
+.onmyoji-dockview .dv-tab {
+  height: 25px;
+  min-width: 0;
+  letter-spacing: 0;
+  border-radius: 2px 2px 0 0;
+  border-bottom: 1px solid transparent;
+}
+.onmyoji-dockview .dv-tab.dv-inactive-tab,
+.dockview-popout-host .dv-tab.dv-inactive-tab {
+  background-color: #191a1c;
+  color: #8c9298;
+}
+.onmyoji-dockview .dv-tab.dv-active-tab,
+.dockview-popout-host .dv-tab.dv-active-tab {
+  color: #d9dde1;
+  border-bottom-color: var(--dock-panel-header-background);
+}
+.onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action { padding: 5px; }
+.onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action svg { width: 7px; height: 7px; opacity: .55; }
+.onmyoji-dockview .dv-tab .dv-default-tab .dv-default-tab-action:hover svg { opacity: 1; }
+/* 弹出独立窗口内的 dockview 不带 .onmyoji-dockview 作用域，按主题类同步标签行样式 */
+.dockview-theme-vs {
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+}

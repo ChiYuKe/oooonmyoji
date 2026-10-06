@@ -1,10 +1,11 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const base = path.join(__dirname, '..');
-const read = file => fs.readFileSync(path.join(base, file), 'utf8');
+const read = file => { const filename = path.join(base, file); if (file.startsWith('src/renderer/') && file.endsWith('.html')) return readExpandedHtml(filename); if (file === 'src/renderer/styles/workbench.css') return readExpandedCss(filename); return fs.readFileSync(filename, 'utf8'); };
 const { createCanvasReferences } = require('../dist-test-renderer/canvas/model/references.js');
 const references = createCanvasReferences({
   state: {}, clone: value => JSON.parse(JSON.stringify(value)), nodes: () => [],
@@ -150,7 +151,7 @@ test('toolbar keeps existing commands and shared compositions parse', () => {
 });
 
 test('dock panel content keeps quadrant docking for split layouts', () => {
-  const docking = read('src/renderer/docking.ts');
+  const docking = read('src/renderer/shell/docking/index.ts');
   assert.equal(docking.includes('dropPositionResolver:'), false,
     'panel content must use Dockview quadrant docking so top/bottom/left/right splits remain available');
   assert.equal(docking.match(/dndEdges: false/g)?.length, 2,
@@ -158,8 +159,8 @@ test('dock panel content keeps quadrant docking for split layouts', () => {
 });
 
 test('「变量引用」默认叠在内容浏览器旁边（内层/外层都跟着它）', () => {
-  const docking = read('src/renderer/docking.ts');
-  const sharedPanels = read('src/renderer/docking/shared-panels.ts');
+  const docking = read('src/renderer/shell/docking/index.ts');
+  const sharedPanels = read('src/renderer/shell/docking/shared-panels.ts');
   const section = (start, end, source) => source.slice(source.indexOf(start), source.indexOf(end));
   // 两层都声明「与内容浏览器同组」：内容浏览器默认停在内层，所以内层定义才是默认位置。
   assert.match(
@@ -182,7 +183,7 @@ test('「变量引用」默认叠在内容浏览器旁边（内层/外层都跟�
 
 test('内容浏览器之外：独立窗口的分组拖回主窗口', () => {
   // 行为：直接实例化编译产物里的真实手势模块（依赖注入的 DockviewApi 桩）。
-  const { registerDockBackGesture } = require('../dist-test-renderer/renderer/docking/gestures.js');
+  const { registerDockBackGesture } = require('../dist-test-renderer/renderer/shell/docking/gestures.js');
 
   const removed = [];
   const timers = [];
@@ -235,7 +236,7 @@ test('内容浏览器之外：独立窗口的分组拖回主窗口', () => {
 });
 
 test('content browser keeps draft editing and flat entry order', () => {
-  const { contentBrowserRenderPlan } = require('../dist-test-renderer/renderer/content-browser/items.js');
+  const { contentBrowserRenderPlan } = require('../dist-test-renderer/renderer/features/content-browser/items.js');
   const entries = [{kind:'asset',name:'template',path:'template.png'}, {kind:'workflow',name:'main',path:'main.json'}, {kind:'folder',name:'assets',path:'assets'}];
   const plan = (folderDraft, renameDraft, currentEntries = entries) => contentBrowserRenderPlan({
     entries: currentEntries,
@@ -264,7 +265,7 @@ test('content browser keeps draft editing and flat entry order', () => {
 });
 
 test('模态弹窗打开时暂停工作区标签条的拖动区（原生拖动区会吞掉盖在其上的弹窗按钮点击）', () => {
-  const css = read('src/renderer/styles.css');
+  const css = read('src/renderer/styles/workbench.css');
   require('postcss').parse(css);
   // 标签条平时整条都是窗口拖动区。
   assert.match(css, /body:not\(\.dockview-dragging\)\s+\.onmyoji-workbench-dockview\s+\.dv-tabs-and-actions-container\s*\{[^}]*-webkit-app-region:\s*drag/);

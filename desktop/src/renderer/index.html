@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource: https://avatars.githubusercontent.com; frame-src 'self'; connect-src 'self' ws:;">
   <title>AutoFlow Studio</title>
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css">
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css">
@@ -44,11 +44,11 @@
             <button type="button" role="menuitemcheckbox" data-workbench-panel="overview" aria-checked="true"><span>概览</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="contentBrowser" aria-checked="true"><span>内容浏览器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="settings" aria-checked="true"><span>设置</span><span class="menu-check">✓</span></button>
-            <button type="button" role="menuitemcheckbox" data-workbench-panel="onmyojiTeamBuilder" aria-checked="false"><span>阴阳师阵容配队</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="onmyojiTeamBuilder" aria-checked="false"><span>式神图鉴</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="soulCalculator" aria-checked="false"><span>御魂计算</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="soulOptimizer" aria-checked="false"><span>御魂配装</span><span class="menu-check">✓</span></button>
+            <button type="button" role="menuitemcheckbox" data-workbench-panel="duelPrediction" aria-checked="false"><span>对弈竞猜</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="soulCommunityUpload" aria-checked="false"><span>上传御魂方案</span><span class="menu-check">✓</span></button>
-            <button type="button" role="menuitemcheckbox" data-workbench-panel="soulCommunityComparison" aria-checked="false"><span>社区方案比对</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="referenceViewer" aria-checked="false"><span>引用查看器</span><span class="menu-check">✓</span></button>
             <button type="button" role="menuitemcheckbox" data-workbench-panel="variableReferences" aria-checked="false"><span>变量引用</span><span class="menu-check">✓</span></button>
             <div class="menu-separator" role="separator"></div>
@@ -91,8 +91,10 @@
         <div class="menu-root">
           <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">扩展</button>
           <div class="titlebar-dropdown" role="menu">
-            <button type="button" role="menuitem" data-app-command="onmyojiTeamBuilder"><span>阴阳师阵容配队</span></button>
+            <button type="button" role="menuitem" data-app-command="onmyojiTeamBuilder"><span>式神图鉴</span></button>
             <button type="button" role="menuitem" data-app-command="soulCalculator"><span>御魂计算</span></button>
+            <button type="button" role="menuitem" data-app-command="soulOptimizer"><span>御魂配装</span></button>
+            <button type="button" role="menuitem" data-app-command="duelPrediction"><span>对弈竞猜</span></button>
           </div>
         </div>
         <div class="menu-root">
@@ -107,6 +109,7 @@
       <div class="titlebar-spacer"></div>
       <button id="user-account" class="titlebar-account" type="button" aria-haspopup="dialog" title="登录与账号管理" data-state="guest">
         <svg class="titlebar-account-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"></circle><circle cx="12" cy="9" r="3"></circle><path d="M5.8 18.8a6.3 6.3 0 0 1 12.4 0"></path></svg>
+        <img class="titlebar-account-avatar" alt="" referrerpolicy="no-referrer" decoding="async" hidden>
         <span class="titlebar-account-label">用户登录</span>
         <svg class="titlebar-account-chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
       </button>
@@ -119,49 +122,7 @@
     <main class="workbench-frame-shell">
       <div id="workbench-frame" class="workbench-frame" aria-label="顶层模块工作区"></div>
       <div id="workbench-module-store" class="workbench-module-store">
-        <section id="module-overview" class="dock-module overview-module" aria-label="脚本执行概览">
-          <header class="overview-toolbar">
-            <div class="overview-title">
-              <i data-lucide="workflow"></i>
-              <div><strong>脚本概览</strong><span>勾选脚本并按队列顺序执行</span></div>
-            </div>
-            <label class="overview-search">
-              <i data-lucide="search"></i>
-              <input id="overview-search" type="search" placeholder="搜索脚本名称或路径" aria-label="搜索脚本">
-            </label>
-            <label class="overview-instance-field">
-              <span>运行实例</span>
-              <select id="overview-instance-select" aria-label="概览运行实例"></select>
-            </label>
-            <button id="overview-refresh" class="overview-command secondary" type="button" title="刷新脚本列表"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
-            <button id="overview-run" class="overview-command primary" type="button"><i data-lucide="play"></i><span>运行所选</span></button>
-            <button id="overview-stop" class="overview-command danger" type="button" disabled><i data-lucide="square"></i><span>停止队列</span></button>
-          </header>
-          <div class="overview-layout">
-            <section class="overview-library" aria-label="全部脚本">
-              <div class="overview-section-header">
-                <div><strong>全部脚本</strong><span id="overview-workflow-count">0 个</span></div>
-                <div class="overview-selection-actions">
-                  <button id="overview-select-all" type="button">全选</button>
-                  <button id="overview-clear" type="button">清空</button>
-                </div>
-              </div>
-              <div id="overview-workflow-grid" class="overview-workflow-grid"></div>
-              <div id="overview-empty" class="overview-empty hidden">没有匹配的脚本</div>
-            </section>
-            <aside class="overview-queue-panel" aria-label="执行顺序">
-              <div class="overview-section-header">
-                <div><strong>执行顺序</strong><span id="overview-selected-count">未选择脚本</span></div>
-              </div>
-              <div id="overview-queue" class="overview-queue"></div>
-              <div id="overview-queue-empty" class="overview-empty">勾选左侧卡片以建立执行队列</div>
-              <div class="overview-queue-summary">
-                <span id="overview-queue-status">等待选择</span>
-                <strong id="overview-queue-progress">0 / 0</strong>
-              </div>
-            </aside>
-          </div>
-        </section>
+        <!-- @include: features/overview/template.html -->
         <section id="module-workbench" class="workbench-module">
           <div class="tool-strip" aria-label="画布工具">
             <div class="tool-group">
@@ -218,270 +179,22 @@
           </footer>
         </section>
 
-        <section id="module-content-browser" class="dock-module content-browser-module">
-          <div class="content-browser-body">
-            <aside class="content-browser-sources" aria-label="内容源">
-              <div class="content-browser-pane-header">
-                <span class="content-browser-pane-title">项目内容</span>
-                <label class="content-browser-pane-search">
-                  <i data-lucide="search"></i>
-                  <input id="content-browser-folder-search" type="search" placeholder="搜索文件夹" aria-label="搜索文件夹" autocomplete="off" spellcheck="false">
-                </label>
-              </div>
-              <div id="content-browser-tree" class="content-browser-tree" aria-label="内容目录"></div>
-              <div class="content-browser-collections">
-                <span>集合</span>
-                <em id="content-browser-folder-count">0 个文件夹</em>
-              </div>
-            </aside>
-            <div class="content-browser-resizer" data-content-resizer="sources" role="separator" aria-orientation="vertical" aria-label="调整内容源宽度" tabindex="0"></div>
-            <aside id="content-browser-filters" class="content-browser-filters" aria-label="类型过滤器"></aside>
-            <div class="content-browser-resizer" data-content-resizer="filters" role="separator" aria-orientation="vertical" aria-label="调整类型过滤宽度" tabindex="0"></div>
-            <div class="content-browser-results">
-              <div class="content-browser-toolbar">
-                <div class="content-browser-view-controls" aria-label="显示方式">
-                  <button class="panel-action compact-action active" data-content-view="grid" title="缩略图"><i data-lucide="layout-grid"></i></button>
-                  <button class="panel-action compact-action" data-content-view="list" title="列表"><i data-lucide="list"></i></button>
-                </div>
-                <button id="content-browser-up" class="panel-action compact-action" title="上一级" disabled><i data-lucide="arrow-left"></i></button>
-                <div id="content-browser-breadcrumbs" class="content-browser-breadcrumbs" aria-label="内容路径"></div>
-                <label class="content-browser-search">
-                  <i data-lucide="search"></i>
-                  <input id="content-browser-search" type="search" placeholder="搜索资产" aria-label="搜索内容">
-                  <i class="content-browser-search-caret" data-lucide="chevron-down"></i>
-                </label>
-                <button id="content-browser-refresh" class="panel-action compact-action" title="刷新内容"><i data-lucide="refresh-cw"></i></button>
-              </div>
-              <div id="content-browser-items" class="content-browser-items grid" role="list"></div>
-              <div id="content-browser-empty" class="empty-panel hidden">没有匹配的内容</div>
-              <div class="content-browser-footer">
-                <span id="content-browser-summary">0 项</span>
-                <span id="content-browser-selection" class="content-browser-selection"></span>
-              </div>
-            </div>
-          </div>
-        </section>
+        <!-- @include: features/content-browser/template.html -->
 
         <section id="module-reference-viewer" class="dock-module reference-viewer-module" aria-label="引用查看器"></section>
 
         <section id="module-soul-optimizer" class="dock-module soul-optimizer-module" aria-label="御魂配装"></section>
         <section id="module-soul-community-upload" class="dock-module soul-community-module" aria-label="上传御魂方案"></section>
-        <section id="module-soul-community-comparison" class="dock-module soul-community-module" aria-label="社区方案比对"></section>
 
-        <section id="module-soul-calculator" class="dock-module team-builder-content soul-calculator-module" aria-label="御魂计算">
-          <header class="team-builder-pane-header">御魂计算</header>
-            <div id="team-builder-soul-calculator" class="team-builder-content-body soul-calculator" role="region" aria-label="御魂计算">
-              <div class="soul-source">
-                <div class="soul-toolbar">
-                  <label for="soul-instance">模拟器实例</label>
-                  <select id="soul-instance" aria-label="选择获取御魂的实例"><option value="">请选择实例</option></select>
-                  <button id="soul-refresh" type="button">刷新实例</button>
-                  <button id="soul-fetch" type="button" aria-describedby="soul-fetch-hint" disabled>获取御魂</button>
-                  <button id="soul-cancel" type="button" hidden>取消获取</button>
-                  <div class="soul-sort-controls" role="group" aria-label="御魂排序">
-                    <label for="soul-sort">排序</label>
-                    <select id="soul-sort" aria-label="御魂排序方式">
-                      <option value="default">默认顺序</option>
-                      <optgroup label="基础信息"><option value="level">等级</option><option value="stars">星级</option></optgroup>
-                    </select>
-                    <button id="soul-sort-direction" type="button" aria-label="排序方向：从高到低" title="从高到低，点击切换为从低到高" disabled>↓</button>
-                  </div>
-                </div>
-                <div class="soul-status-area">
-                  <p id="soul-fetch-hint" class="soul-fetch-hint">获取前，请先将游戏界面切换到<strong>「御魂仓库」</strong>，再点击“获取御魂”。</p>
-                  <p id="soul-status" role="status" aria-live="polite">选择实例后，点击“获取御魂”读取当前角色的背包。</p>
-                  <progress id="soul-progress" aria-label="御魂读取进度" hidden></progress>
-                  <p id="soul-summary" class="soul-summary"></p>
-                </div>
-              </div>
-              <div class="soul-filters">
-                <label class="soul-search-field">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
-                  <input id="soul-search" type="search" placeholder="搜索御魂名称、套装编号或 ID" aria-label="搜索御魂" />
-                </label>
-                <div id="soul-active-filters" class="soul-active-filters" aria-label="已选筛选条件" hidden></div>
-                <button id="soul-filter-toggle" type="button" aria-expanded="false" aria-controls="soul-filter-panel">筛选</button>
-              </div>
-              <div class="soul-results-layout">
-                <div class="soul-results">
-                  <div id="soul-empty" class="soul-empty">尚未获取御魂数据</div>
-                  <ul id="soul-grid" class="soul-grid" aria-label="所选实例的御魂背包" hidden></ul>
-                </div>
-                <aside id="soul-filter-drawer" class="soul-filter-drawer" aria-labelledby="soul-filter-title" hidden>
-                  <header class="soul-window-header"><strong id="soul-filter-title">筛选</strong><button id="soul-filter-close" type="button" aria-label="关闭筛选">×</button></header>
-                  <div id="soul-filter-panel" class="soul-filter-panel">
-                    <div class="soul-filter-heading"><p id="soul-filter-summary" aria-live="polite">全部御魂</p><button id="soul-filter-reset" type="button" disabled>清空条件</button></div>
-                    <p class="soul-filter-help">同组可多选，满足任意一项</p>
-                    <section class="soul-filter-group"><h4>类型</h4>
-                      <details id="soul-type-picker" class="soul-type-picker"><summary id="soul-suit-label">全部类型</summary>
-                        <input id="soul-type-search" type="search" placeholder="查找御魂类型" aria-label="查找御魂类型" />
-                        <div id="soul-type-options" class="soul-type-options"></div>
-                      </details>
-                    </section>
-                    <section class="soul-filter-group"><h4>位置</h4><div class="soul-choice-options" data-soul-choice="soul-position" aria-label="位置"></div></section>
-                    <section class="soul-filter-group"><h4>星级</h4><div class="soul-choice-options" data-soul-choice="soul-stars" aria-label="星级"></div></section>
-                    <section class="soul-filter-group"><h4>等级</h4><div class="soul-choice-options" data-soul-choice="soul-level" aria-label="等级"></div></section>
-                    <section class="soul-filter-group"><h4>状态</h4><div class="soul-choice-options" data-soul-choice="soul-state" aria-label="状态"></div></section>
-                    <section class="soul-filter-group"><h4>主属性</h4><div class="soul-choice-options" data-soul-choice="soul-main-attribute" aria-label="主属性"></div></section>
-                    <section class="soul-filter-group"><h4>固有属性</h4><div class="soul-choice-options" data-soul-choice="soul-intrinsic-attribute" aria-label="固有属性"></div></section>
-                    <section class="soul-filter-group soul-sub-group"><h4>副属性</h4><div class="soul-sub-controls"><p class="soul-sub-legend">○ 必须包含　× 不得包含</p><div id="soul-sub-attributes" class="soul-attribute-options"></div></div></section>
-                    <section class="soul-filter-group"><h4>条数</h4><div class="soul-choice-options" data-soul-choice="soul-sub-count" aria-label="副属性条数"></div></section>
-                  </div>
-                </aside>
-              </div>
-              <div id="soul-detail-window" class="soul-detail-window" popover="manual" role="tooltip">
-                <header class="soul-window-header"><strong>御魂详情</strong></header>
-                <div id="soul-detail" class="soul-detail"><p>选择一条御魂查看详情</p></div>
-              </div>
-              <div hidden aria-hidden="true">
-                <select id="soul-stars" aria-label="按星级筛选"><option value="">全部星级</option><option value="6">六星</option><option value="5">五星</option><option value="4">四星</option><option value="3">三星</option><option value="2">二星</option><option value="1">一星</option></select>
-                <select id="soul-state" aria-label="按状态筛选"><option value="">全部状态</option><option value="locked">已锁定</option><option value="unlocked">未锁定</option><option value="equipped">已装备</option><option value="unequipped">未装备</option><option value="discarded">已弃置</option><option value="kept">未弃置</option></select>
-                <select id="soul-suit"><option value="">全部类型</option></select>
-                <select id="soul-position"><option value="">全部位置</option><option value="1">壹号位</option><option value="2">贰号位</option><option value="3">叁号位</option><option value="4">肆号位</option><option value="5">伍号位</option><option value="6">陆号位</option></select>
-                <select id="soul-level"><option value="">全部等级</option><option value="0-2">+0～+2</option><option value="3-5">+3～+5</option><option value="6-8">+6～+8</option><option value="9-11">+9～+11</option><option value="12-14">+12～+14</option><option value="15">+15</option></select>
-                <select id="soul-sub-count" aria-label="按副属性条数筛选"><option value="">全部条数</option><option value="0">副属性 0 条</option><option value="1">副属性 1 条</option><option value="2">副属性 2 条</option><option value="3">副属性 3 条</option><option value="4">副属性 4 条</option></select>
-                <select id="soul-main-attribute"><option value="">全部主属性</option></select>
-                <select id="soul-intrinsic-attribute"><option value="">全部固有属性</option></select>
-              </div>
-              <footer class="soul-result-count">
-                <span id="soul-count">0 条御魂</span>
-                <details class="soul-note">
-                  <summary>数据说明</summary>
-                  <p>属性按游戏面板数值显示，未加载的属性标记为待解析。当前仅包含背包御魂，不包含收纳库存。图标来自藏宝阁官方资源；数据按实例保存在本地，打开即载入上次结果。</p>
-                </details>
-              </footer>
-            </div>
-        </section>
+        <!-- @include: features/duel/prediction/template.html -->
 
-        <section id="module-onmyoji-team-builder" class="dock-module onmyoji-team-builder-module" aria-label="阴阳师阵容配队">
-          <aside id="team-builder-sidebar" class="team-builder-sidebar">
-            <header class="team-builder-pane-header">栏目</header>
-            <nav class="team-builder-categories" role="tablist" aria-orientation="vertical" aria-label="阵容栏目">
-              <button id="team-builder-tab-shikigami-atlas" class="team-builder-category" type="button" role="tab" aria-selected="true" aria-controls="team-builder-shikigami-atlas">式神图鉴</button>
-              <button id="team-builder-tab-lineup-browser" class="team-builder-category" type="button" role="tab" aria-selected="false" aria-controls="team-builder-lineup-browser" tabindex="-1">阵容配队</button>
-            </nav>
-          </aside>
-          <div id="team-builder-resizer" class="content-browser-resizer team-builder-resizer" role="separator" aria-orientation="vertical" aria-label="调整栏目宽度" aria-controls="team-builder-sidebar" tabindex="0"></div>
-          <section class="team-builder-content" aria-label="阵容内容">
-            <header class="team-builder-pane-header">式神图鉴</header>
-            <div id="team-builder-shikigami-atlas" class="team-builder-content-body shikigami-atlas" role="tabpanel" aria-labelledby="team-builder-tab-shikigami-atlas"></div>
-            <div id="team-builder-lineup-browser" class="team-builder-content-body lineup-browser" role="tabpanel" aria-labelledby="team-builder-tab-lineup-browser" hidden></div>
-          </section>
-        </section>
+        <!-- @include: features/souls/calculator/template.html -->
+
+        <!-- @include: features/shikigami/template.html -->
 
         <section id="module-variable-references" class="dock-module variable-references-module" aria-label="变量引用"></section>
 
-        <section id="module-settings" class="dock-module settings-module">
-          <nav class="settings-nav" aria-label="设置分类">
-            <div class="settings-nav-title">偏好设置</div>
-            <div role="tablist" aria-orientation="vertical">
-              <button id="settings-tab-appearance" class="settings-nav-item active" role="tab" aria-selected="true" aria-controls="settings-page-appearance" data-settings-page="appearance">外观</button>
-              <button id="settings-tab-interface" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-interface" data-settings-page="interface" tabindex="-1">界面</button>
-              <button id="settings-tab-runtime" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-runtime" data-settings-page="runtime" tabindex="-1">运行</button>
-              <button id="settings-tab-ai" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-ai" data-settings-page="ai" tabindex="-1">AI 助手</button>
-              <button id="settings-tab-shortcuts" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-shortcuts" data-settings-page="shortcuts" tabindex="-1">快捷键</button>
-              <button id="settings-tab-about" class="settings-nav-item" role="tab" aria-selected="false" aria-controls="settings-page-about" data-settings-page="about" tabindex="-1">关于</button>
-            </div>
-            <div class="settings-nav-footer">AutoFlow Studio</div>
-          </nav>
-          <div class="settings-body">
-            <section id="settings-page-appearance" class="settings-page" role="tabpanel" aria-labelledby="settings-tab-appearance">
-              <h2>外观</h2><p class="settings-intro">选择工作台的配色，立即应用到所有窗口。</p>
-              <h3 class="settings-section-title">颜色主题</h3>
-              <div class="theme-options" role="radiogroup" aria-label="颜色主题">
-                <label class="theme-option"><input type="radio" name="appearance-theme" value="dark" checked><span class="theme-preview preview-dark" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>墨黑</strong><span>黑灰白 · 经典默认</span></span></label>
-                <label class="theme-option"><input type="radio" name="appearance-theme" value="light"><span class="theme-preview preview-light" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>浅色</strong><span>柔和浅灰 · 清晰明亮</span></span></label>
-                <label class="theme-option"><input type="radio" name="appearance-theme" value="graphite"><span class="theme-preview preview-graphite" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>柔灰</strong><span>柔和灰阶 · 低反差</span></span></label>
-                <label class="theme-option"><input type="radio" name="appearance-theme" value="warm"><span class="theme-preview preview-warm" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>暖炭</strong><span>温暖炭灰 · 米白文字</span></span></label>
-                <label class="theme-option"><input type="radio" name="appearance-theme" value="contrast"><span class="theme-preview preview-contrast" aria-hidden="true"><i></i><b><em></em><em></em><em></em></b></span><span class="theme-caption"><strong>高对比</strong><span>近黑底色 · 明亮边界</span></span></label>
-              </div>
-              <p id="settings-theme-feedback" class="settings-footnote" role="status">主题自动保存，下次启动沿用。</p>
-            </section>
-            <section id="settings-page-interface" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-interface">
-              <h2>界面</h2><p class="settings-intro">设置内容浏览和实例列表的默认行为。</p>
-              <h3 class="settings-section-title">内容与实例</h3>
-              <label class="settings-row">
-                <span class="settings-row-copy"><strong>内容浏览器默认视图</strong><small>缩略图便于识别图片，列表适合查看路径。</small></span>
-                <select id="settings-content-view" aria-label="内容浏览器默认视图">
-                  <option value="grid">缩略图</option>
-                  <option value="list">列表</option>
-                </select>
-              </label>
-              <label class="settings-row">
-                <span class="settings-row-copy"><strong>实例列表自动刷新</strong><small>定期更新已连接的模拟器实例。</small></span>
-                <input id="settings-auto-refresh" class="ui-checkbox" type="checkbox" aria-label="实例列表自动刷新">
-              </label>
-            </section>
-            <section id="settings-page-runtime" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-runtime">
-              <h2>运行</h2><p class="settings-intro">配置启动行为与调试记录。</p>
-              <h3 class="settings-section-title">启动</h3>
-              <label class="settings-row">
-                <span class="settings-row-copy"><strong>启动时恢复上次画布</strong><small>重新打开应用后回到上次的工作流与未保存内容。</small></span>
-                <input id="settings-restore-session" class="ui-checkbox" type="checkbox" aria-label="启动时恢复上次画布">
-              </label>
-              <label class="settings-row">
-                <span class="settings-row-copy"><strong>启动时加载默认工作流</strong><small>没有可恢复的画布时自动加载，不会自动执行。</small></span>
-                <input id="settings-default-workflow" class="ui-checkbox" type="checkbox" aria-label="启动时加载默认工作流">
-              </label>
-              <h3 class="settings-section-title">OCR 运行环境</h3>
-              <div id="settings-runtime-resources" class="runtime-resource-list" aria-live="polite"></div>
-              <p id="settings-runtime-progress" class="settings-footnote" role="status"></p>
-              <h3 class="settings-section-title">调试截图</h3>
-              <label class="settings-row">
-                <span class="settings-row-copy"><strong>调试截图</strong><small>开：每个任务节点存一张画面（artifacts 下 step-*.png 与每轮一张 last-frame.png）并给运行日志当缩略图，另存一份带标注的到 artifacts/&lt;运行 id&gt;/debug/。关：一张都不写。修改后从下次运行生效。</small></span>
-                <input id="settings-debug-enabled" class="ui-checkbox" type="checkbox" aria-label="调试截图">
-              </label>
-              <label class="settings-row">
-                <span class="settings-row-copy"><strong>标注识别与点击位置</strong><small>在 Debug 截图里显示 ROI、匹配度及点击位置。</small></span>
-                <input id="settings-debug-annotate" class="ui-checkbox" type="checkbox" aria-label="标注 Debug 截图">
-              </label>
-              <p id="settings-debug-status" class="settings-footnote" role="status"></p>
-            </section>
-            <section id="settings-page-ai" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-ai">
-              <h2>AI 助手</h2><p class="settings-intro">为卡片提供命名、参数建议，并根据流程推荐待创建的节点。修改后自动保存，支持兼容 Chat Completions 的 AI 服务。</p>
-              <label class="settings-row"><span class="settings-row-copy"><strong>启用 AI 建议</strong><small>仅在点击“获取建议”时请求服务。</small></span><input id="settings-ai-enabled" class="ui-checkbox" type="checkbox"></label>
-              <label class="settings-row"><span class="settings-row-copy"><strong>接口地址</strong><small>填写服务商提供的基础地址（包含版本路径），或完整的 /chat/completions 地址。</small></span><input id="settings-ai-url" class="ui-input" type="url" placeholder="https://服务商地址/v1" autocomplete="off"></label>
-              <label class="settings-row"><span class="settings-row-copy"><strong>模型名称</strong><small>填写服务商支持的对话模型标识。</small></span><input id="settings-ai-model" class="ui-input" type="text" placeholder="模型标识" autocomplete="off" maxlength="200"></label>
-              <label class="settings-row"><span class="settings-row-copy"><strong>API Key</strong><small>密钥在本机加密保存；留空保留已保存的密钥。</small></span><input id="settings-ai-key" class="ui-input" type="password" placeholder="输入 API Key" autocomplete="off" maxlength="4096"></label>
-              <div class="settings-ai-actions"><button id="settings-ai-test" type="button">测试连接</button><button id="settings-ai-clear" type="button">移除已保存的密钥</button></div>
-              <p id="settings-ai-status" class="settings-footnote" role="status"></p>
-              <p class="settings-footnote">获取建议会将当前卡片、所列上下游节点、你填写的要求及勾选的模板图片发送给配置的服务商，可能产生 API 费用。可在建议窗口查看参考范围、关闭图片发送；发送图片需使用支持图片输入的模型。建议需由你确认选取；AI 不会自动执行工作流。</p>
-            </section>
-            <section id="settings-page-shortcuts" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-shortcuts">
-              <h2>快捷键</h2><p class="settings-intro">点击按键组合后按下新快捷键即可修改，修改立即生效并自动保存。</p>
-              <div id="settings-shortcuts-list" class="shortcut-groups"></div>
-              <p id="settings-shortcuts-feedback" class="shortcut-feedback" role="status"></p>
-              <div class="shortcut-actions">
-                <button id="settings-shortcuts-reset-all" type="button">全部恢复默认</button>
-              </div>
-              <h3 class="settings-section-title">固定操作</h3>
-              <ul class="shortcut-list">
-                <li class="shortcut-row"><span class="shortcut-action">平移画布</span><span class="shortcut-keys"><kbd>中键/右键拖拽</kbd><kbd>Alt+拖拽</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">缩放画布</span><span class="shortcut-keys"><kbd>滚轮</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">追加选择节点 / 框选</span><span class="shortcut-keys"><kbd>Shift+点击</kbd><kbd>Shift+拖拽</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">断开变量连接</span><span class="shortcut-keys"><kbd>Alt+点击连线</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">取消连线、拖拽或关闭弹层</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">关闭截图大图预览</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">在菜单或下拉列表中移动</span><span class="shortcut-keys"><kbd>↑</kbd><kbd>↓</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">在运行日志等标签页间移动</span><span class="shortcut-keys"><kbd>←</kbd><kbd>→</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">跳到第一个或最后一个选项</span><span class="shortcut-keys"><kbd>Home</kbd><kbd>End</kbd></span></li>
-                <li class="shortcut-row"><span class="shortcut-action">激活当前选项或提交输入</span><span class="shortcut-keys"><kbd>Enter</kbd><kbd>空格</kbd></span></li>
-              </ul>
-            </section>
-            <section id="settings-page-about" class="settings-page hidden" role="tabpanel" aria-labelledby="settings-tab-about">
-              <h2>关于</h2><p class="settings-intro">AutoFlow Studio · 工作流编辑与运行工具。</p>
-              <h3 class="settings-section-title">应用信息</h3>
-              <div class="settings-row">
-                <span>项目根目录</span>
-                <span id="settings-project-root" class="settings-value"></span>
-              </div>
-              <div class="settings-row">
-                <span>桌面端版本</span>
-                <span class="settings-value">0.1.0</span>
-              </div>
-            </section>
-          </div>
-        </section>
+        <!-- @include: features/settings/template.html -->
       </div>
     </main>
 

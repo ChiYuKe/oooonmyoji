@@ -13,13 +13,13 @@ const root = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 
 test('恢复副本：每次改动留档、写盘即清、按文档隔离', () => {
-  const host = read('src/renderer/editor-host.ts');
+  const host = read('src/renderer/app/editor-host.ts');
   assert.match(host, /recordRecovery\?: \(uri: string, text: string, dirty: boolean\) => void/);
   assert.match(host, /recordRecovery\?\.\(targetUri, text, message\.dirty !== false\)/, '正文变化即留档（带脏标记）');
-  const workspace = read('src/renderer/workspace.ts');
+  const workspace = read('src/renderer/features/workflow/workspace.ts');
   assert.match(workspace, /onDocumentSaved\?: \(uri: string\) => void/);
   assert.match(workspace, /deps\.onDocumentSaved\?\.\(uri\);/, '写盘成功回调');
-  const main = read('src/renderer/main.ts');
+  const main = read('src/renderer/app/bootstrap.ts');
   assert.match(main, /onDocumentSaved: \(uri\) => recovery\.clear\(uri\)/, '落盘即清恢复副本');
   assert.match(main, /recordRecovery: \(uri, text, dirty\) => recovery\.record\(uri, text, dirty\)/);
   assert.match(main, /const recovery = createRecoveryStore\(\);/, '恢复库在壳层只建一份');
@@ -27,7 +27,7 @@ test('恢复副本：每次改动留档、写盘即清、按文档隔离', () =>
 });
 
 test('崩溃恢复与外部变化都用统一确认弹窗，并给出对比正文', () => {
-  const main = read('src/renderer/main.ts');
+  const main = read('src/renderer/app/bootstrap.ts');
   const recovery = main.slice(main.indexOf('async function resolveRecoveryDraft'), main.indexOf('async function resolveExternalChangeDraft'));
   assert.match(recovery, /title: '发现未保存的恢复副本'/);
   assert.match(recovery, /confirmLabel: '恢复未保存内容'/);
@@ -49,13 +49,13 @@ test('崩溃恢复与外部变化都用统一确认弹窗，并给出对比正�
 });
 
 test('三选与恢复都是「先问再做」：不会静默覆盖任何一边', () => {
-  const lifecycle = read('src/renderer/document-lifecycle.ts');
+  const lifecycle = read('src/renderer/features/workflow/document-lifecycle.ts');
   // 加载路径：只有用户选择恢复时才替换正文。
   assert.match(lifecycle, /const recovered = await deps\.resolveRecovery/);
   assert.doesNotMatch(lifecycle, /documentText = recovery\./, '生命周期不认识恢复库本身，只认注入的选择器');
   // 外部改写：本地未保存时一定经过选择器。
   assert.match(lifecycle, /const choice = deps\.resolveExternalChange \? await deps\.resolveExternalChange\(uri\) : 'local';/);
-  const main = read('src/renderer/main.ts');
+  const main = read('src/renderer/app/bootstrap.ts');
   assert.match(main, /resolveExternalChange: \(uri\) => resolveExternalChangeDraft\(uri\)/);
   assert.match(main, /resolveRecovery: \(uri, diskText\) => resolveRecoveryDraft\(uri, diskText\)/);
 });

@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Isolated document and mock replies: never sends project content to an AI provider.
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
@@ -9,7 +10,7 @@ app.setPath('userData', path.join(artifacts, 'ai-node-picker-user-data'));
 app.commandLine.appendSwitch('in-process-gpu');
 app.whenReady().then(async () => {
   fs.mkdirSync(artifacts, { recursive: true });
-  let html = fs.readFileSync(path.join(root, 'src/renderer/canvas.html'), 'utf8');
+  let html = readExpandedHtml(path.join(root, 'src/renderer/canvas.html'));
   html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g, '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
   html = html.replace(/href="\/([^"]+)"/g, (_, file) => `href="${pathToFileURL(path.join(root, 'public', file))}"`);
   const file = path.join(artifacts, 'ai-node-picker-smoke.html'); fs.writeFileSync(file, html);

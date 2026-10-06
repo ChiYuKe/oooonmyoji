@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { contentSelectionGesture: select } = require('../dist-test-renderer/renderer/content-browser/selection.js');
+const { contentSelectionGesture: select } = require('../dist-test-renderer/renderer/features/content-browser/selection.js');
 const order = ['a', 'b', 'c', 'd', 'e'];
 const paths = (result) => [...result.paths];
 

@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Offline DOM verification with the production atlas and a captured inventory.
 const {app,BrowserWindow,protocol,net}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
@@ -11,10 +12,10 @@ app.whenReady().then(async()=>{
     if(!match)return new Response('',{status:404});
     const file=path.join(project,'assets',match[1]+'-icons',match[2]+'.png');return fs.existsSync(file)?net.fetch(pathToFileURL(file).href):new Response('',{status:404});
   });
-  const source=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
+  const source=readExpandedHtml(path.join(root,'src/renderer/index.html'));
   const start=source.indexOf('<section id="module-onmyoji-team-builder"');
   const panel=source.slice(start,source.indexOf('<section id="module-variable-references"',start));
-  const css=fs.readFileSync(path.join(root,'src/renderer/styles.css'),'utf8').replace(/^@import[^;]*;/,'');
+  const css=readExpandedCss(path.join(root,'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/,'');
   const palette=['workbench-light.css','theme.css'].map(name=>fs.readFileSync(path.join(root,'public/theme',name),'utf8')).join('\n');
   const file=path.join(artifacts,'hero-ownership.html');
   fs.writeFileSync(file,`<!doctype html><html lang="zh-CN" data-theme="dark"><meta charset="UTF-8"><style>${css}\n${palette}\n#module-onmyoji-team-builder{height:100vh}</style><body>${panel}</body></html>`);
@@ -37,7 +38,7 @@ app.whenReady().then(async()=>{
       onHeroDetectionProgress:listener=>{progress=listener;return()=>{progress=null;};},
     };
     window.disposeAtlas=installTeamBuilderPages(document.getElementById('module-onmyoji-team-builder'),api);
-    document.getElementById('team-builder-tab-shikigami-atlas').click();
+    document.querySelector('.team-builder-category').click();
     window.atlas=document.getElementById('team-builder-shikigami-atlas');window.el=name=>atlas.querySelector('[data-atlas="'+name+'"]');
     const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};await settle();
     assert.equal(el('instance').value,'mumu-0');assert.equal(el('detect').disabled,false);

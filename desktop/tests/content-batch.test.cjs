@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
-const { runContentBatch } = require('../dist-test-renderer/renderer/content-browser/batch.js');
+const { runContentBatch } = require('../dist-test-renderer/renderer/features/content-browser/batch.js');
 const originalLoad = Module._load;
 Module._load = function (request, ...rest) {
   if (request === 'electron') return { BrowserWindow: class {}, dialog: {}, shell: {} };

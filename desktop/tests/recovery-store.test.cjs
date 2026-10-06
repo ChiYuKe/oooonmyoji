@@ -7,7 +7,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createRecoveryStore, RECOVERY_STORAGE_KEY, RECOVERY_HISTORY_LIMIT,
-} = require('../dist-test-renderer/renderer/recovery-store.js');
+} = require('../dist-test-renderer/renderer/features/workflow/recovery-store.js');
 
 /** 内存版存储。 */
 function memoryStore(initial = null) {

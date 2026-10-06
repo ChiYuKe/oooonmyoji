@@ -85,7 +85,7 @@ test('save 命令：有错误时不直接写盘，先请宿主确认', () => {
 });
 
 test('宿主侧：保存被拦下时弹统一确认框，只有确认才回发 forceSave', () => {
-  const host = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/editor-host.ts'), 'utf8');
+  const host = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app/editor-host.ts'), 'utf8');
   const block = host.slice(host.indexOf("case 'saveBlockedRequested'"), host.indexOf("case 'sidebarStateChanged'"));
   assert.match(block, /showImpactConfirm/, '复用阶段 4 的统一确认弹窗');
   assert.match(block, /saveBlockedRequested/, '消息类型进窄化联合');
@@ -94,7 +94,7 @@ test('宿主侧：保存被拦下时弹统一确认框，只有确认才回发 f
   const messages = fs.readFileSync(path.join(__dirname, '..', 'src/shared/editor-messages.ts'), 'utf8');
   assert.match(messages, /interface SaveBlockedRequestedMessage/);
   assert.match(messages, /'saveBlockedRequested',/);
-  const impact = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/impact-confirm.ts'), 'utf8');
+  const impact = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/ui/impact-confirm.ts'), 'utf8');
   assert.match(impact, /cancelLabel/, '确认框支持自定义取消文案（返回修改）');
 });
 

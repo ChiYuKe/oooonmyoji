@@ -1,13 +1,14 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '..');
-const shell = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
-const popout = fs.readFileSync(path.join(root, 'src/renderer/popout.ts'), 'utf8');
-const overviewSrc = fs.readFileSync(path.join(root, 'src/renderer/overview.ts'), 'utf8');
-const {createDeleteShortcuts} = require('../dist-test-renderer/renderer/delete-shortcuts.js');
+const shell = fs.readFileSync(path.join(root, 'src/renderer/app/bootstrap.ts'), 'utf8');
+const popout = fs.readFileSync(path.join(root, 'src/renderer/shell/popout/entry.ts'), 'utf8');
+const overviewSrc = fs.readFileSync(path.join(root, 'src/renderer/features/overview/index.ts'), 'utf8');
+const {createDeleteShortcuts} = require('../dist-test-renderer/renderer/features/workflow/delete-shortcuts.js');
 
 /** 与其它渲染层测试一致：实例化编译产物里的真实模块，不打开桌面窗口，也不操控鼠标键盘。 */
 function shellHarness(options = {}) {
@@ -236,7 +237,7 @@ test('画布、标题栏命令与独立窗口共用同一个删除入口', () =>
 });
 
 test('队列选中态有深色与浅色语义样式', () => {
-  const styles = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  const styles = readExpandedCss(path.join(root, 'src/renderer/styles/workbench.css'));
   const theme = fs.readFileSync(path.join(root, 'public/theme/theme.css'), 'utf8');
   assert.match(styles, /\.overview-queue-row\.selected \{ background: #[0-9a-f]{6}; \}/);
   assert.match(theme, /:root\[data-theme="light"\] :is\([^)]*\.overview-queue-row\.selected[^)]*\)/);

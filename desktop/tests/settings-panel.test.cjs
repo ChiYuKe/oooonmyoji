@@ -76,7 +76,7 @@ function harness({ storage = {}, apiOverrides = {} } = {}) {
     localStorage: { getItem: key => storage[key] ?? null, setItem: (key, value) => { storage[key] = value; } },
     addEventListener: () => {}, clearInterval: () => {}, setInterval: () => 0, confirm: () => true,
   };
-  const { createSettingsPanel } = require('../dist-test-renderer/renderer/settings-panel.js');
+  const { createSettingsPanel } = require('../dist-test-renderer/renderer/features/settings/panel.js');
   const panel = createSettingsPanel({
     api, contentBrowser: { getView: () => 'list', setView: () => {} },
     showToast: message => toasts.push(message), showPanel: () => { shown++; }, refreshInstances: () => {},
@@ -159,7 +159,7 @@ test('读配置失败时把原因写在页面上，而不是假装是空配置',
 });
 
 test('启动时对布局还原出的设置面板补一次同步', () => {
-  const source = fs.readFileSync(path.join(base, 'src/renderer/main.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(base, 'src/renderer/app/bootstrap.ts'), 'utf8');
   const readAt = source.indexOf('settings.readSettings();');
   const syncAt = source.indexOf("if (workbenchFrame?.isOpen('settings')) settings.refreshPanelData();");
   assert.ok(readAt >= 0, 'main.ts 应当仍然读回启动行为');

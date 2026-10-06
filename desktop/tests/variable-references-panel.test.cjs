@@ -53,7 +53,7 @@ globalThis.document = {
   createElementNS: (_ns, tag) => new Element(tag),
   querySelector: () => host,
 };
-const { createVariableReferences } = require('../dist-test-renderer/renderer/variable-references.js');
+const { createVariableReferences } = require('../dist-test-renderer/renderer/ui/variable-references.js');
 
 function harness() {
   const calls = [];

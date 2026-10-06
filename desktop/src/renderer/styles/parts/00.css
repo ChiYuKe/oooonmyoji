@@ -1,0 +1,306 @@
+@import "@phosphor-icons/web/duotone";
+
+:root {
+  color-scheme: dark;
+  font-family: "HarmonyOS Sans SC", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-size: 13px;
+  color: #d2d2d2;
+  background: #141414;
+  --bg: #141414;
+  --surface: #222222;
+  --surface-raised: #2b2b2b;
+  --surface-hover: #343434;
+  --border: #3b3b3b;
+  --border-soft: #303030;
+  --text: #d2d2d2;
+  --muted: #929292;
+  --blue: #287fbd;
+  --blue-strong: #3694d4;
+  --green: #6eaf78;
+  --yellow: #cda348;
+  --red: #d66a70;
+  --status: #202020;
+  --content-folder-icon: #cecece;
+  --content-folder-tile: #2d2d2d;
+  --content-file-icon: #c0c0c0;
+  --content-file-tile: #292929;
+  --content-selection-surface: rgba(255,255,255,.065);
+  --content-selection-frame: #646464;
+  --content-selection-border: #c7c7c7;
+  --content-selection-tile: #404040;
+  --content-selection-text: #f2f2f2;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--bg); color: var(--text); }
+button, select, input { font: inherit; letter-spacing: 0; }
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+button { color: inherit; }
+/* 细滚动条：去掉原生箭头按钮，圆角滑块悬浮在透明轨道上 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: #4a4a4a;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: #5c5c5c; }
+.hidden { display: none !important; }
+
+.app-shell {
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.workbench-frame-shell, .workbench-frame {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.workbench-frame, .dock-workspace { position: relative; }
+
+.workbench-module-store, .dock-module-store { display: none; }
+.workbench-module {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr) 24px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.custom-titlebar, .app-header, .tool-strip, .status-bar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.custom-titlebar {
+  position: relative;
+  z-index: 1000;
+  background: #151515;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.app-header {
+  gap: 6px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: #252525;
+}
+
+.custom-titlebar button { -webkit-app-region: no-drag; }
+
+.titlebar-icon { width: 16px; height: 16px; margin: 0 6px 0 10px; border-radius: 3px; -webkit-app-region: no-drag; }
+
+.titlebar-menu { align-self: stretch; display: flex; align-items: stretch; -webkit-app-region: no-drag; }
+.menu-root { position: relative; display: flex; align-items: stretch; }
+.menu-trigger {
+  min-width: 46px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: #cbd0d6;
+  font-size: 12px;
+  cursor: default;
+}
+.menu-trigger:hover, .menu-root.open > .menu-trigger { background: #303030; color: #fff; }
+.titlebar-dropdown {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 31px;
+  left: 0;
+  width: 210px;
+  display: none;
+  padding: 5px 0;
+  border: 1px solid #3b3b3b;
+  background: #252525;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .52);
+}
+.menu-root.open > .titlebar-dropdown { display: block; }
+.titlebar-dropdown button {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 11px;
+  border: 0;
+  background: transparent;
+  color: #d6d9df;
+  text-align: left;
+  cursor: default;
+  white-space: nowrap;
+}
+.titlebar-dropdown button:hover, .titlebar-dropdown button:focus-visible { outline: 0; background: #3a3a3a; color: #fff; }
+.titlebar-dropdown kbd { color: #8e96a2; font: 10px/1 "Segoe UI", sans-serif; }
+.titlebar-dropdown button:hover kbd, .titlebar-dropdown button:focus-visible kbd { color: #dceaf2; }
+.titlebar-dropdown .menu-check { visibility: hidden; color: #8fc8e7; font-size: 11px; }
+.titlebar-dropdown button.checked .menu-check { visibility: visible; }
+.menu-separator { height: 1px; margin: 4px 7px; background: #3b3b3b; }
+.titlebar-spacer { flex: 1; }
+.titlebar-account { flex: none; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 180px; height: 25px; margin: 3px 12px 3px 0; padding: 0 9px; white-space: nowrap; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface-raised); color: var(--text); box-shadow: 0 1px 3px #0002; font: inherit; font-size: 11px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+.titlebar-account-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.titlebar-account-icon { flex: none; color: var(--titlebar-account-color, var(--hero-rarity-r, #8ebfdb)); transition: color 120ms ease; }
+.titlebar-account-avatar { flex: none; width: 18px; height: 18px; border-radius: 50%; object-fit: cover; }
+.titlebar-account-chevron { flex: none; color: var(--muted); }
+.titlebar-account[data-state="signed-in"] { --titlebar-account-color: var(--green); }
+.titlebar-account[data-state="offline"] { --titlebar-account-color: var(--muted); }
+.titlebar-account[data-state="loading"] .titlebar-account-icon { animation: titlebar-account-pulse 1.2s ease-in-out infinite; }
+.titlebar-account:hover { background: var(--surface-hover); border-color: var(--border); }
+.titlebar-account:active { box-shadow: inset 0 1px 3px #0003; }
+.titlebar-account:focus-visible { outline: 1px solid var(--ui-focus, var(--blue-strong)); outline-offset: 2px; }
+@keyframes titlebar-account-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .titlebar-account, .titlebar-account-icon { transition: none; animation: none !important; } }
+.header-spacer { flex: 1; }
+
+.desktop-more-menu {
+  position: fixed;
+  z-index: 1400;
+  min-width: 210px;
+  padding: 5px 0;
+  border: 1px solid #3b3b3b;
+  background: #252525;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .52);
+}
+.desktop-more-menu button {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 0;
+  background: transparent;
+  color: #d6d9df;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+  white-space: nowrap;
+}
+.desktop-more-menu button:hover,
+.desktop-more-menu button:focus-visible {
+  outline: 0;
+  background: #094771;
+  color: #fff;
+}
+.desktop-more-separator { height: 1px; margin: 4px 7px; background: #3b3b3b; }
+
+.window-controls {
+  align-self: stretch;
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+.window-control {
+  width: 46px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #cbd0d6;
+  cursor: default;
+}
+.window-control svg { width: 13px; height: 13px; stroke-width: 1.6; }
+.window-control:hover { background: #303030; color: #fff; }
+.window-control.close:hover { background: #c42b1c; color: #fff; }
+
+.icon-button, .command-button, .panel-action {
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.icon-button { width: 30px; padding: 0; display: grid; place-items: center; }
+.icon-button svg, .panel-action svg { width: 15px; height: 15px; stroke-width: 1.8; }
+.icon-button:hover:not(:disabled), .panel-action:hover:not(:disabled) { border-color: transparent; background: var(--surface-hover); }
+.icon-button:disabled, .command-button:disabled { opacity: .35; cursor: default; }
+.fixed-workbench-tab { cursor: default; }
+.command-button { display: flex; align-items: center; gap: 6px; padding: 0 11px; border-color: transparent; background: var(--surface-raised); }
+.command-button svg { width: 14px; height: 14px; }
+.command-button:hover:not(:disabled) { background: var(--surface-hover); }
+
+/* ---------- 工作台统一 tooltip：挂在文档顶层，避免被面板和滚动区裁剪 ---------- */
+[data-tooltip]::before, [data-tooltip]::after { content: none !important; display: none !important; }
+.app-tooltip {
+  position: fixed;
+  z-index: 5000;
+  max-width: 280px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--ui-tooltip-bg);
+  box-shadow: var(--ui-tooltip-shadow);
+  color: var(--ui-tooltip-text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.app-tooltip.hidden { display: none; }
+.app-tooltip.asset-preview {
+  width: min(240px, calc(100vw - 16px));
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 6px;
+}
+.app-tooltip.asset-preview img {
+  display: block;
+  width: 100%;
+  height: 150px;
+  object-fit: contain;
+  background: #111315;
+  border-radius: 3px;
+}
+.app-tooltip-preview-missing {
+  display: grid;
+  height: 150px;
+  place-items: center;
+  border-radius: 3px;
+  background: #111315;
+  color: #aeb8c0;
+  font-size: 11px;
+}
+.app-tooltip-preview-path {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #aeb8c0;
+  font-size: 10px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+select {
+  appearance: base-select;
+  height: 28px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: 0;
+  background: var(--surface-raised);
+  color: var(--text);
+  padding: 0 9px;
+  cursor: pointer;
+  /* Chromium base-select 模式下 UA 默认 align-items 为 unset，内容会顶对齐 */
+  align-items: center;
+}

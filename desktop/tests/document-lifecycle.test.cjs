@@ -3,7 +3,7 @@
 // 若因此跳过加载，首屏画布就是空白，必须手动切一次标签才显示。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {createDocumentLifecycle} = require('../dist-test-renderer/renderer/document-lifecycle.js');
+const {createDocumentLifecycle} = require('../dist-test-renderer/renderer/features/workflow/document-lifecycle.js');
 
 const ACTIVE = 'file:///w/activity_loop.json';
 const OTHER = 'file:///w/new.workflow.json';

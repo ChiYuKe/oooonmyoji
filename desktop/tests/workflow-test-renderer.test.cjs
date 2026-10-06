@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Production renderer with a small in-memory DOM. No windows, screenshots or devices.
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
@@ -41,7 +42,7 @@ class Textarea extends Element { constructor() { super('textarea'); } }
 class Select extends Element { constructor() { super('select'); } }
 
 test('Tools entry opens the current canvas testing snapshot', () => {
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
+  const html = readExpandedHtml(path.join(root, 'src/renderer/index.html'));
   const tools = html.split('>工具</button>')[1].split('<div class="menu-root">')[0];
   assert.match(tools, /data-editor-command="openWorkflowTest"/);
   const {createEditorCommandDispatch} = require('../dist-test-renderer/canvas/state/editor-command-dispatch.js');
@@ -60,7 +61,7 @@ test('restyled renderer initializes, edits a case, steps through results and use
     },
     querySelector: () => elements.get('test-inspection'),
   };
-  for (const [,tag,attributes,id] of fs.readFileSync(path.join(root,'src/renderer/workflow-test.html'),'utf8').matchAll(/<(\w+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
+  for (const [,tag,attributes,id] of readExpandedHtml(path.join(root,'src/renderer/workflow-test.html')).matchAll(/<(\w+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
     const value = document.createElement(tag); value.className = attributes.match(/class="([^"]+)"/)?.[1] || '';
     value.disabled = /\bdisabled\b/.test(attributes); value.hidden = /\bhidden\b/.test(attributes);
     value.value = attributes.match(/value="([^"]+)"/)?.[1] || ''; elements.set(id,value);
@@ -85,7 +86,7 @@ test('restyled renderer initializes, edits a case, steps through results and use
     workflowTestTemplate:async()=> 'assets/templates/imported.png',workflowTestAddNode:async node=>{added=node;return 'node_2';},
   };
   const window = {onmyoji:api, addEventListener() {}, removeEventListener() {}}; document.defaultView = window;
-  const filename = path.join(root,'dist-test-renderer/renderer/workflow-test.js');
+  const filename = path.join(root,'dist-test-renderer/renderer/tools/workflow-test/entry.js');
   const localRequire = createRequire(filename);
   const context = vm.createContext({window,document,HTMLInputElement:Input,HTMLTextAreaElement:Textarea,HTMLSelectElement:Select,structuredClone,console,require:name=>name==='lucide'?{createIcons(){}}:localRequire(name),exports:{}});
   vm.runInContext(fs.readFileSync(filename,'utf8'),context,{filename});

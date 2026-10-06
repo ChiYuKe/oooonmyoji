@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { installTestResizer } = require('../dist-test-renderer/renderer/workflow-test-layout.js');
+const { installTestResizer } = require('../dist-test-renderer/renderer/tools/workflow-test/layout.js');
 
 function fixture() {
   const listeners = new Map();

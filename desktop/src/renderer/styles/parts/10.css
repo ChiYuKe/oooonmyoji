@@ -1,0 +1,263 @@
+.shikigami-owned-skill > div > span { overflow-wrap: anywhere; }
+.shikigami-owned-skill strong { color: var(--effect-number-color, #8ebfdb); }
+.shikigami-owned-loadout { display: grid; grid-template-columns: minmax(0, 1fr) 284px; gap: 18px; align-items: start; }
+.shikigami-owned-loadout > section { min-width: 0; }
+.shikigami-owned-panel { display: grid; grid-template-columns: 1fr; gap: 0; padding: 8px 12px; border-radius: 4px; background: var(--surface); }
+.shikigami-owned-panel table + table thead { display: none; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) th { text-align: left; font-weight: 400; color: var(--muted); }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) thead th { font-size: 10px; padding: 4px 0 8px; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) th:first-child { width: 30%; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) th:not(:first-child), :is(.shikigami-owned-panel, .soul-plan-panel-table) td { text-align: right; }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) tbody th, :is(.shikigami-owned-panel, .soul-plan-panel-table) td { height: 28px; border-top: 1px solid var(--border-soft); }
+:is(.shikigami-owned-panel, .soul-plan-panel-table) strong { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shikigami-owned-addition, .soul-panel-addition { color: #8ebfdb; }
+.shikigami-owned-total, .soul-panel-total { color: var(--green); }
+.shikigami-owned-panel-note { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.shikigami-owned-equipment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.shikigami-owned-equipment.is-empty { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.shikigami-owned-soul { min-width: 0; border-radius: 4px; background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.shikigami-owned-soul-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.shikigami-owned-soul-heading > small { white-space: nowrap; }
+.shikigami-owned-soul-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.shikigami-owned-soul-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.shikigami-owned-soul small { font-size: 10px; color: var(--muted); }
+.shikigami-owned-soul .soul-position-portrait { width: 36px; height: 36px; }
+.shikigami-owned-empty-slot { color: var(--muted); font-size: 11px; }
+.shikigami-owned-soul.is-empty { min-height: 64px; justify-content: center; }
+.shikigami-owned-soul-attributes { overflow-wrap: anywhere; }
+.shikigami-owned-soul-attributes .soul-detail-badges { margin: 0 0 8px; }
+.shikigami-owned-soul-attributes .soul-detail-main { padding-top: 6px; }
+.shikigami-owned-soul-attributes .soul-main-attribute { min-height: 26px; font-size: 11px; }
+.shikigami-owned-soul-attributes .soul-sub-attribute { min-height: 23px; font-size: 11px; gap: 5px; }
+.shikigami-owned-soul-attributes .soul-detail-attribute-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.shikigami-owned-soul-attributes .soul-sub-attribute .soul-detail-attribute-value { color: #8ebfdb; }
+.shikigami-owned-soul-attributes .soul-intrinsic-attributes { margin-top: 6px; padding-top: 6px; }
+.shikigami-owned-soul-attributes .soul-intrinsic-attribute { font-size: 11px; min-height: 23px; }
+.shikigami-owned-soul-attributes .soul-detail-pending { margin: 5px 0; font-size: 10px; }
+.shikigami-owned-soul-id { margin-top: auto; padding-top: 6px; color: var(--muted); font-size: 10px; }
+.shikigami-owned-soul-id summary { width: fit-content; }
+.shikigami-owned-soul-id small, .shikigami-owned-soul-id code { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 10px; }
+.shikigami-owned-set-effects { display: grid; gap: 10px; }
+.shikigami-owned-set-effects > div { padding: 10px 12px; border-radius: 4px; background: var(--surface); }
+.shikigami-owned-set-effects strong { font-size: 11px; }
+.shikigami-owned-set-effects p { margin: 5px 0 0; font-size: 11px; line-height: 1.7; color: var(--muted); }
+.shikigami-owned-identities { margin-top: 12px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.shikigami-owned-identities summary { cursor: pointer; }
+.shikigami-owned-identities code { display: block; margin-top: 6px; }
+.shikigami-owned-empty { padding: 16px; background: var(--surface-raised); border-radius: 4px; line-height: 1.8; }
+@media (max-width: 1120px) {
+  .shikigami-owned-loadout { grid-template-columns: 1fr; gap: 0; }
+  .shikigami-owned-overview { order: -1; }
+  .shikigami-owned-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .shikigami-owned-panel table + table thead { display: table-header-group; }
+  .shikigami-owned-set-effects { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  .soul-optimizer.shikigami-owned-detail { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .shikigami-owned-detail .soul-optimizer-header { padding: 12px; }
+  .shikigami-owned-body { padding: 0 12px 12px; }
+  .shikigami-owned-group { padding: 12px; }
+  .shikigami-owned-group-heading { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+  .shikigami-owned-badges { grid-column: 1 / -1; grid-row: 2; }
+  .shikigami-owned-quantity { grid-column: 2; grid-row: 1; }
+  .shikigami-owned-share-button { grid-column: 3; grid-row: 1; }
+  .shikigami-owned-equipment { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shikigami-owned-equipment.is-empty { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .shikigami-owned-soul { padding: 10px; }
+  .shikigami-owned-panel { grid-template-columns: 1fr; gap: 0; }
+  .shikigami-owned-panel table + table thead { display: none; }
+  .shikigami-owned-set-effects { grid-template-columns: 1fr; }
+}
+.soul-target-community-button { margin-top: 10px; }
+.soul-attribute-limits { margin: 10px 0; font-size: 12px; }
+.soul-attribute-limits summary { cursor: pointer; padding: 6px 0; }
+.soul-attribute-limits table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.soul-attribute-limits th, .soul-attribute-limits td { padding: 6px; border-bottom: 1px solid var(--ui-line); text-align: right; }
+.soul-attribute-limits th { font-weight: 500; color: var(--ui-muted); }
+.soul-attribute-limits tr > :first-child { text-align: left; }
+.soul-community-module { min-width: 0; min-height: 0; overflow: hidden; }
+.soul-community-panel { width: 100%; height: 100%; padding: 18px; overflow: auto; scrollbar-gutter: stable; background: var(--ui-panel); }
+.soul-community { container-type: inline-size; min-width: 0; color: var(--text); --community-shadow: 0 2px 5px #0003, 0 1px 2px #0002; --community-blue: var(--hero-rarity-r, #8ebfdb); }
+.soul-community [hidden] { display: none !important; }
+.soul-community h3 { margin: 0 0 6px; font-size: 14px; }
+.soul-community h4, .soul-community h5 { margin: 0 0 8px; }
+.soul-community p { margin: 6px 0 10px; color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
+.soul-community-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.soul-community-heading p { margin: 0; font-size: 11px; }
+.soul-community-heading > button { flex: none; white-space: nowrap; }
+.soul-community [data-community="status"] { font-size: 11px; margin: 12px 0; }
+.soul-community summary { cursor: pointer; font-size: 12px; padding: 8px 0; }
+.soul-community-fields { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 14px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--community-shadow); }
+.soul-community-fields label { display: flex; flex: 1 1 190px; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ui-muted); min-width: 0; }
+.soul-community-account { padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--ui-border); }
+.soul-account-dialog { box-sizing: border-box; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 20px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--ui-panel); color: var(--text); box-shadow: 0 16px 48px #0006; }
+.soul-account-dialog[open] { animation: soul-account-enter 150ms ease-out; }
+.soul-account-dialog::backdrop { background: #0006; }
+.soul-account-dialog .soul-community-heading { padding-bottom: 16px; }
+.soul-account-dialog .soul-community-heading h3 { margin-bottom: 4px; }
+.soul-account-dialog .soul-community-heading p { font-size: 11px; }
+.soul-account-dialog .soul-account-close { width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 6px; font-size: 16px; }
+.soul-account-dialog .soul-community-account { padding: 18px 0 0; margin: 0; border: 0; }
+.soul-community-account { --account-accent: var(--hero-rarity-r, var(--blue)); }
+.soul-community-account[data-state="signed-in"] { --account-accent: var(--green); }
+.soul-community-account[data-state="offline"] { --account-accent: var(--muted); }
+.soul-account-profile { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 7px; background: var(--surface-raised); }
+.soul-account-avatar { position: relative; display: grid; place-items: center; flex: none; width: 46px; height: 46px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--account-accent) 20%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--account-accent) 12%, var(--surface)); color: var(--account-accent); font-size: 20px; font-weight: 600; }
+.soul-account-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.soul-account-identity { flex: 1; min-width: 0; }
+.soul-community .soul-account-identity h4 { margin: 0 0 4px; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.soul-community .soul-account-identity p { margin: 0; font-size: 11px; overflow-wrap: anywhere; }
+.soul-account-badge { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; background: color-mix(in srgb, var(--account-accent) 9%, var(--surface)); color: var(--account-accent); font-size: 10px; white-space: nowrap; }
+.soul-account-badge::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.soul-community .soul-account-status { margin: 10px 2px 16px; font-size: 11px; overflow-wrap: anywhere; }
+.soul-account-login-actions { margin: 0 0 16px; }
+.soul-community .soul-account-login-actions button { width: 100%; min-height: 36px; border-radius: 6px; background: color-mix(in srgb, var(--account-accent) 12%, var(--surface-raised)); }
+.soul-community .soul-account-login-actions button:hover:not(:disabled) { background: color-mix(in srgb, var(--account-accent) 20%, var(--surface-raised)); }
+.soul-account-rename, .soul-account-authorization { padding: 16px; border-radius: 7px; background: var(--surface-raised); }
+.soul-account-rename > label { color: var(--text); font-size: 12px; font-weight: 600; }
+.soul-community .soul-account-rename p { margin: 6px 0 12px; font-size: 11px; }
+.soul-account-rename-row { display: flex; align-items: center; gap: 8px; }
+.soul-community .soul-account-rename-row input { flex: 1; min-width: 0; width: 0; min-height: 34px; border-radius: 5px; }
+.soul-community .soul-account-rename-row button { flex: none; min-height: 34px; border-radius: 5px; white-space: nowrap; }
+.soul-account-rename small { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; }
+.soul-account-footer { display: flex; flex-direction: column; align-items: end; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+.soul-community .soul-account-footer p { align-self: stretch; margin: 0; font-size: 11px; }
+.soul-community .soul-account-footer button { background: transparent; box-shadow: none; border: 1px solid var(--border-soft); border-radius: 5px; color: var(--muted); }
+.soul-community .soul-account-footer button:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--surface)); border-color: color-mix(in srgb, var(--red) 30%, var(--border-soft)); }
+.soul-community-account .soul-account-authorization [data-community="login-code"] { display: block; width: 100%; height: 48px; margin: 14px 0; text-align: center; font-family: monospace; font-size: 24px; letter-spacing: 3px; color: var(--text); }
+.soul-community .soul-account-authorization p { font-size: 11px; }
+.soul-account-authorization .soul-community-filter-actions { gap: 8px; }
+.soul-community-account[data-state="loading"] .soul-account-badge::before { animation: titlebar-account-pulse 1.2s ease-in-out infinite; }
+@keyframes soul-account-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .soul-account-dialog[open], .soul-account-badge::before { animation: none !important; } }
+@container (max-width: 350px) { .soul-account-profile { display: grid; grid-template-columns: 46px minmax(0, 1fr); padding: 12px; gap: 9px 12px; } .soul-account-badge { grid-column: 2; justify-self: start; } .soul-account-rename-row { flex-wrap: wrap; } .soul-community .soul-account-rename-row input { flex-basis: 100%; } .soul-account-rename-row button { margin-left: auto; } }
+.soul-upload-account-button { margin-bottom: 14px; }
+.soul-community-account [data-community="login-code"] { width: 180px; max-width: 100%; font-family: monospace; font-size: 18px; letter-spacing: 2px; }
+.soul-community-filters { margin-top: 14px; padding: 14px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--community-shadow); }
+.soul-community-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 12px; }
+.soul-community-filter-grid label { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--ui-muted); font-size: 11px; }
+.soul-community .soul-community-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; width: 100%; text-align: left; background: var(--surface); box-shadow: none; font-size: 12px; }
+.soul-community-picker-trigger > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.soul-community-picker-trigger > span:last-child { flex: none; color: var(--ui-muted); font-size: 16px; }
+.soul-community-quick-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.soul-community-quick-filters > div { display: flex; flex-wrap: wrap; gap: 4px; margin-right: 8px; }
+.soul-community-quick-filters button[aria-pressed="true"] { background: var(--ui-selected, var(--surface-hover)); box-shadow: inset 0 0 0 1px var(--ui-muted); }
+.soul-community-filters > details > summary { padding: 9px 0; }
+.soul-community-filters > details[open] > .soul-community-filter-grid { border-top: 1px solid var(--border-soft); padding: 12px 0; }
+.soul-community [data-community="active-filters"] { margin-bottom: 0; font-size: 11px; overflow-wrap: anywhere; }
+.soul-community [data-community="active-filters"]:empty, .soul-community [data-community="filter-hint"]:empty { display: none; }
+.soul-community-picker { width: min(700px, calc(100vw - 32px)); height: min(540px, calc(100vh - 48px)); max-width: none; max-height: none; padding: 16px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--ui-panel, var(--surface)); box-shadow: 0 16px 50px #0005; }
+.soul-community-picker[open] { display: flex; flex-direction: column; gap: 12px; }
+.soul-community-picker::backdrop { background: #0005; }
+.soul-community-picker .soul-community-heading { flex: none; padding-bottom: 10px; }
+.soul-community-picker h3 { margin: 0; }
+.soul-community-picker [data-community="picker-search"] { flex: none; background: var(--surface-raised); }
+.soul-community-picker-browser { display: grid; grid-template-columns: 94px minmax(0, 1fr); min-height: 0; flex: 1; gap: 12px; }
+.soul-community-picker-browser nav { display: flex; flex-direction: column; gap: 4px; overflow: auto; }
+.soul-community-picker-browser nav button { text-align: left; flex: none; box-shadow: none; background: transparent; font-size: 11px; }
+.soul-community-picker-browser nav button[aria-pressed="true"] { background: var(--surface-hover); }
+.soul-community-picker-scroll { min-width: 0; overflow: auto; scrollbar-gutter: stable; }
+.soul-community-picker-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 8px; }
+.soul-community .soul-community-picker-card { display: flex; align-items: center; min-width: 0; min-height: 66px; padding: 8px; gap: 8px; text-align: left; box-shadow: none; background: var(--surface-raised); }
+.soul-community-picker-card[aria-pressed="true"] { outline: 1px solid var(--ui-muted); outline-offset: -1px; }
+.soul-community-picker-card .soul-picker-portrait { width: 34px; height: 34px; }
+.soul-community-picker-card .soul-picker-card-info { gap: 5px; overflow: hidden; }
+.soul-community-picker-card strong { font-size: 12px; overflow-wrap: anywhere; }
+.soul-community-picker-card small { font-size: 10px; color: var(--ui-muted); }
+.soul-community-picker-footer { display: flex; flex: none; justify-content: space-between; align-items: center; padding-top: 10px; border-top: 1px solid var(--border-soft); color: var(--ui-muted); font-size: 11px; }
+@media (max-width: 650px) { .soul-community-picker-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .soul-community-picker-browser { grid-template-columns: 78px minmax(0, 1fr); gap: 8px; } .soul-community-picker-cards { grid-template-columns: minmax(0, 1fr); } }
+.soul-community-filter-range { display: flex; align-items: center; gap: 6px; }
+.soul-community-filter-range input { flex: 1; width: 0; }
+.soul-community-range { --content-selection-frame: var(--blue); display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; color: var(--ui-muted); font-size: 11px; }
+.soul-community-range legend { padding: 0 0 6px; }
+.soul-community-range .soul-range-slider { flex: none; margin: 0 9px; }
+.soul-community-range .soul-range-slider input[type="range"] { min-height: 0; background: transparent; }
+.soul-community-range-scale { display: flex; justify-content: space-between; align-items: center; gap: 4px; font-size: 10px; line-height: 16px; }
+.soul-community .soul-community-range-scale button { min-height: 0; padding: 0 4px; border: 0; background: transparent; color: var(--ui-muted); font-size: 10px; line-height: 16px; box-shadow: none; }
+.soul-community .soul-community-range-scale button:not(:disabled):hover { color: var(--text); background: var(--surface-hover); }
+.soul-community-range-scale button:disabled { opacity: .45; }
+.soul-community-range[data-disabled="true"] { opacity: .5; }
+.soul-community-range[data-disabled="true"] input[type="range"]::-webkit-slider-thumb { cursor: default; }
+.soul-community select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 32px; background: var(--surface); color: var(--text); border: 1px solid transparent; border-radius: 4px; padding: 7px 9px; font: inherit; font-size: 12px; }
+.soul-community-filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.soul-community-filter-actions [data-community="apply"] { background: var(--ui-selected, var(--surface-hover)); }
+.soul-community [data-community="filter-hint"] { color: var(--red); font-size: 11px; }
+.soul-community [data-community="summary"] { font-size: 11px; }
+.soul-community-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0 20px; font-size: 11px; color: var(--ui-muted); }
+.soul-community-pagination label { display: flex; align-items: center; gap: 6px; }
+.soul-community-pagination select { width: auto; }
+.soul-community-pagination [data-community="more"] { margin-left: auto; }
+.soul-community input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 32px; background: var(--surface); color: var(--text); border: 1px solid transparent; border-radius: 4px; padding: 7px 9px; font: inherit; font-size: 12px; transition: background-color 120ms ease; }
+.soul-community button { background: var(--surface-raised); color: var(--text); border: 1px solid transparent; border-radius: 4px; padding: 7px 10px; min-height: 30px; font: inherit; font-size: 11px; box-shadow: var(--community-shadow); cursor: pointer; transition: background-color 120ms ease, box-shadow 120ms ease, color 120ms ease; }
+.soul-community button:hover:not(:disabled), .soul-community input:hover { background: var(--surface-hover); }
+.soul-community button:active:not(:disabled) { background: var(--ui-selected, var(--surface-hover)); box-shadow: inset 0 1px 3px #0002; }
+.soul-community button:disabled { opacity: .5; cursor: default; }
+.soul-community :is(input, button, select):focus-visible { outline: 1px solid var(--ui-focus); outline-offset: 2px; }
+.soul-community-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); align-items: start; gap: 10px; margin: 12px 0 20px; }
+.soul-community-results:empty { display: none; }
+.soul-community .soul-community-choice { text-align: left; display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 12px 14px; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.soul-community .soul-community-choice[aria-pressed="true"] { background: var(--ui-selected, var(--surface-hover)); box-shadow: inset 0 0 0 1px var(--ui-muted), var(--community-shadow); }
+.soul-community-choice small { color: var(--ui-muted); }
+.soul-community-choice-rating { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 3px 0; font-variant-numeric: tabular-nums; }
+.soul-community-choice-rating > strong { color: var(--green); font-size: 20px; }
+.soul-community-choice-rating > span { font-size: 12px; font-weight: 600; }
+.soul-community-choice-status { color: var(--muted); font-size: 10px; }
+.soul-community-comparison-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border-soft); padding-top: 16px; }
+.soul-community-comparison-heading h4 { font-size: 13px; margin-bottom: 4px; }
+.soul-community-comparison-heading p { font-size: 11px; margin: 0; }
+.soul-community-badge { flex: none; padding: 5px 8px; border-radius: 4px; background: var(--surface-raised); color: var(--muted); font-size: 11px; }
+.soul-community-scores { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.soul-community-scores > div { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--community-shadow); min-width: 0; }
+.soul-community-scores small { color: var(--muted); font-size: 11px; }
+.soul-community-scores strong { font-size: 22px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.soul-community-scores [data-kind="mine"] strong { color: var(--community-blue); }
+.soul-community-scores [data-kind="remote"] strong { color: var(--green); }
+.soul-community-panel-card { padding: 14px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--community-shadow); }
+.soul-community-panel-card h5, .soul-community-slots-title { font-size: 12px; }
+.soul-community-panel-tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.soul-community .soul-community-slots-title { margin-top: 20px; }
+.soul-community-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 12px; margin-top: 12px; }
+.soul-community-slot { padding: 14px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--community-shadow); min-width: 0; }
+.soul-community-slot h5 { font-size: 12px; }
+.soul-community-gears { display: grid; gap: 6px; margin: 12px 0; }
+.soul-community-gear { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 4px; background: var(--surface); min-width: 0; }
+.soul-community-gear .soul-position-portrait { width: 36px; height: 36px; flex: none; }
+.soul-community-gear > div { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 4px 8px; min-width: 0; }
+.soul-community-gear small { font-size: 10px; color: var(--muted); }
+.soul-community-gear strong { font-size: 12px; }
+.soul-community-gear span:not(.soul-position-portrait) { grid-column: 1 / -1; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.soul-community-gear[data-kind="mine"] strong { color: var(--community-blue); }
+.soul-community-gear[data-kind="remote"] strong { color: var(--green); }
+.soul-community-gear > div { flex: 1; }
+.soul-community-gear .soul-community-enhancement-score { display: grid; gap: 3px; margin-left: auto; align-self: flex-start; flex: none; text-align: right; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--text); }
+.soul-community-enhancement-score small { font-size: 9px; font-weight: 400; }
+.soul-community-table-wrap { min-width: 0; overflow-x: auto; border-radius: 4px; background: var(--surface); }
+.soul-community-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; }
+.soul-community-table caption { text-align: left; color: var(--ui-muted); margin-bottom: 8px; }
+.soul-community-table :is(th, td) { padding: 9px 8px; border-bottom: 1px solid var(--border-soft); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.soul-community-table :is(th, td):first-child { width: 30%; text-align: left; }
+.soul-community-table thead th { font-weight: 500; color: var(--muted); font-size: 10px; }
+.soul-community-table tbody th { font-weight: 400; color: var(--muted); }
+.soul-community-table td { font-weight: 600; }
+.soul-community-table td:nth-child(2) { color: var(--community-blue); }
+.soul-community-table td:nth-child(3) { color: var(--green); }
+.soul-community-table tbody tr:last-child > * { border-bottom: 0; }
+.soul-community [data-delta="positive"] { color: var(--green); }
+.soul-community [data-delta="negative"] { color: var(--red); }
+.soul-community [data-delta="equal"] { color: var(--muted); }
+.soul-community-slot .soul-community-intrinsic { font-size: 10px; margin: 8px 0 0; }
+.soul-community .soul-community-footnote { font-size: 11px; margin-top: 16px; }
+.soul-community-owned { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; margin: 6px 0; }
+@container (min-width: 1900px) { .soul-community-slots { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@container (max-width: 900px) { .soul-community-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 650px) {
+  .soul-community-slots, .soul-community-panel-tables { grid-template-columns: minmax(0, 1fr); }
+  .soul-community-comparison-heading { flex-wrap: wrap; }
+  .soul-community-scores { gap: 6px; }
+  .soul-community-scores > div { padding: 12px 8px; }
+  .soul-community-scores strong { font-size: 16px; }
+  .soul-community-scores small { font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .soul-community :is(input, button) { transition: none; } }

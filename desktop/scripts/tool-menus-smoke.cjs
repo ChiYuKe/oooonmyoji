@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Actual shell markup, styles and menu controllers in an isolated Electron window.
 // No host bridge, workflow edits, or device connection.
 const { app, BrowserWindow } = require('electron');
@@ -13,12 +14,12 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 190));
 
 app.whenReady().then(async () => {
   fs.mkdirSync(artifacts, { recursive: true });
-  let html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
+  let html = readExpandedHtml(path.join(root, 'src/renderer/index.html'))
     .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g, '')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
     .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/g, '')
     .replace(/href="\/([^"]+)"/g, (_, file) => `href="${pathToFileURL(path.join(root, 'public', file))}"`);
-  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8').replace(/^@import[^;]*;/, '');
+  const css = readExpandedCss(path.join(root, 'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/, '');
   html = html.replace('<head>', `<head><style>${css}</style>`).replace('<html lang="zh-CN">', '<html lang="zh-CN" data-theme="dark">');
   html = html.replace('src="./assets/onmyoji-icon.png"', `src="${pathToFileURL(path.join(root,'src/renderer/assets/onmyoji-icon.png'))}"`);
   const fixture = path.join(artifacts, 'toolbar.html');

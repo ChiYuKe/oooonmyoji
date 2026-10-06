@@ -88,7 +88,7 @@ test('详情栏镜像：setInspectorSelection(kind=comment) 让镜像渲染注�
   const status = fs.readFileSync(path.join(__dirname, '..', 'src/canvas/state/editor-status.ts'), 'utf8');
   assert.match(status, /kind: 'comment', commentId: state\.selectedCommentId/, '画布侧要投影出 comment 选区');
   // 壳层把 inspectorRequested 转发给 detailsFrame（镜像 iframe）：这条链路不能被改掉。
-  const host = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/editor-host.ts'), 'utf8');
+  const host = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app/editor-host.ts'), 'utf8');
   assert.match(host, /case 'inspectorRequested'/, '壳层要处理 inspectorRequested');
   assert.match(host, /postToFrame\(detailsFrame, \{ type: 'editorCommand', command: 'setInspectorSelection'/, '要转发给详细信息镜像');
   // 可见的面板是镜像 iframe：文档画布自己的 #inspector 是隐藏的（这正是之前看不到面板的原因）。

@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Run via npm test (builds the renderer test output first).
 // 渲染入口的浮层契约：框选矩形（.marquee）必须随拖拽出现、更新、并在抬起后消失。
 //
@@ -491,7 +492,7 @@ test('没有 #canvas-grid 图层时退回容器，不抛错', () => {
 });
 
 test('网格背景留在独立图层：CSS 不得把它放回 #canvas-wrap，HTML 要有这一层', () => {
-  const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts), 'utf8').replace(/\r\n/g, '\n');
+  const read = (...parts) => { const filename = path.join(__dirname, '..', ...parts); const text = parts[0] === 'src/renderer' && parts[1]?.endsWith('.html') ? readExpandedHtml(filename) : parts[0] === 'src/renderer' && parts[1] === 'styles/workbench.css' ? readExpandedCss(filename) : fs.readFileSync(filename, 'utf8'); return text.replace(/\r\n/g, '\n'); };
   const css = read('public/legacy/workflow-editor.css');
   const block = (selector) => {
     const start = css.indexOf(`\n${selector} {`);

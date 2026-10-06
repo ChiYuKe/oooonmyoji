@@ -1,18 +1,19 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => { const filename = path.join(root, file); if (file.startsWith('src/renderer/') && file.endsWith('.html')) return readExpandedHtml(filename); if (file === 'src/renderer/styles/workbench.css') return readExpandedCss(filename); return fs.readFileSync(filename, 'utf8'); };
 
 test('workflow documents are real Dockview panels with per-document canvases', () => {
-  const docking = read('src/renderer/docking.ts');
-  const dockingDocuments = read('src/renderer/docking/documents.ts');
-  const shell = read('src/renderer/main.ts');
-  const lifecycleSrc = read('src/renderer/document-lifecycle.ts');
-const workspace = read('src/renderer/workspace.ts');
-  const styles = read('src/renderer/styles.css');
+  const docking = read('src/renderer/shell/docking/index.ts');
+  const dockingDocuments = read('src/renderer/shell/docking/documents.ts');
+  const shell = read('src/renderer/app/bootstrap.ts');
+  const lifecycleSrc = read('src/renderer/features/workflow/document-lifecycle.ts');
+const workspace = read('src/renderer/features/workflow/workspace.ts');
+  const styles = read('src/renderer/styles/workbench.css');
   const html = read('src/renderer/index.html');
 
   // 每个工作流文档一个 Dockview 面板，面板自带独立画布 iframe（渲染器在 docking/documents.ts）。

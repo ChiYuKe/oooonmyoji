@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Run after npm test. Uses an isolated card and an in-memory AI host, with no API requests.
 const { app, BrowserWindow, safeStorage, net, nativeImage } = require('electron');
 const fs = require('node:fs');
@@ -49,7 +50,7 @@ app.whenReady().then(async () => {
     ai.saveSettings({ ...ai.getSettings(), enabled: false, apiKey: '' });
     console.log(JSON.stringify({ electronFetchAndEncryptedStorage: true, actualMultimodalImageUpload: true, imageCompression: true }));
   } finally { await new Promise(resolve => server.close(resolve)); }
-  let html = fs.readFileSync(path.join(root, 'src/renderer/canvas.html'), 'utf8');
+  let html = readExpandedHtml(path.join(root, 'src/renderer/canvas.html'));
   html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g, '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
   html = html.replace(/href="\/([^"]+)"/g, (_, file) => `href="${pathToFileURL(path.join(root, 'public', file))}"`);
   const file = path.join(artifacts, 'ai-smoke.html'); fs.writeFileSync(file, html);
@@ -149,7 +150,7 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(artifacts, 'ai-card-empty-narrow-light.png'), (await win.webContents.capturePage()).toPNG());
   win.setContentSize(1250, 880);
   await win.webContents.executeJavaScript(`document.documentElement.dataset.theme='dark';document.body.classList.remove('desktop-details-mode');`);
-  const settingsHtml = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8').match(/<section id="settings-page-ai"[\s\S]*?<\/section>/)[0].replace('settings-page hidden', 'settings-page');
+  const settingsHtml = readExpandedHtml(path.join(root, 'src/renderer/index.html')).match(/<section id="settings-page-ai"[\s\S]*?<\/section>/)[0].replace('settings-page hidden', 'settings-page');
   const settingsResults = await win.webContents.executeJavaScript(`(async () => {
     const assert=require('node:assert/strict');
     document.body.innerHTML='<div class="settings-body">'+${JSON.stringify(settingsHtml)}+'</div>';

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { bindContentMarquee } = require('../dist-test-renderer/renderer/content-browser/marquee.js');
+const { bindContentMarquee } = require('../dist-test-renderer/renderer/features/content-browser/marquee.js');
 
 function emitter(extra = {}) {
   const listeners = new Map();

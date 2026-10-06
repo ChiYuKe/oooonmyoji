@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource:; frame-src 'self'; connect-src 'self' ws:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: onmyoji-resource: https://avatars.githubusercontent.com; frame-src 'self'; connect-src 'self' ws:;">
   <title>AutoFlow Studio</title>
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Regular.css">
   <link rel="stylesheet" href="/fonts/harmonyos-sans-sc/Semibold.css">
@@ -27,6 +27,6 @@
   </div>
   <script src="/shortcuts/shortcuts.js"></script>
   <script src="/shared/tooltip.js"></script>
-  <script type="module" src="./popout.ts"></script>
+  <script type="module" src="./shell/popout/entry.ts"></script>
 </body>
 </html>

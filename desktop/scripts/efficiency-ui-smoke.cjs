@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Run after npm test: node_modules/.bin/electron.cmd scripts/efficiency-ui-smoke.cjs
 // Isolated editor document and in-memory host; never reads or changes a user's workflow.
 const { app, BrowserWindow } = require('electron');
@@ -12,7 +13,7 @@ app.commandLine.appendSwitch('in-process-gpu');
 
 app.whenReady().then(async () => {
   fs.mkdirSync(artifacts, { recursive: true });
-  let html = fs.readFileSync(path.join(root, 'src/renderer/canvas.html'), 'utf8');
+  let html = readExpandedHtml(path.join(root, 'src/renderer/canvas.html'));
   html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g, '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
   html = html.replace(/href="\/([^"]+)"/g, (_, file) => `href="${pathToFileURL(path.join(root, 'public', file))}"`);
   const file = path.join(artifacts, 'efficiency-smoke.html'); fs.writeFileSync(file, html);

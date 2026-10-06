@@ -1,10 +1,11 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const postcss = require('postcss');
 const root = path.join(__dirname,'../public/legacy');
-const read = file => fs.readFileSync(path.join(root,file),'utf8');
+const read = file => { const filename = path.join(root, file); if (file.startsWith('src/renderer/') && file.endsWith('.html')) return readExpandedHtml(filename); if (file === 'src/renderer/styles/workbench.css') return readExpandedCss(filename); return fs.readFileSync(filename, 'utf8'); };
 const frame = postcss.parse(read('editor-frame.css'));
 const properties = selector => {
   const result = {};

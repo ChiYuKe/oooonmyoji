@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createInstancePicker } = require('../dist-test-renderer/renderer/instance-picker.js');
+const { createInstancePicker } = require('../dist-test-renderer/renderer/features/workflow/instance-picker.js');
 
 class ElementStub {
   constructor() {

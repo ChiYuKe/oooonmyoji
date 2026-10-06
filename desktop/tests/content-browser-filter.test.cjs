@@ -1,8 +1,9 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {contentBrowserRecursiveItems, isUnderContentFolder, nextContentBrowserZoom, CONTENT_BROWSER_ZOOM_MIN, CONTENT_BROWSER_ZOOM_MAX} = require('../dist-test-renderer/renderer/content-browser/items.js');
+const {contentBrowserRecursiveItems, isUnderContentFolder, nextContentBrowserZoom, CONTENT_BROWSER_ZOOM_MIN, CONTENT_BROWSER_ZOOM_MAX} = require('../dist-test-renderer/renderer/features/content-browser/items.js');
 
 /** 复现内容浏览器的递归类型过滤：类型列在“最上层”也会收集深层资产。 */
 function harness(folder) {
@@ -61,11 +62,11 @@ test('内容区 Ctrl + 滚轮缩放条目尺寸', () => {
   }
 
   // 尺寸必须由 --cb-zoom 派生（否则改了变量也不缩放），滚轮必须 Ctrl 门控并持久化。
-  const styles = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/styles.css'), 'utf8');
+  const styles = readExpandedCss(path.join(__dirname, '..', 'src/renderer/styles/workbench.css'));
   assert.match(styles, /\.content-browser-items\.grid \{[^}]*minmax\(calc\(112px \* var\(--cb-zoom\)\)/, '网格列宽要跟随 --cb-zoom');
   assert.match(styles, /\.content-item-preview \{[^}]*height: calc\(72px \* var\(--cb-zoom\)\)/, '预览区高度要跟随 --cb-zoom');
   assert.match(styles, /\.content-browser-items \{[^}]*--cb-zoom: 1/, '默认缩放大小的声明在条目容器上');
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/content-browser.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/features/content-browser/index.ts'), 'utf8');
   assert.match(source, /addEventListener\('wheel',[\s\S]{0,200}?ctrlKey/, '内容区要监听 Ctrl + 滚轮');
   assert.match(source, /event\.preventDefault\(\)/, 'Ctrl + 滚轮要吃掉默认缩放');
   assert.match(source, /onmyoji-studio\.content-browser\.zoom/, '缩放值要持久化');

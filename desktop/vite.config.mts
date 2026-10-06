@@ -1,8 +1,24 @@
 import { defineConfig } from 'vite';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { expandTemplate } = require('./scripts/renderer-templates.cjs') as {
+  expandTemplate: (html: string, root: string) => string;
+};
+
+function rendererTemplates(root: string) {
+  return {
+    name: 'renderer-business-templates',
+    transformIndexHtml(html: string) {
+      return expandTemplate(html, root);
+    },
+  };
+}
 
 export default defineConfig({
   root: path.resolve(import.meta.dirname, 'src/renderer'),
+  plugins: [rendererTemplates(path.resolve(import.meta.dirname, 'src/renderer'))],
   publicDir: path.resolve(import.meta.dirname, 'public'),
   base: './',
   server: {

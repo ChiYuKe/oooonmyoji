@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Run via npm test (builds the renderer test output first).
 // 阶段 8：统一确认弹窗。改名影响范围、保存被拦下、崩溃恢复、外部文件变化都走它。
 // 这里用最小 DOM 替身验证交互契约：单次结算、Esc/遮罩取消、Tab 焦点陷阱、焦点归还、第三个动作。
@@ -179,15 +180,15 @@ test('四个入口共用同一个弹窗组件与样式', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const root = path.join(__dirname, '..');
-  const main = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'src/renderer/app/bootstrap.ts'), 'utf8');
   // 改名影响范围 / 保存被拦下 → editor-host 经 showImpactConfirm；恢复与外部变化 → main 直接调。
   assert.match(main, /showImpactConfirm: async \(request\) => \(await impactConfirm\.open\(request\)\) === true/);
   assert.match(main, /resolveRecoveryDraft[\s\S]*?impactConfirm\.open\(\{/);
   assert.match(main, /resolveExternalChangeDraft[\s\S]*?impactConfirm\.open\(\{/);
-  const host = fs.readFileSync(path.join(root, 'src/renderer/editor-host.ts'), 'utf8');
+  const host = fs.readFileSync(path.join(root, 'src/renderer/app/editor-host.ts'), 'utf8');
   assert.match(host, /showImpactConfirm\?\.\(\{/, '改名与保存都走同一个弹窗');
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
+  const html = readExpandedHtml(path.join(root, 'src/renderer/index.html'));
   assert.match(html, /id="impact-confirm-extra"/, '弹窗支持第三个动作按钮');
-  const styles = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  const styles = readExpandedCss(path.join(root, 'src/renderer/styles/workbench.css'));
   assert.match(styles, /\.impact-confirm-preview \{/, '对比正文有样式');
 });

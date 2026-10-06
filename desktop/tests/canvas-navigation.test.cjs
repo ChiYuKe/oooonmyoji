@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Run via npm test (builds the renderer test output first).
 // 阶段 5：布局与导航命令分派 —— 自动排列范围、锁定位置、画布前进/后退、按状态/类型临时隐藏。
 // 这里直接跑生产分派实现，断言「命令 → 依赖调用」这一层接线。
@@ -104,7 +105,7 @@ test('画布入口把阶段 5 的命令都接上真实实现', () => {
 });
 
 test('画布底部只显示缩放比例，排列预览确认条仍可用', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/canvas.html'), 'utf8');
+  const html = readExpandedHtml(path.join(__dirname, '..', 'src/renderer/canvas.html'));
   assert.match(html, /id="zoom-label"/);
   for (const id of ['btn-viewport-back', 'btn-viewport-forward', 'btn-arrange', 'btn-filter', 'btn-zoom-out', 'btn-zoom-in']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`), `画布底部不再显示 #${id}`);
@@ -132,7 +133,7 @@ test('画布底部只显示缩放比例，排列预览确认条仍可用', () =>
 });
 
 test('排列预览的确认条显眼：文案说明 + 反色实心「应用排列」+ Enter/Esc 快捷键', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/canvas.html'), 'utf8');
+  const html = readExpandedHtml(path.join(__dirname, '..', 'src/renderer/canvas.html'));
   // 以前只有一个小灰「应用」，用户找不到出口；现在文案里直说「点它才写入」，按钮也带上了键位。
   assert.match(html, /id="arrange-preview-hint"/);
   assert.match(html, /应用排列 \(Enter\)/);
@@ -157,7 +158,7 @@ test('排列预览的确认条显眼：文案说明 + 反色实心「应用排�
 });
 
 test('工具条与工具菜单的「自动排列」也走同一条预览命令', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/index.html'), 'utf8');
+  const html = readExpandedHtml(path.join(__dirname, '..', 'src/renderer/index.html'));
   // 以前工具条是「直接排 + fitView」、右键菜单是预览，两条路行为不一致；现在统一成预览。
   assert.equal(html.split('data-editor-command="previewArrange"').length - 1, 2);
   assert.equal(html.includes('data-editor-command="autoLayout"'), false);

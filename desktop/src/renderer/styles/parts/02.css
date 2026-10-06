@@ -1,0 +1,300 @@
+.duel-stat-field input::placeholder { color: var(--muted); font-weight: 400; opacity: .65; }
+.duel-stat-field input:hover, .duel-stat-field input:focus { background: var(--surface-hover); }
+.duel-stat-field input::-webkit-inner-spin-button, .duel-stat-field input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.duel-fighter-card > .duel-recognize-button { grid-row: 11; align-self: center; margin: 4px 8px; }
+.duel-simulation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.duel-run-count-field { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.duel-prediction-module .duel-run-count { width: 88px; min-height: 32px; background: var(--surface-raised); color: var(--text); text-align: center; font-variant-numeric: tabular-nums; }
+.duel-team, .duel-fighter-card { position: relative; }
+.duel-recognition-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; border-radius: inherit; background: color-mix(in srgb, var(--surface-raised) 85%, transparent); cursor: wait; }
+.duel-loading-ring { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--duel-value); border-radius: 50%; animation: spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .duel-loading-ring { animation-duration: 2s; } }
+.duel-prediction-module .duel-capture-instance, .duel-prediction-module .duel-recognize-button { min-height: 32px; padding: 6px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: var(--text); box-shadow: var(--duel-shadow); font: inherit; font-size: 11px; }
+.duel-prediction-module .duel-capture-instance { width: auto; min-width: 140px; }
+.duel-prediction-module .duel-recognize-button { justify-self: start; cursor: pointer; }
+.duel-prediction-module .duel-fighter-card > .duel-recognize-button { justify-self: center; min-height: 28px; padding: 4px 10px; background: transparent; box-shadow: none; color: var(--muted); }
+.duel-prediction-module .duel-recognize-button:hover:not(:disabled), .duel-prediction-module .duel-reset-button:hover:not(:disabled), .duel-prediction-module .duel-run-button:hover:not(:disabled) { background: var(--surface-hover); }
+.duel-prediction-module .duel-recognize-roster { margin: 0; }
+.duel-prediction-module .duel-recognize-button:disabled { cursor: wait; opacity: .65; }
+.duel-recognition-status { color: var(--muted); font-size: 10px; }
+.duel-recognition-status:empty { display: none; }
+.duel-prediction-module .duel-run-button, .duel-prediction-module .duel-reset-button { min-height: 32px; padding: 6px 12px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: var(--text); box-shadow: var(--duel-shadow); font: inherit; font-size: 11px; cursor: pointer; }
+.duel-prediction-module .duel-run-button { background: var(--ui-selected, var(--surface-hover)); font-weight: 600; }
+.duel-simulation-result:empty { display: none; }
+.duel-simulation-result { display: grid; gap: 12px; padding: 14px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--duel-shadow); }
+.duel-simulation-output { min-width: 0; padding: 14px; border-radius: 4px; background: var(--surface-raised); box-shadow: var(--duel-shadow); }
+.duel-output-title { margin: 0 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.duel-simulation-output > .duel-simulation-result { padding: 0; background: transparent; box-shadow: none; }
+.duel-simulation-empty { padding: 24px 12px; color: var(--muted); text-align: center; }
+.duel-simulation-empty strong { color: var(--text); font-size: 12px; font-weight: 500; }
+.duel-simulation-empty p { max-width: 280px; margin: 8px auto 0; font-size: 11px; line-height: 1.7; }
+.duel-simulation-output:has(.duel-simulation-result:not(:empty)) > .duel-simulation-empty { display: none; }
+.duel-simulation-result h3, .duel-result-draws { margin: 0; text-align: center; }
+.duel-result-rates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.duel-result-side { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 4px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.duel-result-side strong { color: var(--text); font-size: 18px; }
+.duel-result-side.is-leading strong { color: var(--green); }
+.duel-result-draws { color: var(--muted); font-size: 10px; }
+.duel-battle-log { min-width: 0; border-top: 1px solid var(--border-soft); padding-top: 8px; }
+.duel-battle-log > summary { color: var(--text); font-size: 11px; cursor: pointer; }
+.duel-battle-log > ol { display: grid; gap: 8px; max-height: 420px; overflow: auto; margin: 8px 0 0; padding: 0 4px 0 0; list-style: none; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.duel-log-filters { display: flex; flex: none; gap: 5px; padding-top: 10px; }
+.duel-match-nav { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 6px; border-radius: 4px; background: var(--surface); }
+.duel-match-nav button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 3px; height: 28px; padding: 0 6px; border: 0; border-radius: 3px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.duel-match-nav button:hover:not(:disabled) { background: var(--surface-hover); }
+.duel-match-nav button svg { flex: none; width: 13px; height: 13px; }
+.duel-match-nav button:disabled { opacity: .45; cursor: default; }
+.duel-match-position { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; gap: 5px; }
+.duel-prediction-module .duel-match-number { flex: none; width: 56px; min-height: 28px; height: 28px; padding: 3px 4px; border: 1px solid var(--border-soft); border-radius: 3px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; }
+.duel-match-number::-webkit-inner-spin-button, .duel-match-number::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.duel-match-total { flex: none; color: var(--muted); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.duel-log-filters button { padding: 4px 8px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.duel-log-filters button:hover, .duel-log-filters button[aria-pressed="true"] { background: var(--surface-hover); color: var(--text); }
+.duel-log-group { min-width: 0; padding: 10px; border-left: 3px solid var(--border); border-radius: 4px; background: var(--surface); }
+.duel-log-group[hidden] { display: none; }
+.duel-log-group-blue { border-left-color: var(--duel-value); }
+.duel-log-group-red { border-left-color: var(--red); }
+.duel-log-blue { color: var(--duel-value); }
+.duel-log-red { color: var(--red); }
+.duel-action-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 5px; color: var(--text); font-size: 12px; }
+.duel-action-number { margin-right: auto; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.duel-action-side { padding: 1px 5px; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, transparent); font-size: 10px; }
+.duel-action-actor { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+.duel-action-actor .soul-picker-portrait { flex: none; width: 24px; height: 24px; }
+.duel-log-icon { display: inline-block; flex: none; width: 13px; height: 13px; vertical-align: middle; }
+.duel-action-skill { display: flex; align-items: start; gap: 7px; margin: 0 0 8px; color: var(--text); font-size: 12px; font-weight: 500; }
+.duel-action-skill-body { min-width: 0; }
+.duel-log-skill-icon { position: relative; display: grid; place-items: center; flex: none; width: 24px; height: 24px; overflow: hidden; border-radius: 50%; background: var(--surface-raised); color: var(--muted); }
+.duel-log-skill-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.duel-action-fire { display: flex; align-items: center; gap: 4px; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.duel-log-event { display: flex; align-items: baseline; gap: 7px; margin-top: 5px; }
+.duel-event-kind { display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex: none; min-width: 34px; padding: 1px 4px; border-radius: 3px; background: color-mix(in srgb, currentColor 10%, transparent); text-align: center; font-size: 10px; }
+.duel-log-event > .soul-picker-portrait { flex: none; align-self: start; width: 20px; height: 20px; }
+.duel-event-damage, .duel-event-defeat { color: var(--red); }
+.duel-event-heal { color: var(--green); }
+.duel-event-control, .duel-event-resource { color: var(--hero-rarity-ssr, #d4b477); }
+.duel-event-shield, .duel-event-gauge { color: var(--duel-value); }
+.duel-event-text { min-width: 0; margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.duel-event-number { font-weight: 600; font-variant-numeric: tabular-nums; }
+.duel-event-damage .duel-event-number, .duel-event-defeat .duel-event-number { color: var(--red); }
+.duel-event-heal .duel-event-number { color: var(--green); }
+.duel-action-details { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border-soft); }
+.duel-action-details > summary { color: var(--muted); font-size: 10px; cursor: pointer; }
+.duel-action-extra { padding-top: 3px; }
+.duel-action-extra .duel-event-text, .duel-event-state { color: var(--muted); font-size: 10px; }
+.duel-event-state { margin: 5px 0 0; overflow-wrap: anywhere; }
+.duel-result-error { margin: 0; color: var(--error, #df8d88); font-size: 11px; }
+@container (min-width: 1320px) {
+  .duel-prediction-simulator { grid-template-columns: minmax(0, 1fr) clamp(320px, 27%, 440px); align-items: start; }
+  .duel-simulation-intro { grid-column: 1 / -1; grid-row: 1; }
+  .duel-roster-workspace { grid-column: 1; grid-row: 2; }
+  .duel-simulation-output { grid-column: 2; grid-row: 2; position: sticky; top: 0; display: flex; flex-direction: column; min-height: 0; height: var(--duel-output-height, 0px); }
+  .duel-output-title { flex: none; }
+  .duel-simulation-output > .duel-simulation-result { flex: 1; min-height: 0; grid-template-rows: auto auto auto minmax(0, 1fr); }
+  .duel-simulation-output > .duel-simulation-result:has(.duel-result-error) { flex: none; grid-template-rows: auto; }
+  .duel-simulation-empty { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .duel-simulation-output .duel-result-side { flex-direction: column; align-items: start; gap: 6px; }
+  .duel-simulation-output .duel-battle-log { display: flex; flex-direction: column; min-height: 0; }
+  .duel-simulation-output .duel-battle-log::details-content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+  .duel-simulation-output .duel-battle-log > summary { flex: none; line-height: 1.6; }
+  .duel-simulation-output .duel-battle-log > ol { flex: 1; min-height: 0; max-height: none; align-content: start; font-size: 11px; line-height: 1.7; }
+  .duel-simulation-output .duel-battle-log:not([open]) > ol { display: none; }
+}
+.duel-roi-dialog { box-sizing: border-box; width: min(880px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - 32px); padding: 16px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 16px 48px #0006; }
+.duel-roi-dialog::backdrop { background: #0006; }
+.duel-roi-heading, .duel-roi-footer { display: flex; align-items: center; gap: 12px; }
+.duel-roi-heading { justify-content: space-between; align-items: start; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.duel-roi-heading-info { min-width: 0; }
+.duel-roi-heading h2 { margin: 0; font-size: 14px; }
+.duel-roi-dialog .duel-roi-help { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.duel-roi-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.duel-roi-instance-field { display: flex; align-items: center; flex: 1; min-width: 0; gap: 10px; color: var(--muted); font-size: 11px; }
+.duel-roi-instance-field[hidden], .duel-roi-dialog .duel-roi-refresh[hidden] { display: none !important; }
+.duel-roi-instance-field > span { flex: none; }
+.duel-roi-dialog .duel-capture-instance { flex: 1; min-width: 0; width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 12px; }
+.duel-roi-dialog .duel-capture-instance:focus-visible { outline: 2px solid var(--ui-focus, var(--blue)); outline-offset: 2px; }
+.duel-roi-viewport { display: flex; justify-content: center; align-items: center; min-width: 0; overflow: hidden; padding: 8px; border-radius: 5px; background: var(--surface-raised); }
+.duel-roi-viewport.is-image-mode { min-height: min(360px, 48vh); border: 1px dashed var(--border); cursor: pointer; }
+.duel-roi-viewport.is-image-mode:not(.is-image-dragging):hover { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, var(--surface-raised)); }
+.duel-roi-placeholder { display: grid; place-items: center; width: 100%; min-height: 180px; margin: 0; padding: 16px; color: var(--muted); font-size: 12px; line-height: 1.6; text-align: center; }
+.duel-roi-stage[hidden], .duel-roi-placeholder[hidden] { display: none !important; }
+.duel-roi-stage { position: relative; width: max-content; max-width: 100%; line-height: 0; touch-action: none; cursor: crosshair; }
+.duel-roi-image { display: block; width: auto; height: auto; max-width: 100%; max-height: min(520px, calc(100vh - 240px)); user-select: none; }
+.duel-roi-selection { position: absolute; z-index: 1; box-sizing: border-box; border: 2px solid var(--blue); background: color-mix(in srgb, var(--blue) 20%, transparent); pointer-events: none; }
+.duel-roi-footer { padding-top: 12px; }
+.duel-roi-size { flex: 1; color: var(--muted); font-size: 11px; }
+.duel-roi-dialog .duel-roi-close, .duel-roi-dialog .duel-roi-cancel, .duel-roi-dialog .duel-roi-refresh, .duel-roi-dialog .duel-roi-import, .duel-roi-dialog .duel-roi-recognize-image { flex: none; min-height: 28px; padding: 5px 10px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 11px; box-shadow: 0 2px 5px #0003; cursor: pointer; }
+.duel-roi-dialog .duel-roi-refresh { min-height: 32px; }
+.duel-roi-dialog .duel-roi-refresh:disabled, .duel-roi-dialog .duel-roi-recognize-image:disabled, .duel-roi-dialog .duel-capture-instance:disabled { opacity: .5; cursor: default; }
+.duel-roi-dialog .duel-roi-file[hidden] { display: none; }
+.duel-roi-dialog .duel-roi-import { min-height: 32px; }
+.duel-roi-dialog .duel-roi-recognize-image { background: var(--blue); color: var(--text-on-accent, #fff); }
+.duel-roi-dialog .duel-roi-close { width: 28px; height: 28px; padding: 0; font-size: 16px; }
+.duel-roi-dialog button:hover { background: var(--surface-hover); }
+.duel-roi-dialog button:focus-visible { outline: 2px solid var(--ui-focus, var(--blue)); outline-offset: 2px; }
+.duel-roi-viewport.is-image-dragging { outline: 2px dashed var(--blue); outline-offset: -4px; background: color-mix(in srgb, var(--blue) 12%, var(--surface-raised)); }
+.duel-roi-placeholder { white-space: pre-line; }
+.team-builder-content {
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+.soul-calculator { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow: hidden; background: var(--dock-panel-background, var(--surface)); }
+.soul-source { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.soul-toolbar, .soul-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.soul-filters { flex: 0 0 34px; min-width: 0; height: 34px; flex-wrap: nowrap; }
+.soul-filters > button { flex: 0 0 auto; white-space: nowrap; }
+.soul-toolbar label { color: var(--muted); font-size: 12px; }
+.soul-toolbar select { min-width: 160px; max-width: 300px; flex: 1; }
+.soul-sort-controls { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.soul-calculator #soul-sort { flex: 0 0 144px; width: 144px; min-width: 0; max-width: none; }
+.soul-calculator #soul-sort-direction { width: 28px; padding: 0; font-size: 16px; }
+.soul-calculator button, .soul-calculator select, .soul-calculator input { min-height: 28px; border: 1px solid var(--border); border-radius: 3px; padding: 4px 9px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 12px; }
+.soul-calculator button { cursor: pointer; }
+.soul-calculator button:disabled { opacity: .45; cursor: default; }
+.soul-calculator button:hover:not(:disabled) { background: var(--surface-hover); }
+.soul-calculator button:focus-visible, .soul-calculator select:focus-visible, .soul-calculator input:focus-visible, .soul-calculator summary:focus-visible { outline: 1px solid var(--ui-focus, var(--blue)); outline-offset: 2px; }
+.soul-calculator .soul-toolbar > button, .soul-calculator .soul-toolbar select, .soul-calculator .soul-sort-controls > button, .soul-calculator .soul-filters > button { border-color: transparent; border-radius: 4px; background: var(--surface-raised); color: color-mix(in srgb, var(--text) 85%, var(--muted)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.soul-calculator .soul-toolbar > button:hover:not(:disabled), .soul-calculator .soul-toolbar select:hover:not(:disabled), .soul-calculator .soul-sort-controls > button:hover:not(:disabled), .soul-calculator .soul-filters > button:hover:not(:disabled) { background: var(--surface-hover); }
+.soul-calculator .soul-toolbar > button:focus-visible, .soul-calculator .soul-toolbar select:focus-visible, .soul-calculator .soul-sort-controls > button:focus-visible, .soul-calculator .soul-filters > button:focus-visible { outline: none; background: var(--ui-selected, var(--surface-hover)); text-decoration: underline; text-underline-offset: 3px; }
+.soul-calculator .soul-toolbar select:open { background: var(--ui-selected, var(--surface-hover)); }
+.soul-calculator .soul-toolbar > button:active:not(:disabled), .soul-calculator .soul-sort-controls > button:active:not(:disabled), .soul-calculator .soul-filters > button:active:not(:disabled), .soul-calculator .soul-active-chip:active:not(:disabled) { background: var(--ui-selected, var(--surface-hover)); }
+/* Style the native picker in Chromium's top layer, keeping native selection and keyboard behavior. */
+@supports (appearance: base-select) {
+  .soul-calculator :is(#soul-instance, #soul-sort), .soul-calculator :is(#soul-instance, #soul-sort)::picker(select) { appearance: base-select; }
+  .soul-calculator :is(#soul-instance, #soul-sort)::picker(select) { padding: 6px; border: 0; border-radius: 4px; background: var(--surface-raised); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18); max-height: min(360px, calc(100vh - 24px)); overflow: auto; font-size: 12px; }
+  .soul-calculator :is(#soul-instance, #soul-sort) option { min-height: 30px; padding: 6px 9px; border-radius: 3px; color: var(--text); background: transparent; font-size: 12px; font-weight: 400; }
+  .soul-calculator :is(#soul-instance, #soul-sort) option:is(:hover, :focus-visible) { outline: none; background: var(--surface-hover); }
+  .soul-calculator :is(#soul-instance, #soul-sort) option:checked { background: var(--ui-selected, var(--surface-hover)); color: var(--content-selection-text); font-weight: 500; }
+  .soul-calculator :is(#soul-instance, #soul-sort) option::checkmark { color: currentColor; }
+  .soul-calculator #soul-sort optgroup { padding: 5px 0; color: var(--muted); font-size: 11px; font-weight: 400; }
+}
+.soul-calculator [hidden] { display: none !important; }
+.soul-calculator p { margin: 0; }
+.soul-status-area { display: grid; gap: 3px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.soul-status-area .soul-fetch-hint { color: var(--text); }
+.soul-fetch-hint strong { font-weight: 600; }
+.soul-status-area .error { color: var(--danger, #e68787); }
+.soul-status-area progress { width: 100%; height: 6px; accent-color: var(--blue); }
+.soul-summary, .soul-note { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.soul-search-field { flex: 0 1 260px; min-width: 160px; display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.soul-search-field:hover, .soul-search-field:focus-within { background: var(--surface-hover); }
+.soul-search-field svg { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); }
+.soul-calculator .soul-search-field input { width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; outline: 0; background: transparent; }
+.soul-calculator .soul-search-field input:focus-visible { outline: none; }
+.soul-calculator input::placeholder { color: var(--muted); }
+.soul-filter-drawer { flex: 0 0 clamp(380px, 38%, 440px); min-width: 0; min-height: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: color-mix(in srgb, var(--surface-raised) 40%, var(--surface)); border: 1px solid transparent; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); }
+.soul-window-header { display: flex; align-items: center; justify-content: space-between; flex: 0 0 32px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--border-soft); background: var(--surface-raised); }
+.soul-filter-drawer .soul-window-header { background: transparent; }
+.soul-window-header strong { font-size: 12px; font-weight: 500; }
+.soul-calculator .soul-window-header button { min-height: 24px; width: 24px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; }
+.soul-detail-window { position: fixed; inset: auto; margin: 0; padding: 0; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); box-sizing: border-box; overflow: hidden; background: var(--surface-raised); color: var(--text); border: 0; border-radius: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.18); }
+.soul-detail-window:popover-open { display: flex; flex-direction: column; pointer-events: none; }
+.soul-detail-window > .soul-window-header { flex-basis: 30px; padding: 0 16px; border: 0; background: transparent; color: var(--muted); }
+.soul-detail-window > .soul-window-header strong { font-size: 11px; }
+.soul-filter-panel { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; scrollbar-gutter: stable; }
+.soul-filter-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text); font-size: 11px; margin-bottom: 4px; }
+.soul-calculator .soul-filter-heading button { border: 0; background: transparent; min-height: 24px; padding: 0; color: var(--muted); font-size: 11px; }
+.soul-filter-group { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px; align-items: start; padding: 10px 0; }
+.soul-calculator .soul-filter-help { margin-bottom: 8px; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.soul-filter-group + .soul-filter-group { border-top: 1px solid var(--border-soft); }
+.soul-filter-group h4 { margin: 0; padding-top: 6px; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--muted); }
+.soul-choice-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 0; }
+.soul-calculator .soul-choice { display: grid; place-items: center; min-width: 0; min-height: 28px; padding: 4px 2px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.soul-calculator .soul-choice[aria-pressed="true"], .soul-calculator .soul-choice[aria-pressed="true"]:hover:not(:disabled) { border-color: transparent; color: var(--content-selection-text); background: var(--ui-selected, var(--surface-hover)); font-weight: 500; }
+.soul-calculator .soul-fixed-main { grid-column: 1 / -1; padding: 6px 10px; color: var(--muted); font-size: 12px; }
+.soul-choice-options[data-soul-choice="soul-position"], .soul-choice-options[data-soul-choice="soul-stars"], .soul-choice-options[data-soul-choice="soul-level"] { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.soul-choice-options[data-soul-choice="soul-sub-count"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.soul-choice-options[data-soul-choice="soul-level"] .soul-choice { font-size: 11px; }
+.soul-choice-options[data-soul-choice="soul-position"] .soul-choice:not([data-value=""]) { font-size: 14px; }
+.soul-sub-controls { min-width: 0; }
+.soul-calculator .soul-sub-legend { margin: 0 0 7px; font-size: 10px; color: var(--muted); }
+.soul-attribute-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.soul-sub-rule { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 24px 24px; min-width: 0; height: 30px; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; background: transparent; }
+.soul-sub-name { display: flex; align-items: center; justify-content: center; min-width: 0; color: var(--text); font-size: 12px; cursor: pointer; }
+.soul-calculator .soul-sub-rule input { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; opacity: 0; pointer-events: none; }
+.soul-calculator .soul-sub-choice { min-height: 0; padding: 0; border: 0; border-left: 1px solid var(--border-soft); border-radius: 0; background: transparent; font-size: 18px; font-weight: 400; line-height: 1; color: var(--muted); }
+.soul-calculator .soul-sub-choice[aria-pressed="true"] { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.soul-calculator .soul-sub-choice[data-mode="exclude"][aria-pressed="true"] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.soul-calculator .soul-sub-choice:focus-visible, .soul-calculator .soul-choice:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 3px; }
+.soul-active-filters { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 34px; overflow-x: auto; overflow-y: hidden; }
+.soul-active-filters::-webkit-scrollbar { height: 4px; }
+.soul-active-filters::-webkit-scrollbar-thumb { border: 0; }
+.soul-calculator .soul-active-chip { flex: 0 0 auto; min-height: 28px; border-radius: 4px; border-color: transparent; padding: 4px 10px; font-size: 12px; color: var(--text); background: var(--surface-raised); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); white-space: nowrap; }
+.soul-calculator .soul-active-chip:focus-visible { outline: none; background: var(--ui-selected, var(--surface-hover)); text-decoration: underline; text-underline-offset: 3px; }
+.soul-calculator #soul-filter-toggle { flex: 0 0 auto; margin-left: auto; }
+.soul-calculator #soul-filter-toggle[aria-expanded="true"], .soul-calculator #soul-filter-toggle[aria-expanded="true"]:hover:not(:disabled) { border-color: transparent; background: var(--ui-selected, var(--surface-hover)); color: var(--content-selection-text); }
+.soul-type-picker { border: 1px solid var(--border); border-radius: 3px; }
+.soul-type-picker summary { list-style: none; cursor: pointer; min-height: 32px; box-sizing: border-box; padding: 6px 12px 6px 9px; border-bottom: 1px solid transparent; font-size: 12px; line-height: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.soul-type-picker summary::-webkit-details-marker { display: none; }
+.soul-type-picker summary::after { content: ''; flex: 0 0 auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; color: var(--muted); transform: translateY(-2px) rotate(45deg); transition: transform 140ms ease; }
+.soul-type-picker[open] summary::after { transform: translateY(2px) rotate(225deg); }
+.soul-type-picker[open] summary { border-bottom: 1px solid var(--border-soft); }
+@media (prefers-reduced-motion: reduce) { .soul-type-picker summary::after { transition: none; } }
+.soul-calculator #soul-type-search { margin: 8px; width: calc(100% - 16px); font-size: 11px; }
+.soul-type-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; max-height: 215px; overflow: auto; padding: 0 8px 8px; }
+.soul-calculator .soul-type-option { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 6px 2px; background: transparent; border-color: transparent; font-size: 10px; }
+.soul-type-option img, .soul-type-placeholder { width: 32px; height: 32px; border-radius: 50%; object-fit: contain; }
+.soul-type-placeholder { display: grid; place-items: center; border: 1px solid var(--border); color: var(--muted); }
+.soul-type-option > span:last-child { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.soul-calculator .soul-type-option[aria-pressed="true"], .soul-calculator .soul-type-option[aria-pressed="true"]:hover:not(:disabled) { border-color: transparent; background: var(--ui-selected, var(--surface-hover)); color: var(--content-selection-text); font-weight: 500; }
+/* Keep the card treatment, with a raised surface that separates choices from the drawer. */
+.soul-calculator .soul-choice, .soul-calculator .soul-type-option, .soul-calculator .soul-sub-rule, .soul-calculator .soul-type-picker { border: 1px solid transparent; border-radius: 4px; background: var(--surface-raised); color: color-mix(in srgb, var(--text) 85%, var(--muted)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.soul-calculator .soul-choice:hover:not(:disabled), .soul-calculator .soul-type-option:hover:not(:disabled), .soul-calculator .soul-sub-rule:hover, .soul-type-picker summary:hover { background: var(--surface-hover); }
+.soul-calculator .soul-choice:focus-visible, .soul-calculator .soul-type-option:focus-visible, .soul-calculator .soul-type-picker summary:focus-visible { outline: none; background: var(--surface-hover); text-decoration: underline; text-underline-offset: 3px; }
+.soul-results { flex: 1; min-width: 0; min-height: 80px; overflow: auto; overflow-anchor: none; scrollbar-gutter: stable; contain: layout paint; border: 0; border-radius: 0; background: var(--surface); }
+.soul-results-layout { position: relative; display: flex; flex: 1; gap: 10px; min-height: 80px; overflow: hidden; }
+.soul-detail { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 14px; line-height: 1.6; }
+.soul-detail-head { display: flex; align-items: center; gap: 12px; }
+.soul-detail-identity { min-width: 0; }
+.soul-detail h3 { margin: 0 0 4px; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.soul-detail-meta { color: var(--muted); font-size: 11px; }
+.soul-icon, .soul-icon-placeholder { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; object-fit: contain; }
+.soul-icon-placeholder { display: inline-grid; place-items: center; border: 1px solid var(--border); color: var(--muted); background: var(--surface); font-size: 18px; }
+.soul-grid { --soul-card-height: 156px; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; align-content: start; list-style: none; padding: 10px; margin: 0; }
+.soul-grid li { min-width: 0; }
+.soul-grid-spacer { grid-column: 1 / -1; pointer-events: none; }
+.soul-calculator .soul-card, .shikigami-atlas .shikigami-atlas-card { --soul-rarity: var(--muted); position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; height: var(--soul-card-height, 156px); padding: 7px 9px; overflow: hidden; border: 1px solid transparent; border-radius: 4px; background: color-mix(in srgb, var(--surface-raised) 40%, var(--surface)); box-shadow: 0 2px 5px rgba(0,0,0,.2), 0 1px 2px rgba(0,0,0,.12); transition: background-color 120ms ease; }
+.soul-card > span { flex-shrink: 0; }
+.soul-card[data-stars="6"] { --soul-rarity: #ad8e64; }
+.soul-card[data-stars="5"] { --soul-rarity: #9785ad; }
+.soul-card[data-stars="4"] { --soul-rarity: #7896ac; }
+.soul-calculator .soul-card:hover:not(:disabled), .shikigami-atlas .shikigami-atlas-card:hover:not(:disabled) { background: var(--surface-raised); }
+.soul-calculator .soul-card.selected, .soul-calculator .soul-card.selected:hover:not(:disabled), .shikigami-atlas .shikigami-atlas-card[aria-pressed="true"] { border-color: transparent; background: var(--surface-hover); }
+.soul-card.selected::after, .shikigami-atlas-card[aria-pressed="true"]::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 4px; height: 4px; border-radius: 50%; background: var(--content-selection-border); }
+.soul-calculator .soul-card:focus-visible, .shikigami-atlas .shikigami-atlas-card:focus-visible { outline: none; background: var(--surface-hover); }
+.soul-card:focus-visible .soul-card-name { text-decoration: underline; text-underline-offset: 3px; }
+.shikigami-atlas-card:focus-visible .shikigami-atlas-card-name { text-decoration: underline; text-underline-offset: 3px; }
+.soul-card-top { display: flex; justify-content: space-between; align-items: center; width: 100%; height: 18px; font-size: 11px; }
+.soul-card-level { color: var(--muted); font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.soul-card-position { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 2px; background: var(--surface); color: var(--muted); }
+.soul-card-portrait { display: grid; place-items: center; }
+.soul-card-portrait .soul-position-portrait { width: 60px; height: 60px; }
+.soul-position-portrait { --soul-slot-color: var(--muted); position: relative; display: inline-block; width: 56px; height: 56px; flex: 0 0 auto; }
+.soul-position-portrait[data-stars="6"] { --soul-slot-color: #b39060; }
+.soul-position-portrait[data-stars="5"] { --soul-slot-color: #9d89b3; }
+.soul-position-portrait[data-stars="4"] { --soul-slot-color: #7b9ab1; }
+.soul-position-portrait svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.soul-position-portrait path { fill: color-mix(in srgb, var(--soul-slot-color) 32%, var(--surface)); stroke: var(--soul-slot-color); stroke-width: 1.5; stroke-linejoin: round; }
+.soul-position-portrait .soul-icon, .soul-position-portrait .soul-icon-placeholder { position: absolute; top: 10.714%; left: 10.714%; width: 78.572%; height: 78.572%; box-sizing: border-box; border-radius: 50%; }
+.soul-card-stars { color: var(--soul-rarity); font-size: 10px; line-height: 12px; letter-spacing: 1px; }
+.soul-card-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; font-weight: 500; line-height: 18px; }
+.soul-card-badges { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 14px; font-size: 10px; line-height: 14px; }
+.soul-card-badges > span { padding: 0 3px; border-radius: 2px; background: var(--surface); color: var(--muted); }
+.soul-card > .soul-card-badges { align-self: stretch; margin-top: auto; min-height: 18px; padding-top: 4px; border-top: 1px solid var(--border-soft); }
+.soul-card > .soul-card-badges:empty { border-top-color: transparent; }
+.soul-card > .soul-card-badges > span { padding: 0 4px; border-radius: 2px; }
+.soul-card-badges .soul-card-equipped { color: #8fb3a2; }
+.soul-card-badges .soul-card-lock { color: #a7b9cc; }
+.soul-card-badges .soul-card-discarded { color: #c69090; }
+@media (prefers-reduced-motion: reduce) { .soul-calculator .soul-card, .shikigami-atlas .shikigami-atlas-card { transition: none; } }
+.soul-detail-badges { justify-content: flex-start; gap: 6px; margin: 10px 0 12px; }
+.soul-detail-badges > span { padding: 2px 6px; border-radius: 2px; }
+.soul-detail-caption { color: var(--muted); font-size: 10px; line-height: 16px; margin-bottom: 4px; }
+.soul-detail-main { padding-top: 8px; border-top: 1px solid var(--border-soft); }
+.soul-main-attribute { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 8px; min-height: 26px; color: var(--yellow); font-size: 12px; }
+.soul-sub-attribute { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 8px; min-height: 26px; font-size: 12px; }
+.soul-detail-attribute-label { min-width: 0; overflow-wrap: anywhere; }
+.soul-detail-attribute-value { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 500; }
+.soul-detail-pending { color: var(--muted); font-size: 11px; }

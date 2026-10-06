@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Real sidebar navigation and atlas component, entirely offline.
 const {app,BrowserWindow,protocol,net}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
@@ -11,10 +12,10 @@ app.whenReady().then(async()=>{
     if(!match)return new Response('',{status:404});
     const file=path.join(project,'assets',match[1]+'-icons',match[2]+'.png');return fs.existsSync(file)?net.fetch(pathToFileURL(file).href):new Response('',{status:404});
   });
-  const source=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
+  const source=readExpandedHtml(path.join(root,'src/renderer/index.html'));
   const start=source.indexOf('<section id="module-onmyoji-team-builder"');
   const panel=source.slice(start,source.indexOf('<section id="module-variable-references"',start));
-  const css=fs.readFileSync(path.join(root,'src/renderer/styles.css'),'utf8').replace(/^@import[^;]*;/,'');
+  const css=readExpandedCss(path.join(root,'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/,'');
   const palette=['workbench-light.css','theme.css'].map(name=>fs.readFileSync(path.join(root,'public/theme',name),'utf8')).join('\n');
   const font=pathToFileURL(path.join(root,'public/fonts/harmonyos-sans-sc/Regular.css')).href;
   const file=path.join(artifacts,'shikigami-atlas.html');
@@ -30,12 +31,10 @@ app.whenReady().then(async()=>{
     const container=document.getElementById('module-onmyoji-team-builder');
     window.disposeAtlas=installTeamBuilderPages(container);
     window.disposeResizer=installTeamBuilderResizer(container,document.getElementById('team-builder-resizer'),{readLayout:()=>null,writeLayout:()=>{}});
-    const lineupTab=document.getElementById('team-builder-tab-lineup-browser'), atlasTab=document.getElementById('team-builder-tab-shikigami-atlas');
-    const atlas=document.getElementById('team-builder-shikigami-atlas'),lineup=document.getElementById('team-builder-lineup-browser');
+    const atlas=document.getElementById('team-builder-shikigami-atlas');
     const el=name=>atlas.querySelector('[data-atlas="'+name+'"]');
-    assert.equal(atlas.hidden,false);assert.equal(lineup.hidden,true);
-    assert.equal(document.getElementById('team-builder-tab-soul-calculator'),null);
-    atlasTab.click();assert.equal(lineup.hidden,true);assert.equal(atlas.hidden,false);
+    assert.equal(container.querySelectorAll('.team-builder-category').length,1);
+    assert.equal(container.querySelectorAll('.team-builder-content-body').length,1);
     assert.equal(container.querySelector('.team-builder-content > header').textContent,'式神图鉴');
     assert.equal(el('cards').querySelectorAll('button').length,280);
     assert.equal(el('detail').querySelectorAll('dl > div').length,8);assert.equal(el('detail').querySelector('input'),null);
@@ -62,11 +61,9 @@ app.whenReady().then(async()=>{
     el('search').value='没有这个式神';el('search').dispatchEvent(new Event('input'));assert.equal(el('cards').querySelectorAll('button').length,0);assert.match(el('cards').textContent,/没有找到/);
     el('search').value='';el('search').dispatchEvent(new Event('input'));el('rarities').querySelector('[data-rarity="4"]').click();
     assert.ok(Array.from(el('cards').querySelectorAll('button')).every(card=>card.querySelector('small').textContent==='SSR'));
-    const count=el('cards').children.length;lineupTab.click();assert.equal(atlas.hidden,true);assert.equal(lineup.hidden,false);
-    lineupTab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
-    assert.equal(atlas.hidden,false);assert.equal(document.activeElement,atlasTab);assert.equal(el('cards').children.length,count);assert.match(el('detail').textContent,/桃花妖/);
-    atlasTab.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}));assert.equal(lineup.hidden,false);assert.equal(document.activeElement,lineupTab);
-    atlasTab.click();el('cards').querySelector('[data-hero-id="389"]').click();
+    const count=el('cards').children.length;
+    assert.equal(el('cards').children.length,count);assert.match(el('detail').textContent,/桃花妖/);
+    el('cards').querySelector('[data-hero-id="389"]').click();
     el('detail').querySelector('[data-detail-view="skills"]').click();
     el('skills').querySelector('[data-skill-id="3892"]').click();
     assert.match(el('skills').querySelector('.shikigami-skill-description').textContent,/战斗和回合开始时/);
@@ -75,7 +72,7 @@ app.whenReady().then(async()=>{
     el('rarities').querySelector('[data-rarity="6"]').click();el('cards').querySelector('[data-hero-id="593"]').click();
     assert.equal(el('skills').querySelectorAll('[data-skill-id]').length,3);assert.match(el('skills').textContent,/午夜猎歌/);
     el('rarities').querySelector('[data-rarity="4"]').click();el('cards').querySelector('[data-hero-id="389"]').click();el('skills').querySelector('[data-skill-id="3892"]').click();
-    return {sidebarNavigation:true,heroCount:280,pinyinSearch:true,rarityFilters:true,readOnlyStats:true,preservedPages:true,keyboardTabs:true,skillSwitching:true,awakenedSkills:true,upgrades:true,extraSkills:true,urSkills:true};
+    return {heroCount:280,pinyinSearch:true,rarityFilters:true,readOnlyStats:true,skillSwitching:true,awakenedSkills:true,upgrades:true,extraSkills:true,urSkills:true};
     } catch(error) {console.error(error.stack);throw error;}
   })()`);
   await win.webContents.executeJavaScript(`(async()=>{
@@ -120,12 +117,11 @@ app.whenReady().then(async()=>{
     open(217);document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));assert.equal(menu(),null);
     open(217);atlas.querySelector('[data-atlas="list"]').dispatchEvent(new Event('scroll'));assert.equal(menu(),null);
     open(217);atlas.querySelector('[data-atlas="search"]').dispatchEvent(new Event('input'));assert.equal(menu(),null);
-    open(217);document.getElementById('team-builder-tab-lineup-browser').click();await Promise.resolve();assert.equal(menu(),null);
-    document.getElementById('team-builder-tab-shikigami-atlas').click();
+    open(217);document.querySelector('.team-builder-category').click();await Promise.resolve();assert.equal(menu(),null);
     document.body.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));assert.equal(menu(),null);
     card(217).dispatchEvent(new KeyboardEvent('keydown',{key:'ContextMenu',bubbles:true,cancelable:true}));assert.ok(menu());
     menu().querySelector('button').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(menu(),null);
-    document.getElementById('team-builder-tab-shikigami-atlas').focus();
+    document.querySelector('.team-builder-category').focus();
   })()`);
   await win.webContents.executeJavaScript(`(async()=>{
     const assert=require('node:assert/strict'),atlas=document.getElementById('team-builder-shikigami-atlas');
@@ -179,7 +175,7 @@ app.whenReady().then(async()=>{
     assert.ok(termEl());assert.equal(termEl().title,'');
     assert.match(el('skills').querySelector('.shikigami-skill-description').textContent,/获得2层羽授/);
     assert.equal(getComputedStyle(termEl()).fontWeight,'600');
-    document.getElementById('team-builder-tab-shikigami-atlas').focus();
+    document.querySelector('.team-builder-category').focus();
   })()`);
   await new Promise(resolve=>setTimeout(resolve,200));
   const point=await win.webContents.executeJavaScript(`(()=>{const r=termEl().getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`);
@@ -242,12 +238,8 @@ app.whenReady().then(async()=>{
     termEl().click();
   })()`);
   fs.writeFileSync(path.join(artifacts,'shikigami-term-tooltip-narrow-light.png'),(await win.webContents.capturePage()).toPNG());
-  await win.webContents.executeJavaScript(`document.getElementById('team-builder-tab-lineup-browser').click()`);
+  await win.webContents.executeJavaScript(`document.querySelector('.team-builder-category').click()`);
   await new Promise(resolve=>setTimeout(resolve,100));
-  if(await win.webContents.executeJavaScript('termOpen()'))throw Error('Hidden atlas must close its term tooltip');
-  await win.webContents.executeJavaScript(`
-    document.getElementById('team-builder-tab-shikigami-atlas').click();
-  `);
   await new Promise(resolve=>setTimeout(resolve,100));
   await win.webContents.executeJavaScript(`
     document.querySelector('.shikigami-atlas-card').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-1,clientY:innerHeight-1}));

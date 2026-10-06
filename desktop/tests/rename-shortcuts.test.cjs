@@ -1,12 +1,13 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '..');
-const shell = fs.readFileSync(path.join(root, 'src/renderer/main.ts'), 'utf8');
-const popout = fs.readFileSync(path.join(root, 'src/renderer/popout.ts'), 'utf8');
-const {createRenameShortcuts} = require('../dist-test-renderer/renderer/rename-shortcuts.js');
+const shell = fs.readFileSync(path.join(root, 'src/renderer/app/bootstrap.ts'), 'utf8');
+const popout = fs.readFileSync(path.join(root, 'src/renderer/shell/popout/entry.ts'), 'utf8');
+const {createRenameShortcuts} = require('../dist-test-renderer/renderer/features/workflow/rename-shortcuts.js');
 
 /** 与 delete-shortcuts 测试一致：实例化编译产物里的真实模块，不打开桌面窗口。 */
 function shellHarness(options = {}) {
@@ -201,7 +202,7 @@ test('F2 选中变量时聚焦详情栏的「变量命名」输入框', () => {
   // 同一个命令入口必须同时覆盖变量与节点两个目标。
   const inspectorSource = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/inspector/variable-inspectors.js'), 'utf8');
   assert.match(inspectorSource, /inspector-variable-name/);
-  const sidebarSource = fs.readFileSync(path.join(root, 'src/renderer/panels/sidebar.ts'), 'utf8');
+  const sidebarSource = fs.readFileSync(path.join(root, 'src/renderer/features/workflow/sidebar.ts'), 'utf8');
   assert.match(sidebarSource, /F2 重命名/, '变量行与结构树行都要在提示里标出 F2');
 });
 
@@ -322,7 +323,7 @@ test('改名影响范围：确认/取消命令转发到暂存实现', () => {
 });
 
 test('内容浏览器重命名走行内编辑，不再弹命名对话框', () => {
-  const cb = fs.readFileSync(path.join(root, 'src/renderer/content-browser.ts'), 'utf8');
+  const cb = fs.readFileSync(path.join(root, 'src/renderer/features/content-browser/index.ts'), 'utf8');
   assert.match(cb, /function commitContentRenameDraft/);
   assert.match(cb, /contentRenameDraft = \{ item, name: item\.name, busy: false \};/);
   // F2 与右键菜单共用 renameItem → renameContentItem：入口里不再打开 requestContentName 弹窗。
@@ -343,23 +344,23 @@ test('壳层、独立窗口与画布共用同一个 F2 重命名入口', () => {
   assert.match(inputBridgeSource, /openNodeNameEditor/, '所有节点卡 F2 先由画布内标题输入框接管');
   assert.match(inputBridgeSource, /_nodeGroupId/, '组内接口卡与变量卡的 F2 要归一到所属组');
   // 文档画布按 F2 时，宿主把聚焦请求转给详细信息镜像（可见的输入框在它那边）。
-  const host = fs.readFileSync(path.join(root, 'src/renderer/editor-host.ts'), 'utf8');
+  const host = fs.readFileSync(path.join(root, 'src/renderer/app/editor-host.ts'), 'utf8');
   assert.match(host, /case 'inspectorRenameRequested'/);
   assert.match(host, /command: 'setInspectorSelection'/, '聚焦前先把节点组选区同步给详情镜像');
   assert.match(host, /command: 'renameSelection' \}/);
   const messages = fs.readFileSync(path.join(root, 'src/shared/editor-messages.ts'), 'utf8');
   assert.match(messages, /'inspectorRenameRequested'/);
   // 侧栏行内改名：变量行与结构树行都在原地换输入框。
-  const sidebarSource = fs.readFileSync(path.join(root, 'src/renderer/panels/sidebar.ts'), 'utf8');
+  const sidebarSource = fs.readFileSync(path.join(root, 'src/renderer/features/workflow/sidebar.ts'), 'utf8');
   assert.match(sidebarSource, /startVariableRename/);
   assert.match(sidebarSource, /startNodeRename/);
   assert.match(sidebarSource, /row-name-edit/);
   assert.match(sidebarSource, /registerEditorDeleteTarget\(\{ variable: \{ name: variable\.name, scope \} \}\)/);
   assert.match(sidebarSource, /registerEditorDeleteTarget\(\{ nodeId: node\.id \}\)/);
-  const styles = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  const styles = readExpandedCss(path.join(root, 'src/renderer/styles/workbench.css'));
   assert.match(styles, /\.row-name-edit \{/);
   assert.match(sidebarSource, /inline-rename-input row-name-edit/);
-  const contentBrowserSource = fs.readFileSync(path.join(root, 'src/renderer/content-browser.ts'), 'utf8');
+  const contentBrowserSource = fs.readFileSync(path.join(root, 'src/renderer/features/content-browser/index.ts'), 'utf8');
   assert.match(contentBrowserSource, /inline-rename-input content-item-name-edit/);
   assert.match(styles, /\.inline-rename-input::selection \{/);
   const panelSource = fs.readFileSync(path.join(__dirname, '../dist-test-renderer/canvas/inspector/panel.js'), 'utf8');

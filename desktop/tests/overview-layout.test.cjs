@@ -1,8 +1,9 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {renderOverviewCard}=require('../dist-test-renderer/renderer/overview/card.js');
+const {renderOverviewCard}=require('../dist-test-renderer/renderer/features/overview/card.js');
 
 function setup(locked=false){
  class E {
@@ -51,7 +52,7 @@ test('running queue still locks selection and configuration',()=>{
  assert.deepEqual(calls,[]);
 });
 test('overview prevents narrow vertical labels and removes selection glow',()=>{
- const css=fs.readFileSync(path.join(__dirname,'../src/renderer/styles.css'),'utf8');
+ const css=readExpandedCss(path.join(__dirname, '../src/renderer/styles/workbench.css'));
  assert.match(css,/\.overview-card-metadata\s*\{[^}]*flex-wrap: wrap/);
  assert.match(css,/\.overview-card-tag\s*\{[^}]*white-space: nowrap/);
  assert.match(css,/\.overview-card-actions\s*\{[^}]*flex: 0 0 auto/);

@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Run via npm test (builds the renderer test output first).
 // 左侧面板已迁到 panels/sidebar.ts：直接用编译产物 + DOM 桩验证，不截取源码。
 const {test} = require('node:test');
@@ -152,7 +153,7 @@ test('empty variable list skips the redundant heading and explains the single ad
   assert.equal(h.list.children.filter((item) => item.tagName === 'h3').length, 0);
   const empty = h.list.children.filter((item) => item.className === 'variable-group-empty');
   assert(empty[0].textContent.includes('＋ 变量'));
-  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/index.html'), 'utf8');
+  const html = readExpandedHtml(path.join(__dirname, '../src/renderer/index.html'));
   assert(new RegExp('id="add-input-button"').test(html) === false);
   assert(/id="add-variable-button"[^>]*>[\s\S]*?<span>变量<\/span><\/button>/.test(html));
 });
@@ -200,7 +201,7 @@ test('变量行显示引用数量徽标：有引用才显示，未引用留空',
 test('变量行给类型、引用徽标和公开开关各自保留列，窄侧栏也不会换行错位', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const renderer = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/styles.css'), 'utf8');
+  const renderer = readExpandedCss(path.join(__dirname, '..', 'src/renderer/styles/workbench.css'));
   const workbench = fs.readFileSync(path.join(__dirname, '..', 'public/workbench/workbench.css'), 'utf8');
   for (const css of [renderer, workbench]) {
     const rowRule = css.match(/(?:#module-variables )?\.variable-row \{[^}]+\}/)?.[0] || '';

@@ -78,7 +78,7 @@ test('节点组的执行引脚名是派生字段，不得把文档标脏', () =>
 });
 
 test('壳层把「与当前持有正文一致」的上报当作非编辑', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/editor-host.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app/editor-host.ts'), 'utf8');
   assert.match(source, /const held = targetUri \? workspace\.tab\?\.\(targetUri\)\?\.text \?\? '' : '';/);
   assert.match(source, /if \(held && held === text\) return;/);
 });

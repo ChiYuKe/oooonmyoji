@@ -4,7 +4,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { installPopoutAlwaysOnTop } = require('../dist-test-renderer/renderer/docking/popout-topmost.js');
+const { installPopoutAlwaysOnTop } = require('../dist-test-renderer/renderer/shell/docking/popout-topmost.js');
 
 function stubWindow() {
   const stored = new Map();

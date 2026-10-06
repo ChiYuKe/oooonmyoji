@@ -28,10 +28,12 @@ import {
   WORKBENCH_LAYOUT_STORAGE_KEY,
   POPOUT_ALWAYS_ON_TOP_STORAGE_KEY,
   clearPersistedLayout,
+  mergeCommunityComparisonLayout,
   persistLayout,
   readPersistedLayout,
   resolveDropOverlayModel,
-} from './docking/layout';
+  stripHiddenGroupHeaders,
+} from './layout';
 import {
   DOCUMENT_COMPONENT,
   DOCUMENT_TAB_COMPONENT,
@@ -40,16 +42,17 @@ import {
   documentPanelId,
   documentUriFromPanelId,
   groupContainsWorkflow,
-} from './docking/documents';
+} from './documents';
 import {
   registerDockBackGesture,
   registerDraggedSourceGroupVacancy,
   registerOutsidePopoutGesture,
   installTabStripWindowDragToggle,
-} from './docking/gestures';
-import { installPopoutAlwaysOnTop } from './docking/popout-topmost';
-import { SHARED_PANEL_DEFINITIONS } from './docking/shared-panels';
-import type { PopoutTopmostStorage } from './docking/popout-topmost';
+} from './gestures';
+import { installPopoutAlwaysOnTop } from './popout-topmost';
+import { installGroupRelayout } from './relayout';
+import { SHARED_PANEL_DEFINITIONS } from './shared-panels';
+import type { PopoutTopmostStorage } from './popout-topmost';
 
 /** 顶置偏好读写：JSON 存在布局存储里，两套 dockview 实例共用同一份。 */
 const popoutTopmostStorage = (): PopoutTopmostStorage => ({
@@ -65,7 +68,7 @@ const popoutTopmostStorage = (): PopoutTopmostStorage => ({
 
 export type DockPanelId = 'structure' | 'palette' | 'variables' | 'details' | 'runtime' | 'contentBrowser' | 'variableReferences';
 export type SharedDockPanelId = 'contentBrowser' | 'runtime' | 'variableReferences';
-export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulCalculator' | 'soulOptimizer' | 'soulCommunityUpload' | 'soulCommunityComparison' | 'referenceViewer' | SharedDockPanelId;
+export type WorkbenchPanelId = 'workflow' | 'overview' | 'settings' | 'onmyojiTeamBuilder' | 'soulCalculator' | 'soulOptimizer' | 'soulCommunityUpload' | 'duelPrediction' | 'referenceViewer' | SharedDockPanelId;
 
 export type SharedDockSurface = 'inner' | 'outer';
 
@@ -250,7 +253,7 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     minimumHeight: 300,
   },
   onmyojiTeamBuilder: {
-    title: '阴阳师阵容配队',
+    title: '式神图鉴',
     moduleElementId: 'module-onmyoji-team-builder',
     reference: 'workflow',
     direction: 'within',
@@ -289,13 +292,13 @@ const WORKBENCH_PANEL_DEFINITIONS: Record<WorkbenchPanelId, DockPanelDefinition>
     minimumWidth: 320,
     minimumHeight: 220,
   },
-  soulCommunityComparison: {
-    title: '社区方案比对',
-    moduleElementId: 'module-soul-community-comparison',
-    reference: 'soulOptimizer',
-    direction: 'right',
-    initialWidth: 1120,
-    initialHeight: 760,
+  duelPrediction: {
+    title: '对弈竞猜',
+    moduleElementId: 'module-duel-prediction',
+    reference: 'workflow',
+    direction: 'within',
+    initialWidth: 920,
+    initialHeight: 680,
     minimumWidth: 320,
     minimumHeight: 240,
   },
@@ -612,9 +615,13 @@ export function createDockingWorkspace(
   let restoredLayout = false;
   if (savedLayout) {
     try {
-      api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
+      const layout = JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>;
+      // 存档里如果带着 hideHeader，恢复出来的分组就没有标签栏（面板内容顶到分组顶部）。
+      stripHiddenGroupHeaders(layout);
+      api.fromJSON(layout);
       restoredLayout = api.totalPanels > 0;
-    } catch {
+    } catch (error) {
+      console.error('恢复停靠布局失败，改用默认布局', error);
       clearPersistedLayout(LAYOUT_STORAGE_KEY);
     }
   }
@@ -693,9 +700,15 @@ export function createDockingWorkspace(
   const popoutFailureDisposable = api.onDidOpenPopoutWindowFail(() => onPopoutFailure?.());
   const outsidePopoutDisposable = registerOutsidePopoutGesture(api, container, onPopoutFailure);
   const dockBackDisposable = registerDockBackGesture(api);
+  const groupRelayoutDisposable = installGroupRelayout(api, container);
   const sourceGroupVacancyDisposable = registerDraggedSourceGroupVacancy(api, (active) => {
     temporaryDragLayout = active;
-    if (!active) saveLayout();
+    if (!active) {
+      saveLayout();
+      // 拖拽让位会把分组隐藏，标签栏高度与容器矩形都可能留下过期测量值，
+      // 松手后补一次重排（同时兜底修回被隐藏的标签栏）。
+      groupRelayoutDisposable.requestRelayout();
+    }
   });
   const popoutTopmostDisposable = installPopoutAlwaysOnTop(api, popoutTopmostStorage());
 
@@ -731,6 +744,7 @@ export function createDockingWorkspace(
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
       popoutTopmostDisposable.dispose();
+      groupRelayoutDisposable.dispose();
       sourceGroupVacancyDisposable.dispose();
       dockBackDisposable.dispose();
       saveLayout();
@@ -819,9 +833,15 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
   const savedLayout = readPersistedLayout(WORKBENCH_LAYOUT_STORAGE_KEY);
   if (savedLayout) {
     try {
-      api.fromJSON(JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>);
+      const layout = JSON.parse(savedLayout) as ReturnType<DockviewApi['toJSON']>;
+      // 同上：外层工作台的标签栏也不能被存档里的 hideHeader 关掉。
+      stripHiddenGroupHeaders(layout);
+      // 社区和计算共用配装工作区；旧的外层社区栏迁入内部停靠布局。
+      mergeCommunityComparisonLayout(layout);
+      api.fromJSON(layout);
       restored = api.totalPanels > 0;
-    } catch {
+    } catch (error) {
+      console.error('恢复工作台布局失败，改用默认布局', error);
       clearPersistedLayout(WORKBENCH_LAYOUT_STORAGE_KEY);
     }
   }
@@ -859,6 +879,11 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     }
     addPanel(panelId);
     const panel = api.getPanel(panelId);
+    // 从扩展入口打开计算或配队时回到主窗口标签行，复用已有页面状态。
+    const workflow = api.getPanel('workflow');
+    if ((panelId === 'soulCalculator' || panelId === 'onmyojiTeamBuilder') && panel && workflow && panel.group !== workflow.group) {
+      panel.api.moveTo({ group: workflow.group, position: 'center' });
+    }
     panel?.api.setActive();
     panel?.focus();
     onLayoutChange?.();
@@ -898,9 +923,15 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     if (item instanceof DockviewGroupPanel) return !groupContainsWorkflow(item);
     return item.api.id !== 'workflow';
   });
+  const groupRelayoutDisposable = installGroupRelayout(api, container);
   const sourceGroupVacancyDisposable = registerDraggedSourceGroupVacancy(api, (active) => {
     temporaryDragLayout = active;
-    if (!active) saveLayout();
+    if (!active) {
+      saveLayout();
+      // 拖拽让位会把分组隐藏，标签栏高度与容器矩形都可能留下过期测量值，
+      // 松手后补一次重排（同时兜底修回被隐藏的标签栏）。
+      groupRelayoutDisposable.requestRelayout();
+    }
   });
   const dockBackDisposable = registerDockBackGesture(api);
   const popoutTopmostDisposable = installPopoutAlwaysOnTop(api, popoutTopmostStorage());
@@ -935,6 +966,7 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
     markDragHandled: outsidePopoutDisposable.markHandled,
     dispose: () => {
       popoutTopmostDisposable.dispose();
+      groupRelayoutDisposable.dispose();
       sourceGroupVacancyDisposable.dispose();
       dockBackDisposable.dispose();
       saveLayout();
@@ -948,8 +980,9 @@ export function createWorkbenchFrame(onLayoutChange?: () => void, onPopoutFailur
 }
 
 // 再导出拆分出的符号，保持对外导入面不变。
-export { documentPanelId, documentUriForPanelId, documentUriFromPanelId, setDocumentPanelDirty, groupContainsWorkflow } from './docking/documents';
-export { isSharedDockPanelId, connectSharedPanelDocking } from './docking/shared-panels';
-export { registerDockBackGesture, registerOutsidePopoutGesture, registerDraggedSourceGroupVacancy, installTabStripWindowDragToggle } from './docking/gestures';
-export { LAYOUT_STORAGE_KEY, WORKBENCH_LAYOUT_STORAGE_KEY, readPersistedLayout, persistLayout, resolveDropOverlayModel } from './docking/layout';
-export { SHARED_PANEL_DEFINITIONS, DEFAULT_SHARED_PANEL_SURFACES, COMPANION_SHARED_PANELS, SHARED_PANEL_SURFACE_KEYS } from './docking/shared-panels';
+export { documentPanelId, documentUriForPanelId, documentUriFromPanelId, setDocumentPanelDirty, groupContainsWorkflow } from './documents';
+export { isSharedDockPanelId, connectSharedPanelDocking } from './shared-panels';
+export { registerDockBackGesture, registerOutsidePopoutGesture, registerDraggedSourceGroupVacancy, installTabStripWindowDragToggle } from './gestures';
+export { LAYOUT_STORAGE_KEY, WORKBENCH_LAYOUT_STORAGE_KEY, readPersistedLayout, persistLayout, resolveDropOverlayModel, stripHiddenGroupHeaders, moveLayoutPanel } from './layout';
+export { installGroupRelayout } from './relayout';
+export { SHARED_PANEL_DEFINITIONS, DEFAULT_SHARED_PANEL_SURFACES, COMPANION_SHARED_PANELS, SHARED_PANEL_SURFACE_KEYS } from './shared-panels';

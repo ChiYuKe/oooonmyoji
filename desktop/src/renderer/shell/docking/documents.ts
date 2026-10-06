@@ -10,7 +10,7 @@ import {
   type ITabRenderer,
   type TabPartInitParameters,
 } from 'dockview';
-import type { DocumentPanelHooks } from '../docking';
+import type { DocumentPanelHooks } from './index';
 
 /** 文档面板的组件名与 id 前缀；一个工作流文档对应一个 Dockview 面板。 */
 export const DOCUMENT_COMPONENT = 'workflow-canvas';

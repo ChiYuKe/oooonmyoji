@@ -13,7 +13,7 @@ import {
   type PanelTransfer,
   type Position,
 } from 'dockview';
-import type { DockingController, DockPanelDefinition, SharedDockPanelId, SharedDockSurface, SharedPanelDockBridge, WorkbenchFrameController } from '../docking';
+import type { DockingController, DockPanelDefinition, SharedDockPanelId, SharedDockSurface, SharedPanelDockBridge, WorkbenchFrameController } from './index';
 import { groupContainsWorkflow } from './documents';
 import { persistLayout, readPersistedLayout } from './layout';
 

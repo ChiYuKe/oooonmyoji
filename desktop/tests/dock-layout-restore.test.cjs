@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 // Run via npm test (builds the desktop output first).
 // 停靠布局持久化：读写/清理走编译产物并做行为验证；「恢复时不再无条件补回关闭的面板」
 // 是 docking.ts 的装配顺序，没有可实例化的 Dockview DOM 环境，按仓库既有做法做源码级断言。
@@ -6,14 +7,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const base = path.join(__dirname, '..');
-const read = (file) => fs.readFileSync(path.join(base, file), 'utf8');
+const read = file => { const filename = path.join(base, file); if (file.startsWith('src/renderer/') && file.endsWith('.html')) return readExpandedHtml(filename); if (file === 'src/renderer/styles/workbench.css') return readExpandedCss(filename); return fs.readFileSync(filename, 'utf8'); };
 const {
   LAYOUT_STORAGE_KEY,
   WORKBENCH_LAYOUT_STORAGE_KEY,
   clearPersistedLayout,
   persistLayout,
   readPersistedLayout,
-} = require('../dist-test-renderer/renderer/docking/layout.js');
+} = require('../dist-test-renderer/renderer/shell/docking/layout.js');
 
 /** 主进程存储 + localStorage 回退的最小桩。 */
 function stubWindow() {
@@ -63,7 +64,7 @@ test('清掉坏布局时两份存储一起删', () => {
 });
 
 test('默认脚手架只出现在首次运行与恢复默认布局', () => {
-  const docking = read('src/renderer/docking.ts');
+  const docking = read('src/renderer/shell/docking/index.ts');
   const section = (start, end) => docking.slice(docking.indexOf(start), docking.indexOf(end));
   // 恢复过布局就不再补面板：用户关掉的固定面板不该重启后自己回来。
   assert.match(docking, /restoredLayout = api\.totalPanels > 0/);
@@ -91,7 +92,7 @@ test('默认脚手架只出现在首次运行与恢复默认布局', () => {
 });
 
 test('兜底根模块保留，其余面板关掉就是关掉', () => {
-  const docking = read('src/renderer/docking.ts');
+  const docking = read('src/renderer/shell/docking/index.ts');
   assert.match(docking, /else if \(!api\.getPanel\('workflow'\)\) addPanel\('workflow'\)/, '「工作流编辑器」必须始终存在');
   assert.equal(
     /addPanel\('overview'\)/.test(docking), false,

@@ -15,7 +15,7 @@ import { DockviewGroupPanel, type DockviewApi, type IDockviewPanel } from 'dockv
  * 分组时会把分组重新加回主窗口网格（`doRemoveGroup` 的 popout 分支），也就是「拖回来」。
  * 回到主窗口后分组停靠在网格首个位置，再在窗口内拖一次就能放到想要的槽位。
  */
-export function registerDockBackGesture(api: DockviewApi): { dispose(): void } {
+export function registerDockBackGesture(api: DockviewApi, returnGroup?: (group: DockviewGroupPanel) => void): { dispose(): void } {
   const disposables: Array<() => void> = [];
 
   const watch = (popout: { window: Window; group: DockviewGroupPanel }): void => {
@@ -44,7 +44,8 @@ export function registerDockBackGesture(api: DockviewApi): { dispose(): void } {
       // 等这次指针事件收尾再动布局，避免在 dockview 自己的拖拽回调里移除分组。
       win.setTimeout(() => {
         try {
-          api.removeGroup(group);
+          if (returnGroup) returnGroup(group);
+          else api.removeGroup(group);
         } catch {
           // 窗口可能正好在关闭；此时分组已经不存在，忽略即可。
         }
@@ -203,6 +204,7 @@ export function registerDraggedSourceGroupVacancy(
   let sourcePanelId: string | undefined;
   let sourceWasVisible = false;
   let sourceWasActive = false;
+  let temporaryLayoutActive = false;
   let dragGeneration = 0;
   let finishTimer: number | undefined;
   let removeEndListeners: (() => void) | undefined;
@@ -218,19 +220,29 @@ export function registerDraggedSourceGroupVacancy(
 
     const group = sourceGroup;
     const panelId = sourcePanelId;
+    const wasVisible = sourceWasVisible;
+    const wasActive = sourceWasActive;
     sourceGroup = undefined;
     sourcePanelId = undefined;
-    if (!group || !panelId) return;
-
-    const currentPanel = api.getPanel(panelId);
-    const groupStillExists = api.groups.some((candidate) => candidate === group);
-    if (groupStillExists && currentPanel?.group === group) {
-      if (sourceWasVisible && !group.api.isVisible) group.api.setVisible(true);
-      if (sourceWasActive) currentPanel.api.setActive();
-    }
     sourceWasVisible = false;
     sourceWasActive = false;
-    onTemporaryLayoutChange(false);
+
+    try {
+      if (!group || !panelId) return;
+      const currentPanel = api.getPanel(panelId);
+      const groupStillExists = api.groups.some((candidate) => candidate === group);
+      if (groupStillExists && currentPanel?.group === group) {
+        if (wasVisible && !group.api.isVisible) group.api.setVisible(true);
+        if (wasActive) currentPanel.api.setActive();
+      }
+    } finally {
+      // 「临时布局」是布局持久化的总开关：无论中途发生什么都要收掉，
+      // 否则之后所有布局变更都不会再写回存储。
+      if (temporaryLayoutActive) {
+        temporaryLayoutActive = false;
+        onTemporaryLayoutChange(false);
+      }
+    }
   };
 
   const finishAfterDockview = (): void => {
@@ -274,6 +286,7 @@ export function registerDraggedSourceGroupVacancy(
       sourceWasVisible = group.api.isVisible;
       sourceWasActive = group.activePanel === event.panel;
       if (canHideWholeGroup && !sourceWasVisible) return;
+      temporaryLayoutActive = true;
       onTemporaryLayoutChange(true);
       if (canHideWholeGroup) {
         group.api.setVisible(false);

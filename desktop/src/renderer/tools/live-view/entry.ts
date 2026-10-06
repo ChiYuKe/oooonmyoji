@@ -17,8 +17,8 @@ import type {
   LiveViewOcr,
   LiveViewPollResult,
   LiveViewRoi,
-} from '../shared/contracts';
-import './styles.css';
+} from '../../../shared/contracts';
+import '../../styles/workbench.css';
 
 const api = window.onmyoji;
 
@@ -36,10 +36,16 @@ const stepNameEl = document.querySelector<HTMLElement>('#live-step-name')!;
 const stepActionEl = document.querySelector<HTMLElement>('#live-step-action')!;
 const stepStatusEl = document.querySelector<HTMLElement>('#live-step-status')!;
 const stepDurationEl = document.querySelector<HTMLElement>('#live-step-duration')!;
+const stepList = document.querySelector<HTMLOListElement>('#live-step-list')!;
+const stepEmpty = document.querySelector<HTMLElement>('#live-step-empty')!;
+const stepCount = document.querySelector<HTMLElement>('#live-step-count')!;
 const summaryEl = document.querySelector<HTMLElement>('#live-summary')!;
 const matchList = document.querySelector<HTMLUListElement>('#live-match-list')!;
 const matchEmpty = document.querySelector<HTMLElement>('#live-match-empty')!;
 const matchCount = document.querySelector<HTMLElement>('#live-match-count')!;
+const stateList = document.querySelector<HTMLUListElement>('#live-state-list')!;
+const stateEmpty = document.querySelector<HTMLElement>('#live-state-empty')!;
+const stateCount = document.querySelector<HTMLElement>('#live-state-count')!;
 const ocrList = document.querySelector<HTMLUListElement>('#live-ocr-list')!;
 const ocrEmpty = document.querySelector<HTMLElement>('#live-ocr-empty')!;
 const ocrCount = document.querySelector<HTMLElement>('#live-ocr-count')!;
@@ -312,6 +318,41 @@ function renderSidebar(): void {
   if (!frame) return;
   const overlay = frame.overlay;
 
+  const plannedSteps = frame.step.workflow_steps || [];
+  const currentStepIndex = plannedSteps.findIndex((step) => step.step_id === frame?.step.step_id);
+  const orderedSteps = currentStepIndex < 0
+    ? plannedSteps.map((step, index) => ({ step, index }))
+    : [
+      ...plannedSteps.slice(currentStepIndex).map((step, offset) => ({ step, index: currentStepIndex + offset })),
+      ...plannedSteps.slice(0, currentStepIndex).map((step, index) => ({ step, index })),
+    ];
+  stepCount.textContent = String(plannedSteps.length);
+  stepEmpty.classList.toggle('hidden', plannedSteps.length > 0);
+  stepList.replaceChildren();
+  orderedSteps.forEach(({ step, index }) => {
+    const item = document.createElement('li');
+    const role = currentStepIndex < 0 ? (index === 0 ? 'next' : 'later')
+      : index === currentStepIndex ? 'current'
+        : index === currentStepIndex + 1 ? 'next'
+          : index < currentStepIndex ? 'previous' : 'later';
+    item.className = `live-step-item ${role}`;
+    const order = document.createElement('span');
+    order.className = 'live-step-order';
+    order.textContent = String(index + 1);
+    const content = document.createElement('span');
+    content.className = 'live-step-content';
+    const name = document.createElement('strong');
+    name.textContent = step.name || step.action || step.step_id;
+    const detail = document.createElement('small');
+    detail.textContent = `${step.action || '任务'} · ${step.step_id}`;
+    content.append(name, detail);
+    const state = document.createElement('span');
+    state.className = 'live-step-role';
+    state.textContent = role === 'current' ? '当前' : role === 'next' ? '下一候选' : role === 'previous' ? '前序' : '后续';
+    item.append(order, content, state);
+    stepList.appendChild(item);
+  });
+
   matchCount.textContent = String(overlay.matches.length);
   matchEmpty.classList.toggle('hidden', overlay.matches.length > 0);
   matchList.replaceChildren();
@@ -319,8 +360,8 @@ function renderSidebar(): void {
     const li = document.createElement('li');
     li.className = index === selectedMatch ? 'selected' : '';
     const belowThreshold = match.threshold !== null && match.confidence < match.threshold;
-    const name = match.template ? match.template.slice(match.template.lastIndexOf('/') + 1) : '模板';
-    li.textContent = `${(match.confidence * 100).toFixed(1)}%  ${name}  ${match.box[0]},${match.box[1]} ${match.box[2]}×${match.box[3]}`
+    const name = match.template ? match.template.split(/[\\/]/).pop() : '模板';
+    li.textContent = `${(match.confidence * 100).toFixed(1)}%  ${match.state ? `${match.state} · ` : ''}${name}  ${match.box[0]},${match.box[1]} ${match.box[2]}×${match.box[3]}`
       + (belowThreshold ? `  <阈值 ${((match.threshold ?? 0) * 100).toFixed(0)}%>` : '');
     if (belowThreshold) li.classList.add('miss');
     li.title = match.template ?? '';
@@ -330,6 +371,22 @@ function renderSidebar(): void {
       drawFrame();
     });
     matchList.appendChild(li);
+  });
+
+  const states = overlay.states || [];
+  stateCount.textContent = String(states.length);
+  stateEmpty.classList.toggle('hidden', states.length > 0);
+  stateList.replaceChildren();
+  states.forEach((state) => {
+    const li = document.createElement('li');
+    const sources = [
+      ...state.templates.map((template) => template.split(/[\\/]/).pop() || template),
+      ...state.texts.map((text) => `文字「${text}」`),
+    ];
+    li.textContent = `${state.name} · ${sources.join(' / ') || '未配置识别项'}`
+      + (state.threshold !== null ? ` · 阈值 ${(state.threshold * 100).toFixed(0)}%` : '');
+    li.title = [...state.templates, ...state.texts].join('\n');
+    stateList.appendChild(li);
   });
 
   ocrCount.textContent = String(overlay.ocr.length);
@@ -443,11 +500,6 @@ function renderSummary(): void {
   }
   const step = frame.step;
   const lines = [
-    `动作：${step.action ?? '—'}`,
-    `节点类型：${step.node_kind ?? '—'}`,
-    `步骤：${step.step_id ?? '—'}`,
-    step.breadcrumb ? `路径：${step.breadcrumb}` : '',
-    `状态：${step.status ?? '—'}`,
     step.error ? `错误：${step.error}` : '',
     step.error_category ? `错误分类：${step.error_category}` : '',
     `运行：${frame.instance_id || '—'}`,
@@ -460,6 +512,7 @@ function renderSummary(): void {
 // ------------------------------------------------------------------ 轮询
 
 function applyFrame(next: LiveViewFrame): void {
+  next.overlay.states ||= [];
   frame = next;
   if (selectedMatch !== null && selectedMatch >= next.overlay.matches.length) selectedMatch = null;
   const token = next.seq;
@@ -590,7 +643,7 @@ function bindUi(): void {
 
   clearButton.addEventListener('click', () => {
     if (!frame) return;
-    frame = { ...frame, overlay: { rois: [], matches: [], ocr: [], clicks: [] } };
+    frame = { ...frame, overlay: { rois: [], matches: [], ocr: [], clicks: [], states: [] } };
     selectedMatch = null;
     renderSidebar();
     renderSummary();

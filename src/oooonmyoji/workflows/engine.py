@@ -123,6 +123,16 @@ class WorkflowEngine:
         self.history: list[dict[str, Any]] = []
         self.requires_worker_restart = False
         self.compiled: CompiledWorkflow = compile_workflow(workflow, registry)
+        self._live_step_plan = [
+            {
+                "step_id": node_id,
+                "name": node.name or node.action or node_id,
+                "action": node.action,
+                "execution_index": index,
+            }
+            for node_id, index in sorted(self.compiled.execution_index.items(), key=lambda item: item[1])
+            if (node := self.compiled.node_map[node_id]).is_task and node.action
+        ]
         self._lock = threading.RLock()
         self._steps = 0
         self._cooldowns: dict[str, float] = {}
@@ -1009,6 +1019,7 @@ class WorkflowEngine:
             "node_path": path_ids,
             "node_path_names": path_names,
             "breadcrumb": " → ".join(path_names),
+            "workflow_steps": self._live_step_plan,
             "ts": time.time(),
         }
         if node.is_task:
@@ -1047,6 +1058,7 @@ class WorkflowEngine:
             "node_path": path_ids,
             "node_path_names": path_names,
             "breadcrumb": breadcrumb,
+            "workflow_steps": self._live_step_plan,
             "started_at": started_at,
             "duration_ms": round((self._timer() - started_perf) * 1000, 3),
         }

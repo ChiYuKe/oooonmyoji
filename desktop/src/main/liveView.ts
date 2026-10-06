@@ -197,7 +197,7 @@ function readSnapshot(files: SnapshotFiles): { frame: LiveViewFrame; seq: number
     instance_id: typeof record.instance_id === 'string' ? record.instance_id : '',
     step: (record.step && typeof record.step === 'object' ? record.step : {}) as LiveViewFrame['step'],
     overlay: (record.overlay && typeof record.overlay === 'object' ? record.overlay : {
-      rois: [], matches: [], ocr: [], clicks: [],
+      rois: [], matches: [], ocr: [], clicks: [], states: [],
     }) as LiveViewFrame['overlay'],
     frame_width: typeof record.frame_width === 'number' ? record.frame_width : 0,
     frame_height: typeof record.frame_height === 'number' ? record.frame_height : 0,

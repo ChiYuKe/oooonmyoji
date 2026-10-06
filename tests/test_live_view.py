@@ -95,7 +95,7 @@ def test_overlay_ignores_confidence_less_and_degenerate_boxes() -> None:
         "roi": [0, 0, 0, 0],
     }))
 
-    assert overlay == {"rois": [], "matches": [], "ocr": [], "clicks": []}
+    assert overlay == {"rois": [], "matches": [], "ocr": [], "clicks": [], "states": []}
 
 
 def test_overlay_caps_box_count() -> None:
@@ -109,8 +109,8 @@ def test_overlay_caps_box_count() -> None:
 
 
 def test_overlay_survives_events_without_params_or_output() -> None:
-    assert build_overlay({}) == {"rois": [], "matches": [], "ocr": [], "clicks": []}
-    assert build_overlay({"params": None, "output": [1, 2, 3]}) == {"rois": [], "matches": [], "ocr": [], "clicks": []}
+    assert build_overlay({}) == {"rois": [], "matches": [], "ocr": [], "clicks": [], "states": []}
+    assert build_overlay({"params": None, "output": [1, 2, 3]}) == {"rois": [], "matches": [], "ocr": [], "clicks": [], "states": []}
 
 
 def test_step_summary_keeps_status_bar_fields() -> None:

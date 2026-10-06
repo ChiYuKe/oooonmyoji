@@ -89,6 +89,32 @@ def _named_rois(value: object) -> Iterable[tuple[str, list[int]]]:
             yield from _named_rois(child)
 
 
+def _state_candidates(value: object) -> list[dict[str, Any]]:
+    """从消失状态列表提取监视面板可读的候选状态，不把配置误当成匹配结果。"""
+
+    if not isinstance(value, list):
+        return []
+    states: list[dict[str, Any]] = []
+    for candidate in value[:MAX_OVERLAY_BOXES]:
+        if not isinstance(candidate, dict):
+            continue
+        templates: list[str] = []
+        template = candidate.get("template")
+        if isinstance(template, str) and template:
+            templates.append(template)
+        many = candidate.get("templates")
+        if isinstance(many, list):
+            templates.extend(item for item in many if isinstance(item, str) and item)
+        texts = candidate.get("texts")
+        states.append({
+            "name": str(candidate.get("name") or "未命名状态"),
+            "templates": templates,
+            "texts": [item for item in texts if isinstance(item, str) and item] if isinstance(texts, list) else [],
+            "threshold": _confidence(candidate.get("threshold")),
+        })
+    return states
+
+
 def _match_box(value: dict[str, Any]) -> list[int] | None:
     reference = _numbers(value.get("reference"), 4)
     if reference is not None:
@@ -156,12 +182,15 @@ def _recognitions(value: object, *, seen: set[tuple[int, ...]]) -> tuple[list[di
         seen.add(key)
         template = item.get("template")
         threshold = item.get("threshold")
-        matches.append({
+        match: dict[str, Any] = {
             "confidence": confidence,
             "box": box,
             "template": template if isinstance(template, str) else None,
             "threshold": round(float(threshold), 4) if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) else None,
-        })
+        }
+        if isinstance(item.get("state"), str):
+            match["state"] = item["state"]
+        matches.append(match)
     return matches, ocr
 
 
@@ -173,11 +202,13 @@ def build_overlay(event: dict[str, Any]) -> dict[str, Any]:
     param_matches, param_ocr = _recognitions(event.get("params"), seen=seen)
     output_matches, output_ocr = _recognitions(event.get("output"), seen=seen)
     matches = sorted(param_matches + output_matches, key=lambda item: item["confidence"], reverse=True)
+    params = event.get("params")
     return {
         "rois": [{"label": label, "box": box} for label, box in _named_rois(event.get("params"))][:MAX_OVERLAY_BOXES],
         "matches": matches[:MAX_OVERLAY_BOXES],
         "ocr": (param_ocr + output_ocr)[:MAX_OVERLAY_BOXES],
         "clicks": list(_click_trails(event))[:MAX_OVERLAY_BOXES],
+        "states": _state_candidates(params.get("disappeared_states") if isinstance(params, dict) else None),
     }
 
 
@@ -201,6 +232,8 @@ def step_summary(event: dict[str, Any]) -> dict[str, Any]:
         "error_category": event.get("error_category"),
         "node_path": list(node_path) if isinstance(node_path, (list, tuple)) else None,
         "node_path_names": list(node_path_names) if isinstance(node_path_names, (list, tuple)) else None,
+        "workflow_steps": [dict(item) for item in event.get("workflow_steps", []) if isinstance(item, dict)]
+        if isinstance(event.get("workflow_steps"), list) else [],
         "breadcrumb": event.get("breadcrumb"),
         "error_path": list(event["error_path"]) if isinstance(event.get("error_path"), (list, tuple)) else None,
         "error_breadcrumb": event.get("error_breadcrumb"),

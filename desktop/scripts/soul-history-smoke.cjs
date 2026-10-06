@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Offline history uses real captured backpacks, without launching/contacting MuMu.
 const {app,BrowserWindow,protocol,net,ipcMain}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
@@ -21,8 +22,8 @@ app.whenReady().then(async()=>{
     const match=new URL(request.url).pathname.match(/^\/assets\/(soul|hero)-icons\/(\d+)\.png$/);if(!match)return new Response('',{status:404});
     const file=path.join(project,'assets',match[1]+'-icons',match[2]+'.png');return fs.existsSync(file)?net.fetch(pathToFileURL(file).href):new Response('',{status:404});
   });
-  const source=fs.readFileSync(path.join(desktop,'src/renderer/index.html'),'utf8'),panel=source.match(/<div id="team-builder-soul-calculator"[\s\S]*?\n            <\/div>/)[0];
-  const css=fs.readFileSync(path.join(desktop,'src/renderer/styles.css'),'utf8').replace(/^@import[^;]*;/,'');
+  const source=readExpandedHtml(path.join(desktop,'src/renderer/index.html')),panel=source.match(/<div id="team-builder-soul-calculator"[\s\S]*?\n            <\/div>/)[0];
+  const css=readExpandedCss(path.join(desktop,'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/,'');
   const palette=['workbench-light.css','theme.css'].map(name=>fs.readFileSync(path.join(desktop,'public/theme',name),'utf8')).join('\n');
   const file=path.join(artifacts,'soul-history.html');fs.writeFileSync(file,`<!doctype html><html lang="zh-CN" data-theme="dark"><meta charset="UTF-8"><style>${css}\n${palette}</style><body><section class="team-builder-content" style="height:100vh"><header class="team-builder-pane-header">御魂计算</header>${panel}</section></body></html>`);
   const win=new BrowserWindow({show:false,width:1280,height:850,webPreferences:{nodeIntegration:true,contextIsolation:false,sandbox:false,offscreen:true,backgroundThrottling:false}});

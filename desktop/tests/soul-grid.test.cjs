@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { soulGridRange } = require('../dist-test-renderer/renderer/soul-grid.js');
+const { soulGridRange } = require('../dist-test-renderer/renderer/features/souls/inventory/grid.js');
 
 test('window covers the viewport and keeps row-aligned buffering without a total limit', () => {
   for (const total of [6180, 12000]) {

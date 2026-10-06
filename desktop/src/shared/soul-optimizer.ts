@@ -44,6 +44,10 @@ export interface OptimizationOptions {
   objective: OptimizationObjective;
   requirements: Array<{ suitId: number; count: 2 | 4 }>;
   twoPieceAttribute?: string;
+  /** Require all six pieces to come from different suits (no activated set bonus). */
+  distinctSuits?: boolean;
+  /** Turn off contextual four-piece set constraints for panel-only utilities. */
+  applySuitMechanicRanges?: boolean;
   mainAttributes: Partial<Record<number, string[]>>;
   ranges: Partial<Record<PanelKey, { min?: number; max?: number }>>;
   onlySix: boolean;
@@ -106,7 +110,7 @@ export function evaluatePlan(souls: SoulRecord[], base: Panel, catalog: SuitProf
  */
 export async function optimizeSouls(souls: SoulRecord[], catalog: SuitProfile[], options: OptimizationOptions,
   progress: (value: SearchProgress) => void = () => {}, cancelled: () => boolean = () => false): Promise<SearchResult> {
-  options={...options,ranges:suitMechanicRanges(options.requirements.flatMap(requirement=>Array.from({length:requirement.count},()=>({suitId:requirement.suitId}))),options.ranges)};
+  if (options.applySuitMechanicRanges !== false) options={...options,ranges:suitMechanicRanges(options.requirements.flatMap(requirement=>Array.from({length:requirement.count},()=>({suitId:requirement.suitId}))),options.ranges)};
   if (!Object.hasOwn(OPTIMIZATION_OBJECTIVES, options.objective)) throw new Error('请选择有效的效果指标');
   for (const value of Object.values(options.base)) if (!Number.isFinite(value) || value < 0) throw new Error('式神基础面板必须为非负数');
   for (const range of Object.values(options.ranges)) {
@@ -193,6 +197,7 @@ export async function optimizeSouls(souls: SoulRecord[], catalog: SuitProfile[],
     const position = order[depth];
     for (const item of slots[position]) {
       chosen[position] = item.soul; const id = item.soul.suitId!;
+      if (options.distinctSuits && counts.has(id)) continue;
       counts.set(id, (counts.get(id) ?? 0) + 1);
       for (let i = 0; i < ATTRS.length; i++) prefixes[depth + 1][i] = current[i] + item.v[i];
       yield* search(depth + 1);

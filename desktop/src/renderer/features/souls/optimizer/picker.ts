@@ -1,5 +1,5 @@
-import type { HeroProfile, SuitProfile } from '../shared/soul-optimizer';
-import type { SoulSnapshot } from '../shared/souls';
+import type { HeroProfile, SuitProfile } from '../../../../shared/soul-optimizer';
+import type { SoulSnapshot } from '../../../../shared/souls';
 
 export const HERO_RARITIES: Record<number, string> = { 1: 'N', 2: 'R', 3: 'SR', 4: 'SSR', 5: 'SP', 6: 'UR' };
 export function appendHeroRarity(parent: HTMLElement, rarity: number): void {

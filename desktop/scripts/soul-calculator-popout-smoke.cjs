@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Actual native popout, production Dockview/menus/calculator/optimizer and a saved inventory. No device writes.
 const {app,BrowserWindow,ipcMain,protocol}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict'),{pathToFileURL}=require('node:url');
@@ -20,13 +21,13 @@ app.whenReady().then(async()=>{
   ipcMain.handle('window:close',event=>owner(event).close());
   ipcMain.handle('window:minimize',event=>owner(event).minimize());
   ipcMain.handle('window:toggle-maximize',event=>{const win=owner(event);win.isMaximized()?win.unmaximize():win.maximize();});
-  const main=fs.readFileSync(path.join(root,'src/renderer/main.ts'),'utf8');
+  const main=fs.readFileSync(path.join(root,'src/renderer/app/bootstrap.ts'),'utf8');
   const handlers=main.slice(main.indexOf("  document.querySelectorAll<HTMLElement>('[data-app-command]')"),main.indexOf('  settings.bind();'));
   assert.ok(handlers.includes("popout('soulCalculator')"));
-  const entry=`import {createWorkbenchFrame} from '../../desktop/src/renderer/docking';
-import {createTitlebarMenus,installTitlebarMenuBar} from '../../desktop/src/renderer/titlebar-menus';
-import {installSoulCalculator} from '../../desktop/src/renderer/soul-calculator';
-import {installSoulOptimizer} from '../../desktop/src/renderer/soul-optimizer-view';
+  const entry=`import {createWorkbenchFrame} from '../src/renderer/shell/docking/index';
+import {createTitlebarMenus,installTitlebarMenuBar} from '../src/renderer/shell/titlebar-menus';
+import {installSoulCalculator} from '../src/renderer/features/souls/calculator/index';
+import {installSoulOptimizer} from '../src/renderer/features/souls/optimizer/view';
 const stored=new Map([['onmyoji-studio.souls.instance','mumu-1']]);
 const api={readLayout:k=>stored.get(k)??null,writeLayout:(k,v)=>stored.set(k,v),
 listSoulInstances:async()=>[{id:'mumu-1',backend:'mumu',mumuIndex:1,online:false}],loadSouls:async()=>window.fixtureSnapshot,onSoulFetchProgress:()=>()=>{},fetchSouls:()=>{throw Error('No device writes')},cancelSoulFetch:async()=>{},isAlwaysOnTop:async()=>false};
@@ -38,8 +39,8 @@ ${handlers}`;
   const entryFile=path.join(out,'entry.ts');fs.writeFileSync(entryFile,entry);
   const {build}=await import(pathToFileURL(path.join(root,'node_modules/vite/dist/node/index.js')).href);
   await build({configFile:false,logLevel:'error',build:{lib:{entry:entryFile,name:'soulPopoutTest',formats:['iife'],fileName:()=> 'check.js'},outDir:path.join(out,'bundle'),emptyOutDir:true}});
-  let html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g,'').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'').replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/g,'');
-  const css=fs.readFileSync(path.join(root,'src/renderer/styles.css'),'utf8').replace(/^@import[^;]*;/,'')+fs.readFileSync(path.join(root,'node_modules/dockview/dist/styles/dockview.css'),'utf8');
+  let html=readExpandedHtml(path.join(root,'src/renderer/index.html')).replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g,'').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'').replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/g,'');
+  const css=readExpandedCss(path.join(root,'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/,'')+fs.readFileSync(path.join(root,'node_modules/dockview/dist/styles/dockview.css'),'utf8');
   html=html.replace('</head>',`<style>${css}</style></head>`).replace('</body>',`<script>window.fixtureSnapshot=${JSON.stringify(snapshot)};</script><script src="/check.js"></script></body>`);
   server=http.createServer((req,res)=>{
     const url=new URL(req.url,'http://localhost');let file;

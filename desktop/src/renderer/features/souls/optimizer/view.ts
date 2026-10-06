@@ -1,21 +1,21 @@
-import { soulCatalog } from '../shared/soul-catalog-data';
-import { PANEL_LABELS, OPTIMIZATION_OBJECTIVES, formatPlanScore, objectiveMainAttributes, optimizeSouls, sortSoulPlans } from '../shared/soul-optimizer';
-import type { HeroProfile, SuitProfile, Panel, PanelKey, OptimizationObjective, OptimizationOptions, SoulPlan, SoulPlanSortKey, SearchResult, SearchProgress } from '../shared/soul-optimizer';
-import type { SoulSnapshot, SoulRecord } from '../shared/souls';
-import type { RuntimeInstance, SoulInstance } from '../shared/contracts';
-import { SOUL_SLOT_MAIN_ATTRIBUTES, SOUL_SLOT_DEFAULT_MAIN_ATTRIBUTES } from '../shared/soul-slots';
-import { createInstancePicker, instanceLabel } from './instance-picker';
-import { createSoulPositionPortrait } from './soul-position-portrait';
-import { installOptimizerPicker, appendPickerPortrait, appendHeroRarity, SUIT_ATTRIBUTES } from './soul-optimizer-picker';
-import { installSoulPlanDetail } from './soul-plan-detail';
-import { installSoulRangeEditor } from './soul-range-editor';
-import { installSoulDetailWindow } from './soul-detail-window';
-import { renderSoulDetail } from './soul-detail-render';
-import type { ImageShareApi } from './image-share';
-import { renderSoulTarget } from './soul-target-view';
-import { installSoulTargetRange } from './soul-target-range';
-import type { SoulCommunityPanels } from './soul-community-view';
-import type { CommunityApi } from '../shared/soul-community';
+import { soulCatalog } from '../../../../shared/soul-catalog-data';
+import { PANEL_LABELS, OPTIMIZATION_OBJECTIVES, formatPlanScore, objectiveMainAttributes, optimizeSouls, sortSoulPlans } from '../../../../shared/soul-optimizer';
+import type { HeroProfile, SuitProfile, Panel, PanelKey, OptimizationObjective, OptimizationOptions, SoulPlan, SoulPlanSortKey, SearchResult, SearchProgress } from '../../../../shared/soul-optimizer';
+import type { SoulSnapshot, SoulRecord } from '../../../../shared/souls';
+import type { RuntimeInstance, SoulInstance } from '../../../../shared/contracts';
+import { SOUL_SLOT_MAIN_ATTRIBUTES, SOUL_SLOT_DEFAULT_MAIN_ATTRIBUTES } from '../../../../shared/soul-slots';
+import { createInstancePicker, instanceLabel } from '../../workflow/instance-picker';
+import { createSoulPositionPortrait } from '../components/position-portrait';
+import { installOptimizerPicker, appendPickerPortrait, appendHeroRarity, SUIT_ATTRIBUTES } from './picker';
+import { installSoulPlanDetail } from '../components/plan-detail';
+import { installSoulRangeEditor } from '../components/range-editor';
+import { installSoulDetailWindow } from '../components/detail-window';
+import { renderSoulDetail } from '../components/detail-render';
+import type { ImageShareApi } from '../../../ui/image-share';
+import { renderSoulTarget } from '../inventory/target-view';
+import { installSoulTargetRange } from '../inventory/target-range';
+import type { CommunityContext, SoulCommunityPanels } from '../community/view';
+import type { CommunityApi } from '../../../../shared/soul-community';
 
 const heroes: HeroProfile[] = soulCatalog.heroes;
 const suits: SuitProfile[] = soulCatalog.suits;
@@ -23,12 +23,60 @@ const ATTR_LABELS: Record<string, string> = { attackAdditionRate: '攻击加成'
 const PERCENT = new Set<PanelKey>(['crit', 'critDamage', 'hit', 'resist']);
 const format = (key: PanelKey, value: number): string => PERCENT.has(key) ? `${(value * 100).toFixed(2)}%` : value.toFixed(2);
 interface SavedPlan { key: string; heroId: number; heroName: string; created: string; plan: SoulPlan; objective?: OptimizationOptions['objective']; base?: Panel }
+interface CachedOptimizerResult {
+  schema: 1;
+  instanceId: string;
+  fetchedAt: string;
+  heroId: number;
+  options: OptimizationOptions;
+  result: SearchResult;
+  sort: SoulPlanSortKey;
+  targetPlanIndex: number;
+  manualMainPositions: number[];
+  excludedFavoriteKeys: string[];
+  cachedAt: string;
+}
 export type OptimizerWorkerFactory = () => Worker;
 interface OptimizerViewApi extends ImageShareApi, Partial<CommunityApi> { readLayout(key: string): string | null; writeLayout(key: string, value: string | null): void }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPanel(value: unknown): value is Panel {
+  return isRecord(value) && Object.keys(PANEL_LABELS).every(key => Number.isFinite(value[key]));
+}
+
+function isCachedOptimizerResult(value: unknown, snapshot: SoulSnapshot): value is CachedOptimizerResult {
+  if (!isRecord(value) || value.schema !== 1 || value.instanceId !== snapshot.instanceId || value.fetchedAt !== snapshot.fetchedAt ||
+      typeof value.heroId !== 'number' || !Number.isInteger(value.heroId) || !Object.hasOwn(OPTIMIZATION_OBJECTIVES, value.options && isRecord(value.options) ? value.options.objective as string : '') ||
+      !Array.isArray(value.manualMainPositions) || !value.manualMainPositions.every(position => [2, 4, 6].includes(position as number)) ||
+      !Array.isArray(value.excludedFavoriteKeys) || !value.excludedFavoriteKeys.every(key => typeof key === 'string') ||
+      typeof value.cachedAt !== 'string' || !['score', 'attack', 'hp', 'defense', 'speed', 'crit', 'critDamage', 'hit', 'resist'].includes(value.sort as string) ||
+      typeof value.targetPlanIndex !== 'number' || !Number.isInteger(value.targetPlanIndex)) return false;
+  const options = value.options as unknown as OptimizationOptions;
+  const result = value.result as unknown as SearchResult;
+  const inventoryIds = new Set(snapshot.souls.map(soul => soul.id));
+  if (!isPanel(options.base) || !Array.isArray(options.requirements) || !options.requirements.every(requirement => Number.isInteger(requirement.suitId) && [2, 4].includes(requirement.count)) ||
+      !Array.isArray(options.excludedIds) || !options.excludedIds.every(id => typeof id === 'string') ||
+      !isRecord(options.mainAttributes) || !Object.values(options.mainAttributes).every(attributes => Array.isArray(attributes) && attributes.every(attribute => typeof attribute === 'string')) ||
+      !isRecord(options.ranges) || !Object.values(options.ranges).every(range => range === undefined || isRecord(range) &&
+        (range.min === undefined || typeof range.min === 'number' && Number.isFinite(range.min)) &&
+        (range.max === undefined || typeof range.max === 'number' && Number.isFinite(range.max))) ||
+      !['onlySix', 'onlyMaxLevel', 'unequipped', 'excludeDiscarded'].every(key => typeof (options as unknown as Record<string, unknown>)[key] === 'boolean') ||
+      !Number.isFinite(options.seconds) || !Number.isFinite(options.limit) || !Array.isArray(result?.plans) ||
+      !['complete', 'timeout', 'cancelled'].includes(result.status) || !Number.isFinite(result.elapsed) || !Number.isFinite(result.visited) ||
+      !Number.isFinite(result.found) || !Number.isFinite(result.skipped) || !Array.isArray(result.candidates) ||
+      !result.candidates.every(candidate => Number.isFinite(candidate)) || !result.plans.every(plan => isRecord(plan) && Array.isArray(plan.ids) &&
+        plan.ids.length === 6 && plan.ids.every(id => typeof id === 'string' && inventoryIds.has(id)) &&
+        isPanel(plan.panel) && Number.isFinite(plan.score) && Array.isArray(plan.suits) && plan.suits.every(suit => isRecord(suit) && Number.isFinite(suit.id) && Number.isFinite(suit.count)))) return false;
+  return heroes.some(hero => hero.id === value.heroId) && value.targetPlanIndex >= 0 && value.targetPlanIndex < Math.max(1, result.plans.length);
+}
 
 export interface SoulOptimizerPanelHooks {
   /** 由停靠布局提供：把配装面板显示到前面。 */
   open?(): void;
+  openCalculator?(): void;
   community?: SoulCommunityPanels;
 }
 
@@ -49,6 +97,14 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   panel.innerHTML = `
     <header class="soul-optimizer-header"><div class="soul-optimizer-heading"><h2 id="soul-optimizer-title">御魂配装</h2><div class="soul-optimizer-instance-row"><div data-ui="instance-picker" class="instance-picker soul-instance-picker"><button type="button" class="instance-select soul-instance-select" data-action="select-instance" aria-haspopup="listbox" aria-expanded="false" aria-label="运行实例"><span data-ui="instance-label" class="instance-select-label">请选择实例</span><span class="instance-picker-chevron" aria-hidden="true"></span></button><div data-ui="instance-menu" class="instance-menu soul-instance-menu" role="listbox" hidden></div></div><p data-ui="source"></p></div></div></header>
     <div class="soul-optimizer-body">
+      <section class="soul-optimizer-inventory-empty" data-ui="inventory-empty" aria-labelledby="soul-inventory-empty-title">
+        <span class="soul-optimizer-inventory-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7 9-4 9 4-9 4-9-4Z M3 7v10l9 4 9-4V7 M12 11v10"></path></svg></span>
+        <h3 id="soul-inventory-empty-title">先获取御魂，再开始配装</h3>
+        <p>当前实例还没有御魂数据。前往「御魂计算」，选择模拟器实例，再点击「获取御魂」。</p>
+        <div class="soul-optimizer-inventory-tip">获取前，请先将游戏界面切换到「御魂仓库」。</div>
+        <button type="button" data-action="open-calculator">前往御魂计算 <span aria-hidden="true">↗</span></button>
+        <small>获取完成后，回到这里即可设置配装条件。</small>
+      </section>
       <form data-ui="form"><details class="soul-optimizer-configuration" data-ui="configuration" open><summary><strong>配装条件</strong><span data-ui="configuration-summary"></span></summary><fieldset data-ui="settings">
         <section class="soul-optimizer-hero"><div class="soul-optimizer-hero-overview"><button type="button" data-action="choose-hero" class="soul-optimizer-selection soul-optimizer-hero-selection" aria-label="选择式神"></button><div data-ui="hero-panel" class="soul-optimizer-hero-panel"></div><select data-ui="hero" aria-label="选择式神" hidden></select></div>
         </section>
@@ -111,15 +167,36 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   for (const [value, info] of Object.entries(OPTIMIZATION_OBJECTIVES)) addOption(select('objective'), value, info.label);
   const heroSelect = select('hero');
   let snapshot: SoulSnapshot | undefined, worker: Worker | undefined, running = false, disposed = false, generation = 0;
+  const renderInventoryState = (): void => {
+    const hasInventory = Boolean(snapshot?.souls.length);
+    panel.dataset.inventory = hasInventory ? 'ready' : 'empty';
+    el('inventory-empty').hidden = hasInventory;
+    action('start').disabled = running || !hasInventory;
+    el<HTMLFieldSetElement>('settings').disabled = running || !hasInventory;
+    action('open-calculator').disabled = !hooks.openCalculator;
+  };
+  action('open-calculator').addEventListener('click', () => hooks.openCalculator?.());
   let cancelled = false, selectedHero = heroes.find(hero => hero.name === '大天狗') ?? heroes[0];
   let saved: SavedPlan[] = [], results: SoulPlan[] = [];
+  let lastSearchResult: SearchResult | undefined, resultExcludedFavoriteKeys: string[] = [];
+  const manualMainPositions = new Set<number>();
   let ranges: OptimizationOptions['ranges'] = {};
   let resultObjective: OptimizationOptions['objective'] = 'damage', resultHero = selectedHero;
   let resultBase: Panel | undefined;
   let resultOptions: OptimizationOptions | undefined, resultStatus: SearchResult['status'] = 'complete';
   let targetTimer: ReturnType<typeof setTimeout> | undefined;
   let targetPlanIndex = 0;
-  const targetRange = installSoulTargetRange(el('target-range'), () => select('objective').value as OptimizationObjective,
+  let targetSavedKey: string | undefined;
+  const community = hooks.community;
+  let lastCommunityContextKey: string | undefined;
+  const updateCommunityContext = (context?: CommunityContext): void => {
+    const key = context ? `${context.snapshotKey ?? ''}|${context.hero.id}|${context.plan.ids.join('|')}|${JSON.stringify(context.options)}` : '';
+    if (key === lastCommunityContextKey) return;
+    lastCommunityContextKey = key;
+    community?.update(context);
+  };
+  const targetObjective = (): OptimizationObjective => saved.find(item => item.key === targetSavedKey)?.objective ?? resultObjective;
+  const targetRange = installSoulTargetRange(el('target-range'), targetObjective,
     () => { clearTimeout(targetTimer); targetTimer = setTimeout(renderTarget, 250); },
     () => { clearTimeout(targetTimer); renderTarget(); });
   const planDetail = installSoulPlanDetail(host, suits, preview, closePreview, api);
@@ -128,6 +205,42 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     chooseSuit: (kind, value) => { select(kind).value = value; select(kind).dispatchEvent(new Event('change', { bubbles: true })); }, closePreview });
   const rangeEditor = installSoulRangeEditor(host, () => ranges, next => { ranges = next; changed(); }, closePreview);
   const savedKey = (): string => `onmyoji-studio.souls.plans.${snapshot?.instanceId ?? ''}`;
+  const selectedHeroKey = (): string => `onmyoji-studio.souls.optimizer-hero.${snapshot?.instanceId ?? ''}`;
+  const resultCacheKey = (): string => `onmyoji-studio.souls.optimizer-results.${snapshot?.instanceId ?? ''}`;
+  const readSelectedHero = (): HeroProfile | undefined => {
+    if (!snapshot) return undefined;
+    try {
+      const heroId = Number(api.readLayout(selectedHeroKey()));
+      return Number.isInteger(heroId) ? heroes.find(hero => hero.id === heroId) : undefined;
+    } catch { return undefined; }
+  };
+  const persistSelectedHero = (): void => {
+    if (!snapshot) return;
+    try { api.writeLayout(selectedHeroKey(), String(selectedHero.id)); } catch { /* Keep current selection if local storage is unavailable. */ }
+  };
+  const readResultCache = (): CachedOptimizerResult | undefined => {
+    if (!snapshot) return undefined;
+    const key = resultCacheKey();
+    try {
+      const raw = api.readLayout(key);
+      if (!raw) return undefined;
+      const value: unknown = JSON.parse(raw);
+      if (isCachedOptimizerResult(value, snapshot)) return value;
+    } catch { /* Ignore damaged or outdated calculation caches. */ }
+    api.writeLayout(key, null);
+    return undefined;
+  };
+  const persistResultCache = (): void => {
+    if (!snapshot || !lastSearchResult || !resultOptions) return;
+    const cache: CachedOptimizerResult = {
+      schema: 1, instanceId: snapshot.instanceId, fetchedAt: snapshot.fetchedAt, heroId: resultHero.id,
+      options: resultOptions, result: lastSearchResult, sort: select('result-sort').value as SoulPlanSortKey,
+      targetPlanIndex, manualMainPositions: [...manualMainPositions], excludedFavoriteKeys: resultExcludedFavoriteKeys,
+      cachedAt: new Date().toISOString(),
+    };
+    try { api.writeLayout(resultCacheKey(), JSON.stringify(cache)); } catch { /* Calculation stays usable if persistence is unavailable. */ }
+  };
+  const clearResultCache = (): void => { if (snapshot) api.writeLayout(resultCacheKey(), null); };
   const setStatus = (text: string, error = false): void => { el('status').textContent = text; el('status').classList.toggle('error', error); };
   const populateHeroes = (): void => {
     heroSelect.replaceChildren();
@@ -179,7 +292,6 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     for (const name of names) { const label = doc.createElement('label'); const input = doc.createElement('input'); input.type = 'checkbox'; input.dataset.position = String(position); input.value = name; input.checked = SOUL_SLOT_DEFAULT_MAIN_ATTRIBUTES[position].includes(name); label.append(input, doc.createTextNode(ATTR_LABELS[name])); choices.append(label); }
     row.append(choices); el('main').append(row);
   }
-  const manualMainPositions = new Set<number>();
   const mainInputs = (position: number): HTMLInputElement[] => [...el('main').querySelectorAll<HTMLInputElement>(`input[data-position="${position}"]`)];
   /** Objectives carry their own main attribute so 生命 builds do not keep searching 攻击加成 slots. */
   const applyObjectiveMains = (objective: OptimizationObjective): void => {
@@ -204,6 +316,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       row.append(edit, remove); el('ranges').append(row);
     }
   };
+  const excludedFavoriteKeys = (): string[] => [...el('exclusions').querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value);
   const options = (): OptimizationOptions => {
     if (!selectedHero.base) throw new Error('该式神缺少基础属性，请更新式神目录。');
     const base = { ...selectedHero.base };
@@ -218,41 +331,83 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       onlySix: field('six').checked, onlyMaxLevel: field('max').checked, unequipped: field('unequipped').checked, excludeDiscarded: field('kept').checked,
       excludedIds: [...new Set([...el('exclusions').querySelectorAll<HTMLInputElement>('input:checked')].flatMap(input => saved.find(plan => plan.key === input.value)?.plan.ids ?? []))], seconds: Number(select('seconds').value), limit: Number(select('limit').value) };
   };
+  const savedAnalysisOptions = (item: SavedPlan): OptimizationOptions | undefined => {
+    const hero = heroes.find(candidate => candidate.id === item.heroId);
+    const base = item.base ?? hero?.base;
+    if (!base) return undefined;
+    const objective = item.objective ?? resultObjective;
+    const mainAttributes: OptimizationOptions['mainAttributes'] = {};
+    for (const position of [1, 3, 5]) mainAttributes[position] = [...SOUL_SLOT_MAIN_ATTRIBUTES[position]];
+    for (const position of [2, 4, 6]) {
+      const main = snapshot?.souls.find(soul => soul.id === item.plan.ids[position - 1])?.mainAttribute?.name;
+      mainAttributes[position] = main ? [main] : [...SOUL_SLOT_MAIN_ATTRIBUTES[position]];
+    }
+    return { base: { ...base }, objective, requirements: item.plan.suits
+      .filter(set => set.count >= 2 && suits.some(suit => suit.id === set.id))
+      .map(set => ({ suitId: set.id, count: set.count >= 4 ? 4 as const : 2 as const })), mainAttributes, ranges: {},
+      onlySix: false, onlyMaxLevel: false, unequipped: false, excludeDiscarded: false, excludedIds: [], seconds: 30, limit: 20 };
+  };
   const renderTarget = (): void => {
     const host = el('target-analysis'); host.replaceChildren(); delete host.dataset.achieved;
     el('target-note').textContent = '查看选定方案的实际副词条收益和评分差距。+15 御魂属性已固定，提升评分需要换装。';
-    const source = select('target-source'); source.replaceChildren(); source.disabled = !results.length;
+    const selectedSaved = saved.find(item => item.key === targetSavedKey);
+    if (!selectedSaved) targetSavedKey = undefined;
+    const source = select('target-source'); source.replaceChildren(); source.disabled = !results.length && !selectedSaved;
     results.forEach((plan, index) => addOption(source, String(index), `方案 ${index + 1} · ${formatPlanScore(plan.score, resultObjective)}`));
-    source.value = String(targetPlanIndex);
-    const communityContext = results.length && resultOptions && snapshot ? { hero: resultHero, plan: results[targetPlanIndex] ?? results[0], inventory: snapshot.souls, options: resultOptions } : undefined;
+    if (selectedSaved) addOption(source, `saved:${selectedSaved.key}`, `收藏 · ${selectedSaved.heroName} · ${formatPlanScore(selectedSaved.plan.score, selectedSaved.objective)}`);
+    source.value = selectedSaved ? `saved:${selectedSaved.key}` : String(targetPlanIndex);
+    const analysisPlan = selectedSaved?.plan ?? results[targetPlanIndex] ?? results[0];
+    const analysisHero = selectedSaved ? heroes.find(hero => hero.id === selectedSaved.heroId) : resultHero;
+    const analysisOptions = selectedSaved ? savedAnalysisOptions(selectedSaved) : resultOptions;
+    const analysisStatus = selectedSaved ? 'complete' : resultStatus;
+    const communityContext = analysisPlan && analysisHero && analysisOptions && snapshot ? { hero: analysisHero, plan: analysisPlan, inventory: snapshot.souls, options: analysisOptions, snapshotKey: `${snapshot.instanceId}|${snapshot.fetchedAt}` } : undefined;
+    updateCommunityContext(communityContext);
     let target: ReturnType<typeof targetRange.read>;
     try { target = targetRange.read(); } catch (error) {
-      community?.update(communityContext);
       appendText(host, 'p', error instanceof Error ? error.message : String(error), 'soul-target-error'); return;
     }
-    community?.update(communityContext ? { ...communityContext, target: target ?? undefined } : undefined);
     if (!target) return;
-    if (!results.length || !resultOptions || !snapshot) {
-      appendText(host, 'p', running ? '计算完成后会自动分析目标差距。' : '请先计算出符合条件的方案，再选择要分析的原方案。', 'soul-target-note'); return;
+    if (!analysisPlan || !analysisOptions || !analysisHero || !snapshot) {
+      appendText(host, 'p', running ? '计算完成后会自动分析目标差距。' : '请先计算或收藏一个方案，再选择要分析的原方案。', 'soul-target-note'); return;
     }
     try {
-      renderSoulTarget(host, target, results[targetPlanIndex] ?? results[0], snapshot.souls, suits, resultOptions, resultStatus,
-        plan => planDetail.show(plan, resultHero, snapshot, resultBase, resultObjective,resultOptions?.ranges),resultHero.name);
+      renderSoulTarget(host, target, analysisPlan, snapshot.souls, suits, analysisOptions, analysisStatus,
+        plan => planDetail.show(plan, analysisHero, snapshot, analysisOptions.base, analysisOptions.objective, analysisOptions.ranges), analysisHero.name);
     } catch (error) { appendText(host, 'p', error instanceof Error ? error.message : String(error), 'soul-target-error'); }
   };
-  const community = hooks.community;
   const communityButton = doc.createElement('button'); communityButton.type = 'button'; communityButton.className = 'soul-target-community-button';
-  communityButton.dataset.action = 'open-community'; communityButton.textContent = '社区方案比对…';
-  communityButton.disabled = !community; communityButton.setAttribute('aria-controls', 'module-soul-community-comparison');
+  communityButton.dataset.action = 'open-community'; communityButton.textContent = '社区御魂配置…';
+  communityButton.disabled = !community; communityButton.setAttribute('aria-controls', 'soul-workspace-community');
+  // 社区和配装在同一工作区左右对照，控制器负责显示现有面板。
   communityButton.addEventListener('click', () => { closePreview(); picker.close(); planDetail.close(); rangeEditor.close(); community?.show(communityButton); });
   el('target-note').parentElement!.append(communityButton);
-  select('target-source').addEventListener('change', () => { targetPlanIndex = Number(select('target-source').value); renderTarget(); });
-  const clearResults = (): void => { results = []; targetPlanIndex = 0; el('results').replaceChildren(); el('result-note').textContent = ''; el('result-total').textContent = ''; select('result-sort').disabled = true; action('start').textContent = '开始计算'; renderTarget(); };
+  select('target-source').addEventListener('change', () => {
+    const previousObjective = targetObjective();
+    const value = select('target-source').value;
+    if (value.startsWith('saved:')) targetSavedKey = value.slice('saved:'.length);
+    else { targetSavedKey = undefined; targetPlanIndex = Number(value); }
+    if (targetObjective() !== previousObjective) targetRange.reset();
+    renderTarget(); persistResultCache();
+  });
+  const clearResults = (forgetCache = true): void => {
+    results = []; lastSearchResult = undefined; resultExcludedFavoriteKeys = []; targetPlanIndex = 0;
+    if (forgetCache) clearResultCache();
+    el('results').replaceChildren(); el('result-note').textContent = ''; el('result-total').textContent = '';
+    select('result-sort').disabled = true; action('start').textContent = '开始计算'; renderTarget();
+  };
   function changed(): void { updateConfigurationSummary(); updateSuitSelections(); updateHeroPanel(); renderRanges(); if (results.length && !running) { clearResults(); setStatus('条件已更改，请重新计算。'); } else renderTarget(); }
-  const setRunning = (value: boolean): void => { running = value; el<HTMLFieldSetElement>('settings').disabled = value; action('start').disabled = value; action('reset').disabled = value; action('cancel').hidden = !value; action('cancel').disabled = false; for (const button of el('saved').querySelectorAll('button')) button.disabled = value; };
+  const setRunning = (value: boolean): void => { running = value; renderInventoryState(); action('reset').disabled = value; action('cancel').hidden = !value; action('cancel').disabled = false; for (const button of el('saved').querySelectorAll('button')) button.disabled = value; };
   const stop = (): void => { cancelled = true; worker?.postMessage({ type: 'cancel' }); };
   const persist = (): void => api.writeLayout(savedKey(), JSON.stringify(saved));
-  const renderPlan = (parent: HTMLElement, plan: SoulPlan, label: string, onSave?: () => void, onRemove?: () => void, objective?: OptimizationOptions['objective'], alreadySaved = false, hero?: HeroProfile, base?: Panel): void => {
+  const focusTargetAnalysis = (): void => {
+    const targetSection = el<HTMLDetailsElement>('target-section');
+    targetSection.open = true;
+    const bodyRect = body.getBoundingClientRect();
+    const sectionRect = targetSection.getBoundingClientRect();
+    body.scrollTo({ top: body.scrollTop + sectionRect.top - bodyRect.top, behavior: 'smooth' });
+    field('target').focus({ preventScroll: true });
+  };
+  const renderPlan = (parent: HTMLElement, plan: SoulPlan, label: string, onSave?: () => void, onRemove?: () => void, objective?: OptimizationOptions['objective'], alreadySaved = false, hero?: HeroProfile, base?: Panel, onAnalyze?: () => void): void => {
     const card = doc.createElement('article'); card.className = 'soul-optimizer-plan';
     card.dataset.score = String(plan.score); card.dataset.planIds = plan.ids.join('|');
     const heading = appendText(card, 'div', '', 'soul-optimizer-section-heading'); appendText(heading, 'strong', label);
@@ -284,9 +439,15 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
     const planRanges=results.includes(plan)?resultOptions?.ranges:undefined;
     const actions = appendText(card, 'div', '', 'soul-optimizer-plan-actions');
     const view = doc.createElement('button'); view.type = 'button'; view.dataset.action = 'view-plan'; view.className = 'soul-plan-view-button'; view.textContent = '查看配装详情 ↗'; view.addEventListener('click', () => planDetail.show(plan, hero, snapshot, base, objective,planRanges)); actions.append(view);
-    if (results.includes(plan)) {
+    if (results.includes(plan) || onAnalyze) {
       const analyze = doc.createElement('button'); analyze.type = 'button'; analyze.dataset.action = 'analyze-plan'; analyze.textContent = '分析当前方案';
-      analyze.addEventListener('click', () => { targetPlanIndex = results.indexOf(plan); renderTarget(); el<HTMLDetailsElement>('target-section').open = true; el('target-section').scrollIntoView({ block: 'start' }); field('target').focus(); }); actions.append(analyze);
+      analyze.addEventListener('click', () => {
+        if (onAnalyze) onAnalyze();
+        else { targetSavedKey = undefined; targetPlanIndex = results.indexOf(plan); }
+        renderTarget();
+        focusTargetAnalysis();
+        persistResultCache();
+      }); actions.append(analyze);
     }
     const details = doc.createElement('details'); details.className = 'soul-optimizer-plan-details'; appendText(details, 'summary', '查看六件御魂'); card.append(details);
     const list = appendText(details, 'div', '', 'soul-optimizer-plan-souls');
@@ -323,10 +484,16 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       renderPlan(el('saved'), item.plan, item.heroName, undefined, () => {
         if (running) return;
         const wasExcluded = [...el('exclusions').querySelectorAll<HTMLInputElement>('input:checked')].some(input => input.value === item.key);
+        if (targetSavedKey === item.key) { targetSavedKey = undefined; targetRange.reset(); }
         saved = saved.filter(p => p.key !== item.key); persist(); renderSaved(); syncResultFavorites();
+        renderTarget();
         // Keep the completed search and analysis as a snapshot. Removed exclusions affect the next search.
         if (wasExcluded) setStatus('收藏已删除，已取消该方案的御魂排除；当前结果已保留，下次计算生效。');
-      }, item.objective, false, heroes.find(hero => hero.id === item.heroId), item.base);
+      }, item.objective, false, heroes.find(hero => hero.id === item.heroId), item.base, () => {
+        const previousObjective = targetObjective();
+        targetSavedKey = item.key;
+        if (targetObjective() !== previousObjective) targetRange.reset();
+      });
     }
   };
   const renderResults = (): void => {
@@ -339,29 +506,65 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       }, undefined, resultObjective, alreadySaved, resultHero, resultBase);
     }
   };
-  const progress = (value: SearchProgress): void => setStatus(`正在搜索 · ${value.elapsed.toFixed(1)} 秒 · 已检查 ${value.visited.toLocaleString()} 个节点 · 找到 ${value.found.toLocaleString()} 个可行组合`);
-  const finish = (result: SearchResult): void => {
-    setRunning(false); worker?.terminate(); worker = undefined; results = result.plans;
-    resultStatus = result.status; renderTarget();
+  const presentResult = (result: SearchResult, restoredAt?: string): void => {
+    results = result.plans; resultStatus = result.status; renderTarget();
     const phase = { complete: '搜索完成', timeout: '已到搜索时限，尚未完成全部搜索', cancelled: '已停止，尚未完成全部搜索' }[result.status];
-    setStatus(`${phase} · ${result.elapsed.toFixed(1)} 秒 · ${result.plans.length} 个方案${result.skipped ? ` · ${result.skipped} 条属性不完整或套装未知的御魂未参与` : ''}`);
-    el('result-note').textContent = result.status === 'complete' ? '符合条件的最优方案' : '当前找到的方案 · 可增加时长重新计算';
-    el('result-total').textContent = results.length ? `· ${results.length} 个` : '';
-    select('result-sort').disabled = !results.length;
+    setStatus(restoredAt
+      ? `已恢复上次结果 · ${result.plans.length} 个方案 · ${new Date(restoredAt).toLocaleString()}`
+      : `${phase} · ${result.elapsed.toFixed(1)} 秒 · ${result.plans.length} 个方案${result.skipped ? ` · ${result.skipped} 条属性不完整或套装未知的御魂未参与` : ''}`);
+    el('result-note').textContent = result.status === 'complete' ? (restoredAt ? '上次搜索的最优方案' : '符合条件的最优方案') : '当前找到的方案 · 可增加时长重新计算';
+    el('result-total').textContent = result.plans.length ? `· ${result.plans.length} 个` : '';
+    select('result-sort').disabled = !result.plans.length;
     el('results').replaceChildren();
-    if (!results.length) appendText(el('results'), 'p', result.candidates.some(n => n === 0) ? `部分位置没有可用御魂：${result.candidates.map((n, i) => `${i + 1} 号位 ${n} 件`).join(' · ')}。请调整主属性、使用范围或等级限制。` : result.status === 'complete' ? '没有符合条件的组合，请调整套装或属性限制。' : '在此次搜索内还没有找到符合条件的组合。可放宽条件或增加时长。', 'soul-optimizer-empty');
+    if (!result.plans.length) appendText(el('results'), 'p', result.candidates.some(n => n === 0) ? `部分位置没有可用御魂：${result.candidates.map((n, i) => `${i + 1} 号位 ${n} 件`).join(' · ')}。请调整主属性、使用范围或等级限制。` : result.status === 'complete' ? '没有符合条件的组合，请调整套装或属性限制。' : '在此次搜索内还没有找到符合条件的组合。可放宽条件或增加时长。', 'soul-optimizer-empty');
     if (results.length) {
       renderResults(); el<HTMLDetailsElement>('configuration').open = false; action('start').textContent = '重新计算';
       body.scrollTop = 0;
     }
   };
+  const restoreResultCache = (cache: CachedOptimizerResult): void => {
+    const hero = heroes.find(item => item.id === cache.heroId);
+    if (!hero) return;
+    const config = cache.options;
+    selectedHero = hero; heroSelect.value = String(hero.id);
+    select('objective').value = config.objective;
+    select('four').value = String(config.requirements.find(item => item.count === 4)?.suitId ?? '');
+    select('two').value = config.twoPieceAttribute ? `attr:${config.twoPieceAttribute}` : String(config.requirements.find(item => item.count === 2)?.suitId ?? '');
+    for (const position of [2, 4, 6]) {
+      const selected = new Set(config.mainAttributes[position] ?? []);
+      for (const input of mainInputs(position)) input.checked = selected.has(input.value);
+    }
+    ranges = Object.fromEntries(Object.entries(config.ranges).map(([key, range]) => [key, range ? { ...range } : range]));
+    manualMainPositions.clear(); cache.manualMainPositions.forEach(position => manualMainPositions.add(position));
+    field('six').checked = config.onlySix; field('max').checked = config.onlyMaxLevel;
+    field('unequipped').checked = config.unequipped; field('kept').checked = config.excludeDiscarded;
+    select('seconds').value = String(config.seconds); select('limit').value = String(config.limit);
+    updateConfigurationSummary(); updateSuitSelections(); updateHeroPanel(); renderRanges();
+    const excluded = new Set(cache.excludedFavoriteKeys);
+    for (const input of el('exclusions').querySelectorAll<HTMLInputElement>('input')) input.checked = excluded.has(input.value);
+    resultHero = hero; resultBase = { ...config.base }; resultObjective = config.objective;
+    resultOptions = config; resultStatus = cache.result.status; results = cache.result.plans;
+    lastSearchResult = cache.result; resultExcludedFavoriteKeys = cache.excludedFavoriteKeys;
+    targetPlanIndex = Math.min(cache.targetPlanIndex, Math.max(0, results.length - 1));
+    select('result-sort').value = cache.sort;
+    presentResult(cache.result, cache.cachedAt);
+  };
+  const progress = (value: SearchProgress): void => setStatus(`正在搜索 · ${value.elapsed.toFixed(1)} 秒 · 已检查 ${value.visited.toLocaleString()} 个节点 · 找到 ${value.found.toLocaleString()} 个可行组合`);
+  const finish = (result: SearchResult): void => {
+    setRunning(false); worker?.terminate(); worker = undefined;
+    lastSearchResult = result;
+    presentResult(result);
+    persistResultCache();
+  };
   const start = (): void => {
-    if (!snapshot || running) return;
+    if (!snapshot?.souls.length || running) return;
     let config: OptimizationOptions;
     try { config = options(); } catch (error) { setStatus(String(error instanceof Error ? error.message : error), true); return; }
+    const excludedKeys = excludedFavoriteKeys();
     resultHero = selectedHero; resultBase = { ...config.base }; resultObjective = config.objective; resultOptions = config; updateConfigurationSummary();
     const token = ++generation; cancelled = false; closePreview(); setRunning(true); setStatus('正在准备御魂组合…');
     clearResults();
+    resultExcludedFavoriteKeys = excludedKeys;
     const failed = (message: string): void => { if (token !== generation || disposed) return; setRunning(false); worker?.terminate(); worker = undefined; renderTarget(); setStatus(`计算失败：${message}`, true); };
     if (createWorker) {
       try {
@@ -397,7 +600,11 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   action('choose-hero').addEventListener('click', picker.openHero);
   action('choose-four').addEventListener('click', () => picker.openSuit('four'));
   action('choose-two').addEventListener('click', () => picker.openSuit('two'));
-  heroSelect.addEventListener('change', () => { selectedHero = heroes.find(hero => hero.id === Number(heroSelect.value))!; applyHero(); changed(); });
+  heroSelect.addEventListener('change', () => {
+    selectedHero = heroes.find(hero => hero.id === Number(heroSelect.value))!;
+    applyHero(); persistSelectedHero(); changed();
+    if (!results.length) clearResultCache();
+  });
   el('form').addEventListener('change', event => {
     if (event.target === select('objective')) return;
     if (event.target instanceof doc.defaultView!.HTMLInputElement && event.target.dataset.position) manualMainPositions.add(Number(event.target.dataset.position));
@@ -406,9 +613,10 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   });
   el('form').addEventListener('input', changed);
   el('saved').addEventListener('change', changed);
-  select('result-sort').addEventListener('change', renderResults);
+  select('result-sort').addEventListener('change', () => { renderResults(); persistResultCache(); });
   body.addEventListener('scroll', closePreview, { passive: true });
   populateHeroes(); applyHero(); renderSaved(); updateConfigurationSummary(); updateSuitSelections(); renderRanges(); renderTarget();
+  renderInventoryState();
   // 面板可能被用户收起或直接关掉：停靠视图会把模块元素挪回隐藏的模块仓库，
   // 模态选择器若仍开着就会悬在页面顶层，所以面板不可见时先把它们收掉。
   const visibility = new IntersectionObserver(entries => {
@@ -417,7 +625,7 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
   visibility.observe(host);
   const open = (): void => {
     hooks.open?.();
-    action('start').focus();
+    action(snapshot?.souls.length ? 'start' : 'open-calculator').focus();
   };
   return {
     update(next, instances = [], selectedInstanceId = '', instancePickerDisabled = false): void {
@@ -428,7 +636,11 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
       } else instancePicker.update(pickerInstances, selectedInstanceId, instancePickerDisabled);
       if (next !== snapshot) {
         generation++; stop(); picker.close(); planDetail.close(); rangeEditor.close(); worker?.terminate(); worker = undefined; setRunning(false); snapshot = next; results = []; saved = [];
-        clearResults(); el<HTMLDetailsElement>('configuration').open = true;
+        selectedHero = heroes.find(hero => hero.name === '大天狗') ?? heroes[0];
+        const preferredHero = readSelectedHero();
+        if (preferredHero) selectedHero = preferredHero;
+        heroSelect.value = String(selectedHero.id); applyHero();
+        clearResults(false); el<HTMLDetailsElement>('configuration').open = true;
         if (snapshot) {
           try {
             const data: unknown = JSON.parse(api.readLayout(savedKey()) ?? '[]');
@@ -437,8 +649,17 @@ export function installSoulOptimizer(host: HTMLElement, api: OptimizerViewApi, c
               objective: item.objective && Object.hasOwn(OPTIMIZATION_OBJECTIVES, item.objective) ? item.objective : undefined }));
           } catch { /* Ignore damaged local favorites instead of preventing calculation. */ }
         }
-        renderSaved(); setStatus(snapshot ? '设置条件后开始计算。' : '请先获取御魂数据。');
+        renderSaved(); updateConfigurationSummary(); updateSuitSelections(); updateHeroPanel();
+        const cachedResult = readResultCache();
+        if (cachedResult && (!preferredHero || cachedResult.heroId === preferredHero.id)) {
+          restoreResultCache(cachedResult);
+          persistSelectedHero();
+        } else {
+          if (cachedResult) clearResultCache();
+          setStatus(snapshot?.souls.length ? '设置条件后开始计算。' : '请先获取御魂数据。');
+        }
       }
+      renderInventoryState();
       el('source').textContent = snapshot
         ? `${snapshot.souls.length.toLocaleString()} 件御魂 · ${new Date(snapshot.fetchedAt).toLocaleString()}`
         : selectedInstanceId ? '尚未载入此实例的御魂数据。' : '选择实例后载入御魂数据。';

@@ -1,14 +1,14 @@
-import { OPTIMIZATION_OBJECTIVES, formatPlanScore } from '../shared/soul-optimizer';
-import type { HeroProfile, OptimizationOptions, Panel, SoulPlan, SuitProfile } from '../shared/soul-optimizer';
-import type { SoulRecord, SoulSnapshot } from '../shared/souls';
-import { createSoulPositionPortrait } from './soul-position-portrait';
-import { appendPickerPortrait, SUIT_ATTRIBUTES } from './soul-optimizer-picker';
-import { appendEffectNumbers } from './effect-text';
-import { planPanelAddition, renderSoulPanelTable } from './soul-panel-table';
-import { installSoulPlanShare } from './soul-plan-share';
-import type { ImageShareApi } from './image-share';
-import { suitMechanicRanges } from '../shared/soul-substat-standard';
-import type { SubstatContext } from '../shared/soul-substat-standard';
+import { OPTIMIZATION_OBJECTIVES, formatPlanScore } from '../../../../shared/soul-optimizer';
+import type { HeroProfile, OptimizationOptions, Panel, SoulPlan, SuitProfile } from '../../../../shared/soul-optimizer';
+import type { SoulRecord, SoulSnapshot } from '../../../../shared/souls';
+import { createSoulPositionPortrait } from './position-portrait';
+import { appendPickerPortrait, SUIT_ATTRIBUTES } from '../optimizer/picker';
+import { appendEffectNumbers } from '../../../ui/effect-text';
+import { planPanelAddition, renderSoulPanelTable } from './panel-table';
+import { installSoulPlanShare } from './plan-share';
+import type { ImageShareApi } from '../../../ui/image-share';
+import { suitMechanicRanges } from '../../../../shared/soul-substat-standard';
+import type { SubstatContext } from '../../../../shared/soul-substat-standard';
 
 export function installSoulPlanDetail(root: HTMLElement, suits: SuitProfile[], preview: (anchor: HTMLElement, soul: SoulRecord, context?: SubstatContext) => void, closePreview: () => void, shareApi?: ImageShareApi): {
   show(plan: SoulPlan, hero: HeroProfile | undefined, snapshot: SoulSnapshot | undefined, base?: Panel, objective?: OptimizationOptions['objective'], ranges?:OptimizationOptions['ranges']): void;

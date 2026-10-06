@@ -1,6 +1,6 @@
-import type { OptimizationObjective } from '../shared/soul-optimizer';
-import { OPTIMIZATION_OBJECTIVES } from '../shared/soul-optimizer';
-import type { TargetScoreRange } from '../shared/soul-target-analysis';
+import type { OptimizationObjective } from '../../../../shared/soul-optimizer';
+import { OPTIMIZATION_OBJECTIVES } from '../../../../shared/soul-optimizer';
+import type { TargetScoreRange } from '../../../../shared/soul-target-analysis';
 
 type Bound = 'min' | 'max';
 const scales: Record<OptimizationObjective, number> = { damage: 50000, attack: 20000, hp: 100000, defense: 5000, speed: 400, crit: 250, critDamage: 500, hit: 300, resist: 300 };

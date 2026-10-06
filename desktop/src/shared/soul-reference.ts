@@ -20,6 +20,7 @@ const allowedMains = (position: number, options: OptimizationOptions): readonly 
   return selected?.length ? legal.filter(name => selected.includes(name)) : legal;
 };
 const key = (souls: readonly SoulRecord[]): string => souls.map(s => [
+  `${s.position}:${s.suitId}`,
   `${s.mainAttribute!.name}:${s.mainAttribute!.value}`,
   s.subAttributes!.map(a => `${a.name}:${a.value}`).join(','),
   (s.intrinsicAttributes ?? []).map(a => `${a.name}:${a.value}`).join(','),
@@ -90,6 +91,34 @@ function candidates(source: SoulRecord, options: OptimizationOptions, analysis: 
   return allowedMains(source.position!, options).flatMap(name => candidatesForMain({ ...source, mainAttribute: {
     name, value: SIX_STAR_MAIN_VALUES[name], label: SOUL_MAIN_ATTRIBUTE_LABELS[name], percent: !flat.has(name), rolls: 1,
   } }, options, analysis, boss));
+}
+
+/** Set bonuses depend on counts, while main attributes belong to positions.
+ * Assign the same set counts freely without moving a position's main/substats.
+ * Intrinsics travel with their set, so only boss pieces carry boss intrinsics. */
+function flexibleSuitLayouts(source: readonly SoulRecord[]): number[][] {
+  const counts = new Map<number, number>();
+  for (const soul of source) counts.set(soul.suitId!, (counts.get(soul.suitId!) ?? 0) + 1);
+  const ids = [...counts.keys()].sort((a, b) => a - b), result: number[][] = [];
+  const visit = (layout: number[]): void => {
+    if (layout.length === 6) { result.push([...layout]); return; }
+    for (const id of ids) if (counts.get(id)!) {
+      counts.set(id, counts.get(id)! - 1); layout.push(id); visit(layout); layout.pop(); counts.set(id, counts.get(id)! + 1);
+    }
+  };
+  visit([]); return result;
+}
+function assignSuitLayout(souls: readonly SoulRecord[], layout: readonly number[], sources: readonly SoulRecord[], catalog: Map<number, SuitProfile>): SoulRecord[] {
+  const pieces = new Map<number, SoulRecord[]>();
+  for (const soul of souls) { const group = pieces.get(soul.suitId!) ?? []; group.push(soul); pieces.set(soul.suitId!, group); }
+  return souls.map((soul, index) => {
+    const suitId = layout[index], piece = pieces.get(suitId)!.shift()!, metadata = sources.find(source => source.suitId === suitId)!;
+    return { ...soul, id: `reference-slot-${index + 1}-suit-${suitId}-${soul.id}`, suitId,
+      name: catalog.get(suitId)!.name, iconKey: metadata.iconKey, iconUrl: metadata.iconUrl,
+      mainAttribute: { ...soul.mainAttribute! }, subAttributes: soul.subAttributes!.map(attribute => ({ ...attribute })),
+      intrinsicAttributes: (piece.intrinsicAttributes ?? []).map(attribute => ({ ...attribute })),
+    };
+  });
 }
 
 /** Independent hypothetical replacement gear. Never alters or reuses actual inventory IDs. */
@@ -179,9 +208,22 @@ export function generateSoulReferences(analysis: SoulTargetAnalysis, options: Op
   }).filter(state => templateMatches(state.souls) && withinBounds(state.panel) && Number.isFinite(state.score) && distance(state.score) <= 1e-9)
     .sort((a, b) => a.rank - b.rank);
   const selected = new Set<string>();
+  const layouts = flexibleSuitLayouts(analysis.souls), originalLayout = analysis.souls.map(soul => soul.suitId!);
+  const chosenLayouts: number[][] = [];
+  const layoutDistance = (a: readonly number[], b: readonly number[]): number => a.reduce((sum, id, index) => sum + Number(id !== b[index]), 0);
   const configs = achieved.filter(state => {
     const signature = panelKey(state.panel); if (selected.has(signature)) return false;
     selected.add(signature); return true;
-  }).slice(0, 3).map(state => ({souls: state.souls, panel: state.panel, score: state.score, meetsTarget: true}));
+  }).slice(0, 3).map(state => {
+    const available = layouts.filter(layout => !chosenLayouts.some(chosen => layoutDistance(layout, chosen) === 0));
+    const layout = (available.length ? available : layouts).slice().sort((a, b) => {
+      const score = (candidate: number[]): number => Math.min(...[originalLayout, ...chosenLayouts].map(other => layoutDistance(candidate, other)));
+      return score(b) - score(a) || layoutDistance(b, originalLayout) - layoutDistance(a, originalLayout) || a.join(',').localeCompare(b.join(','));
+    })[0];
+    chosenLayouts.push(layout);
+    const souls = assignSuitLayout(state.souls, layout, analysis.souls, suits);
+    const panel = evaluatePlan(souls, options.base, catalog), score = planScore(panel, options.objective);
+    return { souls, panel, score, meetsTarget: templateMatches(souls) && withinBounds(panel) && Number.isFinite(score) && distance(score) <= 1e-9 };
+  }).filter(reference => reference.meetsTarget);
   return { configs, reason: !configs.length ? '本次生成未找到同时满足目标评分范围和全部限制的参考配置。条件保持不变，结果不代表理论上限。' : undefined };
 }

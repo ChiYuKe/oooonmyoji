@@ -1,5 +1,5 @@
-import { SUBSTAT_STATUS } from '../shared/soul-substat-standard';
-import type { SubstatStatus } from '../shared/soul-substat-standard';
+import { SUBSTAT_STATUS } from '../../../../shared/soul-substat-standard';
+import type { SubstatStatus } from '../../../../shared/soul-substat-standard';
 
 const icons: Record<SubstatStatus, string> = {
   core: 'M5 12l4 4L19 6',

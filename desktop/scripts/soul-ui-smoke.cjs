@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Real Electron DOM checks using local snapshots; does not connect to any device.
 const { app, BrowserWindow, protocol, net } = require('electron');
 const { pathToFileURL } = require('node:url');
@@ -25,9 +26,9 @@ app.whenReady().then(async () => {
     const file = path.join(project, 'assets', match[1] + '-icons', match[2] + '.png');
     return fs.existsSync(file) ? net.fetch(pathToFileURL(file).href) : new Response('', { status: 404 });
   });
-  const source = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
+  const source = readExpandedHtml(path.join(root, 'src/renderer/index.html'));
   const panel = source.match(/<div id="team-builder-soul-calculator"[\s\S]*?\n            <\/div>/)[0];
-  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8').replace(/^@import[^;]*;/, '');
+  const css = readExpandedCss(path.join(root, 'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/, '');
   const palette = ['workbench-light.css', 'theme.css'].map(name => fs.readFileSync(path.join(root, 'public/theme', name), 'utf8')).join('\n');
   const font = pathToFileURL(path.join(root, 'public/fonts/harmonyos-sans-sc/Regular.css')).href;
   const file = path.join(artifacts, 'soul-calculator.html');

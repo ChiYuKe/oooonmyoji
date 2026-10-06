@@ -1,6 +1,6 @@
-import type { SoulRecord, SoulAttribute } from '../shared/souls';
-import { createSoulPositionPortrait } from './soul-position-portrait';
-import { appendEffectNumbers } from './effect-text';
+import type { SoulRecord, SoulAttribute } from '../../../../shared/souls';
+import { createSoulPositionPortrait } from './position-portrait';
+import { appendEffectNumbers } from '../../../ui/effect-text';
 
 /** 御魂单件详情：背包列表面板和配装面板各自的浮窗共用同一份渲染。 */
 export function renderSoulDetail(doc: Document, detail: HTMLElement, selected?: SoulRecord,

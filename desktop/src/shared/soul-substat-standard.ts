@@ -15,6 +15,8 @@ export type SoulUsage = keyof typeof SOUL_USAGES;
 export interface SubstatContext {
   usage?: SoulUsage; objective?: OptimizationObjective; ranges?: OptimizationOptions['ranges'];
   panel?: Panel; gear?: readonly SoulRecord[]; heroName?: string;
+  /** False for metric-only reinforcement scoring; retain ordinary classification by default. */
+  includeConditions?: boolean;
 }
 export interface SubstatAssessment {
   status: SubstatStatus; reason: string; effectiveValue: number; overflowValue: number;
@@ -132,7 +134,7 @@ export function suitMechanicRanges(gear: readonly Pick<SoulRecord,'suitId'>[], r
 /** Classifies a substat in this usage; values remain actual values and never add a pollution penalty. */
 export function assessSoulSubstat(soul: SoulRecord, attr: SoulAttribute, context: SubstatContext = {}): SubstatAssessment {
   const result=(status:SubstatStatus,reason:string,effectiveValue=attr.value,overflowValue=0):SubstatAssessment=>({status,reason,effectiveValue,overflowValue});
-  const usage=resolvedSoulUsage(soul,context), key=statPanels[attr.name], ranges=context.gear?suitMechanicRanges(context.gear,context.ranges??{}):context.ranges, range=key?ranges?.[key]:undefined;
+  const usage=resolvedSoulUsage(soul,context), key=statPanels[attr.name], ranges=context.includeConditions===false?undefined:context.gear?suitMechanicRanges(context.gear,context.ranges??{}):context.ranges, range=key?ranges?.[key]:undefined;
   const core=context.objective?OBJECTIVE_SUBSTATS[context.objective]:templates[usage] ?? OBJECTIVE_SUBSTATS[usage as OptimizationObjective] ?? [];
   if(!key) return result('pending','尚未识别此属性的机制。',0);
   if(core.includes(attr.name)) {

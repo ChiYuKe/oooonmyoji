@@ -1,4 +1,4 @@
-import { PANEL_LABELS, type Panel, type PanelKey } from '../shared/soul-optimizer';
+import { PANEL_LABELS, type Panel, type PanelKey } from '../../../../shared/soul-optimizer';
 
 export type PanelAddition = Record<PanelKey, number | null>;
 const PERCENT = new Set<PanelKey>(['crit', 'critDamage', 'hit', 'resist']);

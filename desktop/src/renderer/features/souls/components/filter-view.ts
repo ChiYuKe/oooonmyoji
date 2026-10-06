@@ -1,4 +1,4 @@
-import type { SoulRecord } from '../shared/souls';
+import type { SoulRecord } from '../../../../shared/souls';
 
 export const selectedSoulFilterValues = (select: HTMLSelectElement): string[] =>
   Array.from(select.selectedOptions, option => option.value).filter(Boolean);

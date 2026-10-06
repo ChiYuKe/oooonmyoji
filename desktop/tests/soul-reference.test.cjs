@@ -18,9 +18,11 @@ function setup(objective = 'damage', ranges = {}, target) {
 }
 function check(reference, source, options, target) {
   assert.equal(reference.souls.length, 6);
+  const counts = souls => [...souls.reduce((result, soul) => result.set(soul.suitId, (result.get(soul.suitId) ?? 0) + 1), new Map())].sort((a, b) => a[0] - b[0]);
+  assert.deepEqual(counts(reference.souls), counts(source), 'set combination and counts remain fixed, independently of positions');
   reference.souls.forEach((s, i) => {
     assert.match(s.id, /^reference-slot-/); assert.notEqual(s.id, source[i].id); assert.equal(s.itemId, null);
-    assert.equal(s.position, i + 1); assert.equal(s.suitId, source[i].suitId); assert.equal(s.stars, 6); assert.equal(s.level, 15);
+    assert.equal(s.position, i + 1); assert.equal(s.stars, 6); assert.equal(s.level, 15);
     assert.ok(SOUL_SLOT_MAIN_ATTRIBUTES[s.position].includes(s.mainAttribute.name));
     const allowed=options.mainAttributes[s.position];
     if(allowed?.length)assert.ok(allowed.includes(s.mainAttribute.name),'generated main attributes obey the user selection');
@@ -57,6 +59,9 @@ test('generates multiple independent complete configurations without changing ma
   assert.equal(result.configs.length, 3); assert.ok(result.configs.every(r => r.meetsTarget));
   result.configs.forEach(r => check(r, souls, options, { min: analysis.target }));
   assert.equal(new Set(result.configs.map(r => JSON.stringify(r.souls))).size, 3);
+  const originalLayout = souls.map(s => s.suitId).join(',');
+  assert.ok(result.configs.every(r => r.souls.map(s => s.suitId).join(',') !== originalLayout), 'references can move the four-set and boss pieces to other positions');
+  assert.equal(new Set(result.configs.map(r => r.souls.map(s => s.suitId).join(','))).size, 3, 'different references show different valid set arrangements');
   for (const reference of result.configs) for (const soul of reference.souls) for (const attr of soul.subAttributes) {
     if (!['attackAdditionRate','attackAdditionVal','critRateAdditionVal','critPowerAdditionVal','speedAdditionVal'].includes(attr.name)) assert.equal(attr.rolls,1,'unrelated output stats do not get repeated allocations');
   }
@@ -69,6 +74,34 @@ test('uses each selected objective, including raw percentage goals', () => {
     assert.ok(result.configs.some(r => r.meetsTarget), objective);
     result.configs.forEach(r => check(r, souls, options, { min: analysis.target }));
   }
+});
+
+test('flexible positions use the assigned suit name and icon, with boss intrinsics only on boss pieces', () => {
+  const { souls, options, analysis } = setup('damage', { crit: { min: 1 } }, 19000);
+  const source = analysis.souls.map(soul => ({ ...soul, name: `source-${soul.suitId}`, iconKey: `suit-${soul.suitId}`, iconUrl: `fixture://suit-${soul.suitId}` }));
+  const before = JSON.stringify(source), result = generateSoulReferences({ ...analysis, souls: source }, options, catalog);
+  assert.equal(result.configs.length, 3);
+  for (const reference of result.configs) {
+    check(reference, souls, options, { min: 19000 });
+    assert.ok(reference.souls.some((soul, index) => soul.suitId !== source[index].suitId));
+    for (const soul of reference.souls) {
+      assert.equal(soul.name, catalog.find(suit => suit.id === soul.suitId).name);
+      assert.equal(soul.iconKey, `suit-${soul.suitId}`); assert.equal(soul.iconUrl, `fixture://suit-${soul.suitId}`);
+    }
+  }
+  assert.equal(JSON.stringify(source), before);
+});
+
+test('a six-piece single-suit template remains valid when there are no different suit positions to arrange', () => {
+  const { souls, options } = setup('damage');
+  const source = souls.map(soul => ({ ...soul, suitId: 1, intrinsicAttributes: [] }));
+  const selected = { ...options, requirements: [{ suitId: 1, count: 4 }, { suitId: 1, count: 2 }] };
+  const panel = evaluatePlan(source, base, catalog), plan = { ids: source.map(soul => soul.id), panel, score: planScore(panel, 'damage'), suits: [] };
+  const analysis = analyzeSoulTarget(plan, source, catalog, selected, { max: 1e9 });
+  const result = generateSoulReferences(analysis, selected, catalog);
+  assert.equal(result.configs.length, 3);
+  result.configs.forEach(reference => check(reference, source, selected, { min: 0, max: 1e9 }));
+  assert.ok(result.configs.every(reference => reference.souls.every(soul => soul.suitId === 1 && soul.intrinsicAttributes.length === 0)));
 });
 test('target upper bounds are respected; impossible targets are never marked achieved', () => {
   const { souls, options, analysis } = setup('damage', { crit: { min: 1 } }, { min: 20000, max: 20500 });

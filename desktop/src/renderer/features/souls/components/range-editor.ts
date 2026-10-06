@@ -1,5 +1,5 @@
-import { PANEL_LABELS } from '../shared/soul-optimizer';
-import type { PanelKey, OptimizationOptions } from '../shared/soul-optimizer';
+import { PANEL_LABELS } from '../../../../shared/soul-optimizer';
+import type { PanelKey, OptimizationOptions } from '../../../../shared/soul-optimizer';
 
 type Ranges = OptimizationOptions['ranges'];
 type Bound = 'min' | 'max';

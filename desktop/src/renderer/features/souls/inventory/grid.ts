@@ -1,9 +1,11 @@
-import type { SoulRecord } from '../shared/souls';
+import type { SoulRecord } from '../../../../shared/souls';
 
 export function soulGridRange(total: number, columns: number, rowHeight: number, scrollTop: number, height: number): { start: number; end: number; rows: number } {
   const rows = Math.ceil(total / columns);
-  const first = Math.max(0, Math.min(rows - 1, Math.floor(Math.max(0, scrollTop) / rowHeight) - 3));
-  const last = Math.min(rows, Math.max(first, Math.ceil((Math.max(0, scrollTop) + height) / rowHeight) + 3));
+  // Keep two rows on either side ready: enough room for a quick wheel scroll while
+  // reducing the number of card/image elements repainted on each virtual range shift.
+  const first = Math.max(0, Math.min(rows - 1, Math.floor(Math.max(0, scrollTop) / rowHeight) - 2));
+  const last = Math.min(rows, Math.max(first, Math.ceil((Math.max(0, scrollTop) + height) / rowHeight) + 2));
   return { start: first * columns, end: Math.min(total, last * columns), rows };
 }
 

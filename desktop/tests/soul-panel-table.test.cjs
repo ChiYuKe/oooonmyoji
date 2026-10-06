@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {planPanelAddition,formatPanelValue} = require('../dist-test-renderer/renderer/soul-panel-table');
+const {planPanelAddition,formatPanelValue} = require('../dist-test-renderer/renderer/features/souls/components/panel-table');
 
 test('plan additions use the original calculation base; percentage values are differences in points', () => {
   const base={attack:3242.8,hp:10139.88,defense:396.9,speed:119,crit:.08,critDamage:1.5,hit:0,resist:0};

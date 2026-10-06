@@ -1,4 +1,4 @@
-import type { SoulRecord } from '../shared/souls';
+import type { SoulRecord } from '../../../../shared/souls';
 
 // Positions follow the equipment ring: upper left, left, lower left,
 // lower right, right, upper right. The portrait itself is never rotated.
@@ -23,9 +23,24 @@ export function createSoulPositionPortrait(doc: Document, soul: SoulRecord, lazy
     const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', outline);
     svg.append(path); portrait.append(svg);
   }
-  if (soul.iconUrl) {
-    const image = doc.createElement('img'); image.className = 'soul-icon'; image.src = soul.iconUrl; image.alt = '';
-    image.loading = lazy ? 'lazy' : 'eager'; image.decoding = 'async'; portrait.append(image);
+  const bundledIconUrl = Number.isSafeInteger(soul.suitId) && (soul.suitId ?? 0) > 0
+    ? `onmyoji-resource://project/assets/soul-icons/${soul.suitId}.png` : undefined;
+  const iconUrl = soul.iconUrl || bundledIconUrl;
+  if (iconUrl) {
+    const image = doc.createElement('img'); image.className = 'soul-icon'; image.src = iconUrl; image.alt = '';
+    image.loading = lazy ? 'lazy' : 'eager'; image.decoding = 'async';
+    let retriedBundledIcon = false;
+    image.addEventListener('error', () => {
+      if (!retriedBundledIcon && bundledIconUrl && image.src !== bundledIconUrl) {
+        retriedBundledIcon = true; image.src = bundledIconUrl; return;
+      }
+      image.remove();
+      if (!portrait.querySelector('.soul-icon-placeholder')) {
+        const placeholder = doc.createElement('span'); placeholder.className = 'soul-icon-placeholder';
+        placeholder.textContent = (soul.name ?? '御魂').slice(0, 1); portrait.append(placeholder);
+      }
+    });
+    portrait.append(image);
   } else {
     const placeholder = doc.createElement('span'); placeholder.className = 'soul-icon-placeholder';
     placeholder.textContent = (soul.name ?? '御魂').slice(0, 1); portrait.append(placeholder);

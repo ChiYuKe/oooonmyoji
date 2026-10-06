@@ -1,15 +1,16 @@
-import type { OnmyojiDesktopApi, RuntimeInstance, SoulInstance } from '../shared/contracts';
-import type { SoulRecord, SoulSnapshot } from '../shared/souls';
-import { instanceLabel } from './instance-picker';
-import { SoulGrid } from './soul-grid';
-import { installSoulFilterView, selectedSoulFilterValues } from './soul-filter-view';
-import { installSoulDetailWindow } from './soul-detail-window';
-import type { SoulOptimizerPanel } from './soul-optimizer-view';
-import { soulMainAttributesForPositions, SOUL_MAIN_ATTRIBUTE_LABELS } from '../shared/soul-slots';
-import { createSoulPositionPortrait } from './soul-position-portrait';
-import { renderSoulDetail } from './soul-detail-render';
+import type { OnmyojiDesktopApi, RuntimeInstance, SoulInstance } from '../../../../shared/contracts';
+import type { SoulRecord, SoulSnapshot } from '../../../../shared/souls';
+import { instanceLabel } from '../../workflow/instance-picker';
+import { SoulGrid } from '../inventory/grid';
+import { installSoulFilterView, selectedSoulFilterValues } from '../components/filter-view';
+import { installSoulDetailWindow } from '../components/detail-window';
+import type { SoulOptimizerPanel } from '../optimizer/view';
+import type { SoulSpeedCalculator } from './speed';
+import { soulMainAttributesForPositions, SOUL_MAIN_ATTRIBUTE_LABELS } from '../../../../shared/soul-slots';
+import { createSoulPositionPortrait } from '../components/position-portrait';
+import { renderSoulDetail } from '../components/detail-render';
 
-export { formatSoulAttribute } from './soul-detail-render';
+export { formatSoulAttribute } from '../components/detail-render';
 
 const SELECTION_KEY = 'onmyoji-studio.souls.instance';
 type SoulApi = Pick<OnmyojiDesktopApi, 'listSoulInstances' | 'fetchSouls' | 'loadSouls' | 'cancelSoulFetch' | 'onSoulFetchProgress' | 'readLayout' | 'writeLayout'>;
@@ -128,7 +129,7 @@ export function sortSouls(souls: SoulRecord[], key: string, direction: SoulSortD
   return entries.map(entry => entry.soul);
 }
 
-export function installSoulCalculator(root: HTMLElement, api: SoulApi, optimizer?: SoulOptimizerPanel): () => void {
+export function installSoulCalculator(root: HTMLElement, api: SoulApi, optimizer?: SoulOptimizerPanel, speedCalculator?: SoulSpeedCalculator): () => void {
   const doc = root.ownerDocument;
   const element = <T extends HTMLElement>(id: string): T => root.querySelector<T>(`#${id}`)!;
   const instance = element<HTMLSelectElement>('soul-instance');
@@ -247,7 +248,7 @@ export function installSoulCalculator(root: HTMLElement, api: SoulApi, optimizer
     const top = add(select, 'span', '', 'soul-card-top');
     add(top, 'span', soul.level == null ? '—' : `+${soul.level}`, 'soul-card-level');
     add(top, 'span', soul.position ? ['壹', '贰', '叁', '肆', '伍', '陆'][soul.position - 1] : '—', 'soul-card-position');
-    const portrait = add(select, 'span', '', 'soul-card-portrait'); portrait.append(createSoulPositionPortrait(doc, soul));
+    const portrait = add(select, 'span', '', 'soul-card-portrait'); portrait.append(createSoulPositionPortrait(doc, soul, true));
     const starCount = Math.min(6, Math.max(0, soul.stars ?? 0));
     const starsLabel = add(select, 'span', starCount ? '★'.repeat(starCount) : '—', 'soul-card-stars');
     starsLabel.setAttribute('aria-hidden', 'true');
@@ -276,6 +277,7 @@ export function installSoulCalculator(root: HTMLElement, api: SoulApi, optimizer
     detailWindow.close();
     const snapshot = state.snapshot;
     optimizer?.update(snapshot, state.instances, state.selectedId, refreshing || Boolean(state.fetchingId));
+    speedCalculator?.update(snapshot);
     launcher.disabled = !optimizer || !snapshot?.souls.length;
     const mainNames = soulMainAttributesForPositions(selectedSoulFilterValues(positionFilter));
     const mainSignature = mainNames.join('|');

@@ -1,4 +1,4 @@
-import { installImageShare, type ImageShareApi } from './image-share';
+import { installImageShare, type ImageShareApi } from '../../../ui/image-share';
 
 /** Freeze the actual detail layout, so export follows the same CSS and viewport. */
 export function installSoulPlanShare(root: HTMLElement, api?: ImageShareApi): {

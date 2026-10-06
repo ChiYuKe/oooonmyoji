@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { SoulCalculatorState, filterSouls, formatSoulAttribute, sortSouls } = require('../dist-test-renderer/renderer/soul-calculator.js');
+const { SoulCalculatorState, filterSouls, formatSoulAttribute, sortSouls } = require('../dist-test-renderer/renderer/features/souls/calculator/index.js');
 const { soulMainAttributesForPositions } = require('../dist-test-renderer/shared/soul-slots.js');
 
 test('main attribute choices follow fixed odd positions and distinct even-position rules', () => {

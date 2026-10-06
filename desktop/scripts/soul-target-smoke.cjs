@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('./renderer-templates.cjs');
 // Target analysis with a real inventory and production worker. No device writes.
 const { app, BrowserWindow, protocol, net } = require('electron');
 const fs = require('node:fs'), path = require('node:path'), { pathToFileURL } = require('node:url');
@@ -14,7 +15,7 @@ app.whenReady().then(async () => {
   });
   const snapshot = await new (require('../dist-electron/main/soulService').SoulService)(project).load('mumu-1');
   if (!snapshot) throw Error('Missing saved local inventory');
-  const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8').replace(/^@import[^;]*;/, '');
+  const css = readExpandedCss(path.join(root, 'src/renderer/styles/workbench.css')).replace(/^@import[^;]*;/, '');
   const palette = ['workbench-light.css', 'theme.css'].map(name => fs.readFileSync(path.join(root, 'public/theme', name), 'utf8')).join('\n');
   const font = pathToFileURL(path.join(root, 'public/fonts/harmonyos-sans-sc/Regular.css')).href;
   const html = path.join(out, 'soul-target.html');

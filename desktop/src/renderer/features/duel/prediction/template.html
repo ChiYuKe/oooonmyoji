@@ -1,0 +1,23 @@
+<section id="module-duel-prediction" class="dock-module duel-prediction-module" aria-label="对弈竞猜">
+          <aside class="duel-prediction-sidebar">
+            <header class="team-builder-pane-header">栏目</header>
+            <nav class="duel-prediction-categories" role="tablist" aria-orientation="vertical" aria-label="竞猜栏目">
+              <button id="duel-prediction-tab-simulation" class="duel-prediction-category" type="button" role="tab" aria-selected="true" aria-controls="duel-prediction-page-simulation">模拟预测</button>
+              <button id="duel-prediction-tab-live" class="duel-prediction-category" type="button" role="tab" aria-selected="false" aria-controls="duel-prediction-page-live" tabindex="-1">游戏实机</button>
+              <button id="duel-prediction-tab-upload" class="duel-prediction-category" type="button" role="tab" aria-selected="false" aria-controls="duel-prediction-page-upload" tabindex="-1">实机上传</button>
+            </nav>
+          </aside>
+          <div class="duel-prediction-divider" aria-hidden="true"></div>
+          <section class="duel-prediction-main" aria-label="对弈竞猜内容">
+            <header class="team-builder-pane-header" data-duel-title>模拟预测</header>
+            <div id="duel-prediction-page-simulation" class="duel-prediction-content" role="tabpanel" aria-labelledby="duel-prediction-tab-simulation">
+              <div class="duel-prediction-simulator" data-duel-simulator></div>
+            </div>
+            <div id="duel-prediction-page-live" class="duel-prediction-content" role="tabpanel" aria-labelledby="duel-prediction-tab-live" hidden>
+              <div class="duel-live" data-duel-live></div>
+            </div>
+            <div id="duel-prediction-page-upload" class="duel-prediction-content" role="tabpanel" aria-labelledby="duel-prediction-tab-upload" hidden>
+              <section class="duel-live-upload" data-duel-live-upload aria-label="已保存实机对局"></section>
+            </div>
+          </section>
+        </section>

@@ -1,0 +1,111 @@
+workflow 寮突破
+  version: 5.0.0
+  description: ""
+  resolution: [1920, 1080]
+  root: root_1
+  inputs:
+    v_44034320dd0c495f9751121bda940934:
+      type: integer
+      display_name: 突破轮数
+      default: 999
+      _autoPublished: true
+  variables:
+    v_743b45786cb34bb79e078f9a81586a0b:
+      type: integer
+      display_name: 突破轮数
+      default: 999
+      initial_from: v_44034320dd0c495f9751121bda940934
+  _inputParams: {}
+  node root_1 root 入口
+    at: [600, -136]
+  node sequence_1 sequence 等待星形徽章并点击
+    at: [296, 232]
+  node task_1 task 点击匹配到的星形徽章
+    at: [-112, 544]
+    action: input.tap_match
+    params:
+      random_interval: [0.2, 0.4]
+      random_offset: 20
+      verify_gone: false
+      disappeared_states:
+        - name: 出现进攻标签
+          template: assets/templates/task_4-template.png
+          roi: [590, 485, 560, 171]
+          threshold: 0.85
+      disappeared_state_timeout_seconds: 3
+  node task_2 task 等待星形徽章出现
+    at: [-488, 560]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/task_2-template.png, assets/templates/task_2-templates.png]
+      roi: [606, 184, 523, 225]
+      timeout_seconds: 1
+  node task_4 task 等待“进攻”按钮出现
+    at: [208, 552]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_4-template.png
+      present: true
+      timeout_seconds: 1
+      roi: [582, 148, 571, 516]
+  node task_3 task 点击“进攻”按钮并确认左上角模式图标出现
+    at: [576, 560]
+    action: input.tap_match
+    params:
+      random_interval: [0.2, 0.4]
+      random_offset: 20
+      verify_gone: true
+      disappeared_states:
+        - name: 出现模式图标
+          template: assets/templates/task_3-disappeared_states.png
+          roi: [516, 0, 170, 95]
+          threshold: 0.85
+      disappeared_state_timeout_seconds: 5
+  node sequence_2 sequence
+    at: [600, 24]
+    decorator repeat
+  node sequence_3 sequence 等待“点击继续”并点击
+    at: [952, 272]
+  node task_5 task 点击等待节点命中的画面提示并确认消失
+    at: [1280, 552]
+    action: input.tap_match
+    params:
+      random_interval: [0.2, 0.3]
+      random_offset: 20
+      verify_gone: true
+      disappeared_states:
+        - name: 确认回到起点
+          templates: [assets/templates/task_2-templates.png]
+          template: assets/templates/task_2-template.png
+          roi: [594, 178, 534, 225]
+          threshold: 0.85
+      disappeared_state_timeout_seconds: 3
+      verify_timeout_seconds: 1
+    decorator retry
+      attempts: 5
+      delay_seconds: 0.2
+  node task_6 task 等待“点击屏幕继续”或空槽任一命中
+    at: [928, 560]
+    action: vision.wait_any
+    params:
+      templates:
+        - assets/templates/wait_for_empty_party_slot_1-templates.png
+        - assets/templates/task_6-templates.png
+      timeout_seconds: 60
+      roi: [679, 917, 555, 163]
+      scale_search: true
+  var inputs.v_44034320dd0c495f9751121bda940934
+  edges:
+    task_2:out.match -> task_1:match
+    task_4:out.matches.0 -> task_3:match
+    var__inputs__v_44034320dd0c495f9751121bda940934:out -> sequence_2:decorators.0.count
+    task_6:out.match -> task_5:match
+    root_1 -> sequence_2
+    sequence_1 -> task_2
+    sequence_1:then.1 -> task_1
+    sequence_1:then.2 -> task_4
+    sequence_1:then.3 -> task_3
+    sequence_2 -> sequence_1
+    sequence_2:then.1 -> sequence_3
+    sequence_3 -> task_6
+    sequence_3:then.1 -> task_5

@@ -387,6 +387,48 @@
     })[row.status] || row.status || '未知';
   }
 
+  function actionLabel(action) {
+    return ({
+      'input.tap_match': '点击匹配项',
+      'vision.wait_any': '等待任一模板命中',
+      'vision.wait_template': '等待模板出现',
+      'vision.match_template': '匹配模板',
+    })[String(action || '')] || String(action || '动作');
+  }
+
+  function localizedErrorCategory(category) {
+    return ({
+      workflow: '工作流校验', vision: '视觉识别', not_matched: '未匹配',
+      ocr: '文字识别', recovery: '状态恢复', action: '动作执行',
+      internal: '内部错误', workflow_timeout: '工作流超时',
+      node_timeout: '节点超时', action_timeout: '动作超时',
+      cancelled: '已取消', condition: '条件不满足',
+    })[String(category || '')] || String(category || '');
+  }
+
+  function localizedErrorMessage(value) {
+    const message = String(value || '');
+    const actionOutput = /^Action ([^ ]+) output: (.+)$/.exec(message);
+    if (actionOutput) {
+      const detail = actionOutput[2];
+      const unexpected = /^Additional properties are not allowed \('([^']+)' was unexpected\)$/.exec(detail);
+      if (unexpected) return `${actionLabel(actionOutput[1])}的输出格式不符合定义：出现未定义字段“${unexpected[1]}”。`;
+      const missing = /^'([^']+)' is a required property$/.exec(detail);
+      if (missing) return `${actionLabel(actionOutput[1])}的输出缺少必填字段“${missing[1]}”。`;
+      return `${actionLabel(actionOutput[1])}的输出校验失败：${detail}`;
+    }
+    const actionInput = /^node (.+?) Action arguments: (.+)$/.exec(message);
+    if (actionInput) return `节点 ${actionInput[1]} 的动作参数不符合定义：${actionInput[2]}`;
+    const known = {
+      'tap completed but no configured next state appeared': '点击已完成，但没有检测到配置的下一状态。',
+      'matched template disappeared but no configured next state appeared': '匹配模板已消失，但没有检测到配置的下一状态。',
+      'template match is no longer present': '目标模板已不在当前画面中。',
+      'none of the configured states matched': '配置的状态均未匹配。',
+      'current page is not a configured state': '当前画面不属于已配置的状态。',
+    };
+    return known[message] || message;
+  }
+
   function branchReason(row) {
     const source = row.recoveredByName ? `“${row.recoveredByName}”选择器` : '上级选择器';
     if (row.decorator === 'condition' || row.errorCategory === 'condition') return `节点条件不满足，${source}已转到其他分支`;
@@ -402,7 +444,7 @@
     if (row.errorCategory === 'condition') return '节点条件不满足';
     if (row.errorCategory === 'workflow_timeout') return '工作流执行超时';
     if (row.errorCategory === 'node_timeout' || row.errorCategory === 'action_timeout') return '节点执行超时';
-    return row.error || '';
+    return localizedErrorMessage(row.error);
   }
 
   function formatDetailValue(value) {
@@ -660,10 +702,10 @@
     if (row.params !== null && row.params !== undefined) entries.push(['实际参数', row.params]);
     if (row.output !== null && row.output !== undefined) entries.push(['节点输出', row.output]);
     if (row.workflowDepth > 0 && row.workflowPath.length > 0) entries.push(['调用路径', row.workflowPath.join(' > ')]);
-    if (row.errorCategory) entries.push(['错误分类', row.errorCategory]);
+    if (row.errorCategory) entries.push(['错误分类', localizedErrorCategory(row.errorCategory)]);
     if (row.recoveredByName) entries.push(['恢复来源', row.recoveredByName]);
-    if (row.error) entries.push([row.status === 'branch_miss' ? '原始未完成原因' : '原始错误', row.error]);
-    if (row.forcedSuccess && row.originalError) entries.push(['被改写的失败原因', row.originalError]);
+    if (row.error) entries.push([row.status === 'branch_miss' ? '原始未完成原因' : '原始错误', localizedErrorMessage(row.error)]);
+    if (row.forcedSuccess && row.originalError) entries.push(['被改写的失败原因', localizedErrorMessage(row.originalError)]);
     const shotUri = thumbnailUri(row.thumbnail);
     if (row.thumbnail && !shotUri) entries.push(['截图文件', row.thumbnail]);
     if (entries.length === 0) return;

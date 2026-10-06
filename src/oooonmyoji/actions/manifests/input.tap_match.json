@@ -3,7 +3,7 @@
   "name": "input.tap_match",
   "version": "1.0.0",
   "entry": "builtin:TapMatchAction",
-  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。开启重新校验后，每次执行都会先重新确认模板仍在画面中；开启 verify_gone 后，点击节点会在自身内部确认原模板消失。配置消失状态列表后，点击后还必须确认其中一个下一状态出现才返回成功；确认失败时由 Retry 只重试当前节点。输出实际点击坐标、偏移量和等待间隔。",
+  "description": "点击匹配结果中心，可配置随机偏移和随机点击前等待。开启重新校验后，每次执行都会先重新确认模板仍在画面中；开启 verify_gone 后，点击节点会在自身内部确认原模板消失。配置消失状态列表后，点击后还必须确认其中一个下一状态出现才返回成功；确认失败时由 Retry 只重试当前节点。输出实际点击坐标、偏移量和等待间隔，并在成功时提供命中的下一状态及匹配框。",
   "parameters": {
     "match": {
       "type": "object",
@@ -44,17 +44,17 @@
     },
     "random_offset": {
       "type": "integer",
-      "default": 0,
+      "default": 8,
       "min": 0,
-      "description": "在匹配中心 X/Y 方向分别随机偏移的最大像素数，默认 0"
+      "description": "在匹配中心 X/Y 方向分别随机偏移的最大像素数，默认 8"
     },
     "random_interval": {
       "type": "array",
       "items": { "type": "duration", "min": 0 },
       "min_items": 2,
       "max_items": 2,
-      "default": [0, 0],
-      "description": "点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0, 0]"
+      "default": [0.2, 0.4],
+      "description": "点击前随机等待区间 [最小秒数, 最大秒数]，默认 [0.2, 0.4]"
     },
     "verify_gone": {
       "type": "boolean",
@@ -94,6 +94,23 @@
       "revalidated": { "type": "boolean" },
       "skipped": { "type": "boolean" },
       "final_state": { "type": "string" },
+      "state_match": {
+        "type": "object",
+        "properties": {
+          "x": { "type": "integer" },
+          "y": { "type": "integer" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "confidence": { "type": "number" },
+          "reference": { "type": "array", "items": { "type": "number" }, "min_items": 4, "max_items": 4 },
+          "center": { "type": "array", "items": { "type": "integer" }, "min_items": 2, "max_items": 2 },
+          "template": { "type": "string" },
+          "threshold": { "type": "number" },
+          "roi": { "type": "array", "items": { "type": "number" }, "min_items": 4, "max_items": 4 },
+          "state": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
       "verified_gone": { "type": "boolean" }
     },
     "additionalProperties": false

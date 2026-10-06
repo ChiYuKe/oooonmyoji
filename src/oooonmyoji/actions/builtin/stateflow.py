@@ -48,6 +48,7 @@ class TapMatchAction(Action):
                             "revalidated": True,
                             "skipped": True,
                             "final_state": detected["state"],
+                            "state_match": {**detected["match"], "state": detected["state"]},
                             "verified_gone": True,
                         })
                     return ActionResult.failed("matched template disappeared but no configured next state appeared", category="vision")
@@ -133,6 +134,7 @@ class TapMatchAction(Action):
                     output=output,
                 )
             output["final_state"] = detected["state"]
+            output["state_match"] = {**detected["match"], "state": detected["state"]}
         return ActionResult.succeeded(output)
 
 

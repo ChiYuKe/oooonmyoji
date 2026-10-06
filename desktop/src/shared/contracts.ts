@@ -3,7 +3,6 @@ import type { SoulSnapshot, SoulFetchProgress } from './souls';
 import type { HeroOwnershipSnapshot, HeroOwnershipProgress } from './hero-ownership';
 import type { HeroBaseRequest } from './hero-panel';
 import type { Panel } from './soul-optimizer';
-import type { LineupExternalSource, LineupSearchRequest, LineupSearchResponse } from './lineups';
 import type { ActionCardRow } from './parameter-types';
 import type { WorkflowTestInit, WorkflowTestRequest, WorkflowTestEvent, TestCommand, TestNodeDraft, TestNodeTransfer, TestNodeAdded } from './workflow-testing';
 
@@ -54,6 +53,29 @@ export interface RuntimeInstance {
   adbSerial?: string;
   mumuIndex?: number;
   displayName?: string;
+}
+
+export interface DuelScreenRecognition {
+  width: number;
+  height: number;
+  backend: string;
+  screenSide: 'blue' | 'red' | 'unknown';
+  items: Array<{ text: string; confidence: number; box: number[][] }>;
+  heroMatches: Array<{ x: number; heroId: number; score: number; confidenceGap: number } | null>;
+  soulMatches: Array<{ x: number; suitId: number; score: number; confidenceGap: number } | null>;
+}
+
+export interface DuelScreenCapture {
+  width: number;
+  height: number;
+  dataUrl: string;
+}
+
+export interface DuelScreenRoi {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** Only the soul browser includes offline instances with validated local caches. */
@@ -280,6 +302,14 @@ export interface LiveViewMatch {
   box: number[];
   template: string | null;
   threshold: number | null;
+  state?: string | null;
+}
+
+export interface LiveViewStateCandidate {
+  name: string;
+  templates: string[];
+  texts: string[];
+  threshold: number | null;
 }
 
 export interface LiveViewOcr {
@@ -300,6 +330,14 @@ export interface LiveViewOverlay {
   matches: LiveViewMatch[];
   ocr: LiveViewOcr[];
   clicks: LiveViewClick[];
+  states: LiveViewStateCandidate[];
+}
+
+export interface LiveViewPlannedStep {
+  step_id: string;
+  name: string;
+  action: string;
+  execution_index: number;
 }
 
 /** 运行时步骤事件里状态条需要的字段。 */
@@ -322,6 +360,8 @@ export interface LiveViewStep {
   /** 失败时的定位面包屑（成功事件没有这两个字段）。 */
   error_path?: string[] | null;
   error_breadcrumb?: string | null;
+  /** 当前工作流按树遍历顺序排列的任务步骤；分支可能跳过，循环可能重复。 */
+  workflow_steps?: LiveViewPlannedStep[];
 }
 
 /** 运行时写给桌面端的一帧“眼中的画面”。 */
@@ -501,6 +541,8 @@ export interface OnmyojiDesktopApi {
   getDebugSettings(): Promise<RuntimeDebugSettings>;
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;
+  captureDuelScreen(instanceId: string): Promise<DuelScreenCapture>;
+  recognizeDuelScreen(dataUrl: string, roi: DuelScreenRoi): Promise<DuelScreenRecognition>;
   listSoulInstances(): Promise<SoulInstance[]>;
   listCommunityBuilds(endpoint: string, query: import('./soul-community').CommunityQuery, options?: import('./soul-community').CommunityListOptions): Promise<import('./soul-community').CommunityPage>;
   getCommunityAccount(endpoint: string): Promise<import('./soul-community').CommunityAccountState>;
@@ -519,10 +561,6 @@ export interface OnmyojiDesktopApi {
   detectHeroOwnership(instanceId: string): Promise<HeroOwnershipSnapshot | null>;
   cancelHeroDetection(instanceId: string): Promise<void>;
   onHeroDetectionProgress(listener: (progress: HeroOwnershipProgress) => void): () => void;
-  searchLineups(request: LineupSearchRequest): Promise<LineupSearchResponse>;
-  openLineupPost(bvid: string): Promise<void>;
-  openLineupUrl(source: LineupExternalSource, url: string): Promise<void>;
-  openLineupSource(source: LineupExternalSource, keyword: string): Promise<void>;
   fetchSouls(instanceId: string): Promise<SoulSnapshot | null>;
   loadSouls(instanceId: string): Promise<SoulSnapshot | null>;
   cancelSoulFetch(instanceId: string): Promise<void>;

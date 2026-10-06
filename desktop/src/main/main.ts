@@ -5,12 +5,11 @@ import { SoulService } from './soulService';
 import { listCommunityBuilds, uploadCommunityBuild, deleteCommunityBuild, getCommunityAccount, renameCommunityAccount, startCommunityLogin, pollCommunityLogin, cancelCommunityLogin, openCommunityLogin, logoutCommunityAccount, listCommunityOwnedBuilds } from './soulCommunityService';
 import { HeroOwnershipService } from './heroOwnershipService';
 import { HeroPanelService } from './heroPanelService';
-import { searchLineups } from './lineupService';
-import { NGA_BOARD_URL } from './ngaLineupService';
 import { loadAiImage } from './ai-images';
 import { copyPngToClipboard } from './clipboardImage';
 import { pathToFileURL } from 'node:url';
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import {
@@ -35,6 +34,7 @@ import type {
   RoiCaptureRequest,
   RunWorkflowRequest,
   RuntimeDebugSettings,
+  RuntimeResourceStatus,
   RuntimeResourceVariantId,
   SaveCanvasRequest,
   SaveTemplateRequest,
@@ -42,7 +42,6 @@ import type {
   VisionCommand,
   VisionStreamEvent,
 } from '../shared/contracts';
-import type { LineupExternalSource } from '../shared/lineups';
 import { chooseRuntimeInstance } from './core/runtimeInstances';
 import {
   clampLiveViewInterval,
@@ -445,6 +444,22 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('runtime:list-instances', () => runtime.listInstances());
+  ipcMain.handle('duel:capture-screen', async (_event, id: unknown) => {
+    if (typeof id !== 'string' || !(await runtime.listInstances()).some(item => item.id === id)) {
+      throw new Error('所选实例已离线，请启动模拟器后重试');
+    }
+    if (runtime.running || workflowTestService?.running || souls?.running || heroOwnership?.running) {
+      throw new Error('请先停止工作流、节点测试或数据读取，再读取模拟器画面');
+    }
+    return runtime.captureDuelScreen(id);
+  });
+  ipcMain.handle('duel:recognize-screen', (_event, dataUrl: unknown, roi: unknown) => {
+    if (typeof dataUrl !== 'string' || !roi || typeof roi !== 'object') throw new Error('请先选择截图区域');
+    if (runtime.running || workflowTestService?.running || souls?.running || heroOwnership?.running) {
+      throw new Error('请先停止工作流、节点测试或数据读取，再识别画面区域');
+    }
+    return runtime.recognizeDuelScreen(dataUrl, roi as import('../shared/contracts').DuelScreenRoi);
+  });
   ipcMain.handle('souls:list-instances', async () => souls!.listInstances(await runtime.listInstances()));
   ipcMain.handle('souls:community-list', (_event, endpoint: unknown, query: unknown, options: unknown) => listCommunityBuilds(endpoint, query, options));
   ipcMain.handle('souls:community-account', (_event, endpoint: unknown) => getCommunityAccount(endpoint));
@@ -465,67 +480,15 @@ function registerIpc(): void {
   ipcMain.handle('heroes:base-panel', (_event, request: unknown) => heroPanels!.load(request));
   ipcMain.handle('heroes:detect', async (_event, id: unknown) => {
     if (typeof id !== 'string' || !(await runtime.listInstances()).some(item => item.id === id)) throw new Error('所选实例已离线，请启动模拟器后刷新实例');
-    if (runtime.running || workflowTestService?.running || souls?.running) throw new Error('请先停止工作流、节点测试或御魂获取，再检测仓库');
+    if (runtime.running || runtime.recognizingDuelScreen || workflowTestService?.running || souls?.running) throw new Error('请先停止工作流、节点测试、画面识别或御魂获取，再检测仓库');
     return heroOwnership!.fetch(id);
   });
   ipcMain.handle('heroes:cancel', (_event, id: unknown) => typeof id === 'string' ? heroOwnership?.cancel(id) : undefined);
-  ipcMain.handle('lineups:search', (_event, request: unknown) => searchLineups(request));
-  ipcMain.handle('lineups:open-post', async (_event, bvid: unknown) => {
-    if (typeof bvid !== 'string' || !/^BV[0-9A-Za-z]{10}$/.test(bvid)) throw new Error('阵容来源链接无效');
-    await shell.openExternal(`https://www.bilibili.com/video/${bvid}/`);
-  });
-  ipcMain.handle('lineups:open-url', async (_event, source: unknown, rawUrl: unknown) => {
-    const allowedHosts: Record<LineupExternalSource, string[]> = {
-      bilibili: ['www.bilibili.com'],
-      'netease-community': ['ds.163.com'],
-      'netease-official': ['yys.163.com', 'yys.16163.com'],
-      weibo: ['weibo.com', 'www.weibo.com'],
-      nga: ['nga.cn', 'www.nga.cn', 'nga.178.com', 'bbs.nga.cn'],
-    };
-    if (typeof source !== 'string' || !Object.prototype.hasOwnProperty.call(allowedHosts, source) || typeof rawUrl !== 'string') throw new Error('阵容来源链接无效');
-    let url: URL;
-    try { url = new URL(rawUrl); } catch { throw new Error('阵容来源链接无效'); }
-    if (url.protocol !== 'https:' || !allowedHosts[source as LineupExternalSource].includes(url.hostname.toLowerCase())) throw new Error('阵容来源链接无效');
-    await shell.openExternal(url.href);
-  });
-  ipcMain.handle('lineups:open-source', async (_event, source: unknown, keyword: unknown) => {
-    const sources: LineupExternalSource[] = ['bilibili', 'netease-community', 'netease-official', 'weibo', 'nga'];
-    if (typeof source !== 'string' || !sources.includes(source as LineupExternalSource)) throw new Error('阵容来源无效');
-    const term = typeof keyword === 'string' ? keyword.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
-    const q = `阴阳师 ${term} 阵容`.trim();
-    if (source === 'nga') {
-      await shell.openExternal(NGA_BOARD_URL);
-      return;
-    }
-    if (source === 'netease-community') {
-      await shell.openExternal('https://ds.163.com/topic/%E9%98%B4%E9%98%B3%E5%B8%88/');
-      return;
-    }
-    if (source === 'bilibili') {
-      const searchUrl = new URL('https://search.bilibili.com/all');
-      searchUrl.searchParams.set('keyword', q);
-      searchUrl.searchParams.set('order', 'pubdate');
-      await shell.openExternal(searchUrl.toString());
-      return;
-    }
-    if (source === 'weibo') {
-      const searchUrl = new URL('https://s.weibo.com/weibo');
-      searchUrl.searchParams.set('q', q);
-      await shell.openExternal(searchUrl.toString());
-      return;
-    }
-    const url = new URL('https://www.baidu.com/s');
-    const sourceQuery = {
-      'netease-official': `site:yys.163.com ${q}`,
-    };
-    url.searchParams.set('wd', sourceQuery[source as keyof typeof sourceQuery]);
-    await shell.openExternal(url.toString());
-  });
   ipcMain.handle('souls:fetch', async (_event, instanceId: unknown) => {
     if (typeof instanceId !== 'string' || !(await runtime.listInstances()).some((item) => item.id === instanceId)) {
       throw new Error('所选实例已离线，请刷新实例列表');
     }
-    if (runtime.running || workflowTestService?.running || heroOwnership?.running) throw new Error('请先停止工作流、节点测试或仓库检测，再获取御魂');
+    if (runtime.running || runtime.recognizingDuelScreen || workflowTestService?.running || heroOwnership?.running) throw new Error('请先停止工作流、节点测试、画面识别或仓库检测，再获取御魂');
     return souls!.fetch(instanceId);
   });
   // 载入上次保存的快照：实例可以已经离线，所以这里不校验在线状态。
@@ -924,16 +887,54 @@ function askRendererForApproval(request: McpApprovalRequest): Promise<McpApprova
   });
 }
 
-function registerResourceIpc(projectRoot: string): void {
-  ipcMain.handle('resources:status', () => resourceManager?.status() ?? {
-    ready: true,
-    activeVariant: 'cpu',
-    variants: [{
-      id: 'cpu', label: '内置运行环境', description: '此版本已内置运行资源。', version: app.getVersion(),
-      installedVersion: app.getVersion(), downloadBytes: 0, installed: true, ready: true,
-      supported: true, supportMessage: '已内置',
-    }],
+function localRuntimeResourceStatus(projectRoot: string): RuntimeResourceStatus {
+  const configPath = path.join(projectRoot, 'config', 'config.json');
+  let useGpu = false;
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as { ocr?: { use_gpu?: unknown } };
+    useGpu = config.ocr?.use_gpu === true;
+  } catch {
+    // 配置无法读取时按 CPU 显示；真正启动运行时仍会给出配置错误。
+  }
+
+  const sitePackages = path.join(projectRoot, '.venv', 'Lib', 'site-packages');
+  const hasPaddle = existsSync(path.join(sitePackages, 'paddle', '__init__.py'));
+  let gpuVersion: string | undefined;
+  try {
+    const gpuPackage = readdirSync(sitePackages).find((name) => /^paddlepaddle_gpu-(.+)\.dist-info$/i.test(name));
+    gpuVersion = gpuPackage?.match(/^paddlepaddle_gpu-(.+)\.dist-info$/i)?.[1];
+  } catch {
+    // 发布版 / 首次配置前可能没有项目虚拟环境。
+  }
+  const gpuProbe = spawnSync('nvidia-smi', ['--query-gpu=name,driver_version', '--format=csv,noheader'], {
+    encoding: 'utf8', windowsHide: true, timeout: 4000,
   });
+  const gpuName = typeof gpuProbe.stdout === 'string' ? gpuProbe.stdout.trim().split(/\r?\n/)[0] : '';
+  const gpuReady = Boolean(hasPaddle && gpuVersion && gpuName);
+  const activeVariant: RuntimeResourceVariantId = useGpu && gpuReady ? 'gpu' : 'cpu';
+  const localVersion = gpuVersion || app.getVersion();
+  const variants: RuntimeResourceStatus['variants'] = hasPaddle ? [
+    {
+      id: 'cpu', label: 'CPU 通用版', description: '使用项目本地 Paddle OCR 环境。',
+      version: localVersion, installedVersion: localVersion, downloadBytes: 0,
+      installed: true, ready: true, supported: true, supportMessage: '项目本地环境',
+    },
+    ...(gpuVersion ? [{
+      id: 'gpu' as const, label: 'NVIDIA GPU 加速版', description: '使用项目本地 Paddle GPU 环境。',
+      version: gpuVersion, installedVersion: gpuVersion, downloadBytes: 0,
+      installed: true, ready: gpuReady, supported: Boolean(gpuName),
+      supportMessage: gpuName || '未检测到 NVIDIA 显卡或驱动',
+    }] : []),
+  ] : [{
+    id: 'cpu', label: '内置运行环境', description: '此版本已内置运行资源。', version: app.getVersion(),
+    installedVersion: app.getVersion(), downloadBytes: 0, installed: true, ready: true,
+    supported: true, supportMessage: '已内置',
+  }];
+  return { ready: true, activeVariant, variants };
+}
+
+function registerResourceIpc(projectRoot: string): void {
+  ipcMain.handle('resources:status', () => resourceManager?.status() ?? localRuntimeResourceStatus(projectRoot));
   const variantId = (value: unknown): RuntimeResourceVariantId => {
     if (value !== 'cpu' && value !== 'gpu') throw new Error('未知的运行环境类型');
     return value;
@@ -948,10 +949,25 @@ function registerResourceIpc(projectRoot: string): void {
     );
   });
   ipcMain.handle('resources:activate', async (_event, value: unknown) => {
-    if (!resourceManager) throw new Error('当前版本使用内置运行环境，无法切换');
     if (runtime?.running || visionTestStream?.running || workflowTestService?.running) throw new Error('有任务或测试正在运行，请先停止后再切换');
-    const result = resourceManager.activate(variantId(value));
-    process.env.ONMYOJI_RUNTIME_ROOT = resourceManager.runtimeRoot;
+    const id = variantId(value);
+    let result: RuntimeResourceStatus;
+    if (resourceManager) {
+      result = resourceManager.activate(id);
+      process.env.ONMYOJI_RUNTIME_ROOT = resourceManager.runtimeRoot;
+    } else {
+      const local = localRuntimeResourceStatus(projectRoot);
+      const selected = local.variants.find((item) => item.id === id);
+      if (!selected?.ready || !selected.supported) throw new Error(`本地${id === 'gpu' ? ' GPU' : ' CPU'} OCR 环境不可用`);
+      const configPath = path.join(projectRoot, 'config', 'config.json');
+      const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      const ocr = config.ocr && typeof config.ocr === 'object' && !Array.isArray(config.ocr)
+        ? config.ocr as Record<string, unknown>
+        : {};
+      config.ocr = { ...ocr, use_gpu: id === 'gpu' };
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+      result = localRuntimeResourceStatus(projectRoot);
+    }
     process.env.ONMYOJI_OCR_USE_GPU = result.activeVariant === 'gpu' ? '1' : '0';
     await initializeRuntimeServices(projectRoot);
     if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createWindow();
@@ -972,15 +988,21 @@ app.whenReady().then(async () => {
   const devUrl = process.env.ONMYOJI_DESKTOP_DEV_URL;
   rendererBaseUrl = devUrl ? new URL(devUrl).origin : await startRendererServer(path.join(app.getAppPath(), 'dist', 'renderer'));
   registerShellIpc();
-  const manifestPath = path.join(projectRoot, 'runtime-manifest.json');
-  const bundledPython = path.join(projectRoot, 'tools', 'python312-embed', 'python.exe');
-  if (!existsSync(bundledPython) && existsSync(manifestPath)) {
+  // 已打包的初始安装版把清单放在 resources 根目录；桌面源码启动则复用
+  // package:win:initial 生成的 release/runtime-assets 清单，无需先打包安装应用。
+  const manifestPath = [
+    path.join(projectRoot, 'runtime-manifest.json'),
+    path.join(projectRoot, 'desktop', 'release', 'runtime-assets', 'runtime-manifest.json'),
+  ].find((filename) => existsSync(filename));
+  if (manifestPath) {
     resourceManager = new RuntimeResourceManager(projectRoot, app.getPath('userData'), manifestPath);
   }
   registerResourceIpc(projectRoot);
-  const resourceStatus = resourceManager?.status();
-  if (resourceStatus?.ready && resourceManager) {
+  const resourceStatus = resourceManager?.status() ?? localRuntimeResourceStatus(projectRoot);
+  if (resourceManager && resourceStatus.ready) {
     process.env.ONMYOJI_RUNTIME_ROOT = resourceManager.runtimeRoot;
+    process.env.ONMYOJI_OCR_USE_GPU = resourceStatus.activeVariant === 'gpu' ? '1' : '0';
+  } else if (!resourceManager) {
     process.env.ONMYOJI_OCR_USE_GPU = resourceStatus.activeVariant === 'gpu' ? '1' : '0';
   }
   if (!resourceManager || resourceManager.status().ready) await initializeRuntimeServices(projectRoot);

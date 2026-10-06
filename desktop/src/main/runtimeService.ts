@@ -8,6 +8,9 @@ import type {
   RoiCaptureResult,
   RunWorkflowRequest,
   RuntimeDebugSettings,
+  DuelScreenCapture,
+  DuelScreenRoi,
+  DuelScreenRecognition,
   RuntimeInstance,
   RuntimeOutputEvent,
   RuntimeStateEvent,
@@ -32,6 +35,7 @@ function readJsonObject(file: string): Record<string, unknown> {
 
 export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private activeProcess: ChildProcess | undefined;
+  private activeDuelTools = 0;
   private stopRequested = false;
   private stopGeneration = 0;
   private watchTimer: NodeJS.Timeout | undefined;
@@ -44,6 +48,10 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
   get running(): boolean {
     return Boolean(this.activeProcess && this.activeProcess.exitCode === null);
+  }
+
+  get recognizingDuelScreen(): boolean {
+    return this.activeDuelTools > 0;
   }
 
   private get pythonPath(): string {
@@ -157,7 +165,128 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     });
   }
 
+  private async runDuelTool(args: string[], timeoutMs: number, stdoutLimit: number): Promise<Record<string, unknown>> {
+    this.activeDuelTools++;
+    try {
+      return await new Promise((resolve, reject) => {
+      const child = spawn(this.pythonPath, args, {
+        cwd: this.project.projectRoot,
+        env: pythonUtf8Environment(process.env, this.project.projectRoot),
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      const finish = (error?: Error, result?: Record<string, unknown>): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else if (result) resolve(result);
+        else reject(new Error('模拟器画面识别没有返回结果'));
+      };
+      const timer = setTimeout(() => {
+        child.kill();
+        finish(new Error('读取画面超时，请确认 OCR 模型已安装且模拟器已启动'));
+      }, timeoutMs);
+      child.stdout?.setEncoding('utf8');
+      child.stderr?.setEncoding('utf8');
+      child.stdout?.on('data', chunk => { stdout = `${stdout}${String(chunk)}`.slice(-stdoutLimit); });
+      child.stderr?.on('data', chunk => { stderr = `${stderr}${String(chunk)}`.slice(-12_000); });
+      child.once('error', error => finish(new Error(`无法启动画面识别：${error.message}`)));
+      child.once('close', code => {
+        let response: Record<string, unknown> | undefined;
+        for (const line of stdout.trim().split(/\r?\n/).reverse()) {
+          try {
+            const value = JSON.parse(line) as unknown;
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+              response = value as Record<string, unknown>;
+              break;
+            }
+          } catch { /* OCR libraries may write progress text to stdout. */ }
+        }
+        if (!response) return finish(new Error(stderr.trim() || '无法读取画面处理结果'));
+        if (code !== 0 || response.ok !== true) {
+          return finish(new Error(typeof response.error === 'string' ? response.error : stderr.trim() || '模拟器画面处理失败'));
+        }
+        finish(undefined, response);
+      });
+      });
+    } finally {
+      this.activeDuelTools = Math.max(0, this.activeDuelTools - 1);
+    }
+  }
+
+  async captureDuelScreen(instanceId: string): Promise<DuelScreenCapture> {
+    if (this.running) throw new Error('工作流运行期间不能读取模拟器画面');
+    if (typeof instanceId !== 'string' || !instanceId.trim() || instanceId.length > 160) throw new Error('请选择有效的模拟器实例');
+    const response = await this.runDuelTool([
+      '-m', 'src.oooonmyoji.tools.duel_screen', '--config', this.configPath, '--mode', 'capture', '--instance', instanceId,
+    ], 30_000, 24_000_000);
+    const dataUrl = response.dataUrl;
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,') || dataUrl.length > 22_000_000) {
+      throw new Error('模拟器没有返回有效截图');
+    }
+    return { width: Number(response.width) || 0, height: Number(response.height) || 0, dataUrl };
+  }
+
+  async recognizeDuelScreen(dataUrl: string, roi: DuelScreenRoi): Promise<DuelScreenRecognition> {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,') || dataUrl.length > 22_000_000) {
+      throw new Error('截图无效或过大，请重新读取模拟器画面');
+    }
+    const values = [roi?.x, roi?.y, roi?.width, roi?.height];
+    if (!values.every(value => Number.isInteger(value) && value >= 0) || roi.width < 1 || roi.height < 1) {
+      throw new Error('请先框选要识别的画面区域');
+    }
+    const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'onmyoji-duel-roi-'));
+    const imagePath = path.join(temporaryDirectory, 'capture.png');
+    try {
+      fs.writeFileSync(imagePath, Buffer.from(dataUrl.slice('data:image/png;base64,'.length), 'base64'));
+      const response = await this.runDuelTool([
+        '-m', 'src.oooonmyoji.tools.duel_screen', '--config', this.configPath, '--mode', 'recognize-image',
+        '--image', imagePath, '--roi', String(roi.x), String(roi.y), String(roi.width), String(roi.height),
+      ], 90_000, 2_000_000);
+        const items = Array.isArray(response.items) ? response.items : [];
+        return {
+          width: Number(response.width) || 0,
+          height: Number(response.height) || 0,
+          backend: typeof response.backend === 'string' ? response.backend : 'unknown',
+          screenSide: response.screenSide === 'blue' || response.screenSide === 'red' ? response.screenSide : 'unknown',
+          items: items.filter(item => item && typeof item === 'object').map(item => {
+            const value = item as Record<string, unknown>;
+            return {
+              text: typeof value.text === 'string' ? value.text : '',
+              confidence: Number(value.confidence) || 0,
+              box: Array.isArray(value.box) ? value.box as number[][] : [],
+            };
+          }),
+          heroMatches: Array.isArray(response.heroMatches) ? response.heroMatches.map(item => {
+            if (!item || typeof item !== 'object') return null;
+            const value = item as Record<string, unknown>;
+            const x = Number(value.x), heroId = Number(value.heroId), score = Number(value.score);
+            const confidenceGap = Number(value.confidenceGap);
+            return Number.isFinite(x) && Number.isInteger(heroId) && Number.isFinite(score) && Number.isFinite(confidenceGap)
+              ? { x, heroId, score, confidenceGap }
+              : null;
+          }) : [],
+          soulMatches: Array.isArray(response.soulMatches) ? response.soulMatches.map(item => {
+            if (!item || typeof item !== 'object') return null;
+            const value = item as Record<string, unknown>;
+            const x = Number(value.x), suitId = Number(value.suitId), score = Number(value.score);
+            const confidenceGap = Number(value.confidenceGap);
+            return Number.isFinite(x) && Number.isInteger(suitId) && Number.isFinite(score) && Number.isFinite(confidenceGap)
+              ? { x, suitId, score, confidenceGap }
+              : null;
+          }) : [],
+        };
+    } finally {
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  }
+
   async runWorkflow(request: RunWorkflowRequest): Promise<void> {
+    if (this.recognizingDuelScreen) throw new Error('正在识别模拟器画面，请稍后再运行工作流');
     if (this.activeProcess && this.activeProcess.exitCode === null) throw new Error('已有工作流正在运行，请先停止');
     const launchStopGeneration = this.stopGeneration;
     const workflowPath = this.project.resolveWorkflowPath(request.uri);
@@ -318,7 +447,9 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private startWatching(files: Array<{ file: string; instanceId: string }>): void {
     this.stopWatching();
     this.watchedFiles = new Map(files.map(({ file, instanceId }) => [file, { offset: 0, instanceId, pending: '' }]));
-    this.watchTimer = setInterval(() => this.tickWatcher(), 350);
+    // Keep canvas run markers responsive; at 350ms short steps could finish
+    // before their `running` event reached the renderer.
+    this.watchTimer = setInterval(() => this.tickWatcher(), 100);
   }
 
   private finishWatching(): void {

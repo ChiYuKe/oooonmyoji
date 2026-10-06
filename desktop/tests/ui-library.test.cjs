@@ -1,5 +1,6 @@
 // Run via npm test (builds the renderer test output first).
 // 组件库已迁到 src/canvas/ui/elements.ts：直接使用编译产物，行为测试不再切片源码。
+const { readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -164,8 +165,11 @@ test('标量数组行的图标按钮与输入框同高并对齐到输入框那�
 });
 test('tooltips share a borderless neutral surface and reduced shadow across renderers', () => {
   const postcss=require('postcss');
-  for(const file of ['ui.css','workflow-editor.css','../../src/renderer/styles.css']) {
-    const css=postcss.parse(fs.readFileSync(path.join(root,file),'utf8'));
+  for(const file of ['ui.css','workflow-editor.css','../../src/renderer/styles/workbench.css']) {
+    const source=file.endsWith('styles/workbench.css')
+      ? readExpandedCss(path.join(root,file))
+      : fs.readFileSync(path.join(root,file),'utf8');
+    const css=postcss.parse(source);
     let found=0;
     css.walkRules(rule=>{
       if(!rule.selectors.some(selector=>['.app-tooltip','.ui-tooltip'].includes(selector))) return;
@@ -398,6 +402,16 @@ test('任务参数结构化控件：固定长度数组给固定输入，未声�
   assert.equal(objectList.className,'object-array');
   assert.equal(objectList.querySelectorAll('.object-array-card').length,1);
   assert.deepEqual(objectList.querySelectorAll('.structured-field').map(field=>field.children[0].textContent),['name','ttl']);
+  // 嵌套字段缺键时按清单里的默认值显示：消失状态项只写了名称，匹配阈值也必须是 0.85，
+  // 不能给一个空框让用户照着手打一遍（运行时本来就按 apply_parameter_defaults 用 0.85）。
+  const stateItem={type:'object',properties:{name:{type:'string',required:true},threshold:{type:'number',default:0.85,min:0,max:1}}};
+  const stateList=controls.objectArrayControl({type:'array',items:stateItem},stateItem,[{name:'出现进攻标签'}],()=>{},{},'disappeared_states');
+  const stateFields=stateList.querySelectorAll('.structured-field');
+  assert.deepEqual(stateFields.map(field=>field.children[0].textContent),['name *','threshold']);
+  assert.equal(stateFields[1].children[1].value,'0.85','缺键的匹配阈值要显示默认值 0.85');
+  // 显式写过的值优先于默认值。
+  const stated=controls.nestedValueControl({type:'number',default:0.85},0.9,()=>{},{},'threshold');
+  assert.equal(stated.value,'0.9');
   // 空对象无法推断字段，保留原有的 JSON 兜底（有明确结构时不会出现）。
   const empty=controls.nestedValueControl({type:'object'},{},()=>{}, {},'blank');
   assert.equal(empty.tagName,'TEXTAREA');

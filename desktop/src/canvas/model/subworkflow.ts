@@ -90,11 +90,14 @@ export function createSubworkflowHelpers(deps: SubworkflowDeps) {
 
   function decoratorLabel(decorator: any): string {
     if (!decorator) return 'Decorator';
-    if (decorator.type === 'cooldown') return `Cooldown · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
-    if (decorator.type === 'timeout') return `Time Limit · ${compactValue(decorator.seconds, 22)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
-    if (decorator.type === 'retry') return `Retry · ${compactValue(decorator.attempts, 22)}${isBindingValue(decorator.attempts) ? '' : ' 次'}`;
-    if (decorator.type === 'repeat') return `Repeat · ${compactValue(decorator.count, 22)}${decorator.count && typeof decorator.count === 'object' ? '' : ' 次'}`;
-    if (decorator.type === 'do_once') return `Do Once · ${isBindingValue(decorator.reset_on_failure) ? compactValue(decorator.reset_on_failure, 22) : decorator.reset_on_failure ? '成功才锁定' : '整个运行只执行一次'}`;
+    const valueLabel = (value: any): string => isBindingValue(value)
+      ? `← ${referenceLabel(value.ref)}`
+      : compactValue(value, 22);
+    if (decorator.type === 'cooldown') return `Cooldown · ${valueLabel(decorator.seconds)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
+    if (decorator.type === 'timeout') return `Time Limit · ${valueLabel(decorator.seconds)}${isBindingValue(decorator.seconds) ? '' : 's'}`;
+    if (decorator.type === 'retry') return `Retry · ${valueLabel(decorator.attempts)}${isBindingValue(decorator.attempts) ? '' : ' 次'}`;
+    if (decorator.type === 'repeat') return `Repeat · ${valueLabel(decorator.count)}${isBindingValue(decorator.count) ? '' : ' 次'}`;
+    if (decorator.type === 'do_once') return `Do Once · ${isBindingValue(decorator.reset_on_failure) ? valueLabel(decorator.reset_on_failure) : decorator.reset_on_failure ? '成功才锁定' : '整个运行只执行一次'}`;
     if (decorator.type === 'force_success') return 'Force Success · 失败也算成功';
     return String(decorator.type || 'Decorator');
   }

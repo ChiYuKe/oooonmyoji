@@ -641,8 +641,33 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
       if (renderAll || rectsIntersect(nodeRect(node), viewRect)) visibleNodes.add(node.id);
     }
     const visibleCards = new Set<string>();
+    // 装饰器（例如 Repeat.count）目前在详情栏里直接保存变量引用，没有画布数据端口。
+    // 如果仍把对应变量卡片作为普通可见卡片挂载，它会看起来像一张莫名悬空的卡片。
+    // 仅被装饰器引用的变量不画卡；同一变量只要也被正常画布端口引用，就仍按常规显示。
+    const decoratorRefs = new Set<string>();
+    const canvasPinRefs = new Set<string>();
+    const collectRefs = (value: any, into: Set<string>): void => {
+      if (!value || typeof value !== 'object') return;
+      if (!Array.isArray(value) && typeof value.ref === 'string') {
+        const match = /^(inputs|variables)\.([^\.]+)/.exec(value.ref);
+        if (match) into.add(`${match[1]}.${match[2]}`);
+        return;
+      }
+      for (const child of Array.isArray(value) ? value : Object.values(value)) collectRefs(child, into);
+    };
+    for (const node of nodeList) {
+      collectRefs(node.decorators, decoratorRefs);
+      for (const pin of context.nodeVariablePins(node)) {
+        if (pin && pin.variable && (pin.scope === 'inputs' || pin.scope === 'variables')) {
+          canvasPinRefs.add(`${pin.scope}.${pin.variable}`);
+        }
+      }
+    }
+    for (const run of runList) collectRefs(run.run?.inputs, canvasPinRefs);
     for (const card of cardList) {
-      if (renderAll || rectsIntersect(context.variableCardRect(card), viewRect)) visibleCards.add(card.id);
+      const ref = `${card.scope}.${card.name}`;
+      const decoratorOnly = decoratorRefs.has(ref) && !canvasPinRefs.has(ref);
+      if (!decoratorOnly && (renderAll || rectsIntersect(context.variableCardRect(card), viewRect))) visibleCards.add(card.id);
     }
     const visibleRuns = new Set<string>();
     for (const card of runList) {

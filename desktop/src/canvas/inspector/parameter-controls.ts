@@ -650,11 +650,18 @@ export function createParameterControls(deps: ParameterControlsDeps) {
 
   function nestedValueControl(definition: any, value: any, onChange: (value: any) => void, ctx: any, key: string): UiNode {
     if (isBindingValue(value)) return bindingControl(definition || {}, value, onChange, ctx);
-    const structured = structuredControl(definition, value, onChange, ctx, key);
+    // 键没写时按定义里的默认值显示。顶层参数一直有这条规则（`renderParameter` 取的就是
+    // `definition.default`），但嵌套字段以前把 `undefined` 直接塞给控件：清单里明明写着
+    // 「匹配阈值 0.85」，新加的状态项里却是一个空框，用户只好手打一遍。
+    // 依旧不往文档里落键——运行时由 `apply_parameter_defaults` 填同一份默认值，两边数字一致。
+    const shown = value === undefined && definition && typeof definition === 'object' && definition.default !== undefined
+      ? clone(definition.default)
+      : value;
+    const structured = structuredControl(definition, shown, onChange, ctx, key);
     if (structured) return structured;
-    const scalar = scalarValueControl(definition, value, onChange, ctx);
+    const scalar = scalarValueControl(definition, shown, onChange, ctx);
     if (scalar) return scalar;
-    const area = el('textarea', 'json-value compact-json'); area.value = JSON.stringify(value, null, 2);
+    const area = el('textarea', 'json-value compact-json'); area.value = JSON.stringify(shown, null, 2);
     area.addEventListener('change', () => { try { onChange(JSON.parse(area.value)); } catch { toast('不是有效 JSON', true); } });
     return area;
   }
@@ -683,24 +690,26 @@ export function createParameterControls(deps: ParameterControlsDeps) {
       return shell;
     }
     if (def.type === 'asset' || def.type === 'path') {
-      const shell = el('div', 'inline-control');
+      const shell = el('div', 'asset-control');
       const input = textInput(value, onChange, { placeholder: def.type === 'asset' ? 'assets/templates/...' : '' });
       if (def.type === 'asset' && assetPathStatus(value) === 'missing') input.classList.add('asset-missing');
       if (def.type === 'asset' || assetPreviewForPath(value)) bindAssetPreview(input);
       shell.appendChild(input);
       if (def.type === 'asset') {
+        const actions = el('div', 'asset-control-actions');
         const browse = el('button', '', '浏览'); browse.title = '浏览 assets 中的图片';
         browse.addEventListener('click', () => openAssetBrowser(ctx.node ? ctx.node.id : '', ctx.key || '', value, (assetPath: any) => onChange(assetPath)));
-        shell.appendChild(browse);
+        actions.appendChild(browse);
         if (ctx.node) {
           const pick = el('button', '', '截取'); pick.title = '从当前画面截取模板';
           pick.addEventListener('click', () => requestRoi(ctx.node.id, ctx.key || '', 'asset', { applyValue: (assetPath: any) => onChange(assetPath) }));
-          shell.appendChild(pick);
+          actions.appendChild(pick);
           const replace = el('button', '', '替换'); replace.title = '从当前画面截取并覆盖当前模板';
           replace.addEventListener('click', () => requestTemplateReplacement(ctx.node.id, ctx.key || '', input.value, { applyValue: (assetPath: any) => onChange(assetPath) }));
-          shell.appendChild(replace);
-          appendMissingAssetAction(shell, ctx.node, ctx.key || '', value, onChange);
+          actions.appendChild(replace);
+          appendMissingAssetAction(actions, ctx.node, ctx.key || '', value, onChange);
         }
+        shell.appendChild(actions);
       }
       return shell;
     }
@@ -740,16 +749,19 @@ export function createParameterControls(deps: ParameterControlsDeps) {
     }
     list.forEach((item, index) => {
       const row = el('div', 'scalar-array-row');
-      row.appendChild(nestedValueControl(itemDef, item, (next) => { const updated = list.slice(); updated[index] = next; onChange(updated); }, ctx, ''));
-      row.appendChild(iconButton('object-array-move', '上移', 'arrow-up', () => {
+      const control = nestedValueControl(itemDef, item, (next) => { const updated = list.slice(); updated[index] = next; onChange(updated); }, ctx, '');
+      row.appendChild(control);
+      const actions = itemDef && itemDef.type === 'asset' ? control.querySelector('.asset-control-actions') : null;
+      const appendAction = (button: UiNode) => (actions || row).appendChild(button);
+      appendAction(iconButton('object-array-move', '上移', 'arrow-up', () => {
         if (index === 0) return;
         const updated = list.slice(); [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]]; onChange(updated);
       }));
-      row.appendChild(iconButton('object-array-move', '下移', 'arrow-down', () => {
+      appendAction(iconButton('object-array-move', '下移', 'arrow-down', () => {
         if (index >= list.length - 1) return;
         const updated = list.slice(); [updated[index + 1], updated[index]] = [updated[index], updated[index + 1]]; onChange(updated);
       }));
-      row.appendChild(iconButton('scalar-array-remove', '删除该项', 'trash', () => {
+      appendAction(iconButton('scalar-array-remove', '删除该项', 'trash', () => {
         if (definition.min_items !== undefined && list.length <= definition.min_items) { toast(`至少需要 ${definition.min_items} 项`, true); return; }
         const updated = list.slice(); updated.splice(index, 1); onChange(updated);
       }));

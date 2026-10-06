@@ -178,6 +178,37 @@
 :root[data-theme="light"] .dock-module {
     background: var(--dock-panel-background, #ededed)
 }
+:root[data-theme="light"] .duel-prediction-divider {
+    background: var(--dock-panel-background, #ededed)
+}
+:root[data-theme="light"] .duel-block-skill {
+    border-color: color-mix(in srgb, var(--hero-rarity-ssr, #978055) 50%, var(--border-soft))
+}
+:root[data-theme="light"] .duel-block-effect {
+    border-color: color-mix(in srgb, var(--green, #658c74) 48%, var(--border-soft))
+}
+:root[data-theme="light"] .duel-summon-marker {
+    border: 1px solid color-mix(in srgb, var(--hero-rarity-ssr, #978055) 55%, var(--border-soft));
+    color: var(--hero-rarity-ssr, #6b5b3c)
+}
+:root[data-theme="light"] .duel-live-upload {
+    --duel-value: var(--hero-rarity-r, #48606e)
+}
+:root[data-theme="light"] .duel-prediction-simulator {
+    --duel-value: var(--hero-rarity-r, #48606e)
+}
+:root[data-theme="light"] .duel-event-control, :root[data-theme="light"] .duel-event-resource {
+    color: var(--hero-rarity-ssr, #6b5b3c)
+}
+:root[data-theme="light"] .duel-result-error {
+    color: var(--error, #82524f)
+}
+:root[data-theme="light"] .duel-roi-dialog::backdrop {
+    background: rgba(255, 255, 255, 0.4)
+}
+:root[data-theme="light"] .duel-roi-dialog .duel-roi-recognize-image {
+    color: var(--text-on-accent, #232323)
+}
 :root[data-theme="light"] .soul-status-area .error {
     color: var(--danger, #885050)
 }
@@ -225,15 +256,6 @@
 }
 :root[data-theme="light"] .shikigami-atlas .shikigami-skill-term {
     color: #48606e
-}
-:root[data-theme="light"] .lineup-status[data-state="error"] {
-    color: var(--error, #82524f)
-}
-:root[data-theme="light"] .lineup-status[data-state="warning"] {
-    color: var(--warning, #6a5b3d)
-}
-:root[data-theme="light"] .lineup-empty[data-state="error"] {
-    color: var(--error, #82524f)
 }
 :root[data-theme="light"] .module-command-strip {
     border-bottom: 1px solid #e8e8e8;
@@ -1345,6 +1367,22 @@
     background: #e0e4e6;
     color: #232323
 }
+:root[data-theme="light"] .live-step-item {
+    color: #313131
+}
+:root[data-theme="light"] .live-step-item.current {
+    background: #e0e4e6;
+    color: #232323
+}
+:root[data-theme="light"] .live-step-item.next {
+    background: color-mix(in srgb, #e8f6fc 9%, transparent)
+}
+:root[data-theme="light"] .live-step-item.current .live-step-role {
+    color: #406271
+}
+:root[data-theme="light"] .live-step-item.next .live-step-role {
+    color: #4b6069
+}
 :root[data-theme="light"] .vision-pre {
     color: #3b3b3b
 }
@@ -1594,6 +1632,9 @@
 }
 :root[data-theme="light"] .soul-account-dialog::backdrop {
     background: rgba(255, 255, 255, 0.4)
+}
+:root[data-theme="light"] .soul-community-picker::backdrop {
+    background: rgba(0, 0, 0, 0.333)
 }
 :root[data-theme="light"] {
     --ui-bg: #f3f3f3;

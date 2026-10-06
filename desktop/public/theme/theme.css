@@ -224,6 +224,38 @@
   --card-line: #aaaaaa; --card-rule: #666666; --card-text: #ffffff; --card-secondary: #e6e6e6;
   --card-muted: #cccccc; --card-icon: #ffffff; --card-port: #eeeeee;
 }
+:root[data-theme="light"][data-palette="pink"] {
+  --light-chrome: #f4d2df; --light-canvas: #fac5d7; --light-header: #f9e1e9;
+  --light-selection: #efbfd0; --light-selection-text: #66384b;
+  --ui-bg: #fac5d7; --ui-panel: #fceaf0; --ui-field: #fff9fb;
+  --ui-surface: #f6dfe7; --ui-hover: #f2ccd9; --ui-selected: #efbfd0;
+  --ui-line: #ebc4d2; --ui-text: #49333d; --ui-muted: #825f6c;
+  --ui-danger: #a63e46; --ui-focus: #bd6689; --border: #d9aabc;
+  --ui-tooltip-bg: #fff9fb; --ui-tooltip-text: #49333d;
+  --blue: #9f4e70; --blue-strong: #813b5b; --accent: #bd6689;
+  --green: #397747; --red: #a63e46; --yellow: #806323;
+  --success: #397747; --danger: #a63e46; --warning: #806323; --info: #9f4e70;
+  --wire: #b67c94; --grid: rgba(105,56,77,.055);
+  --content-folder-icon: #80566a; --content-folder-tile: #f5dce5;
+  --content-file-icon: #80566a; --content-file-tile: #f7e3ea;
+  --content-selection-surface: rgba(166,62,102,.09); --content-selection-frame: #c78da5;
+  --content-selection-border: #9f4e70; --content-selection-tile: #f0cbd8; --content-selection-text: #49333d;
+  --vscode-editor-background: var(--light-canvas); --vscode-sideBar-background: var(--ui-panel);
+  --vscode-editorWidget-background: var(--ui-surface); --vscode-panel-border: var(--border);
+  --vscode-foreground: var(--ui-text); --vscode-descriptionForeground: var(--ui-muted);
+  --vscode-focusBorder: var(--ui-focus); --vscode-button-background: var(--blue);
+  --vscode-button-hoverBackground: var(--blue-strong); --vscode-input-background: var(--ui-field);
+  --vscode-list-hoverBackground: var(--ui-hover); --vscode-list-activeSelectionBackground: var(--light-selection);
+  --vscode-menu-background: var(--ui-panel); --vscode-menu-selectionBackground: var(--light-selection);
+}
+:root[data-theme="light"][data-palette="pink"] :is(.node .node-box, .instance-run-card .instance-run-card-box, .variable-card .variable-card-box) { fill: #fff7fa; stroke: #d3a3b6; }
+:root[data-theme="light"][data-palette="pink"] :is(.node .node-head, .instance-run-card .instance-run-card-head, .variable-card .variable-card-head) { fill: #f7e3eb; }
+:root[data-theme="light"][data-palette="pink"] :is(.node.selected .node-box, .instance-run-card.selected .instance-run-card-box, .variable-card.selected .variable-card-box) { fill: #fbeaf0; stroke: #bd829a; }
+:root[data-theme="light"][data-palette="pink"] :is(.node.selected .node-head, .instance-run-card.selected .instance-run-card-head, .variable-card.selected .variable-card-head) { fill: #f0cfdb; }
+:root[data-theme="light"][data-palette="pink"] :is(.node-name, .instance-run-card-instance, .variable-card-name) { fill: #49333d; }
+:root[data-theme="light"][data-palette="pink"] :is(.node-type, .node-meta, .node-duration, .node-field-label, .instance-run-card-type, .instance-run-card-field-label, .variable-card-type, .variable-card-access, .pin-variable-param) { fill: #825f6c; }
+:root[data-theme="light"][data-palette="pink"] :is(.node-icon, .instance-run-card-icon, .decorator-icon) { fill: #9f4e70; }
+:root[data-theme="light"][data-palette="pink"] #minimap { background: #f8e5ec; border-color: #e1bdcb; }
 /* Use the chosen palette on secondary surfaces as well as the main panels. */
 :root[data-theme="dark"][data-palette] { background: var(--dark-canvas); color: var(--ui-text); --ui-tooltip-bg: var(--ui-surface); --ui-tooltip-text: var(--ui-text); }
 :root[data-theme="dark"][data-palette] :is(.onmyoji-dockview, .dockview-popout-host, .dockview-theme-vs) { --dv-separator-border: var(--dark-canvas); }

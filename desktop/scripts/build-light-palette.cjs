@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const postcss = require('postcss');
 const root = path.join(__dirname, '..');
+const { readExpandedCss } = require('./renderer-templates.cjs');
 function tone(channels, role) {
   const [r,g,b] = channels;
   const brightness = .2126*r + .7152*g + .0722*b;
@@ -54,14 +55,18 @@ function convert(value, role) {
   return text.replace(/__URL_(\d+)__/g,(_,i)=>urls[Number(i)]);
 }
 const groups = {
-  workbench:['src/renderer/styles.css','public/legacy/ui.css'],
+  workbench:['src/renderer/styles/workbench.css','public/legacy/ui.css'],
   editor:['public/legacy/workflow-editor.css','public/legacy/workflow-browser.css','public/legacy/ui.css','public/legacy/inspector.css','public/legacy/child-order-dnd.css'],
   log:['public/legacy/ui.css','public/runtime-log/run-log.css'],
 };
 function generate(files) {
   const output=postcss.root();
   for(const filename of files) {
-    const source=postcss.parse(fs.readFileSync(path.join(root,filename),'utf8'));
+    const absolute=path.join(root,filename);
+    const css=filename.startsWith('src/renderer/styles/')
+      ? readExpandedCss(absolute,path.join(root,'src/renderer'))
+      : fs.readFileSync(absolute,'utf8');
+    const source=postcss.parse(css);
     function walk(container,target) {
       for(const node of container.nodes || []) {
         if(node.type==='atrule') {

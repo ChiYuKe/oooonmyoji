@@ -1,3 +1,4 @@
+const { readExpandedHtml, readExpandedCss } = require('../scripts/renderer-templates.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -39,7 +40,8 @@ test('standalone previews use browser storage and react to other preview tabs',(
 test('all production surfaces initialize theme before content and load scoped adapters',()=>{
   const files=['src/renderer/index.html','src/renderer/popout.html','src/renderer/vision-test.html','src/renderer/workflow-test.html','src/renderer/live-view.html','src/renderer/canvas.html','public/runtime-log/index.html'];
   for(const file of files) {
-    const html=fs.readFileSync(path.join(root,file),'utf8');
+    const filename=path.join(root,file);
+    const html=file==='src/renderer/index.html' ? readExpandedHtml(filename) : fs.readFileSync(filename,'utf8');
     assert(html.indexOf('/theme/theme.js')<html.indexOf('</head>'),file);
     assert.match(html,/theme\/(workbench|editor|log)-light.css/);
     assert.match(html,/theme\/theme.css/);
@@ -88,7 +90,7 @@ test('curated light surfaces have readable contrast and all dock tab states are 
   assert.doesNotMatch(source,/filter:\s*(invert|brightness)/);
 });
 test('settings keeps original controls and separates all categories',()=>{
-  const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
+  const html=readExpandedHtml(path.join(root,'src/renderer/index.html'));
   for(const category of ['appearance','interface','runtime','shortcuts','about']) {
     assert.equal((html.match(new RegExp(`id="settings-page-${category}"`,'g')) || []).length,1);
     assert.match(html,new RegExp(`aria-controls="settings-page-${category}"`));
@@ -100,8 +102,8 @@ test('settings keeps original controls and separates all categories',()=>{
   assert.match(css,/#module-settings.settings-module \{ display: grid; grid-template-columns: 132px minmax\(0, 1fr\)/);
 });
 test('一个总开关同时管住两份截图输出',()=>{
-  const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
-  const panel=fs.readFileSync(path.join(root,'src/renderer/settings-panel.ts'),'utf8');
+  const html=readExpandedHtml(path.join(root,'src/renderer/index.html'));
+  const panel=fs.readFileSync(path.join(root,'src/renderer/features/settings/panel.ts'),'utf8');
   const service=fs.readFileSync(path.join(root,'src/main/runtimeService.ts'),'utf8');
   // 页面：一个总开关 + 标注开关 + 一行如实报告配置的状态
   for(const id of ['settings-debug-enabled','settings-debug-annotate','settings-debug-status']) {
@@ -145,14 +147,14 @@ test('every palette persists, synchronizes and retains the appropriate base styl
   let persisted='dark'; const listeners=new Set();
   const host={getTheme:()=>persisted,setTheme:value=>{persisted=value;for(const fn of listeners)fn(value);return value;},onThemeChanged:fn=>{listeners.add(fn);return()=>listeners.delete(fn);}};
   const first=themeWindow(host); const second=themeWindow(host);
-  const html=fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8');
-  for(const id of ['dark','graphite','warm','contrast','light']) {
+  const html=readExpandedHtml(path.join(root,'src/renderer/index.html'));
+  for(const id of ['dark','graphite','warm','contrast','pink','light']) {
     assert(html.includes('value="'+id+'"'));
     assert.equal(first.win.StudioTheme.set(id),true);
     assert.equal(second.win.StudioTheme.get(),id);
     assert.equal(second.doc.documentElement.dataset.palette,id);
-    assert.equal(second.doc.documentElement.dataset.theme,id==='light'?'light':'dark');
-    assert.equal(second.doc.documentElement.style.colorScheme,id==='light'?'light':'dark');
+    assert.equal(second.doc.documentElement.dataset.theme,['light','pink'].includes(id)?'light':'dark');
+    assert.equal(second.doc.documentElement.style.colorScheme,['light','pink'].includes(id)?'light':'dark');
     assert.equal(themeWindow(host).win.StudioTheme.get(),id);
     const store={}; const preview=themeWindow(null,store);
     preview.win.StudioTheme.set(id);

@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const key = 'onmyoji-studio.appearance';
-  const names = { dark: '墨黑', graphite: '柔灰', warm: '暖炭', contrast: '高对比', light: '浅色' };
+  const names = { dark: '墨黑', graphite: '柔灰', warm: '暖炭', contrast: '高对比', pink: '粉色', light: '浅色' };
   const valid = value => Object.prototype.hasOwnProperty.call(names, value);
   const normalize = value => valid(value) ? value : 'dark';
   const listeners = new Set();
@@ -13,8 +13,9 @@
   function apply(value) {
     current = normalize(value);
     document.documentElement.dataset.palette = current;
-    document.documentElement.dataset.theme = current === 'light' ? 'light' : 'dark';
-    document.documentElement.style.colorScheme = current === 'light' ? 'light' : 'dark';
+    const scheme = current === 'light' || current === 'pink' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = scheme;
+    document.documentElement.style.colorScheme = scheme;
     for (const listener of listeners) listener(current);
   }
   apply(current);

@@ -1,4 +1,4 @@
-import { normalizeCommunityBuild, normalizeCommunityQuery, communityBuildTitle, COMMUNITY_MAX_BYTES } from '../../../desktop/src/shared/soul-community';
+import { normalizeCommunityBuild, normalizeCommunityQuery, communityBuildTitle, COMMUNITY_MAX_BYTES, COMMUNITY_UPLOAD_COOLDOWN_MS } from '../../../desktop/src/shared/soul-community';
 import { soulCatalog } from '../../../desktop/src/shared/soul-catalog-data';
 import type { PanelKey } from '../../../desktop/src/shared/soul-optimizer';
 import { AuthError, authRoute, mutationOwner, json, digest } from './githubAuth';
@@ -16,6 +16,14 @@ interface Env extends AuthEnv {
   AUTH_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 interface StoredRow { id: string; created_at: string; payload: string; author: string | null }
+interface UploadCooldown { next_upload_at: number; request_id: string }
+function uploadCoolingDown(nextUploadAt: number): Response {
+  const retryAfterMs = Math.max(1, Math.min(COMMUNITY_UPLOAD_COOLDOWN_MS, nextUploadAt - Date.now()));
+  const seconds = Math.ceil(retryAfterMs / 1000);
+  const response = json({ error: `每个账号 30 秒内只能上传一次，请在 ${seconds} 秒后重试。`, retryAfterMs }, 429);
+  response.headers.set('Retry-After', String(seconds));
+  return response;
+}
 async function readBody(request: Request): Promise<unknown> {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw Error('请上传 JSON 格式的方案。');
   if (Number(request.headers.get('content-length')) > COMMUNITY_MAX_BYTES) throw Error('社区方案过大。');
@@ -91,6 +99,9 @@ export default {
         await env.DB.prepare('DELETE FROM builds WHERE id = ? AND delete_hash = ?').bind(deletion[1], tokenHash).run();
         return json({ deleted: true });
       }
+      const previousCooldown = await env.DB.prepare('SELECT next_upload_at, request_id FROM community_upload_cooldowns WHERE owner_hash = ?')
+        .bind(tokenHash).first<UploadCooldown>();
+      if (previousCooldown && previousCooldown.next_upload_at > Date.now()) return uploadCoolingDown(previousCooldown.next_upload_at);
       let build;
       try { build = normalizeCommunityBuild(await readBody(request)); }
       catch (error) { return json({ error: error instanceof Error ? error.message : '社区方案无效。' }, 400); }
@@ -101,25 +112,36 @@ export default {
       const author = build.author === '匿名用户' ? `御魂玩家-${tokenHash.slice(0, 12)}` : build.author.normalize('NFKC').trim();
       if (!author || author.length > 30) return json({ error: '署名需为 1 至 30 个字符。' }, 400);
       const authorKey = author.toLocaleLowerCase('en-US');
-      // The unique index arbitrates simultaneous name claims; a token keeps ownership across restarts.
-      await env.DB.prepare('INSERT INTO community_authors (owner_hash, author_key, name) VALUES (?, ?, ?) ON CONFLICT DO NOTHING')
-        .bind(tokenHash, authorKey, author).run();
       const holder = await env.DB.prepare('SELECT owner_hash FROM community_authors WHERE author_key = ?').bind(authorKey).first<{ owner_hash: string }>();
       if (holder && holder.owner_hash !== tokenHash) return json({ error: '这个署名已被其他用户使用，请换一个署名。' }, 409);
+      build.author = author;
+      const { title: _title, author: _author, ...content } = build;
+      const id = await digest(`${tokenHash}:${JSON.stringify(content)}`), now = Date.now(), createdAt = new Date(now).toISOString();
+      const requestId = crypto.randomUUID(), nextUploadAt = now + COMMUNITY_UPLOAD_COOLDOWN_MS;
+      let batchResult: Array<{ results?: UploadCooldown[] }>;
       try {
-        await env.DB.prepare('UPDATE community_authors SET author_key = ?, name = ? WHERE owner_hash = ?').bind(authorKey, author, tokenHash).run();
+        // The conditional UPSERT elects one request for this owner. All writes are gated
+        // by that request ID in the same D1 transaction; a failed write rolls back the cooldown.
+        batchResult = await env.DB.batch([
+          env.DB.prepare('INSERT INTO community_upload_cooldowns (owner_hash, next_upload_at, request_id) VALUES (?, ?, ?) ON CONFLICT(owner_hash) DO UPDATE SET next_upload_at = excluded.next_upload_at, request_id = excluded.request_id WHERE community_upload_cooldowns.next_upload_at <= ?')
+            .bind(tokenHash, nextUploadAt, requestId, now),
+          env.DB.prepare('INSERT INTO community_authors (owner_hash, author_key, name) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM community_upload_cooldowns WHERE owner_hash = ? AND request_id = ?) ON CONFLICT(owner_hash) DO NOTHING')
+            .bind(tokenHash, authorKey, author, tokenHash, requestId),
+          env.DB.prepare('UPDATE community_authors SET author_key = ?, name = ? WHERE owner_hash = ? AND EXISTS (SELECT 1 FROM community_upload_cooldowns WHERE owner_hash = ? AND request_id = ?)')
+            .bind(authorKey, author, tokenHash, tokenHash, requestId),
+          env.DB.prepare('INSERT INTO builds (id, hero_id, objective, created_at, payload, delete_hash) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM community_upload_cooldowns WHERE owner_hash = ? AND request_id = ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload')
+            .bind(id, build.heroId, build.objective, createdAt, JSON.stringify(build), tokenHash, tokenHash, requestId),
+          env.DB.prepare('SELECT next_upload_at, request_id FROM community_upload_cooldowns WHERE owner_hash = ?').bind(tokenHash),
+        ]) as Array<{ results?: UploadCooldown[] }>;
       } catch (error) {
         if (String(error).includes('UNIQUE')) return json({ error: '这个署名已被其他用户使用，请换一个署名。' }, 409);
         throw error;
       }
-      build.author = author;
-      // Idempotent per uploader and content. System title and signature do not create duplicates.
-      const { title: _title, author: _author, ...content } = build;
-      const id = await digest(`${tokenHash}:${JSON.stringify(content)}`), createdAt = new Date().toISOString();
-      await env.DB.prepare('INSERT INTO builds (id, hero_id, objective, created_at, payload, delete_hash) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload')
-        .bind(id, build.heroId, build.objective, createdAt, JSON.stringify(build), tokenHash).run();
+      const cooldown = batchResult[4]?.results?.[0];
+      if (!cooldown) throw Error('上传冷却状态缺失');
+      if (cooldown.request_id !== requestId) return uploadCoolingDown(cooldown.next_upload_at);
       const stored = await env.DB.prepare('SELECT created_at FROM builds WHERE id = ?').bind(id).first<{ created_at: string }>();
-      return json({ id, createdAt: stored?.created_at ?? createdAt, author }, 201);
+      return json({ id, createdAt: stored?.created_at ?? createdAt, author, cooldownMs: Math.max(0, Math.min(COMMUNITY_UPLOAD_COOLDOWN_MS, cooldown.next_upload_at - Date.now())) }, 201);
     } catch (error) { return json({ error: error instanceof AuthError ? error.message : '社区服务暂时不可用，请稍后重试。' }, error instanceof AuthError ? error.status : 503); }
   },
 };

@@ -8,7 +8,7 @@ const { execFileSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const { soulCatalog } = require('../dist-electron/shared/soul-catalog-data.js');
 const { evaluatePlan, planScore } = require('../dist-electron/shared/soul-optimizer.js');
-const { createCommunityBuild, normalizeCommunityBuild, communityBuildTitle, compareCommunityBuild, normalizeCommunityEndpoint } = require('../dist-electron/shared/soul-community.js');
+const { createCommunityBuild, normalizeCommunityBuild, communityBuildTitle, compareCommunityBuild, normalizeCommunityEndpoint, communityAccountAvatarUrl } = require('../dist-electron/shared/soul-community.js');
 const root = path.resolve(__dirname, '../..');
 let worker;
 const workerOutput = fs.mkdtempSync(path.join(os.tmpdir(), 'onmyoji-community-test-'));
@@ -93,8 +93,8 @@ function workerHarness() {
   const db = new DatabaseSync(':memory:');
   for (const migration of fs.readdirSync(path.join(root, 'cloudflare/soul-community/migrations')).sort()) db.exec(fs.readFileSync(path.join(root, 'cloudflare/soul-community/migrations', migration), 'utf8'));
   let permitted = true;
-  const env = { DB: { async batch(statements) { db.exec('BEGIN'); try { const results = []; for (const statement of statements) results.push(await statement.run()); db.exec('COMMIT'); return results; } catch (error) { db.exec('ROLLBACK'); throw error; } }, prepare(sql) { let bindings = []; return { bind(...values) { bindings = values; return this; },
-    async all() { return { results: db.prepare(sql).all(...bindings) }; }, async first() { return db.prepare(sql).get(...bindings) ?? null; }, async run() { return db.prepare(sql).run(...bindings); } }; } },
+  const env = { DB: { async batch(statements) { db.exec('BEGIN'); try { const results = statements.map(statement => statement.execute()); db.exec('COMMIT'); return results; } catch (error) { db.exec('ROLLBACK'); throw error; } }, prepare(sql) { let bindings = []; const execute = () => { const statement = db.prepare(sql); return statement.columns().length ? { results: statement.all(...bindings) } : { results: [], meta: statement.run(...bindings) }; }; return { bind(...values) { bindings = values; return this; }, execute,
+    async all() { return { results: db.prepare(sql).all(...bindings) }; }, async first() { return db.prepare(sql).get(...bindings) ?? null; }, async run() { return execute(); } }; } },
     READ_LIMITER: { async limit() { return { success: permitted }; } }, WRITE_LIMITER: { async limit() { return { success: permitted }; } } };
   if (!worker) {
     execFileSync(process.execPath, [path.join(root, 'desktop/node_modules/typescript/bin/tsc'), '-p', path.join(root, 'cloudflare/soul-community/tsconfig.json'), '--noEmit', 'false', '--module', 'Node16', '--moduleResolution', 'Node16', '--rootDir', root, '--outDir', workerOutput]);
@@ -102,8 +102,53 @@ function workerHarness() {
   }
   const call = async (method, pathname = '/v1/builds', body, token = 'b'.repeat(64), headers = {}) => worker.fetch(new Request(`https://community.example${pathname}`, { method,
     headers: { 'Content-Type': 'application/json', 'X-Delete-Token': token, Authorization: `Bearer ${token}`, ...headers }, ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }) }), env);
-  return { db, env, call, throttle() { permitted = false; } };
+  return { db, env, call, expireUploads() { db.prepare('UPDATE community_upload_cooldowns SET next_upload_at = 0').run(); }, throttle() { permitted = false; } };
 }
+
+test('upload cooldown is atomic per GitHub account across sessions and IPs, including the exact 30-second boundary', async () => {
+  const h = workerHarness(), f = fixture(), originalNow = Date.now;
+  let now = originalNow(); Date.now = () => now;
+  const hash = async value => Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))).toString('hex');
+  const sessions = ['a', 'b', 'c'].map(letter => `cs_${letter.repeat(64)}`);
+  try {
+    h.env.GITHUB_CLIENT_ID = 'public-test-client';
+    for (const [id, owner, author] of [['123', '1'.repeat(64), '甲'], ['456', '2'.repeat(64), '乙']]) {
+      h.db.prepare('INSERT INTO community_authors VALUES (?, ?, ?)').run(owner, author, author);
+      h.db.prepare('INSERT INTO community_accounts VALUES (?, ?, ?, ?)').run(id, `user${id}`, owner, new Date(now).toISOString());
+    }
+    for (const [i, session] of sessions.entries()) h.db.prepare('INSERT INTO community_sessions VALUES (?, ?, ?)').run(await hash(session), i < 2 ? '123' : '456', now + 100000);
+    const concurrent = await Promise.all(sessions.slice(0, 2).map((session, i) => h.call('POST', '/v1/builds', { ...f.build, author: '甲', target: i ? {} : f.target }, session, { 'CF-Connecting-IP': `192.0.2.${i + 1}` })));
+    assert.deepEqual(concurrent.map(r => r.status).sort(), [201, 429]);
+    assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM builds').get().n, 1);
+    const rejected = concurrent.find(r => r.status === 429), body = await rejected.json();
+    assert.equal(body.retryAfterMs, 30000); assert.equal(rejected.headers.get('Retry-After'), '30');
+    assert.equal((await h.call('POST', '/v1/builds', { ...f.build, author: '乙' }, sessions[2], { 'CF-Connecting-IP': '192.0.2.1' })).status, 201);
+    now += 29999;
+    const early = await h.call('POST', '/v1/builds', { ...f.build, author: '不应改名' }, sessions[1]);
+    assert.equal(early.status, 429); assert.equal((await early.json()).retryAfterMs, 1);
+    assert.equal(h.db.prepare("SELECT name FROM community_authors WHERE owner_hash = ?").get('1'.repeat(64)).name, '甲');
+    now++;
+    const accepted = await h.call('POST', '/v1/builds', { ...f.build, author: '甲' }, sessions[1]);
+    assert.equal(accepted.status, 201); assert.equal((await accepted.json()).cooldownMs, 30000);
+    assert.equal((await h.call('POST', '/v1/builds', { ...f.build, author: '甲' }, sessions[0])).status, 429);
+    await h.call('POST', '/v1/auth/logout', undefined, sessions[0]);
+    assert.equal((await h.call('POST', '/v1/builds', { ...f.build, author: '甲' }, sessions[1])).status, 429);
+  } finally { Date.now = originalNow; h.db.close(); }
+});
+
+test('invalid uploads and database failures do not consume the account cooldown', async () => {
+  const h = workerHarness(), f = fixture();
+  try {
+    assert.equal((await h.call('POST', '/v1/builds', { ...f.build, souls: [] })).status, 400);
+    assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM community_upload_cooldowns').get().n, 0);
+    h.db.exec("CREATE TRIGGER reject_test_upload BEFORE INSERT ON builds BEGIN SELECT RAISE(ABORT, 'test write failure'); END");
+    assert.equal((await h.call('POST', '/v1/builds', f.build)).status, 503);
+    assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM community_upload_cooldowns').get().n, 0);
+    assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM community_authors').get().n, 0);
+    h.db.exec('DROP TRIGGER reject_test_upload');
+    assert.equal((await h.call('POST', '/v1/builds', f.build)).status, 201);
+  } finally { h.db.close(); }
+});
 test('GitHub identity login binds legacy uploads, works across devices and revokes guest/session access', async () => {
   const h = workerHarness(), f = fixture(), originalFetch = global.fetch;
   let githubId = 123456, githubLogin = 'GithubTester', mode = 'authorized', requests = [];
@@ -134,6 +179,7 @@ test('GitHub identity login binds legacy uploads, works across devices and revok
     assert.equal((await h.call('DELETE', `/v1/builds/${published.id}`)).status, 401);
     const deviceTwo = await signIn('c'.repeat(64));
     const owned = await (await h.call('GET', '/v1/my-builds', undefined, deviceTwo.sessionToken)).json(); assert.equal(owned.uploads[0].id, published.id);
+    h.expireUploads();
     assert.equal((await h.call('POST', '/v1/builds', { ...f.build, author: '账号署名' }, deviceTwo.sessionToken)).status, 201);
     const renamed = await (await h.call('GET', '/v1/account', undefined, login.sessionToken)).json(); assert.equal(renamed.user.author, '账号署名');
     const rename = await h.call('POST', '/v1/account', { author: '　新署名Ａ　' }, login.sessionToken);
@@ -199,7 +245,7 @@ test('Worker + actual SQLite migration: upload, filter, deduplicate, paginate an
   const h = workerHarness(), f = fixture();
   try {
     const first = await h.call('POST', '/v1/builds', f.build); assert.equal(first.status, 201); const published = await first.json();
-    const again = await h.call('POST', '/v1/builds', { ...f.build, title: '更新名称' }); assert.equal((await again.json()).id, published.id);
+    h.expireUploads(); const again = await h.call('POST', '/v1/builds', { ...f.build, title: '更新名称' }); assert.equal((await again.json()).id, published.id);
     assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM builds').get().n, 1);
     const listPath = `/v1/builds?heroId=${f.hero.id}&objective=damage`;
     const listed = await (await h.call('GET', listPath)).json(); assert.equal(listed.entries[0].title, communityBuildTitle(f.hero, f.souls, soulCatalog.suits)); assert.equal(listed.cursor, null);
@@ -223,7 +269,7 @@ test('Worker reserves unique signatures by owner, normalizes names and keeps all
     const response = await first.json(); assert.equal(response.author, 'Alice');
     const clash = await h.call('POST', '/v1/builds', { ...f.build, author: ' ＡＬＩＣＥ ' }, 'c'.repeat(64));
     assert.equal(clash.status, 409); assert.match((await clash.json()).error, /已被其他用户使用/);
-    const renamed = await h.call('POST', '/v1/builds', { ...f.build, author: '新的署名', target: {} }); assert.equal(renamed.status, 201);
+    h.expireUploads(); const renamed = await h.call('POST', '/v1/builds', { ...f.build, author: '新的署名', target: {} }); assert.equal(renamed.status, 201);
     const list = await (await h.call('GET', `/v1/builds?heroId=${f.hero.id}&objective=damage`)).json();
     assert.equal(list.entries.length, 2); assert.ok(list.entries.every(e => e.author === '新的署名'));
     const races = await Promise.all(['c', 'd'].map(token => h.call('POST', '/v1/builds', { ...f.build, author: '同时申请' }, token.repeat(64))));
@@ -236,7 +282,7 @@ test('Worker accepts scores below/above reference target and uploads without any
   const h = workerHarness(), { build } = fixture();
   try {
     for (const target of [{ min: 9999999 }, { max: 0 }, undefined]) {
-      const response = await h.call('POST', '/v1/builds', { ...build, target, ranges: { speed: { min: 999 } } });
+      h.expireUploads(); const response = await h.call('POST', '/v1/builds', { ...build, target, ranges: { speed: { min: 999 } } });
       assert.equal(response.status, 201);
     }
     assert.equal(h.db.prepare('SELECT COUNT(*) AS n FROM builds').get().n, 3);
@@ -265,6 +311,11 @@ test('desktop network bridge validates input and translates failed service respo
   response = Response.json({ entries: [{}], cursor: null });
   const stale = await exports.listCommunityBuilds('https://example.com', { heroId: hero.id, objective: 'damage' }, { refresh: true });
   assert.equal(stale.cache.stale, true); assert.equal(stale.entries.length, 1);
+  response = Response.json({ error: '请稍候', retryAfterMs: 12000 }, { status: 429 });
+  const cooling = await exports.uploadCommunityBuild('https://example.com', build, 'b'.repeat(64));
+  assert.equal(cooling.retryAfterMs, 12000); assert.equal(cooling.error, '请稍候');
+  response = Response.json({ error: '无效冷却', retryAfterMs: 600000 }, { status: 429 });
+  await assert.rejects(exports.uploadCommunityBuild('https://example.com', build, 'b'.repeat(64)), /无效冷却/);
 });
 test('network bridge persists cache across instances and invalidates it only after successful mutations', async () => {
   const filename = path.join(root, 'desktop/dist-electron/main/soulCommunityService.js'), f = fixture();
@@ -365,7 +416,7 @@ function viewHarness(list, options = {}) {
   if (!values.has('onmyoji-studio.souls.community')) values.set('onmyoji-studio.souls.community', JSON.stringify({ endpoint: options.endpoint ?? 'https://community.example', author: '', deleteToken: '' }));
   function element(tag = 'div') {
     const localElements = new Map();
-    const node = { tag, children: [], textContent: '', value: '', className: '', attrs: {}, dataset: {}, disabled: false, hidden: false, events: {},
+    const node = { tag, children: [], textContent: '', value: '', className: '', attrs: {}, dataset: {}, disabled: false, hidden: false, events: {}, style: { setProperty(name, value) { this[name] = value; } },
       append(...children) { for (const child of children) child.parent = this; this.children.push(...children); }, replaceChildren(...children) { this.children = children; this.textContent = ''; },
       prepend(...children) { for (const child of children) child.parent = this; this.children.unshift(...children); },
       isConnected: true, open: false, focus() { this.focused = true; },
@@ -373,6 +424,7 @@ function viewHarness(list, options = {}) {
       close() { this.open = false; this.events.close?.(); },
       remove() { this.isConnected = false; if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); },
       setAttribute(name, value) { this.attrs[name] = value; }, addEventListener(event, fn) { this.events[event] = fn; },
+      removeAttribute(name) { delete this.attrs[name]; delete this[name]; },
       removeEventListener(event, fn) { if (this.events[event] === fn) delete this.events[event]; },
       querySelector(selector) { const name = selector.match(/data-community="(.*?)"/)?.[1]; return localElements.get(name) ?? this.children.find(child => name && child.dataset.community === name) ?? this.children.map(child => child.querySelector(selector)).find(Boolean) ?? null; },
       querySelectorAll(selector) { return this.children.flatMap(child => [...(child.tag === selector ? [child] : []), ...child.querySelectorAll(selector)]); },
@@ -392,7 +444,7 @@ function viewHarness(list, options = {}) {
   const api = { readLayout: key => values.get(key) ?? null, writeLayout: (key, value) => values.set(key, value), listCommunityBuilds: list,
     async uploadCommunityBuild(endpoint, build, token) { uploads.push({ endpoint, build, token }); return { id: 'd'.repeat(64), createdAt: new Date().toISOString(), author: build.author }; }, async deleteCommunityBuild() {} };
   Object.assign(api, options.api ?? {});
-  const module = require('../dist-test-renderer/renderer/soul-community-view.js');
+  const module = require('../dist-test-renderer/renderer/features/souls/community/view.js');
   let visibility; const opened = [];
   const originalObserver = global.IntersectionObserver;
   global.IntersectionObserver = class { constructor(callback) { visibility = this; this.callback = callback; } observe() {} disconnect() { this.disconnected = true; } fire(visible) { this.callback([{ isIntersecting: visible }]); } };
@@ -402,6 +454,66 @@ function viewHarness(list, options = {}) {
   return { view, host, uploadHost, elements, uploads, values, element, visibility, opened, api, accountButton };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('upload countdown persists per account across windows and reopening, blocks programmatic clicks and expires automatically', async () => {
+  const originalNow = Date.now, originalInterval = global.setInterval, originalClearInterval = global.clearInterval;
+  let now = originalNow(), nextTimer = 0; const timers = new Map(), views = [], values = new Map();
+  Date.now = () => now; global.setInterval = callback => { timers.set(++nextTimer, callback); return nextTimer; }; global.clearInterval = timer => timers.delete(timer);
+  const f = fixture(), context = { hero: f.hero, plan: f.plan, inventory: f.souls, options: f.options };
+  const make = async (id, extra = {}) => {
+    const h = viewHarness(async () => ({ entries: [], cursor: null }), { values, api: {
+      async getCommunityAccount() { return { user: { githubId: id, login: `user${id}`, author: `署名${id}` }, persistent: true }; }, ...extra,
+    } }); views.push(h); h.view.update(context); await tick(); return h;
+  };
+  const pulse = () => { for (const callback of timers.values()) callback(); };
+  try {
+    const first = await make('123'), second = await make('123');
+    await first.elements.get('upload').fire(); assert.equal(first.uploads.length, 1);
+    pulse(); assert.equal(second.elements.get('upload').disabled, true); assert.match(second.elements.get('upload').textContent, /30 秒/);
+    await second.elements.get('upload').fire(); assert.equal(second.uploads.length, 0);
+    const reopened = await make('123'); assert.equal(reopened.elements.get('upload').disabled, true);
+    const other = await make('456'); assert.equal(other.elements.get('upload').disabled, false);
+    await other.elements.get('upload').fire(); assert.equal(other.uploads.length, 1);
+    now += 29000; pulse(); assert.match(reopened.elements.get('upload').textContent, /1 秒/);
+    now += 1000; pulse(); assert.equal(reopened.elements.get('upload').disabled, false);
+    await reopened.elements.get('upload').fire(); assert.equal(reopened.uploads.length, 1);
+    reopened.view.update(); now += 30000; pulse(); assert.equal(reopened.elements.get('upload').disabled, true, 'cooldown expiry must not enable a missing plan');
+    const failed = await make('789', { async uploadCommunityBuild() { throw Error('网络失败'); } });
+    await failed.elements.get('upload').fire(); await tick(); assert.equal(failed.elements.get('upload').disabled, false);
+    const remote = await make('987', { async uploadCommunityBuild() { return { retryAfterMs: 9000, error: '其他设备刚刚上传，请等待' }; } });
+    await remote.elements.get('upload').fire(); assert.match(remote.elements.get('upload').textContent, /9 秒/);
+    assert.match(remote.elements.get('upload-status').textContent, /其他设备/);
+    now += 9000; pulse(); assert.equal(remote.elements.get('upload').disabled, false);
+  } finally {
+    for (const h of views) h.view.dispose(); assert.equal(timers.size, 0);
+    Date.now = originalNow; global.setInterval = originalInterval; global.clearInterval = originalClearInterval;
+  }
+});
+
+test('six-soul comparison keeps main stats and adds separate estimated scores for both users', async () => {
+  const f = fixture(), h = viewHarness(async () => ({ entries: [f.entry], cursor: null }));
+  f.options.ranges = { speed: { min: 128 } };
+  h.view.update({ hero: f.hero, plan: f.plan, inventory: f.souls, options: f.options }); await tick();
+  const all = node => [node, ...(node.children ?? []).flatMap(all)];
+  const nodes = all(h.elements.get('comparison'));
+  const rows = nodes.filter(n => n.className === 'soul-community-gear');
+  assert.equal(rows.length, 12);
+  const { estimateSoulEnhancementScore } = require('../dist-test-renderer/shared/soul-enhancement-score');
+  const { evaluatePlan } = require('../dist-test-renderer/shared/soul-optimizer');
+  for (const [i, row] of rows.entries()) {
+    const remote = i % 2 === 1, gear = remote ? f.entry.souls : f.souls;
+    const score = estimateSoulEnhancementScore(gear[Math.floor(i / 2)], { objective: f.options.objective, ranges: f.options.ranges, gear, panel: evaluatePlan(gear, f.options.base, soulCatalog.suits) });
+    const badge = row.children.at(-1);
+    assert.equal(badge.className, 'soul-community-enhancement-score');
+    assert.equal(badge.textContent, `${score.score.toFixed(2)} / 10`);
+    assert.match(badge.title, /五次强化/); assert.match(badge.children[0].textContent, /估算/);
+    assert.ok(row.children[1].children.some(n => n.tag === 'span' && !n.textContent.includes('/ 10')), 'main attribute stays visible');
+  }
+  assert.equal(rows[0].children[1].children.at(-1).textContent, 'untrusted label 486.00');
+  assert.equal(rows[1].children[1].children.at(-1).textContent, '攻击 486.00');
+  assert.equal(nodes.filter(n => n.textContent.includes('配装条件：') && n.textContent.includes('不计强化分')).length, 12);
+  h.view.dispose();
+});
 test('titlebar account dialog shares login controls and updates without a calculated soul plan', async () => {
   const timers = [], originalTimeout = global.setTimeout, originalClear = global.clearTimeout;
   global.setTimeout = callback => { timers.push(callback); return timers.length; }; global.clearTimeout = () => {};
@@ -425,14 +537,29 @@ test('titlebar account dialog shares login controls and updates without a calcul
     dialog.close(); await h.accountButton.fire(); assert.equal(h.elements.get('login-code').value, 'ABCD-EFGH');
     timers.shift()(); await tick(); assert.equal(h.accountButton.textContent, user.author); assert.match(h.accountButton.title, /Tester/);
     assert.equal(h.elements.get('author').value, user.author);
+    const avatar = h.elements.get('account-avatar'), image = avatar.children.find(node => node.tag === 'img');
+    assert.equal(image.src, 'https://avatars.githubusercontent.com/u/123456?s=96&v=4');
+    assert.equal(image.referrerPolicy, 'no-referrer'); assert.equal(image.hidden, true);
+    await image.fire('load'); assert.equal(image.hidden, false);
+    await image.fire('error'); assert.equal(image.hidden, true); assert.equal(avatar.children[0].textContent, [...user.author][0]);
     h.elements.get('rename-author').value = '新署名'; await h.elements.get('rename-save').fire();
+    assert.equal(avatar.children.find(node => node.tag === 'img'), image); assert.equal(image.hidden, true);
     assert.equal(h.accountButton.textContent, '新署名'); assert.equal(h.elements.get('author').value, '新署名');
     assert.equal(JSON.parse(h.values.get('onmyoji-studio.souls.community')).author, '新署名');
     h.elements.get('rename-author').value = '重名'; await h.elements.get('rename-save').fire();
     assert.match(h.elements.get('account-status').textContent, /其他用户/); assert.equal(h.accountButton.textContent, '新署名');
     await h.elements.get('logout').fire(); assert.equal(logouts, 1); assert.equal(h.accountButton.textContent, '用户登录');
+    assert.equal(image.hidden, true); assert.equal(image.src, undefined);
+    await image.fire('load'); assert.equal(image.hidden, true);
   } finally { h.view.dispose(); global.setTimeout = originalTimeout; global.clearTimeout = originalClear; }
   assert.equal(dialog.isConnected, false); assert.equal(h.accountButton.events.click, undefined);
+});
+test('account avatar uses only the durable numeric GitHub ID on the trusted image host', () => {
+  assert.equal(communityAccountAvatarUrl(null), null);
+  assert.equal(communityAccountAvatarUrl({ githubId: '123456', login: 'Renamed', author: '新署名' }), 'https://avatars.githubusercontent.com/u/123456?s=96&v=4');
+  for (const githubId of ['https://other.example/a', '../a', '123/../../a', '0', '123?redirect=other', '12345678901234567']) {
+    assert.equal(communityAccountAvatarUrl({ githubId, login: 'Tester', author: '测试' }), null);
+  }
 });
 test('GitHub upload UI requires login, shows authorization code, synchronizes owned builds and cancels late polls', async () => {
   const f = fixture(), timers = [], originalTimeout = global.setTimeout, originalClear = global.clearTimeout;
@@ -503,15 +630,17 @@ test('community UI allows any score and missing target while requiring complete 
   h.view.update(context); await tick(); assert.equal(h.elements.get('upload').disabled, false); assert.equal(h.elements.get('results').children.length, 1);
   h.view.update({ ...context, target: { min: f.plan.score + 1 } }); assert.equal(h.elements.get('upload').disabled, false);
   await h.elements.get('upload').fire(); assert.equal(h.uploads.length, 1);
+  for (const key of h.values.keys()) if (key.includes('.upload-cooldown.')) h.values.delete(key);
   h.view.update({ ...context, target: undefined }); assert.equal(h.elements.get('upload').disabled, false);
   await h.elements.get('upload').fire(); assert.equal(h.uploads.length, 2);
   assert.deepEqual(h.uploads[1].build.target, {});
+  for (const key of h.values.keys()) if (key.includes('.upload-cooldown.')) h.values.delete(key);
   h.view.update({ ...context, target: { max: 0 } }); assert.equal(h.elements.get('upload').disabled, false);
   h.view.update({ ...context, inventory: f.souls.slice(1) }); assert.equal(h.elements.get('upload').disabled, true);
   assert.ok(h.elements.get('upload-hint').textContent.includes('社区方案格式无效'));
   assert.equal(h.uploads[0].build.souls.length, 6); assert.equal(h.uploads[0].token.length, 64);
   assert.equal(JSON.stringify(f), before);
-  h.view.update(); assert.equal(h.elements.get('upload').disabled, true); assert.equal(h.elements.get('results').children.length, 0);
+  h.view.update(); assert.equal(h.elements.get('upload').disabled, true); assert.equal(h.elements.get('results').children.length, 1);
   h.view.dispose();
 });
 test('upload UI generates names and persists signature and ownership immediately across restart', async () => {
@@ -530,13 +659,42 @@ test('upload UI generates names and persists signature and ownership immediately
   assert.equal(JSON.parse(reopened.values.get('onmyoji-studio.souls.community')).deleteToken, saved.deleteToken);
   reopened.view.dispose();
 });
-test('late community responses cannot repopulate a cleared or different source context', async () => {
+test('clearing a calculated plan keeps public browsing; late pages from another hero are discarded', async () => {
   const f = fixture(), pending = [];
   const h = viewHarness(() => new Promise(resolve => pending.push(resolve))), context = { hero: f.hero, plan: f.plan, inventory: f.souls, options: f.options, target: f.target };
   h.view.update(context); h.view.update(); pending[0]({ entries: [f.entry], cursor: null }); await tick();
+  assert.equal(h.elements.get('results').children.length, 1); assert.equal(h.elements.get('match').disabled, true);
+  h.elements.get('browse-hero').value = '364'; await h.elements.get('browse-hero').fire('change');
+  pending[1]({ entries: [f.entry], cursor: null }); await tick(); assert.equal(h.elements.get('results').children.length, 0);
+  h.view.update(context); h.view.dispose(); pending[2]({ entries: [f.entry], cursor: null }); await tick();
   assert.equal(h.elements.get('results').children.length, 0);
-  h.view.update(context); h.view.dispose(); pending[1]({ entries: [f.entry], cursor: null }); await tick();
-  assert.equal(h.elements.get('results').children.length, 0);
+});
+test('community browsing loads, filters, pages, inspects and remembers hero choices without calculating or logging in', async () => {
+  const f = fixture(), queries = [], h = viewHarness(async (_endpoint, query) => {
+    queries.push(query);
+    return { entries: [{ ...f.entry, heroId: query.heroId, objective: query.objective }], cursor: query.cursor ? null : `${f.entry.createdAt}|${f.entry.id}`, filterVersion: 1 };
+  }, { panels: true });
+  try {
+    await tick(); assert.equal(queries.length, 0);
+    h.visibility.fire(true); await tick();
+    assert.equal(queries.length, 1); assert.equal(h.elements.get('results').children.length, 1);
+    assert.equal(h.elements.get('refresh').disabled, false); assert.equal(h.elements.get('apply').disabled, false);
+    assert.equal(h.elements.get('upload').disabled, true); assert.equal(h.elements.get('match').disabled, true);
+    assert.equal(h.elements.get('results').children[0].children[2].children.length, 1, 'browsing shows a score without an invented comparison delta');
+    const detail = h.elements.get('comparison');
+    assert.ok(detail.children.some(child => child.textContent === '六件御魂详情'));
+    assert.equal(detail.children.find(child => child.className === 'soul-community-slots').children.length, 6);
+    await h.elements.get('more').fire(); await tick(); assert.equal(queries.length, 2); assert.ok(queries[1].cursor);
+    h.elements.get('filter-author').value = f.entry.author; await h.elements.get('apply').fire('click', { preventDefault() {} }); await tick();
+    assert.equal(queries.at(-1).author, f.entry.author);
+    h.elements.get('browse-hero').value = '364'; await h.elements.get('browse-hero').fire('change'); await tick();
+    assert.equal(queries.at(-1).heroId, 364); assert.equal(h.elements.get('filter-author').value, '');
+    h.elements.get('browse-objective').value = 'critDamage'; await h.elements.get('browse-objective').fire('change'); await tick();
+    assert.equal(queries.at(-1).objective, 'critDamage'); assert.match(h.elements.get('score-label').textContent, /%/);
+    h.elements.get('score-min').value = '999'; await h.elements.get('score-min').fire('input'); assert.equal(h.elements.get('results').children.length, 0);
+  } finally { h.view.dispose(); }
+  const restored = viewHarness(async () => ({ entries: [], cursor: null }), { panels: true, values: h.values });
+  assert.equal(restored.elements.get('browse-hero').value, '364'); assert.equal(restored.elements.get('browse-objective').value, 'critDamage'); restored.view.dispose();
 });
 test('dockable community panels open independently, load on visibility and keep upload/list statuses separate', async () => {
   const f = fixture(); let requests = 0;
@@ -553,6 +711,7 @@ test('dockable community panels open independently, load on visibility and keep 
   assert.match(h.elements.get('upload-status').textContent, /已公开上传/);
   h.view.show(trigger); await tick(); assert.equal(requests, 1);
   h.view.show(trigger, true); assert.equal(requests, 1);
+  for (const key of h.values.keys()) if (key.includes('.upload-cooldown.')) h.values.delete(key);
   await h.elements.get('upload').fire(); assert.equal(h.uploads.length, 2); assert.equal(requests, 2);
   assert.match(h.elements.get('upload-status').textContent, /已公开上传/); assert.match(h.elements.get('status').textContent, /已载入/);
   h.visibility.fire(false); h.view.update({ hero: f.hero, plan: f.plan, inventory: f.souls, options: f.options }); assert.equal(requests, 2);
@@ -626,7 +785,7 @@ test('community local conditions, own uploads and favorites update without issui
   const context = { hero: f.hero, plan: f.plan, inventory: f.souls, options: f.options, target: f.target };
   h.view.update(context); await tick();
   h.elements.get('match').value = 'target'; await h.elements.get('match').fire('change'); assert.equal(h.elements.get('results').children.length, 1);
-  h.view.update({ ...context, target: { min: f.plan.score + 1 } }); assert.equal(h.elements.get('results').children.length, 0);
+  h.view.update({ ...context, target: { min: f.plan.score + 1 } }); assert.equal(h.elements.get('results').children.length, 1, 'a viewer goal does not replace the uploaded reference target');
   h.elements.get('match').value = 'all'; await h.elements.get('match').fire('change');
   const favorite = h.elements.get('comparison').children[0].children.at(-1); assert.equal(favorite.textContent, '收藏方案'); await favorite.fire();
   h.elements.get('scope').value = 'favorites'; await h.elements.get('scope').fire('change'); assert.equal(h.elements.get('results').children.length, 1);
@@ -662,6 +821,52 @@ test('percent objective ranges use displayed percent values and deltas use perce
   h.elements.get('delta-min').value = '-.1'; await h.elements.get('delta-min').fire('input'); assert.equal(h.elements.get('results').children.length, 1); h.view.dispose();
 });
 
+test('community dual sliders filter live, preserve unlimited bounds and restore exact typed ranges', async () => {
+  const f = fixture(), queries = [], h = viewHarness(async (_endpoint, query) => { queries.push(query); return { entries: [f.entry], cursor: null }; });
+  const context = { hero: f.hero, plan: f.plan, inventory: f.souls, options: f.options };
+  const el = name => h.elements.get(name), slide = async (name, value) => { el(name).value = String(value); await el(name).fire('input'); };
+  h.view.update(context); await tick(); const requests = queries.length;
+  assert.equal(el('score-min').value, ''); assert.equal(el('score-max').value, ''); assert.equal(el('score-clear').disabled, true);
+  assert.equal(el('score-max-slider').attrs['aria-valuetext'], '不限');
+  await slide('score-min-slider', Math.ceil(f.plan.score + 1));
+  assert.equal(el('results').children.length, 0); assert.equal(el('score-max').value, ''); assert.equal(queries.length, requests);
+  await el('score-clear').fire(); assert.equal(el('results').children.length, 1);
+  await slide('score-max-slider', 20000); await slide('score-min-slider', 30000);
+  assert.equal(el('score-min').value, '20000', 'dragging the lower thumb stops at the upper bound');
+  await slide('score-max-slider', 10000); assert.equal(el('score-max').value, '20000');
+  await el('score-clear').fire();
+  await slide('delta-min-slider', -100); assert.equal(el('delta-min').value, '-100'); assert.equal(el('results').children.length, 1);
+  await slide('delta-max-slider', -1); assert.equal(el('results').children.length, 0);
+  await el('delta-clear').fire(); assert.equal(el('delta-min-slider').min, '-5000'); assert.equal(el('results').children.length, 1);
+  await slide('panel-speed-min', 1234.567); assert.equal(el('panel-speed-min-slider').value, '1234.567'); assert.ok(Number(el('panel-speed-min-slider').max) >= 1234.567);
+  await slide('panel-speed-max', 1200); assert.match(el('filter-hint').textContent, /下限/);
+  await el('panel-speed-clear').fire(); assert.equal(el('filter-hint').textContent, '');
+  await slide('panel-speed-min', 100.125);
+  h.view.dispose();
+  const restored = viewHarness(async () => ({ entries: [f.entry], cursor: null }), { values: h.values });
+  restored.view.update(context); await tick();
+  assert.equal(restored.elements.get('panel-speed-min').value, '100.125'); assert.equal(restored.elements.get('panel-speed-min-slider').value, '100.125');
+  await restored.elements.get('reset').fire();
+  assert.equal(restored.elements.get('panel-speed-min').value, ''); assert.equal(restored.elements.get('panel-speed-min-slider').value, '0');
+  restored.view.update(undefined); assert.equal(restored.elements.get('delta-min-slider').disabled, true); assert.equal(restored.elements.get('delta-max-slider').disabled, true);
+  restored.view.dispose();
+});
+
+test('community percentage sliders use displayed units and refresh when switching objective', async () => {
+  const f = fixture(), entry = { ...f.entry, objective: 'crit' }, h = viewHarness(async () => ({ entries: [entry], cursor: null }));
+  const options = { ...f.options, objective: 'crit' }, plan = { ...f.plan, score: planScore(f.plan.panel, 'crit') };
+  h.view.update({ hero: f.hero, plan, inventory: f.souls, options }); await tick();
+  const el = name => h.elements.get(name), slide = async (name, value) => { el(name).value = String(value); await el(name).fire('input'); };
+  assert.equal(el('score-max-slider').max, '250'); assert.equal(el('score-max-slider').step, '.1'); assert.equal(el('delta-scale-min').textContent, '-25百分点');
+  await slide('score-min-slider', 90); await slide('score-max-slider', 110);
+  assert.equal(el('results').children.length, 1); assert.equal(el('score-min-slider').attrs['aria-valuetext'], '90%');
+  await slide('delta-min-slider', .1); assert.equal(el('results').children.length, 0); await el('delta-clear').fire();
+  await slide('panel-crit-min-slider', 110); assert.equal(el('results').children.length, 0); await el('panel-crit-clear').fire();
+  el('browse-objective').value = 'hp'; await el('browse-objective').fire('change'); await tick();
+  assert.equal(el('score-max-slider').max, '100000'); assert.equal(el('score-min').value, ''); assert.equal(el('delta-min-slider').disabled, true);
+  h.view.dispose();
+});
+
 test('changing list filters does not cancel the status and ownership of an in-flight upload', async () => {
   const f = fixture(), h = viewHarness(async () => ({ entries: [], cursor: null, filterVersion: 1 }));
   let finish;
@@ -670,7 +875,7 @@ test('changing list filters does not cancel the status and ownership of an in-fl
   const uploading = h.elements.get('upload').fire(); assert.equal(h.elements.get('upload').disabled, true);
   h.elements.get('search').value = '新查询'; await h.elements.get('apply').fire('click', { preventDefault() {} }); await tick();
   finish({ id: 'd'.repeat(64), createdAt: f.entry.createdAt, author: '分享者' }); await uploading;
-  assert.match(h.elements.get('upload-status').textContent, /已公开上传/); assert.equal(h.elements.get('owned').children.length, 1); assert.equal(h.elements.get('upload').disabled, false); h.view.dispose();
+  assert.match(h.elements.get('upload-status').textContent, /已公开上传/); assert.equal(h.elements.get('owned').children.length, 1); assert.equal(h.elements.get('upload').disabled, true); assert.match(h.elements.get('upload').textContent, /冷却/); h.view.dispose();
 });
 
 test('network bridge forwards validated filters and preserves server filter capability', async () => {
@@ -682,4 +887,34 @@ test('network bridge forwards validated filters and preserves server filter capa
   for (const [key, value] of Object.entries(query)) assert.equal(requested.searchParams.get(key), String(value));
   await assert.rejects(exports.listCommunityBuilds('https://community.example', { ...query, suit4: 1.5 }));
   await assert.rejects(exports.listCommunityBuilds('https://community.example', { ...query, cursor: 'bad' })); assert.equal(calls, 1);
+});
+
+test('community quick filters and current-plan preset avoid manually entering the same configuration', async () => {
+  const f = fixture(), queries = [], h = viewHarness(async (_endpoint, query) => { queries.push(query); return { entries: [f.entry], cursor: null, filterVersion: 1 }; });
+  const options = { ...f.options, requirements: [{ suitId: 300083, count: 4 }, { suitId: 300092, count: 2 }], mainAttributes: { 2: ['attackAdditionRate'], 4: ['attackAdditionRate', 'maxHpAdditionRate'] }, ranges: { crit: { min: .9, max: 1.5 }, speed: { min: 100 } } };
+  const context = { hero: f.hero, plan: f.plan, inventory: f.souls, options }, before = JSON.stringify(context);
+  h.view.update(context); await tick();
+  await h.elements.get('only-better').fire(); assert.equal(h.elements.get('match').value, 'better'); assert.equal(h.elements.get('results').children.length, 0);
+  await h.elements.get('only-better').fire(); assert.equal(h.elements.get('match').value, 'all'); assert.equal(h.elements.get('results').children.length, 1);
+  await h.elements.get('scope-favorites').fire(); assert.equal(h.elements.get('scope').value, 'favorites'); assert.equal(h.elements.get('results').children.length, 0);
+  await h.elements.get('scope-all').fire(); assert.equal(h.elements.get('scope').value, 'all');
+  h.elements.get('browse-hero').value = '364'; await h.elements.get('browse-hero').fire('change'); await tick();
+  assert.equal(h.elements.get('only-better').disabled, true); assert.equal(h.elements.get('use-current').disabled, false);
+  await h.elements.get('use-current').fire(); await tick();
+  assert.equal(queries.at(-1).heroId, f.hero.id); assert.equal(queries.at(-1).suit4, 300083); assert.equal(queries.at(-1).suit2, 300092); assert.equal(queries.at(-1).main2, 'attackAdditionRate'); assert.equal(queries.at(-1).main4, undefined, 'multiple permitted mains are checked by compatible conditions');
+  assert.equal(h.elements.get('panel-crit-min').value, '90'); assert.equal(h.elements.get('panel-crit-max').value, '150'); assert.equal(h.elements.get('panel-speed-min').value, '100'); assert.equal(h.elements.get('match').value, 'compatible');
+  assert.equal(h.elements.get('hero-label').textContent, f.hero.name); assert.match(h.elements.get('advanced-summary').textContent, /项/); assert.equal(JSON.stringify(context), before);
+  h.elements.get('advanced').open = true; await h.elements.get('reset').fire(); await tick(); assert.equal(h.elements.get('advanced').open, false); assert.equal(h.elements.get('advanced-summary').textContent, '更多筛选'); h.view.dispose();
+});
+
+test('community text searches debounce typing, choices apply immediately and disposal cancels pending searches', async () => {
+  const f = fixture(), queries = [], h = viewHarness(async (_endpoint, query) => { queries.push(query); return { entries: [], cursor: null, filterVersion: 1 }; });
+  h.view.update(); await tick();
+  h.elements.get('search').value = '针'; await h.elements.get('search').fire('input');
+  h.elements.get('search').value = '针女'; await h.elements.get('search').fire('input'); assert.equal(queries.length, 1);
+  await new Promise(resolve => setTimeout(resolve, 340)); assert.equal(queries.length, 2); assert.equal(queries.at(-1).search, '针女');
+  h.elements.get('suit4').value = '300083'; await h.elements.get('suit4').fire('change'); await tick(); assert.equal(queries.at(-1).suit4, 300083); assert.equal(queries.length, 3);
+  h.elements.get('main6').value = 'critRateAdditionVal'; await h.elements.get('main6').fire('change'); await tick(); assert.equal(queries.at(-1).main6, 'critRateAdditionVal');
+  h.elements.get('search').value = '不会再发送'; await h.elements.get('search').fire('input'); h.view.dispose();
+  const requests = queries.length; await new Promise(resolve => setTimeout(resolve, 340)); assert.equal(queries.length, requests);
 });

@@ -3,8 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { SoulCommunityCache } from './soulCommunityCache';
 import { SoulCommunityAuthStore } from './soulCommunityAuthStore';
-import { COMMUNITY_MAX_BYTES, normalizeCommunityAccount, normalizeCommunityAuthor, normalizeCommunityBuild, normalizeCommunityEndpoint, normalizeCommunityEntry, normalizeCommunityQuery } from '../shared/soul-community';
-import type { CommunityPage, CommunityAccountState, CommunityLoginPrompt, CommunityLoginResult, CommunityOwnedPage } from '../shared/soul-community';
+import { COMMUNITY_MAX_BYTES, COMMUNITY_UPLOAD_COOLDOWN_MS, normalizeCommunityAccount, normalizeCommunityAuthor, normalizeCommunityBuild, normalizeCommunityEndpoint, normalizeCommunityEntry, normalizeCommunityQuery } from '../shared/soul-community';
+import type { CommunityPage, CommunityAccountState, CommunityLoginPrompt, CommunityLoginResult, CommunityOwnedPage, CommunityUploadResult } from '../shared/soul-community';
 
 let cache: SoulCommunityCache | undefined;
 const communityCache = (): SoulCommunityCache => cache ??= new SoulCommunityCache({
@@ -26,7 +26,7 @@ const authStore = (): SoulCommunityAuthStore => auth ??= new SoulCommunityAuthSt
     mkdirSync(directory, { recursive: true }); writeFileSync(`${filename}.tmp`, value, 'utf8'); renameSync(`${filename}.tmp`, filename);
   },
 });
-class CommunityRequestError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+class CommunityRequestError extends Error { constructor(message: string, readonly status: number, readonly retryAfterMs?: number) { super(message); } }
 interface PendingLogin extends CommunityLoginPrompt { flowToken: string }
 const pendingLogins = new Map<string, PendingLogin>();
 const loginAttempts = new Map<string, symbol>();
@@ -45,7 +45,8 @@ async function request(endpoint: unknown, path: string, init?: RequestInit): Pro
       const address = normalizeCommunityEndpoint(endpoint);
       if (authStore().get(address)?.token === authorization.slice(7)) authStore().remove(address);
     }
-    throw new CommunityRequestError(typeof value?.error === 'string' ? value.error.slice(0, 200) : `社区服务暂不可用（${response.status}）。`, response.status);
+    const retryAfterMs = response.status === 429 && Number.isInteger(value?.retryAfterMs) && value.retryAfterMs > 0 && value.retryAfterMs <= COMMUNITY_UPLOAD_COOLDOWN_MS ? value.retryAfterMs : undefined;
+    throw new CommunityRequestError(typeof value?.error === 'string' ? value.error.slice(0, 200) : `社区服务暂不可用（${response.status}）。`, response.status, retryAfterMs);
   }
   return value;
 }
@@ -60,14 +61,21 @@ export async function listCommunityBuilds(endpoint: unknown, value: unknown, opt
 const token = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw Error('上传管理凭据无效。'); return value;
 };
-export async function uploadCommunityBuild(endpoint: unknown, value: unknown, deleteToken: unknown): Promise<{ id: string; createdAt: string; author: string }> {
+export async function uploadCommunityBuild(endpoint: unknown, value: unknown, deleteToken: unknown): Promise<CommunityUploadResult> {
   const build = normalizeCommunityBuild(value), body = JSON.stringify(build);
   if (Buffer.byteLength(body) > COMMUNITY_MAX_BYTES) throw Error('社区方案过大。');
   const session = authStore().get(normalizeCommunityEndpoint(endpoint));
-  const result = await request(endpoint, '/v1/builds', { method: 'POST', body, headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.token}` } : { 'X-Delete-Token': token(deleteToken) }) } }) as { id: string; createdAt: string; author?: string };
+  let result: { id: string; createdAt: string; author?: string; cooldownMs?: number };
+  try {
+    result = await request(endpoint, '/v1/builds', { method: 'POST', body, headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.token}` } : { 'X-Delete-Token': token(deleteToken) }) } }) as typeof result;
+  } catch (error) {
+    if (error instanceof CommunityRequestError && error.retryAfterMs) return { error: error.message, retryAfterMs: error.retryAfterMs };
+    throw error;
+  }
   const entry = normalizeCommunityEntry({ ...build, ...result }); communityCache().invalidate(normalizeCommunityEndpoint(endpoint));
   if (session) authStore().set(normalizeCommunityEndpoint(endpoint), { ...session, user: { ...session.user, author: entry.author } });
-  return { id: entry.id, createdAt: entry.createdAt, author: entry.author };
+  return { id: entry.id, createdAt: entry.createdAt, author: entry.author,
+    cooldownMs: Number.isInteger(result.cooldownMs) && result.cooldownMs! >= 0 && result.cooldownMs! <= COMMUNITY_UPLOAD_COOLDOWN_MS ? result.cooldownMs : COMMUNITY_UPLOAD_COOLDOWN_MS };
 }
 export async function deleteCommunityBuild(endpoint: unknown, id: unknown, deleteToken: unknown): Promise<void> {
   if (typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw Error('社区方案标识无效。');

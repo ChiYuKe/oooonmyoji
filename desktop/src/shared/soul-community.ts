@@ -17,10 +17,16 @@ export interface CommunityEntry extends CommunityBuild { id: string; createdAt: 
 export interface CommunityPage { entries: CommunityEntry[]; cursor: string | null; filterVersion?: 1; cache?: { savedAt: number; stale: boolean } }
 export interface CommunityListOptions { refresh?: boolean }
 export interface CommunityAccount { githubId: string; login: string; author: string }
+export function communityAccountAvatarUrl(account: CommunityAccount | null): string | null {
+  return account && /^[1-9]\d{0,15}$/.test(account.githubId) ? `https://avatars.githubusercontent.com/u/${account.githubId}?s=96&v=4` : null;
+}
 export interface CommunityAccountState { user: CommunityAccount | null; persistent: boolean; offline?: boolean }
 export interface CommunityLoginPrompt { userCode: string; verificationUrl: string; expiresAt: number; interval: number }
 export type CommunityLoginResult = { status: 'pending'; interval: number } | { status: 'complete'; account: CommunityAccountState };
 export interface CommunityOwnedPage { uploads: { id: string; title: string }[]; cursor: string | null }
+export const COMMUNITY_UPLOAD_COOLDOWN_MS = 30_000;
+export type CommunityUploadResult = { id: string; createdAt: string; author: string; cooldownMs?: number }
+  | { error: string; retryAfterMs: number };
 export function normalizeCommunityAuthor(value: unknown): string {
   if (typeof value !== 'string' || value.length > 100 || /[\u0000-\u001f\u007f]/.test(value)) throw Error('署名需为 1 至 30 个字符，不可包含控制字符。');
   const author = value.normalize('NFKC').trim();
@@ -86,7 +92,7 @@ export interface CommunityApi {
   logoutCommunityAccount(endpoint: string): Promise<void>;
   listCommunityOwnedBuilds(endpoint: string, cursor?: string): Promise<CommunityOwnedPage>;
   listCommunityBuilds(endpoint: string, query: CommunityQuery, options?: CommunityListOptions): Promise<CommunityPage>;
-  uploadCommunityBuild(endpoint: string, build: CommunityBuild, deleteToken: string): Promise<{ id: string; createdAt: string; author: string }>;
+  uploadCommunityBuild(endpoint: string, build: CommunityBuild, deleteToken: string): Promise<CommunityUploadResult>;
   deleteCommunityBuild(endpoint: string, id: string, deleteToken: string): Promise<void>;
 }
 export interface CommunityComparison {

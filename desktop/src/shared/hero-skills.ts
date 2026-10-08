@@ -1,5 +1,7 @@
 export interface HeroSkill {
   id: number;
+  /** Optional level from an actual lineup record; absent means use the battle-wide fallback. */
+  rank?: number;
   name: string;
   icon: string;
   description: string;

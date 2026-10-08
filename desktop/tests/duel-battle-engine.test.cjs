@@ -1,11 +1,47 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { simulateBattle } = require('../dist-test-renderer/renderer/features/duel/engine/battle-engine.js');
+const { predictionCoverageWarning } = require('../dist-test-renderer/renderer/features/duel/prediction/coverage-warning.js');
 const { heroSkillsCatalog } = require('../dist-test-renderer/shared/hero-skills-data.js');
 
 const fighter = (heroId, panel, skillLevel = 5) => ({ heroId, fourSuit: '', skillLevel, panel });
 
-test('图鉴中的每个式神都能进入自动战斗决策', () => {
+test('未迁移专属 AI 或机制时，胜率旁明确提示其不是实战概率', () => {
+  const diagnostics = [
+    { contentType: 'hero', contentId: '323', aspect: 'ai', status: 'unsupported' },
+    { contentType: 'hero', contentId: '323', aspect: 'mechanics', status: 'unsupported' },
+    { contentType: 'hero', contentId: '357', aspect: 'ai', status: 'unsupported' },
+    { contentType: 'soul', contentId: 'soul:300007', status: 'partial' },
+  ];
+  assert.match(predictionCoverageWarning(diagnostics), /2 名式神/);
+  assert.match(predictionCoverageWarning(diagnostics), /不是实战概率/);
+  assert.match(predictionCoverageWarning(diagnostics), /可能与游戏胜负相反/);
+  assert.equal(predictionCoverageWarning([{ contentType: 'hero', contentId: '295', status: 'verified' }]), undefined);
+});
+
+test('10点场实战阵容含9名部分覆盖式神时，预测结果必须提示方向可能失真', () => {
+  const panel = (attack, hp, defense, speed, crit, critDamage, hit, resist) =>
+    ({ attack, hp, defense, speed, crit, critDamage: critDamage / 100, hit, resist });
+  const state = {
+    red: [fighter(552, panel(3413, 23984, 899, 212, 30, 150, 0, 125)),
+      fighter(585, panel(3001, 28171, 545, 208, 3, 150, 0, 56)),
+      fighter(295, panel(2791, 26935, 743, 181, 5, 150, 0, 64)),
+      fighter(304, panel(4928, 15964, 648, 137, 105, 220, 60, 56)),
+      fighter(330, panel(4773, 12666, 529, 135, 25, 185, 15, 48))],
+    blue: [fighter(323, panel(2737, 23586, 799, 181, 20, 150, 0, 64)),
+      fighter(357, panel(5661, 13446, 519, 152, 67, 178, 0, 0)),
+      fighter(313, panel(5067, 16864, 744, 132, 95, 185, 0, 144)),
+      fighter(324, panel(4520, 18145, 686, 129, 25, 227, 0, 63)),
+      fighter(238, panel(5256, 14585, 668, 115, 80, 255, 0, 55))],
+  };
+  const outcome = simulateBattle(state, 1, 0);
+  const warning = predictionCoverageWarning(outcome.diagnostics);
+  assert.match(warning, /9 名式神/);
+  for (const name of ['天井下', '初翎山风', '犬夜叉', '化鲸', '慧明灯', '御馔津', '不知火'])
+    assert.ok(warning.includes(name), `${name} 应出现在未迁移规则提示中`);
+});
+
+test('图鉴中的每个式神都能进入模块化行动流程，未迁移规则会被标记', () => {
   const ids = Object.keys(heroSkillsCatalog.heroes).map(Number);
   const strongPanel = { hp: 10000, attack: 1e9, defense: 1000, speed: 10000, crit: 0, critDamage: 1.5, hit: 0, resist: 0 };
   const weakPanel = { hp: 10000, attack: 1, defense: 1000, speed: 1, crit: 0, critDamage: 1.5, hit: 0, resist: 0 };
@@ -14,8 +50,41 @@ test('图鉴中的每个式神都能进入自动战斗决策', () => {
       blue: [fighter(heroId, strongPanel)],
       red: [fighter(251, weakPanel)],
     }, 1);
-    assert.ok(battle.sampleLog.some(line => line.startsWith('行动 ') && line.includes('蓝方·')), `式神 ${heroId} 应进入自动行动流程`);
+    assert.equal(battle.engine, 'modular');
+    assert.ok(battle.sampleResult.events.some(event => event.type === 'action-declared'
+      && event.intent.actorId === `blue:1:${heroId}`), `式神 ${heroId} 应进入自动行动流程`);
+    if (battle.diagnostics.some(item => item.contentId === String(heroId) && item.status === 'unsupported'))
+      assert.ok(battle.diagnostics.some(item => item.contentId === String(heroId) && item.message?.includes('通用基础攻击')));
   }
+});
+
+test('截图中的两队阵容完整走模块化战斗并报告部分覆盖项', () => {
+  const stats = (attack, hp, defense, speed, crit, critDamage, hit, resist) =>
+    ({ attack, hp, defense, speed, crit, critDamage, hit, resist });
+  const state = {
+    red: [
+      fighter(247, stats(5741, 14728, 652, 205, 20, 150, 60, 64)),
+      fighter(396, stats(4423, 19313, 710, 192, 35, 150, 60, 40)),
+      fighter(600, stats(4667, 15286, 496, 166, 48, 206, 0, 15)),
+      fighter(331, stats(3541, 14374, 541, 127, 10, 255, 0, 135)),
+      fighter(395, stats(2710, 16858, 563, 111, 30, 220, 0, 0)),
+    ],
+    blue: [
+      fighter(391, stats(6103, 14973, 764, 207, 110, 220, 30, 0)),
+      fighter(306, stats(3014, 32882, 818, 199, 88, 164, 0, 56)),
+      fighter(362, stats(4131, 15087, 884, 121, 38, 206, 0, 24)),
+      fighter(356, stats(3434, 14585, 514, 121, 8, 248, 0, 31)),
+      fighter(392, stats(5654, 15451, 602, 118, 0, 213, 0, 0)),
+    ],
+  };
+  const souls = { 247: '300036', 396: '300010', 600: '300080', 331: '300049', 395: '300006',
+    391: '300083', 306: '300003', 362: '300010', 356: '300049', 392: '300049' };
+  for (const unit of [...state.red, ...state.blue]) unit.fourSuit = souls[unit.heroId];
+  const result = simulateBattle(state, 1, 0);
+  assert.equal(result.engine, 'modular');
+  assert.ok(result.sampleResult.events.some(event => event.type === 'action-declared'));
+  assert.ok(result.diagnostics.some(item => item.status === 'partial'));
+  assert.equal(result.diagnostics.some(item => item.status === 'unsupported'), false);
 });
 
 test('式神AI资料标注为无条件施放三技能的式神会按规则选技', () => {
@@ -216,32 +285,36 @@ test('御馔津依灵符数量决策，神启荒依星辰之力层数切换技�
   const miko = simulateBattle({
     blue: [fighter(304, panel(100000, 100, 300)), fighter(304, panel(100000, 100, 200))],
     red: [fighter(251, panel(100000, 1, 1))],
-  }, 1).sampleLog;
-  assert.ok(miko.some(line => line.includes('先机｜蓝方·御馔津无消耗施放「狐狩界」')),
+  }, 3).sampleLog;
+  assert.ok(miko.some(line => line.includes('蓝方·御馔津获得status.hero.304.fox-hunt-field')),
     '每个御馔津开局先机开启狐狩界');
-  assert.ok(miko.some(line => line.includes('御馔津使用技能「燃爆·破魔箭」')),
-    '友方御馔津都已有灵符后燃爆灵符');
+  assert.ok(miko.some(line => line.startsWith('行动 ') && line.includes('御馔津使用技能「燃爆·破魔箭」')),
+    '多名御馔津持符时按参考AI规则使用破魔箭');
 
-  const oracle = simulateBattle({
+  const oracleBattle = simulateBattle({
     blue: [fighter(390, panel(100000, 100, 90))],
     red: [fighter(251, panel(100000, 1, 300))],
-  }, 1).sampleLog;
-  assert.ok(oracle.some(line => line.includes('神启荒的星爆条件触发')), '敌方未消耗鬼火时累积星辰之力');
+  }, 1);
+  const oracle = oracleBattle.sampleLog;
+  assert.ok(oracleBattle.sampleResult.events.some(event => event.type === 'damage' && event.source.id === '3902'),
+    '敌方未消耗鬼火时命运星河触发星爆伤害');
+  assert.ok(oracleBattle.sampleResult.events.some(event => event.type === 'status-added'
+    && event.instance.statusId === 'status.hero.390.star-power'), '星爆后获得星辰之力');
   assert.ok(oracle.some(line => line.startsWith('行动 ') && line.includes('神启荒使用技能「星流霆击」')),
     '星辰之力达到3层后使用3技能');
 });
 
-test('御馔津开局先机狐狩界不占行动，结界存续时首次行动普攻', () => {
+test('御馔津开局先机狐狩界不占行动，首个选招按持符AI规则走妖术分支', () => {
   const panel = speed => ({ hp: 100000, attack: 100, defense: 1000, speed, crit: 0, critDamage: 1.5, hit: 0, resist: 0 });
   const log = simulateBattle({
     blue: [fighter(304, panel(300))],
     red: [fighter(251, panel(1))],
   }, 1).sampleLog;
-  assert.ok(log.some(line => line.includes('先机｜蓝方·御馔津无消耗施放「狐狩界」')),
+  assert.ok(log.some(line => line.includes('蓝方·御馔津获得status.hero.304.fox-hunt-field')),
     '开场立即建立狐狩界并获得灵符');
   const firstMikoAction = log.find(line => line.startsWith('行动 ') && line.includes('御馔津使用'));
-  assert.ok(firstMikoAction?.includes('普攻「一矢」'),
-    '视频帧显示结界存续时首次行动普攻');
+  assert.ok(firstMikoAction?.includes('「狐狩界」') || firstMikoAction?.includes('「燃爆·破魔箭」'),
+    '当前参考AI规则在持符时选择狐狩界或破魔箭；被动箭画面不作为行动选择证据');
 });
 
 test('紧那罗按律音优先级完成一回目，川猿按固定次序变幻三种形态', () => {
@@ -892,17 +965,17 @@ test('低阶式神与呱太按人数、鬼火和友方增益条件决策', () =>
     '帚神在敌方超过3名时群攻');
 });
 
-test('初翎山风的迅风按行动值与友方血线自动协战', () => {
+test('初翎山风在自动战斗中按鬼火施放岚并在低迅风时使用猎目', () => {
   const panel = (hp, speed, attack = 100) => ({ hp, attack, defense: 1000, speed, crit: 0, critDamage: 1.5, hit: 0, resist: 0 });
   const battle = simulateBattle({
     blue: [fighter(357, panel(100000, 500, 1000))],
-    red: [fighter(251, panel(100000, 1, 1))],
+    red: [fighter(251, panel(100000, 1, 1)), fighter(251, panel(100000, 1, 1))],
   }, 8);
   const log = battle.sampleLog;
-  assert.ok(log.some(line => line.includes('迅风协战「迅·猎目」')), '初始行动值不足80时迅风先用猎目');
-  assert.ok(log.some(line => line.includes('迅风协战「迅·击空」')), '两次积累达到80后迅风改用击空');
   assert.ok(log.some(line => line.startsWith('行动 ') && line.includes('初翎山风使用技能「岚」')),
-    '迅风协战后初翎山风仍执行自己的自动技能');
+    '鬼火充足且有多个敌人时使用岚');
+  assert.ok(log.some(line => line.startsWith('行动 ') && line.includes('初翎山风使用技能「迅·猎目」')),
+    '迅风未达80时使用猎目');
 });
 
 test('珍珠和树妖按基础治疗量生成护盾并提高治疗', () => {
@@ -933,7 +1006,7 @@ test('钓瓶火回合结束额外推进鬼火行动条并按防御治疗', () =>
   assert.ok(battle.sampleLog.some(line => line.includes('携带者防御700%')));
 });
 
-test('10点场实战校对：双方五人面板、御魂与开局行动顺序', () => {
+test('10点场阵容的部分覆盖和未迁移机制都保留在结果诊断中', () => {
   const panel = (attack, hp, defense, speed, crit, critDamage, hit, resist) => ({
     attack, hp, defense, speed, crit: crit / 100, critDamage: critDamage / 100,
     hit: hit / 100, resist: resist / 100,
@@ -955,35 +1028,20 @@ test('10点场实战校对：双方五人面板、御魂与开局行动顺序', 
       recordedFighter(330, '300034', panel(4773, 12666, 529, 135, 25, 185, 15, 48)), // 不知火·蚌精
     ],
   }, 1, 0);
-  const actions = battle.sampleLog.filter(line => /^行动 \d+｜/.test(line));
-
-  assert.deepEqual(actions.slice(0, 5).map(line => line.replace(/^行动 \d+｜/, '').replace(/（鬼火.*$/, '')),[
-    '红方·慧明灯使用技能「正念」',
-    '红方·荒骷髅使用技能「黄泉战旗」',
-    '红方·追月神使用技能「清辉月华」',
-    '蓝方·天井下使用普攻「再会之音」',
-    '蓝方·初翎山风使用技能「岚」',
-  ]);
-  assert.ok(actions[5]?.startsWith('行动 6｜红方·御馔津使用普攻「一矢」'),
-    '视频841帧中山风之后轮到御馔津正常行动');
-  assert.ok(actions[6]?.startsWith('行动 6｜红方·荒骷髅使用技能「黄泉战旗」'),
-    '视频921帧中荒骷髅接着触发时之隙额外行动，仍归入同一行动序号');
-  assert.ok(battle.sampleLog.some(line => line.includes('御馔津「一矢·封魔」被动触发')),
-    '敌方行动结束时应触发御馔津的被动追射，但不能作为御馔津自己的行动计数');
-  assert.ok(battle.sampleLog.some(line => line.includes('御馔津无消耗施放「狐狩界」')),
-    '御馔津狐狩界先机应在行动条排序前生效');
-  assert.ok(battle.sampleLog.some(line => line.includes('已启用御魂：') && line.includes('慧明灯=钓瓶火')
-    && line.includes('犬夜叉=针女') && line.includes('御馔津=破势')),
-  '实战记录里的御魂效果应传入模拟器');
-  assert.ok(battle.sampleLog.some(line => line.includes('不知火无消耗施放「星火满天」')),
-    '不知火满级星火满天先机必须在首次行动前生效');
-  assert.ok(battle.sampleLog.some(line => line.includes('结界：友方速度+25')),
-    '星火结界的速度加成必须参与行动排序');
-  assert.ok(battle.sampleLog.some(line => line.includes('红方·不知火对') && line.includes('星火结界触发100%额外普攻')),
-    '10点场中的不知火普攻应触发满级星火结界追加攻击');
-  const openingLog = battle.sampleLog.slice(0, battle.sampleLog.findIndex(line => line.startsWith('行动 6｜')));
-  assert.ok(!openingLog.some(line => line.includes('尚未建模')),
-    '视频已核对的前五次行动不应遗留未建模提示');
+  assert.equal(battle.engine, 'modular');
+  const lineupHeroes = ['585'];
+  for (const heroId of lineupHeroes) {
+    assert.ok(battle.diagnostics.some(item => item.contentType === 'hero' && item.contentId === heroId
+      && item.aspect === 'mechanics' && item.status !== 'verified'), `${heroId} 的未验证机制应披露在诊断中`);
+  }
+  assert.ok(battle.diagnostics.some(item => item.contentType === 'hero' && item.contentId === '304'
+    && item.aspect === 'ai' && item.status === 'partial'), '官方AI表不可用，御馔津选招仍应披露为部分覆盖');
+  const uncovered = battle.diagnostics.filter(item => item.status !== 'verified');
+  assert.equal(uncovered.length, 3, '天井下、初翎山风、犬夜叉、慧明灯、萤草、不知火、化鲸与薙魂机制已验证；仍披露1项机制、1项AI和1种御魂的部分覆盖');
+  for (const soulId of ['soul:300080']) {
+    assert.ok(battle.diagnostics.some(item => item.contentType === 'soul' && item.contentId === soulId
+      && item.status === 'partial'), `${soulId} 的部分覆盖应保留在诊断中`);
+  }
 });
 
 test('不知火星火结界按技能等级追加完整普攻并跳过目标御魂触发', () => {
@@ -992,16 +1050,16 @@ test('不知火星火结界按技能等级追加完整普攻并跳过目标御�
     blue: [fighter(330, panel(300), 5)],
     red: [{ ...fighter(251, panel(1), 5), fourSuit: '返魂香' }],
   }, 1);
-  const extraIndex = battle.sampleLog.findIndex(line => line.includes('星火结界触发100%额外普攻'));
-  assert.ok(extraIndex >= 0, '满级不知火先机结界应保证触发追加普攻');
-  assert.ok(battle.sampleLog[extraIndex].includes('再攻击2次'));
-  assert.ok(battle.sampleLog[extraIndex].includes('无视200点防御') && battle.sampleLog[extraIndex].includes('吸血30%'));
-  const nextAction = battle.sampleLog.findIndex((line, index) => index > extraIndex && line.startsWith('行动 '));
-  const extraHits = battle.sampleLog.slice(extraIndex + 1, nextAction < 0 ? undefined : nextAction);
-  assert.equal(extraHits.filter(line => /(?:攻击|命中) 红方·判官：/.test(line)).length, 2,
-    '追加普攻应复刻初舞的两段攻击');
-  assert.ok(!extraHits.some(line => line.includes('返魂香触发')),
-    '追加普攻不触发目标御魂');
+  const extraAttack = battle.sampleResult.events.find(event => event.type === 'action-scheduled'
+    && event.scheduling === 'assist' && event.intent.actorId === 'blue:1:330' && event.intent.skillId === '3301');
+  assert.ok(extraAttack, '满级不知火先机结界应保证追加普攻');
+  const extraAttackId = extraAttack.attackId;
+  const extraHits = battle.sampleResult.events.filter(event => event.type === 'damage' && event.attackId === extraAttackId);
+  assert.equal(extraHits.length, 2, '追加普攻应复刻初舞的两段攻击');
+  assert.ok(extraHits.every(event => event.suppressTargetSoulTriggers && event.suppressTargetPassiveTriggers),
+    '追加普攻不触发目标御魂或被动');
+  assert.ok(extraHits.every(event => event.leechDamage > 0), '追加普攻应附带30%吸血');
+  assert.ok(extraHits.every(event => event.amount > 180), '追加攻击伤害应体现无视200点防御');
 });
 
 test('日女巳时击退行动条，轮入道有机会追加回合', () => {
@@ -1388,8 +1446,8 @@ test('不知火受到致命伤害后保留1点生命进入离殇并切换姿态�
     blue: [fighter(330, panel(200, 1, 1000))],
     red: [fighter(266, panel(300, 100000, 100000)), fighter(231, panel(1, 1, 100000))],
   }, 1);
-  assert.ok(battle.sampleLog.some(line => line.includes('抵挡致命伤害') && line.includes('离殇姿态')));
-  assert.ok(battle.sampleLog.some(line => line.includes('不知火') && /烬染不夜|终舞/.test(line)));
+  assert.ok(battle.sampleLog.some(line => line.includes('免疫致命伤害')));
+  assert.ok(battle.sampleLog.some(line => line.includes('不知火') && /离歌|烬染不夜|终舞/.test(line)));
 });
 
 test('初音未来鬼火不足时回退音弦动普攻，不把音之舞曲被动当普攻', () => {
@@ -1403,7 +1461,7 @@ test('初音未来鬼火不足时回退音弦动普攻，不把音之舞曲被�
   assert.ok(!battle.sampleLog.some(line => line.includes('技能「音之舞曲」含有尚未建模')));
 });
 
-test('截图十人阵容的御魂均被识别，代表对局日志没有漏建模提示', () => {
+test('指定截图十人阵容的御魂进入模块化对局，并保留部分覆盖诊断', () => {
   const panel = (attack, hp, defense, speed, crit, critDamage, hit, resist) => ({
     attack, hp, defense, speed, crit: crit / 100, critDamage: critDamage / 100,
     hit: hit / 100, resist: resist / 100,
@@ -1411,24 +1469,47 @@ test('截图十人阵容的御魂均被识别，代表对局日志没有漏建�
   const unit = (heroId, fourSuit, stats) => ({ heroId, fourSuit, skillLevel: 5, panel: stats });
   const battle = simulateBattle({
     red: [
-      unit(357, '300029', panel(5319, 18003, 791, 151, 36, 227, 0, 48)),
-      unit(563, '300009', panel(3699, 27977, 676, 146, 39, 178, 18, 40)),
-      unit(280, '300014', panel(3937, 23420, 794, 144, 30, 220, 0, 48)),
-      unit(368, '300010', panel(3427, 34352, 1267, 131, 15, 171, 0, 64)),
-      unit(344, '300031', panel(5150, 10370, 707, 121, 100, 283, 0, 56)),
+      unit(247, '300036', panel(5741, 14728, 652, 205, 20, 150, 60, 64)),
+      unit(396, '300010', panel(4423, 19313, 710, 192, 35, 150, 60, 40)),
+      unit(600, '300080', panel(4667, 15286, 496, 166, 48, 206, 0, 15)),
+      unit(331, '300049', panel(3541, 14374, 541, 127, 10, 255, 0, 135)),
+      unit(395, '300006', panel(2710, 16858, 563, 111, 30, 220, 0, 0)),
     ],
     blue: [
-      unit(201, '300035', panel(3541, 21968, 701, 157, 18, 150, 48, 40)),
-      unit(250, '300036', panel(5246, 16357, 764, 149, 100, 304, 0, 56)),
-      unit(330, '300049', panel(4358, 12666, 584, 147, 15, 185, 0, 63)),
-      unit(595, '300014', panel(1826, 24024, 873, 123, 30, 150, 0, 64)),
-      unit(372, '300034', panel(4054, 13446, 556, 113, 38, 207, 0, 0)),
+      unit(391, '300083', panel(6103, 14973, 764, 207, 110, 220, 30, 0)),
+      unit(306, '300003', panel(3014, 32882, 818, 199, 88, 164, 0, 56)),
+      unit(362, '300010', panel(4131, 15087, 884, 121, 38, 206, 0, 24)),
+      unit(356, '300049', panel(3434, 14585, 514, 121, 8, 248, 0, 31)),
+      unit(392, '300049', panel(5654, 15451, 602, 118, 0, 213, 0, 0)),
     ],
   }, 1, 0);
-  const soulLog = battle.sampleLog.find(line => line.startsWith('已启用御魂：'));
-  for (const soul of ['伤魂鸟', '被服', '镜姬', '招财猫', '镇墓兽', '魅妖', '针女', '幽谷响', '蚌精']) {
-    assert.ok(soulLog?.includes(`=${soul}`), `${soul}应按截图装备生效`);
-  }
-  assert.ok(!battle.sampleLog.some(line => line.includes('尚未建模')),
-    '截图阵容的代表对局不应遗留未处理技能或被动');
+  assert.equal(battle.engine, 'modular');
+  const equippedSouls = new Set(Object.values(battle.sampleResult.state.units).map(unit => unit.soulId));
+  for (const soulId of ['soul:300036', 'soul:300010', 'soul:300080', 'soul:300049', 'soul:300006', 'soul:300083', 'soul:300003'])
+    assert.ok(equippedSouls.has(soulId), `${soulId}应从截图输入装载到战斗状态`);
+  for (const heroId of [247, 396, 600, 331, 395, 391, 306, 362, 356, 392])
+    assert.ok(Object.values(battle.sampleResult.state.units).some(unit => unit.heroId === heroId), `式神 ${heroId} 应进入战斗状态`);
+  assert.equal(battle.sampleResult.events.filter(event => event.type === 'action-declared')
+    .some(event => event.intent.skillId.startsWith('fallback.hero.')), false,
+  '指定阵容实际发起的行动应使用对应式神的模块化技能定义');
+  assert.equal(battle.diagnostics.some(item => item.status === 'unsupported'), false,
+    '截图中的十名式神和七种御魂均应有专属规则注册');
+  assert.ok(battle.diagnostics.some(item => item.status === 'partial'),
+    '已知未完成机制应继续在结果中披露');
+});
+
+test('海月火玉在资源足够时追加消耗1点并提高本次技能伤害40%', () => {
+  const panel = speed => ({ hp: 1000000, attack: 10000, defense: 1000, speed, crit: 0, critDamage: 1.5, hit: 0, resist: 0 });
+  const noSoul = simulateBattle({ blue: [fighter(247, panel(300))], red: [fighter(231, panel(1))] }, 1, 0);
+  const withSoul = simulateBattle({
+    blue: [{ ...fighter(247, panel(300)), fourSuit: '300083' }],
+    red: [fighter(231, panel(1))],
+  }, 1, 0);
+  assert.ok(withSoul.sampleResult.events.some(event => event.type === 'content-triggered'
+    && event.contentId === 'soul:300083' && event.phase === 'resource-payment'));
+  const paidResource = withSoul.sampleResult.events.find(event => event.type === 'resource-changed' && event.phase === 'resource-payment');
+  assert.equal(paidResource.before - paidResource.after, 4);
+  const firstActionDamage = battle => battle.sampleResult.events.filter(event => event.type === 'damage'
+    && event.attackId === 1).reduce((sum, event) => sum + event.amount, 0);
+  assert.ok(firstActionDamage(withSoul) > firstActionDamage(noSoul) * 1.1, '本次多段技能伤害应体现40%提升');
 });

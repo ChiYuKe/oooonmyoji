@@ -13,49 +13,61 @@ export type BattleLogGroup = {
   lines: string[];
 };
 
-// Arrival information precedes the action header and belongs to that next action.
+// Support both numbered legacy headers and the modular engine's action declarations.
 export function groupBattleLog(lines: string[]): BattleLogGroup[] {
   const groups: BattleLogGroup[] = [];
   let current: BattleLogGroup | undefined;
-  let arrival: string | undefined;
+  let pending: string[] = [];
+  let actionNumber = 0;
+  const appendPending = (): void => {
+    if (!pending.length) return;
+    if (!current) {
+      current = { phase: 'opening', side: 'neutral', action: null, actor: '', headline: '开局信息', lines: [] };
+      groups.push(current);
+    }
+    current.lines.push(...pending); pending = [];
+  };
   for (const source of lines) {
     const line = source.trim();
-    if (line.startsWith('行动条到达顺序：')) { arrival = line; continue; }
-    const action = /^行动\s+(\d+)｜(蓝方|红方)·(.+?)((?:使用|受|沉默中).*)$/.exec(line);
+    if (line.startsWith('行动条到达顺序：') || /^(蓝方|红方)·.+的回合开始。$/.test(line)) { pending.push(line); continue; }
+    const numbered = /^行动\s+(\d+)｜(蓝方|红方)·(.+?)((?:使用|受|沉默中).*)$/.exec(line);
+    const declared = /^(蓝方|红方)·(.+?)((?:使用技能|使用通用普攻|使用普攻|本次无法行动).*)$/.exec(line);
+    const action = numbered ? [numbered[2], numbered[3], numbered[4]] : declared ? [declared[1], declared[2], declared[3]] : undefined;
     if (action) {
-      current = { phase: 'action', side: action[2] === '蓝方' ? 'blue' : 'red', action: Number(action[1]), actor: action[3], headline: action[4], lines: arrival ? [arrival] : [] };
-      arrival = undefined; groups.push(current);
-    } else if (line.startsWith('样例对局结束')) {
+      actionNumber = numbered ? Number(numbered[1]) : actionNumber + 1;
+      current = { phase: 'action', side: action[0] === '蓝方' ? 'blue' : 'red', action: actionNumber, actor: action[1], headline: action[2], lines: pending };
+      pending = []; groups.push(current);
+    } else if (line.startsWith('样例对局结束') || line.startsWith('对局结束：')) {
+      appendPending();
       current = { phase: 'ending', side: 'neutral', action: null, actor: '', headline: '对局结束', lines: [line] };
       groups.push(current);
     } else {
+      if (pending.length) { pending.push(line); continue; }
       if (!current) {
         current = { phase: 'opening', side: 'neutral', action: null, actor: '', headline: '开局信息', lines: [] };
         groups.push(current);
       }
-      if (arrival) { current.lines.push(arrival); arrival = undefined; }
       current.lines.push(line);
     }
   }
-  if (arrival) {
-    if (current) current.lines.push(arrival);
-    else groups.push({ phase: 'opening', side: 'neutral', action: null, actor: '', headline: '开局信息', lines: [arrival] });
-  }
+  appendPending();
   return groups;
 }
 
 function eventKind(line: string): { kind: string; label: string; detail: boolean } {
-  if (/剩余生命\s*0(?:[；。，]|$)/.test(line)) return { kind: 'defeat', label: '击败', detail: false };
-  if (/点生命伤害|点伤害|反击|反伤/.test(line)) return { kind: 'damage', label: '伤害', detail: false };
+  if (/被击败|剩余生命\s*0(?:[；。，]|$)/.test(line)) return { kind: 'defeat', label: '击败', detail: false };
+  if (/点生命伤害|点(?:真实)?伤害|损失\d+点生命|反击|反伤/.test(line)) return { kind: 'damage', label: '伤害', detail: false };
   if (/复活/.test(line)) return { kind: 'heal', label: '复活', detail: false };
-  if (/治疗|吸血/.test(line)) return { kind: 'heal', label: '治疗', detail: false };
-  if (/控制生效|驱散/.test(line)) return { kind: 'control', label: line.startsWith('驱散') ? '驱散' : '控制', detail: false };
+  if (/治疗|吸血|恢复.*点生命/.test(line)) return { kind: 'heal', label: '治疗', detail: false };
+  if (/控制生效|驱散|受到控制|抵抗了|免疫了|控制效果被/.test(line)) return { kind: 'control', label: line.startsWith('驱散') ? '驱散' : '控制', detail: false };
+  if (/回合开始|回合结束|开始攻击|攻击结束|行动结算结束/.test(line)) return { kind: 'state', label: '结算', detail: true };
   if (/行动条到达顺序/.test(line)) return { kind: 'state', label: '行动条', detail: true };
   if (/行动条|额外行动/.test(line)) return { kind: 'gauge', label: '行动条', detail: false };
   if (/鬼火|自然回火/.test(line)) return { kind: 'resource', label: '鬼火', detail: true };
-  if (/尚未建模/.test(line)) return { kind: 'state', label: '说明', detail: true };
+  if (/尚未建模|尚未迁移/.test(line)) return { kind: 'state', label: '说明', detail: true };
   if (/状态变化/.test(line)) return { kind: 'state', label: '状态', detail: true };
   if (/护盾|庇护|共鸣之墙/.test(line)) return { kind: 'shield', label: '护盾', detail: false };
+  if (/状态|获得|失去/.test(line)) return { kind: 'state', label: '状态', detail: true };
   return { kind: 'effect', label: '效果', detail: false };
 }
 
@@ -78,7 +90,7 @@ function appendSkillIcon(parent: HTMLElement, actor: string, headline: string): 
   const skills = hero ? heroSkillsCatalog.heroes[hero.id]?.skills ?? [] : [];
   const skill = [...skills, ...skills.flatMap(item => item.extraSkills)].find(item => item.name === name);
   const frame = element(parent.ownerDocument, 'span', 'duel-log-skill-icon');
-  appendIcon(frame, /跳过行动/.test(headline) ? Ban : Swords);
+  appendIcon(frame, /跳过行动|无法行动/.test(headline) ? Ban : Swords);
   if (skill?.icon) {
     const image = parent.ownerDocument.createElement('img');
     image.src = `onmyoji-resource://project/assets/skill-icons/${skill.icon}.png`;

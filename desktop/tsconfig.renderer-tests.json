@@ -9,6 +9,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/renderer/features/duel/engine/**/*.ts",
     "src/renderer/shell/titlebar-menus.ts",
     "src/renderer/shell/tool-menus.ts",
     "src/renderer/features/souls/components/team-builder-layout.ts",

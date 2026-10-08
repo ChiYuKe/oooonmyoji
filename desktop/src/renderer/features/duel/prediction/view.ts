@@ -1,10 +1,13 @@
+/// <reference path="../worker-imports.d.ts" />
 import { soulCatalog } from '../../../../shared/soul-catalog-data';
 import type { HeroProfile, Panel, PanelKey, SuitProfile } from '../../../../shared/soul-optimizer';
 import type { DuelScreenCapture, DuelScreenRecognition, DuelScreenRoi } from '../../../../shared/contracts';
 import { PANEL_LABELS } from '../../../../shared/soul-optimizer';
 import { installCommunityPicker } from '../../souls/community/picker';
 import { appendPickerPortrait } from '../../souls/optimizer/picker';
-import { simulateBattle, simulateBattleSample, type BattleFighterInput, type DuelBattleInput } from '../engine/battle-engine';
+import { predictionCoverageWarning } from './coverage-warning';
+import { simulateBattle, type BattleFighterInput, type DuelBattleInput } from '../engine/battle-engine';
+import DuelSimulationWorker from '../engine/simulation/worker?worker';
 import { renderBattleLog } from '../engine/battle-log';
 import { createElement, ChevronLeft, ChevronRight } from 'lucide';
 
@@ -157,6 +160,21 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   };
   captureInstances.append(instancePlaceholder());
   const recognitionStatus = make<HTMLSpanElement>(doc, 'span', 'duel-recognition-status');
+  const simulationStatus = make<HTMLSpanElement>(doc, 'span', 'duel-simulation-status');
+  let simulationWorker: Worker | undefined;
+  let simulationGeneration = 0;
+  let currentSimulation: { outcome: ReturnType<typeof simulateBattle>; runs: number; state: DuelState } | undefined;
+  const sampleCache = new Map<number, { sampleLog: string[]; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget' }>();
+  const pendingSamples = new Set<number>();
+  const cacheSample = (index: number, sample: { sampleLog: string[]; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget' }): void => {
+    sampleCache.delete(index);
+    sampleCache.set(index, sample);
+    while (sampleCache.size > 20) sampleCache.delete(sampleCache.keys().next().value!);
+  };
+  const stopSimulationWorker = (): void => {
+    simulationWorker?.terminate();
+    simulationWorker = undefined;
+  };
 
   captureInstances.addEventListener('change', () => {
     try { localStorage.setItem(`${STORAGE_KEY}.instance`, captureInstances.value); } catch { /* Optional preference. */ }
@@ -456,12 +474,23 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   const renderResult = (outcome: ReturnType<typeof simulateBattle>, runs: number, matchIndex: number, simulationState: DuelState): void => {
     result.replaceChildren();
     const blue = make(doc, 'div', `duel-result-side${outcome.blueRate >= outcome.redRate ? ' is-leading' : ''}`);
-    blue.append(make(doc, 'span', '', '蓝方胜率'), make(doc, 'strong', '', `${(outcome.blueRate * 100).toFixed(1)}%`));
+    blue.append(make(doc, 'span', '', '蓝方模拟胜率'), make(doc, 'strong', '', `${(outcome.blueRate * 100).toFixed(1)}%`));
     const red = make(doc, 'div', `duel-result-side${outcome.redRate >= outcome.blueRate ? ' is-leading' : ''}`);
-    red.append(make(doc, 'span', '', '红方胜率'), make(doc, 'strong', '', `${(outcome.redRate * 100).toFixed(1)}%`));
-    const draws = make(doc, 'p', 'duel-result-draws', `平局 ${(outcome.drawRate * 100).toFixed(1)}% · ${runs} 场模拟`);
-    const winner = outcome.blueRate === outcome.redRate ? '双方胜率相同' : outcome.blueRate > outcome.redRate ? '蓝方更占优' : '红方更占优';
+    red.append(make(doc, 'span', '', '红方模拟胜率'), make(doc, 'strong', '', `${(outcome.redRate * 100).toFixed(1)}%`));
+    const invalidRuns = outcome.invalidRuns ?? 0;
+    const validRuns = Math.max(0, runs - invalidRuns);
+    const runCountLabel = `${invalidRuns > 0 ? `${validRuns} / ${runs} 场有效模拟 · ${invalidRuns} 场触发预算超限未计入胜率` : `${runs} 场模拟`}`
+      + (outcome.terminationCounts.actionLimit > 0 ? ` · ${outcome.terminationCounts.actionLimit} 场达到行动上限` : '');
+    const engineName = outcome.engine === 'modular' ? '新内核' : '兼容引擎';
+    const draws = make(doc, 'p', 'duel-result-draws', `平局 ${(outcome.drawRate * 100).toFixed(1)}% · ${runCountLabel} · ${engineName}`);
+    const endReason = outcome.sampleResult?.reason ?? outcome.sampleReason;
+    const endNote = endReason === 'action-limit' ? make(doc, 'p', 'duel-result-draws', '样例结束：达到 600 次行动上限，按双方剩余生命比例判定')
+      : endReason === 'elimination' ? make(doc, 'p', 'duel-result-draws', '样例结束：一方全灭')
+        : endReason === 'trigger-budget' ? make(doc, 'p', 'duel-result-draws', '样例结束：触发预算超限，该场不计入胜率') : undefined;
+    const winner = outcome.blueRate === outcome.redRate ? '模拟结果：双方持平' : outcome.blueRate > outcome.redRate ? '模拟结果：蓝方更占优' : '模拟结果：红方更占优';
     result.append(make(doc, 'h3', '', winner));
+    const warningText = predictionCoverageWarning(outcome.diagnostics);
+    if (warningText) result.append(make(doc, 'p', 'duel-result-warning', warningText));
     const rates = make(doc, 'div', 'duel-result-rates'); rates.append(blue, red);
     const log = make<HTMLDetailsElement>(doc, 'details', 'duel-battle-log');
     log.open = true;
@@ -473,7 +502,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     previous.type = 'button'; previous.disabled = matchIndex <= 0;
     previous.addEventListener('click', () => {
       const nextIndex = matchIndex - 1;
-      renderResult({ ...outcome, sampleLog: simulateBattleSample(simulationState, nextIndex) }, runs, nextIndex, simulationState);
+      showSample(nextIndex);
     });
     const matchNumber = make<HTMLInputElement>(doc, 'input', 'duel-match-number');
     matchNumber.type = 'number'; matchNumber.min = '1'; matchNumber.max = String(runs); matchNumber.step = '1';
@@ -489,7 +518,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
       }
       const nextIndex = requested - 1;
       if (nextIndex === matchIndex) return;
-      renderResult({ ...outcome, sampleLog: simulateBattleSample(simulationState, nextIndex) }, runs, nextIndex, simulationState);
+      showSample(nextIndex);
     };
     matchNumber.addEventListener('change', showMatch);
     matchNumber.addEventListener('keydown', event => { if (event.key === 'Enter') showMatch(); });
@@ -498,7 +527,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     next.type = 'button'; next.disabled = matchIndex >= runs - 1;
     next.addEventListener('click', () => {
       const nextIndex = matchIndex + 1;
-      renderResult({ ...outcome, sampleLog: simulateBattleSample(simulationState, nextIndex) }, runs, nextIndex, simulationState);
+      showSample(nextIndex);
     });
     matchNav.append(previous, position, next);
     log.append(matchNav);
@@ -517,7 +546,76 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     }
     log.append(filters);
     log.append(entries);
-    result.append(rates, draws, log);
+    result.append(rates, draws);
+    if (endNote) result.append(endNote);
+    const uncovered = outcome.diagnostics.filter(item => item.status !== 'verified');
+    if (uncovered.length > 0) {
+      const coverage = make<HTMLDetailsElement>(doc, 'details', 'duel-coverage-diagnostics');
+      coverage.append(make(doc, 'summary', '', `新内核覆盖诊断 · ${uncovered.length} 项部分覆盖或未迁移`));
+      coverage.append(make(doc, 'p', '', '以下未验证项目可能影响结果；本阵容仍在模块化引擎中运行。'));
+      const list = make(doc, 'ul', '');
+      for (const item of uncovered) {
+        const hero = item.contentType === 'hero' ? heroes.find(candidate => String(candidate.id) === item.contentId) : undefined;
+        const soulId = item.contentType === 'soul' ? Number(item.contentId.replace(/^soul:/, '')) : undefined;
+        const soul = soulId === undefined ? undefined : suits.find(candidate => candidate.id === soulId);
+        const contentName = hero?.name ?? soul?.name ?? item.contentId;
+        const typeName = item.contentType === 'hero' ? '式神' : item.contentType === 'soul' ? '御魂' : item.contentType === 'status' ? '状态' : '运行时';
+        const aspect = item.aspect === 'ai' ? 'AI' : item.aspect === 'mechanics' ? '技能／被动机制' : '';
+        const coverageName = item.status === 'partial' ? '部分覆盖' : '未迁移';
+        list.append(make(doc, 'li', '', `${typeName}·${contentName}${aspect ? ` · ${aspect}` : ''}：${coverageName}${item.message ? `（${item.message}）` : ''}`));
+      }
+      coverage.append(list);
+      result.append(coverage);
+    }
+    result.append(log);
+  };
+  const showSample = (index: number): void => {
+    const current = currentSimulation;
+    if (!current) return;
+    const cached = sampleCache.get(index);
+    if (cached) {
+      renderResult({ ...current.outcome, sampleLog: cached.sampleLog, sampleReason: cached.sampleReason, sampleResult: undefined }, current.runs, index, current.state);
+      return;
+    }
+    if (!simulationWorker || pendingSamples.has(index)) return;
+    pendingSamples.add(index);
+    simulationStatus.textContent = `正在生成第 ${index + 1} 场样例…`;
+    simulationWorker.postMessage({ type: 'sample', taskId: simulationGeneration, index });
+  };
+  const attachWorkerMessages = (worker: Worker, taskId: number, runs: number, stateSnapshot: DuelState): void => {
+    worker.onmessage = (event: MessageEvent<{ type: string; taskId: number; completed: number; total: number; engine: string;
+      result: ReturnType<typeof simulateBattle>; index: number; sampleLog: string[]; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget'; message: string }>) => {
+      const data = event.data;
+      if (data.taskId !== simulationGeneration || taskId !== simulationGeneration) return;
+      if (data.type === 'progress') {
+        simulationStatus.textContent = data.engine === 'modular'
+          ? `正在模拟 · ${data.completed.toLocaleString()} / ${data.total.toLocaleString()} 场`
+          : data.completed === 0 ? '正在模拟兼容规则…' : '';
+      } else if (data.type === 'result') {
+        cacheSample(0, { sampleLog: data.result.sampleLog, sampleReason: data.result.sampleReason });
+        pendingSamples.delete(0);
+        currentSimulation = { outcome: data.result, runs, state: stateSnapshot };
+        simulationStatus.textContent = '';
+        run.disabled = false; cancelRun.hidden = true;
+        renderResult(data.result, runs, 0, stateSnapshot);
+      } else if (data.type === 'sample') {
+        pendingSamples.delete(data.index);
+        cacheSample(data.index, { sampleLog: data.sampleLog, sampleReason: data.sampleReason });
+        simulationStatus.textContent = '';
+        const current = currentSimulation;
+        if (current) renderResult({ ...current.outcome, sampleLog: data.sampleLog, sampleReason: data.sampleReason, sampleResult: undefined }, current.runs, data.index, current.state);
+      } else if (data.type === 'error') {
+        pendingSamples.clear();
+        run.disabled = false; cancelRun.hidden = true;
+        simulationStatus.textContent = `模拟失败：${data.message}`;
+      }
+    };
+    worker.onerror = event => {
+      if (taskId !== simulationGeneration) return;
+      run.disabled = false; cancelRun.hidden = true;
+      simulationStatus.textContent = `模拟失败：${event.message || 'Worker 执行错误'}`;
+      stopSimulationWorker();
+    };
   };
   const countField = make<HTMLLabelElement>(doc, 'label', 'duel-run-count-field');
   const runCount = make<HTMLInputElement>(doc, 'input', 'duel-run-count');
@@ -537,6 +635,15 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   countField.append(make(doc, 'span', '', '模拟次数'), runCount, make(doc, 'span', '', '场'));
   const run = make<HTMLButtonElement>(doc, 'button', 'duel-run-button', '开始模拟');
   run.type = 'button';
+  const cancelRun = make<HTMLButtonElement>(doc, 'button', 'duel-run-cancel', '取消模拟');
+  cancelRun.type = 'button'; cancelRun.hidden = true;
+  cancelRun.addEventListener('click', () => {
+    simulationGeneration++;
+    stopSimulationWorker();
+    pendingSamples.clear();
+    cancelRun.hidden = true; run.disabled = false;
+    simulationStatus.textContent = '模拟已取消';
+  });
   run.addEventListener('click', () => {
     if (activeRecognitionCount > 0) return;
     if (!runCount.value || !runCount.reportValidity()) { runCount.focus(); return; }
@@ -562,7 +669,17 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
       return;
     }
     const simulationState = JSON.parse(JSON.stringify(state)) as DuelState;
-    renderResult(simulateBattle(simulationState, runs), runs, 0, simulationState);
+    simulationGeneration++;
+    const taskId = simulationGeneration;
+    stopSimulationWorker();
+    sampleCache.clear(); pendingSamples.clear(); currentSimulation = undefined;
+    result.replaceChildren();
+    simulationStatus.textContent = '正在启动模拟…';
+    run.disabled = true; cancelRun.hidden = false;
+    const worker = new DuelSimulationWorker();
+    simulationWorker = worker;
+    attachWorkerMessages(worker, taskId, runs, simulationState);
+    worker.postMessage({ type: 'start', taskId, state: simulationState, runs });
   });
 
   const recognizeRoster = async (side: SideId, button: HTMLButtonElement): Promise<void> => {
@@ -892,13 +1009,10 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     return panel;
   };
 
-  const header = make(doc, 'div', 'duel-simulation-intro');
-  header.append(make(doc, 'p', '', '设置红方与蓝方各 5 名式神，选择御魂并填写战斗总属性。选择式神会带入六星基础属性，可直接修改表格数值。整方识别请切到游戏阵容总览；单列识别请切到对应式神的属性面板。'));
-  header.append(make(doc, 'p', 'duel-simulation-note', '沙盒以行动条时间轴推进，并逐段结算多段攻击、鬼火、行动条推拉、治疗、护盾、控制、驱散、复活及部分御魂触发。技能文字先转换为可识别效果，尚未建模的专属机制会在战报中标明。'));
   teams = make(doc, 'div', 'duel-teams');
   teams.append(makeRoster('red'), makeRoster('blue'));
   const actions = make(doc, 'div', 'duel-simulation-actions');
-  actions.append(countField, run);
+  actions.append(countField, run, cancelRun, simulationStatus);
   const reset = make<HTMLButtonElement>(doc, 'button', 'duel-reset-button', '清空阵容'); reset.type = 'button';
   reset.addEventListener('click', () => {
     closePicker();
@@ -917,7 +1031,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   actions.append(recognitionStatus);
   const rosterWorkspace = make(doc, 'div', 'duel-roster-workspace');
   rosterWorkspace.append(teams, actions);
-  simulator.replaceChildren(header, rosterWorkspace, output);
+  simulator.replaceChildren(rosterWorkspace, output);
   const simulationPage = simulator.closest<HTMLElement>('[role="tabpanel"]')!;
   const view = doc.defaultView!;
   let resizeFrame = 0;
@@ -938,7 +1052,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     if (!resizeFrame) resizeFrame = view.requestAnimationFrame(fitOutput);
   };
   const outputResize = new ResizeObserver(queueOutputFit);
-  outputResize.observe(simulationPage); outputResize.observe(header);
+  outputResize.observe(simulationPage);
   simulationPage.addEventListener('scroll', queueOutputFit, { passive: true });
   view.addEventListener('resize', queueOutputFit);
   queueOutputFit();
@@ -996,6 +1110,8 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   teams.addEventListener('input', change);
 
   return () => {
+    simulationGeneration++;
+    stopSimulationWorker();
     outputResize.disconnect();
     if (resizeFrame) view.cancelAnimationFrame(resizeFrame);
     simulationPage.removeEventListener('scroll', queueOutputFit);

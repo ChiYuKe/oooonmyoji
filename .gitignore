@@ -22,6 +22,8 @@ config/runtime-*.json
 extensions/vscode-owf/node_modules/
 
 # Desktop application build output
+# desktop/out/ holds local duel fidelity reports and captured datasets; see desktop/docs/DUEL_GAME_FIDELITY_IMPLEMENTATION.md.
+desktop/out/
 desktop/node_modules/
 desktop/dist/
 desktop/dist-electron/

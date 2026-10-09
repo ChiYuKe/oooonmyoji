@@ -9,17 +9,25 @@ function git(args, options = {}) {
   if (result.error || result.status !== 0) throw new Error('无法读取 Git 内容，已停止凭据检查');
   return result.stdout;
 }
+// History scanning reads whole blobs, so a single call would exceed the buffer cap on large
+// repositories; batches keep peak memory bounded by the chunk instead of the whole history.
+const objectChunkSize = 64;
 function scanObjects(objects) {
   if (!objects.length) return [];
-  const data = git(['cat-file', '--batch'], { input: objects.map(item => item.oid).join('\n') + '\n' });
-  const issues = []; let offset = 0;
-  for (const item of objects) {
-    const end = data.indexOf(10, offset);
-    const header = data.subarray(offset, end).toString('ascii').split(' ');
-    if (header[1] !== 'blob' || !/^\d+$/.test(header[2])) throw new Error('无法读取 Git 文件内容');
-    const size = Number(header[2]);
-    issues.push(...findSecrets(item.file, data.subarray(end + 1, end + 1 + size)));
-    offset = end + 1 + size + 1;
+  const issues = [];
+  for (let start = 0; start < objects.length; start += objectChunkSize) {
+    const chunk = objects.slice(start, start + objectChunkSize);
+    const data = git(['cat-file', '--batch'], { input: chunk.map(item => item.oid).join('\n') + '\n' });
+    let offset = 0;
+    for (const item of chunk) {
+      const end = data.indexOf(10, offset);
+      if (end < 0) throw new Error('无法读取 Git 文件内容');
+      const header = data.subarray(offset, end).toString('ascii').split(' ');
+      if (header[1] !== 'blob' || !/^\d+$/.test(header[2])) throw new Error('无法读取 Git 文件内容');
+      const size = Number(header[2]);
+      issues.push(...findSecrets(item.file, data.subarray(end + 1, end + 1 + size)));
+      offset = end + 1 + size + 1;
+    }
   }
   return issues;
 }

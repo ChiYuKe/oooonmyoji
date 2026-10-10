@@ -123,7 +123,7 @@ function counterAfterAllyDamage(context: BattleContext, event: BattleEvent): Eff
     if (context.random() >= counterChance) continue;
     const ownerStats = context.getEffectiveStats(owner.unitId) ?? owner.stats;
     const targetStats = context.getEffectiveStats(enemy.unitId) ?? enemy.stats;
-    const rank = Math.max(1, Math.min(5, owner.skillLevels?.[axiangIds.basic] ?? owner.skillLevel));
+    const rank = Math.max(1, Math.min(6, owner.skillLevels?.[axiangIds.basic] ?? owner.skillLevel));
     const ratio = [.1, .105, .11, .115, .125][rank - 1]!;
     const hit = context.calculateDamage({ attack: ownerStats.attack, defense: targetStats.defense,
       defenseIgnore: effectiveDefenseIgnore(owner), ratio, critChance: ownerStats.crit,

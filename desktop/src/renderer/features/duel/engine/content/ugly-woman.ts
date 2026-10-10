@@ -45,7 +45,9 @@ export function registerUglyWoman(registry: ContentRegistry): void {
       const targetStats = target && context.getEffectiveStats(target.unitId);
       if (!owner || owner.unitKind === 'summon' || !target || target.hp <= 0 || !targetStats) return [];
       const source = uglySource(uglyWomanIds.scarecrowSkill, owner.unitId);
-      const levelIndex = Math.max(0, Math.min(4, owner.skillLevel - 1));
+      // 客户端 2283（稻草人）lv2「继承生命值增至」⇒ 稻草人召唤按 2283 的等级
+      const levelIndex = Math.max(0, Math.min(4,
+        (owner.skillLevels?.[uglyWomanIds.scarecrowSkill] ?? owner.skillLevel ?? 1) - 1));
       const puppetId = `summon:${owner.unitId}:${target.unitId}:${context.state.counters.action}`;
       const tetherInstanceId = `${uglyWomanIds.tether}:${puppetId}`;
       const maxHp = Math.max(1, targetStats.hp * Number(parameters.hpRatio ?? .1));
@@ -109,7 +111,9 @@ function applyCurseFire(context: BattleContext, event: BattleEvent): EffectComma
   const owner = context.getUnit(event.source.unitId);
   if (!owner || owner.heroId !== uglyWomanIds.hero || owner.unitKind === 'summon' || owner.hp <= 0
     || !passivesEnabled(owner)) return;
-  const levelIndex = Math.max(0, Math.min(4, owner.skillLevel - 1));
+  // 客户端 2282（诅咒被动）lv2「[buff_2282_1]易伤效果增至」/lv3、lv5「触发概率增至」⇒ 诅咒概率与易伤表按 2282 的等级
+  const levelIndex = Math.max(0, Math.min(4,
+    (owner.skillLevels?.[uglyWomanIds.cursePassive] ?? owner.skillLevel ?? 1) - 1));
   if (context.random() >= curseChances[levelIndex]!) return;
   const enemies = context.getLivingUnits(owner.side === 'blue' ? 'red' : 'blue');
   if (enemies.length === 0) return;

@@ -167,5 +167,5 @@ function modeNote(mode: Spec['mode']): string {
     multi: '多段攻击', 'focus-multi': '选中目标多段攻击', shield: '全队护盾', heal: '全队治疗', ward: '防御/抵抗增益', falling: '逐段递减攻击',
     'lost-shield': '按已损生命生成护盾', freeze: '三段攻击与逐段冰冻判定' })[mode];
 }
-function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
+function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
 function kappaSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

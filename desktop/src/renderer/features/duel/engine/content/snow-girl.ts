@@ -1,7 +1,7 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
-import type { ActionIntent, BattleContext, EffectCommand, SourceRef, StatusInstance } from '../core/types';
+import type { ActionIntent, BattleContext, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
-import { attemptControl } from '../mechanics/control';
+import { attemptControl, rollAddBuffChance } from '../mechanics/control';
 import { effectiveTargetResistance } from './flying-edge';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
@@ -16,6 +16,17 @@ export const snowGirlIds = {
   freeze: 'status.hero.201.freeze',
   armor: 'status.hero.201.ice-armor',
 } as const;
+
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端逐级证据（2011 / 2012 / 2013 的 levDes）：
+ *   2011 lv3「有概率使目标减速…」→ lv5「减速概率增至…」
+ *   2012 lv2「[buff_2012_1]吸收量增至…」→ lv3「被攻击时…有概率使攻击方减速…」→ lv5「减速概率增至…」
+ *   2013 lv3「减速…」→ lv5「减速概率增至…」
+ * ⇒ 本文件的 `skillLevel >= n` 判定要分别按对应技能（basic / armorSkill / blizzard）的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
 
 export function registerSnowGirl(registry: ContentRegistry): void {
   registry.registerStatus({ id: snowGirlIds.slow, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
@@ -78,7 +89,7 @@ export function createSnowGirlDefinition(): HeroDefinition {
         if (armor && actor.hp > 0 && armor.source.unitId) {
           const owner = context.getUnit(armor.source.unitId);
           if (owner && passivesEnabled(owner)) {
-            const chance = owner.skillLevel >= 5 ? .5 : .25;
+            const chance = rank(owner, snowGirlIds.armorSkill) >= 5 ? .5 : .25;
             const response = trySlow(context, { kind: 'skill', id: snowGirlIds.armorSkill, unitId: armor.source.unitId },
               actor.unitId, chance, event.eventId);
             if (response) commands.push(response);
@@ -87,15 +98,15 @@ export function createSnowGirlDefinition(): HeroDefinition {
         if (actor.heroId !== snowGirlIds.hero || target.hp <= 0) return commands;
         const source: SourceRef = { kind: 'skill', id: event.source.id === snowGirlIds.blizzard
           ? snowGirlIds.blizzard : snowGirlIds.basic, unitId: actor.unitId };
-        if (event.source.id === snowGirlIds.basic && actor.skillLevel >= 3) {
-          const chance = actor.skillLevel >= 5 ? .5 : .25;
+        if (event.source.id === snowGirlIds.basic && rank(actor, snowGirlIds.basic) >= 3) {
+          const chance = rank(actor, snowGirlIds.basic) >= 5 ? .5 : .25;
           const slow = trySlow(context, source, target.unitId, chance, event.eventId);
           if (slow) commands.push(slow);
           return commands;
         }
         if (event.source.id !== snowGirlIds.blizzard) return commands;
         const alreadyFrozen = target.statuses.some(status => status.statusId === snowGirlIds.freeze);
-        const params = blizzard.levels[Math.max(0, Math.min(actor.skillLevel - 1, blizzard.levels.length - 1))]!;
+        const params = blizzard.levels[Math.max(0, Math.min(rank(actor, snowGirlIds.blizzard) - 1, blizzard.levels.length - 1))]!;
         const monster = target.unitKind === 'monster';
         if (alreadyFrozen) {
           if (context.random() >= .3) return commands;
@@ -122,7 +133,7 @@ export function createSnowGirlDefinition(): HeroDefinition {
         if (event.type !== 'turn-ended') return;
         const wearer = context.getUnit(event.unitId);
         if (!wearer || wearer.heroId !== snowGirlIds.hero || wearer.hp <= 0 || !passivesEnabled(wearer)) return;
-        const ratio = wearer.skillLevel >= 4 ? .12 : wearer.skillLevel >= 2 ? .09 : .06;
+        const ratio = rank(wearer, snowGirlIds.armorSkill) >= 4 ? .12 : rank(wearer, snowGirlIds.armorSkill) >= 2 ? .09 : .06;
         const recipients = [wearer, ...context.getLivingUnits(wearer.side).filter(unit => unit.unitId !== wearer.unitId)
           .sort((left, right) => (context.getEffectiveStats(right.unitId)?.critDamage ?? right.stats.critDamage)
             - (context.getEffectiveStats(left.unitId)?.critDamage ?? left.stats.critDamage)).slice(0, 2)];
@@ -154,9 +165,7 @@ function trySlow(context: BattleContext, source: SourceRef,
   const targetStats = context.getEffectiveStats(targetId);
   if (!attackerStats || !targetStats) return undefined;
   const resist = effectiveTargetResistance(targetStats.resist, source, context.getUnit);
-  const chance = Math.max(0, Math.min(1, baseChance * (1 + Math.max(0, attackerStats.hit))))
-    * (1 - resist);
-  if (context.random() >= chance) return undefined;
+  if (rollAddBuffChance(context, baseChance * (1 + attackerStats.hit), resist) !== 'success') return undefined;
   const instance: StatusInstance = { instanceId: `${snowGirlIds.slow}:${source.unitId}:${targetId}:${parentEventId}`,
     statusId: snowGirlIds.slow, source, appliedByEventId: parentEventId, stacks: 1,
     duration: { kind: 'count', remaining: 2, owner: 'target-turn' },

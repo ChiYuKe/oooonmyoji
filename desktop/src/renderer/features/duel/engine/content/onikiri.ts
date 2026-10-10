@@ -226,7 +226,7 @@ function passiveRow(actor: Readonly<UnitState>) {
   return battleSkillRow(onikiriIds.passive, skillRank(actor, onikiriIds.passive), actor.awakeFilter);
 }
 function skillRank(actor: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, actor.skillLevels?.[skillId] ?? actor.skillLevel));
+  return Math.max(1, Math.min(6, actor.skillLevels?.[skillId] ?? actor.skillLevel));
 }
 function fallbackOpeningBlades(rank: number): number { return rank >= 4 ? 3 : rank === 3 ? 2 : rank === 2 ? 1 : 0; }
 function isAwakened(actor: Readonly<UnitState>): boolean { return actor.awakeFilter === 1; }

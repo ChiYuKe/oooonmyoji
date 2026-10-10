@@ -17,7 +17,7 @@ const moonRatios = [1.2, 1.35, 1.5, 1.5, 1.5] as const;
 const moonFalloff = [.25, .2, .2, .2, .2] as const;
 
 export function registerHuang(registry: ContentRegistry): void {
-  registry.registerStatus({ id: huangIds.starMark, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: huangIds.starMark, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 5 } satisfies StatusDefinition);
   registry.registerStatus({ id: huangIds.illusion, mechanicsCoverage: 'partial', category: 'buff', dispellable: true,
     sealable: true, durationOwner: 'source-turn', refreshPolicy: 'refresh-duration' });
@@ -210,7 +210,7 @@ function illusionStatus(owner: Readonly<UnitState>, source: SourceRef): StatusIn
 }
 function hasIllusion(owner: Readonly<UnitState>): boolean { return owner.statuses.some(status => status.statusId === huangIds.illusion); }
 function rank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function huangIntent(actorId: string, skillId: string, targetId: string): ActionIntent {
   return { actorId, skillId, targetIds: [targetId], shape: 'single', targetRelation: 'enemy' };

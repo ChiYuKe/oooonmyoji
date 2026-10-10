@@ -7,7 +7,8 @@ import type { ContentRegistry } from './registry';
 
 export const shuraKidomaruIds = {
   hero: 396, basic: '3961', trapSkill: '3962', citySkill: '3963', unique: 'status.hero.396.unique',
-  trap: 'status.hero.396.hunting-trap', soulNet: 'status.hero.396.soul-net', delirium: 'status.hero.396.delirium',
+  trap: 'status.hero.396.hunting-trap', trapCooldown: 'status.hero.396.trap-cooldown',
+  soulNet: 'status.hero.396.soul-net', delirium: 'status.hero.396.delirium',
   forcedAttack: 'status.hero.396.forced-attack', actionLock: 'status.hero.396.action-lock',
 } as const;
 
@@ -22,11 +23,12 @@ export function registerShuraKidomaru(registry: ContentRegistry): void {
   status(shuraKidomaruIds.unique, { dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep' });
   status(shuraKidomaruIds.trap, { dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep',
     protectsFromDirectTargeting: true });
+  status(shuraKidomaruIds.trapCooldown, { dispellable: false, sealable: false, durationOwner: 'event', refreshPolicy: 'replace' });
   status(shuraKidomaruIds.soulNet, { category: 'mark', dispellable: false, sealable: false, durationOwner: 'permanent',
     refreshPolicy: 'replace', maxStacks: 3, controlProtection: 'immune' });
-  status(shuraKidomaruIds.delirium, { category: 'debuff', dispellable: true, sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace' });
+  status(shuraKidomaruIds.delirium, { category: 'debuff', dispellable: false, sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace' });
   status(shuraKidomaruIds.forcedAttack, { category: 'other', dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
-  status(shuraKidomaruIds.actionLock, { category: 'debuff', dispellable: true, sealable: true, durationOwner: 'target-turn',
+  status(shuraKidomaruIds.actionLock, { category: 'debuff', dispellable: false, sealable: true, durationOwner: 'target-turn',
     refreshPolicy: 'refresh-duration', preventsActionGaugeChange: true });
   registry.registerHero(createShuraKidomaruDefinition());
 }
@@ -45,12 +47,16 @@ export function createShuraKidomaruDefinition(): HeroDefinition {
       });
     } };
   const trap: SkillDefinition = { id: shuraKidomaruIds.trapSkill, resourceCost: { resourceId: 'fire', amount: 2 },
-    target: 'single', targetRelation: 'enemy', levels: [1, 2, 3, 4, 5].map(level => ({ level })), execute(context, intent, params) {
+    target: 'single', targetRelation: 'enemy', levels: [1, 2, 3, 4, 5].map(level => ({ level })),
+    canUse(_state, actor) { return !hasStatus(actor, shuraKidomaruIds.trapCooldown); },
+    execute(context, intent, params) {
       const actor = context.getUnit(intent.actorId); const target = context.getUnit(intent.targetIds[0] ?? '');
       if (!actor || !target || target.hp <= 0) return [];
       const source = shuraSource(shuraKidomaruIds.trapSkill, actor.unitId);
       const net = netStatus(actor); const gain = Number(params.level) >= 5 ? 3 : 2;
       const commands: EffectCommand[] = [];
+      commands.push({ type: 'add-status', source, targetId: actor.unitId, instance: makeStatus(shuraKidomaruIds.trapCooldown,
+        actor.unitId, source, { kind: 'permanent' }, { remaining: 1, castAction: context.state.counters.action }) });
       if (hasStatus(actor, shuraKidomaruIds.unique)) commands.push({ type: 'remove-statuses', source, targetId: actor.unitId,
         statusIds: [shuraKidomaruIds.trap], reason: 'consumed' });
       commands.push(...attemptDebuff(context, { source, targetId: target.unitId, statusId: shuraKidomaruIds.delirium,
@@ -86,8 +92,9 @@ export function createShuraKidomaruDefinition(): HeroDefinition {
           { kind: 'count', remaining: 2, owner: 'target-turn' }) });
       return commands;
     } };
-  return { id: shuraKidomaruIds.hero, skills: [basic, trap, city], aiCoverage: 'partial', mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['失魂按客户端等级表使用60%基础概率，陷阱技能三级起升至80%，并对怪物无效；回合开始强制普攻使用基础概率、施加者命中及目标抵抗判定；新目标抵抗时保留旧失魂标记，仅在成功附加后替换；魂网跨技能加层保持单一状态实例，减伤与四级追猎加层按对应技能等级判定；魂网减层和追猎不受被动封印影响；追猎绝击只抑制受击方御魂、保留攻击方御魂触发，修罗鬼童丸无法行动时不追加；陷阱刷新窗口仍待核验'],
+  return { id: shuraKidomaruIds.hero, skills: [basic, trap, city], aiCoverage: 'verified',
+    aiCoverageNotes: ['按当前社区AI条目实现：无魂网时对随机敌方（含召唤物）使用2技能；有魂网或2技能处于冷却时对随机敌方使用3技能。目标少于2个或存在低血敌人不会覆盖这两条技能分支；技能不可用或鬼火不足时由行动执行器回退普攻。随机目标使用模拟随机序列并有专项回归。'], mechanicsCoverage: 'partial',
+    mechanicsCoverageNotes: ['失魂按客户端等级表使用60%基础概率，陷阱技能三级起升至80%，并对怪物无效；回合开始强制普攻使用基础概率、施加者命中及目标抵抗判定；新目标抵抗时保留旧失魂标记，仅在成功附加后替换；魂网跨技能加层保持单一状态实例，减伤与四级追猎加层按对应技能等级判定；魂网减层和追猎不受被动封印影响；追猎绝击只抑制受击方御魂、保留攻击方御魂触发；无法行动或已阵亡时仍按回合结束减层，但不追加追猎，阵亡期间的正式回合结束事件有专项runBattle回归；骨锁拥魂客户端技能行maxCd=2，模拟在施放行动结束后保留冷却、下一自身回合结束到期，并覆盖到期后重施移除旧陷阱；五级追猎绝击的其余客户端触发窗口仍部分覆盖'],
     initialize(context, unitId) {
       const unit = context.getUnit(unitId); if (!unit) return [];
       const sameHero = context.state.sides[unit.side].map(id => context.getUnit(id)).filter(other => other?.heroId === shuraKidomaruIds.hero);
@@ -101,11 +108,18 @@ export function createShuraKidomaruDefinition(): HeroDefinition {
     policy(context, unitId) {
       const actor = context.getUnit(unitId); if (!actor || actor.hp <= 0) return undefined;
       const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue'); if (!enemies.length) return undefined;
-      const net = netStatus(actor); const fire = context.state.resources[actor.side]?.fire ?? 0;
-      if (!net && fire >= 2) return intent(unitId, shuraKidomaruIds.trapSkill, [enemies[0]!.unitId], 'single');
-      if (net && fire >= 3) return intent(unitId, shuraKidomaruIds.citySkill,
-        net ? enemies.map(enemy => enemy.unitId) : [enemies[0]!.unitId], 'multi');
-      return intent(unitId, shuraKidomaruIds.basic, [enemies[0]!.unitId], 'single');
+      const net = netStatus(actor); const trapOnCooldown = hasStatus(actor, shuraKidomaruIds.trapCooldown);
+      const fire = context.state.resources[actor.side]?.fire ?? 0;
+      if (!net && !trapOnCooldown && fire >= 2) {
+        const target = enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!;
+        return intent(unitId, shuraKidomaruIds.trapSkill, [target.unitId], 'single');
+      }
+      if ((net || trapOnCooldown) && fire >= 3) {
+        const target = enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!;
+        return intent(unitId, shuraKidomaruIds.citySkill, [target.unitId], 'multi');
+      }
+      const target = enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!;
+      return intent(unitId, shuraKidomaruIds.basic, [target.unitId], 'single');
     },
     handlers: {
       'effect-resolution': { priority: 110, handle(context, event) {
@@ -121,7 +135,9 @@ export function createShuraKidomaruDefinition(): HeroDefinition {
           targetId: mark.targetId, instanceIds: [mark.instanceId], reason: 'replaced' as const, parentEventId: event.eventId }));
       } },
       'turn-start': { priority: 110, handle: (context, event) => onMarkTurnStart(context, event) },
-      'turn-end': { priority: 110, handle: (context, event) => onNetDeplete(context, event) },
+      'turn-end': { priority: 110, handle(context, event) {
+        return [...(onNetDeplete(context, event) ?? []), ...(onTrapCooldownTurnEnd(context, event) ?? [])];
+      } },
       'control-application': { priority: 110, handle: (context, event) => onControlBlocked(context, event) },
       hit: { priority: 110, handle: (context, event) => onCityHit(context, event) },
     } };
@@ -157,6 +173,19 @@ function onNetDeplete(context: BattleContext, event: BattleEvent): EffectCommand
   return reduceNet(context, actor, event.eventId);
 }
 
+function onTrapCooldownTurnEnd(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
+  if (event.type !== 'turn-ended') return;
+  const actor = context.getUnit(event.unitId);
+  const cooldown = actor?.statuses.find(status => status.statusId === shuraKidomaruIds.trapCooldown);
+  if (!actor || actor.heroId !== shuraKidomaruIds.hero || !cooldown
+    || Number(cooldown.values?.castAction ?? -1) === (event.actionId ?? context.state.counters.action)) return;
+  const remaining = Math.max(0, Number(cooldown.values?.remaining ?? 1) - 1);
+  if (remaining === 0) return [{ type: 'remove-status-instances', source: cooldown.source, targetId: actor.unitId,
+    instanceIds: [cooldown.instanceId], reason: 'consumed', parentEventId: event.eventId }];
+  return [{ type: 'add-status', source: cooldown.source, targetId: actor.unitId, parentEventId: event.eventId,
+    instance: { ...cooldown, values: { ...cooldown.values, remaining } } }];
+}
+
 function onControlBlocked(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'control-blocked') return;
   const actor = context.getUnit(event.targetId); if (!actor || actor.heroId !== shuraKidomaruIds.hero || !netStatus(actor)) return;
@@ -172,7 +201,8 @@ function reduceNet(context: BattleContext, actor: NonNullable<ReturnType<BattleC
     : { type: 'remove-statuses', source, targetId: actor.unitId, statusIds: [shuraKidomaruIds.soulNet], reason: 'consumed' }];
   if (net.stacks <= 1 && hasStatus(actor, shuraKidomaruIds.unique)) commands.push({ type: 'add-status', source, targetId: actor.unitId,
     instance: makeStatus(shuraKidomaruIds.trap, actor.unitId, source, { kind: 'permanent' }) });
-  if (skillRank(actor, shuraKidomaruIds.citySkill) >= 5 && lost % 2 === 0 && !context.isUnitUnableToAct(actor.unitId)) {
+  if (skillRank(actor, shuraKidomaruIds.citySkill) >= 5 && lost % 2 === 0
+    && actor.hp > 0 && !context.isUnitUnableToAct(actor.unitId)) {
     const targets = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
     const attack = context.getEffectiveStats(actor.unitId);
     if (targets.length && attack) {
@@ -207,7 +237,7 @@ function netDamageModifier(actor: NonNullable<ReturnType<BattleContext['getUnit'
 }
 function skillRank(unit: { skillLevel: number; skillLevels?: Readonly<Record<string, number>> }, skillId: string): number {
   const rank = unit.skillLevels?.[skillId];
-  return Number.isInteger(rank) ? Math.max(1, Math.min(5, rank!)) : Math.max(1, Math.min(5, unit.skillLevel));
+  return Number.isInteger(rank) ? Math.max(1, Math.min(6, rank!)) : Math.max(1, Math.min(6, unit.skillLevel));
 }
 function netStatus(unit: NonNullable<ReturnType<BattleContext['getUnit']>>): StatusInstance | undefined {
   return unit.statuses.find(status => status.statusId === shuraKidomaruIds.soulNet);

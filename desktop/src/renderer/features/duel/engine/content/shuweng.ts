@@ -174,5 +174,5 @@ function attack(context: BattleContext, owner: Readonly<UnitState>, target: Read
 function lowestRatio(units: readonly UnitState[]): UnitState | undefined {
   return units.slice().sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp))[0];
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function shuwengSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

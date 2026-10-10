@@ -30,12 +30,17 @@ export function registerShutenDoji(registry: ContentRegistry): void {
     mechanicsCoverage: 'partial',
     initialize(context, unitId) {
       const unit = context.getUnit(unitId);
-      return unit && (unit.skillLevel ?? 1) >= 5 ? addRage(unit, 2, 'initialization') : [];
+      // 客户端 2192 被动 lv5：「获得 2 层 buff」⇒ 开局加怒按 2192 的等级
+      return unit && (unit.skillLevels?.[shutenDojiIds.passive] ?? unit.skillLevel ?? 1) >= 5
+        ? addRage(unit, 2, 'initialization') : [];
     },
     modifyIncomingDamage(_attacker, target, amount) {
       if (!passivesEnabled(target)) return amount * .9;
       const rage = target.statuses.find(status => status.statusId === shutenDojiIds.rage)?.stacks ?? 0;
-      const perStack = rageDamageReduction[Math.max(0, Math.min(4, target.skillLevel - 1))]!;
+      // 客户端 2192（被动）逐级 param4 = 0.05/0.1/0.15「每层使自身受到的伤害减少 5%/10%/15%」，
+      // 与 rageDamageReduction [0,.05,.1,.15,.15] 一致 ⇒ 按 2192 的等级
+      const perStack = rageDamageReduction[Math.max(0, Math.min(4,
+        (target.skillLevels?.[shutenDojiIds.passive] ?? target.skillLevel ?? 1) - 1))]!;
       return amount * .9 * (1 - perStack * rage);
     },
     handlers: {

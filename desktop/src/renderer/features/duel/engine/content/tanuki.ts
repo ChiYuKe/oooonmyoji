@@ -17,6 +17,16 @@ export const tanukiIds = {
 } as const;
 
 const basicRatios = [1, 1.05, 1.1, 1.15, 1.2] as const;
+
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端 2082 被动逐级文本：
+ *   lv2「瞬时效果数值增至 0.5」/ lv3「被吵醒时，将增加自身 30% 行动条」
+ *   / lv4「醉倒概率增至」/ lv5「被吵醒时，改为对敌方全体附上 1 层 buff」
+ * ⇒ 本文件的 `skillLevel` 判定都应按 2082 的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
 const ultDamageRatios = [.12, .14, .16, .18, .2] as const;
 const ultHealRatios = [.18, .18, .18, .18, .18] as const;
 const drunkHealRatios = [.06, .08, .08, .08, .08] as const;
@@ -142,9 +152,9 @@ function wakeWhenHit(context: BattleContext, event: BattleEvent): EffectCommand[
   const source = tanukiSource(tanukiIds.passive, target.unitId);
   const commands: EffectCommand[] = [{ type: 'remove-status-instances', source, targetId: target.unitId,
     instanceIds: [drunk.instanceId], reason: 'consumed', parentEventId: event.eventId }];
-  if (target.skillLevel >= 3) commands.push({ type: 'change-action-gauge', source, targetId: target.unitId,
+  if (rank(target, tanukiIds.passive) >= 3) commands.push({ type: 'change-action-gauge', source, targetId: target.unitId,
     amount: 30, parentEventId: event.eventId });
-  if (target.skillLevel >= 5) {
+  if (rank(target, tanukiIds.passive) >= 5) {
     for (const enemy of context.getLivingUnits(attacker.side)) commands.push(...addSake(target.unitId, enemy, source)
       .map(command => ({ ...command, parentEventId: event.eventId })));
   } else {
@@ -167,7 +177,7 @@ function wakeAtTurnStart(context: BattleContext, event: BattleEvent): EffectComm
   commands.push({ type: 'remove-status-instances', source, targetId: actor.unitId, instanceIds: [drunk.instanceId],
     reason: 'consumed', parentEventId: event.eventId });
   if (passivesEnabled(actor)) {
-    const ratio = drunkHealRatios[Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+    const ratio = drunkHealRatios[Math.max(0, Math.min(4, rank(actor, tanukiIds.passive) - 1))]!;
     commands.push({ type: 'heal', source, targetId: actor.unitId, amount: actor.stats.hp * ratio, parentEventId: event.eventId });
   }
   return commands;
@@ -177,7 +187,7 @@ function fallAsleep(context: BattleContext, event: BattleEvent): EffectCommand[]
   if (event.type !== 'turn-ended') return;
   const actor = context.getUnit(event.unitId);
   if (!actor || actor.heroId !== tanukiIds.hero || actor.hp <= 0 || !passivesEnabled(actor)) return;
-  const chance = actor.skillLevel >= 4 ? .4 : .2;
+  const chance = rank(actor, tanukiIds.passive) >= 4 ? .4 : .2;
   if (context.random() >= chance) return;
   const source = tanukiSource(tanukiIds.passive, actor.unitId);
   return [{ type: 'add-status', source, targetId: actor.unitId, parentEventId: event.eventId,

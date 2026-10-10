@@ -117,7 +117,9 @@ function createLuckyRing(): SkillDefinition {
 function freeDanceAfterTransform(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'control-applied' || event.statusId !== yamausagiIds.transform || !event.source.unitId) return;
   const actor = context.getUnit(event.source.unitId);
-  if (!actor || actor.heroId !== yamausagiIds.hero || actor.hp <= 0 || actor.skillLevel < 5) return;
+  // 客户端 2373（兔子舞·环）lv5：「…若有成功触发变形，则立即施放一次无消耗的『兔子舞』」⇒ 按 2373 的等级
+  if (!actor || actor.heroId !== yamausagiIds.hero || actor.hp <= 0
+    || (actor.skillLevels?.[yamausagiIds.ring] ?? actor.skillLevel ?? 1) < 5) return;
   const allies = context.getLivingUnits(actor.side);
   if (allies.length === 0) return;
   return [{ type: 'schedule-action', source: yamausagiSource(yamausagiIds.ring, actor.unitId),

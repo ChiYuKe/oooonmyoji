@@ -176,7 +176,7 @@ function attack(context: BattleContext, actor: Readonly<UnitState>, target: Read
   return [{ type: 'deal-damage', source: embalmerSource(skillId, actor.unitId), targetId: target.unitId, amount: hit.amount,
     ...(hit.damageOptions ? { damageOptions: hit.damageOptions } : {}), isCritical: hit.isCritical, ...(parentEventId ? { parentEventId } : {}) }];
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function lowestRatio(units: readonly Readonly<UnitState>[]): Readonly<UnitState> { return [...units].sort((left, right) =>
   left.hp / Math.max(1, left.stats.hp) - right.hp / Math.max(1, right.stats.hp))[0]!; }
 function embalmerIntent(actorId: string, skillId: string, targetId: string, shape: ActionIntent['shape'], targetRelation: ActionIntent['targetRelation']): ActionIntent {

@@ -1,7 +1,7 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
 import type { ContentRegistry } from './registry';
@@ -11,8 +11,11 @@ const basicRatios = [.5, .52, .54, .56, .6] as const;
 const detonationRatios = [.75, .8, .85, .9, .9] as const;
 
 export function registerScorpionGirl(registry: ContentRegistry): void {
+  // 客户端 `[3503, 1]`「每层降低 80 点防御，上限 5 层…」且 `indirectDmgType = 1`
+  // ⇒ 每层计入目标的间接伤害层数（getIndirectBuffLv）
   registry.registerStatus({ id: scorpionGirlIds.poison, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
-    sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5, stackScope: 'source-unit' });
+    sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5, stackScope: 'source-unit',
+    indirectDamageLevel: 1 });
   registry.registerHero(createScorpionGirlDefinition());
 }
 
@@ -54,7 +57,9 @@ export function createScorpionGirlDefinition(): HeroDefinition {
 
       const indirectRatio = Number(parameters.ratio ?? .75);
       const indirect = calculateIndirectDamage({ attack, defense: defense.defense,
-        defenseIgnore: effectiveDefenseIgnore(owner), ratio: indirectRatio, critDamage: offense.critDamage }, context.random);
+        defenseIgnore: effectiveDefenseIgnore(owner), ratio: indirectRatio, critDamage: offense.critDamage,
+        // 蝎女自己的层（`[3503]` indirectDmgType=1，每层计入 getIndirectBuffLv）⇒ 额外无视 层数×10
+        layers: indirectBuffLv(target) }, context.random);
       commands.push({ type: 'lose-life', source, targetId: target.unitId, amount: indirect.amount, lifeLossKind: 'indirect' });
       const healRatio = skillRank(owner, scorpionGirlIds.passive) >= 3 ? .3 : .2;
       commands.push(...detonationHealing(context, owner, source, indirect.amount * healRatio));
@@ -137,7 +142,7 @@ function scorpionPoisonTick(context: BattleContext, event: BattleEvent): EffectC
     const attack = scorpionAttack(context, owner), offense = context.getEffectiveStats(owner.unitId) ?? owner.stats;
     const defense = context.getEffectiveStats(target.unitId) ?? target.stats;
     const result = calculateIndirectDamage({ attack, defense: defense.defense, defenseIgnore: effectiveDefenseIgnore(owner),
-      ratio: .9, critDamage: offense.critDamage }, context.random);
+      ratio: .9, critDamage: offense.critDamage, layers: indirectBuffLv(target) }, context.random);
     commands.push({ type: 'lose-life', source: scorpionSource(scorpionGirlIds.skill, owner.unitId), targetId: target.unitId,
       amount: result.amount, lifeLossKind: 'indirect', parentEventId: event.eventId });
   }
@@ -167,6 +172,6 @@ function scorpionAttack(context: BattleContext, owner: Readonly<UnitState>): num
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function scorpionSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

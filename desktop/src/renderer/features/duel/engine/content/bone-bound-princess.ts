@@ -2,7 +2,7 @@ import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { attemptDebuff } from '../mechanics/control';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import type { ContentRegistry } from './registry';
 
@@ -236,7 +236,7 @@ function serpentVenomTick(context: BattleContext, event: BattleEvent): EffectCom
     const attack = context.getEffectiveStats(owner.unitId) ?? owner.stats;
     const defense = context.getEffectiveStats(target.unitId) ?? target.stats;
     const damage = calculateIndirectDamage({ attack: attack.attack, defense: defense.defense,
-      defenseIgnore: effectiveDefenseIgnore(owner), ratio: .99, critDamage: attack.critDamage }, context.random);
+      defenseIgnore: effectiveDefenseIgnore(owner), ratio: .99, critDamage: attack.critDamage , layers: indirectBuffLv(target)}, context.random);
     commands.push({ type: 'lose-life', source: source(boneBoundPrincessIds.serpentBasic, owner.unitId),
       targetId: target.unitId, amount: damage.amount, lifeLossKind: 'indirect', parentEventId: event.eventId });
   }

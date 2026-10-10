@@ -85,8 +85,10 @@ function applyHauntAfterUltimate(context: BattleContext, event: BattleEvent): Ef
   if (event.type !== 'attack-ended' || event.source.id !== samuraiSpiritIds.ultimate || !event.source.unitId) return;
   const actor = context.getUnit(event.source.unitId);
   if (!actor || actor.heroId !== samuraiSpiritIds.hero) return;
+  // 客户端 2223（大招）逐级 param1 = 0.54/0.57/0.6/0.63/0.65 与 ultimateRatios 一致 ⇒ 按 2223 的等级
   const parameters = ultimateRatios.map((ratio, index) => ({ ratio, hauntRatio: hauntRatios[index]!, hitReduction: hitReduction[index]! }))
-    [Math.max(0, Math.min(actor.skillLevel - 1, ultimateRatios.length - 1))]!;
+    [Math.max(0, Math.min((actor.skillLevels?.[samuraiSpiritIds.ultimate] ?? actor.skillLevel ?? 1) - 1,
+      ultimateRatios.length - 1))]!;
   const commands: EffectCommand[] = [];
   for (const targetChange of event.targetHealthChanges ?? []) {
     const target = context.getUnit(targetChange.targetId);
@@ -129,7 +131,9 @@ function firePenaltyOnHauntDispel(context: BattleContext, event: BattleEvent): E
     || !event.removedSource?.unitId) return;
   const owner = context.getUnit(event.removedSource.unitId);
   const target = context.getUnit(event.targetId);
-  if (!owner || owner.heroId !== samuraiSpiritIds.hero || owner.skillLevel < 5 || !target) return;
+  // 客户端 2222 被动 lv5：「[buff] 被驱散时，目标削减 1 点鬼火」⇒ 按 2222 的等级
+  if (!owner || owner.heroId !== samuraiSpiritIds.hero
+    || (owner.skillLevels?.[samuraiSpiritIds.passive] ?? owner.skillLevel ?? 1) < 5 || !target) return;
   return [{ type: 'change-resource', source: source(samuraiSpiritIds.passive, owner.unitId), side: target.side,
     resourceId: 'fire', amount: -1, parentEventId: event.eventId }];
 }

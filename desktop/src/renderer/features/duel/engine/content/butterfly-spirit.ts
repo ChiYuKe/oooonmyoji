@@ -1,5 +1,5 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
-import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef } from '../core/types';
+import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { effectiveStats } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
@@ -21,6 +21,14 @@ const speedPerLayer = [10, 20, 20, 30, 30] as const;
 const healRatios = [.3, .31, .33, .34, .36] as const;
 const damageHealRatios = [.08, .09, .1, .11, .12] as const;
 
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端 2412 被动 lv5：「生命比例门槛降至 20% 生命，当自身获得 4 层轻盈时，
+ * 施放「祈愿之舞」消耗鬼火**减少 2 点**」⇒ 火耗 2→0 的判定应按 2412 的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 export function registerButterflySpirit(registry: ContentRegistry): void {
   registry.registerStatus({ id: butterflySpiritIds.lightness, mechanicsCoverage: 'partial', category: 'buff', dispellable: true,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace' });
@@ -35,7 +43,7 @@ export function registerButterflySpirit(registry: ContentRegistry): void {
     resourceCost: { resourceId: 'fire', amount: 2 },
     resolveResourceCost(state, actor) {
       const lightness = actor.statuses.find(status => status.statusId === butterflySpiritIds.lightness);
-      return { resourceId: 'fire', amount: actor.skillLevel >= 5 && (lightness?.stacks ?? 0) >= 4 ? 0 : 2 };
+      return { resourceId: 'fire', amount: rank(actor, butterflySpiritIds.passive) >= 5 && (lightness?.stacks ?? 0) >= 4 ? 0 : 2 };
     },
     target: 'single',
     targetRelation: 'ally',
@@ -82,7 +90,7 @@ export function registerButterflySpirit(registry: ContentRegistry): void {
         - right.hp / Math.max(1, right.stats.hp))[0]!;
       const fire = context.state.resources[actor.side]?.fire ?? 0;
       const lightness = actor.statuses.find(status => status.statusId === butterflySpiritIds.lightness);
-      const skillCost = actor.skillLevel >= 5 && (lightness?.stacks ?? 0) >= 4 ? 0 : 2;
+      const skillCost = rank(actor, butterflySpiritIds.passive) >= 5 && (lightness?.stacks ?? 0) >= 4 ? 0 : 2;
       if (target.hp / Math.max(1, target.stats.hp) < .75 && fire >= skillCost) {
         return { actorId: actor.unitId, skillId: butterflySpiritIds.wishDance,
           targetIds: [target.unitId], shape: 'single', targetRelation: 'ally' };
@@ -144,7 +152,9 @@ function updateLightness(context: BattleContext, event: BattleEvent): EffectComm
       const unit = context.getUnit(unitId);
       if (!unit || unit.heroId !== butterflySpiritIds.hero || unit.hp <= 0) continue;
       const previous = unit.statuses.find(status => status.statusId === butterflySpiritIds.lightness);
-      const levelIndex = Math.max(0, Math.min(speedThresholds.length - 1, unit.skillLevel - 1));
+      // 客户端 2412（被动）lv3-5「生命比例门槛降至」param1 = 0.25/0.25/0.2，与 speedThresholds 一致 ⇒ 按 2412 的等级
+      const levelIndex = Math.max(0, Math.min(speedThresholds.length - 1,
+        rank(unit, butterflySpiritIds.passive) - 1));
       const threshold = speedThresholds[levelIndex]!;
       const amountPerLayer = speedPerLayer[levelIndex]!;
       const layers = passivesEnabled(unit) ? Math.max(0, Math.floor((1 - lowestRatio + 1e-9) / threshold)) : 0;

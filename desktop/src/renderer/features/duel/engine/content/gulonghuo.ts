@@ -28,7 +28,7 @@ export function registerGulonghuo(registry: ContentRegistry): void {
       const actor = context.getUnit(intent.actorId);
       const target = intent.targetIds.map(id => context.getUnit(id)).find(unit => unit && unit.hp > 0 && unit.unitId !== actor?.unitId);
       if (!actor || actor.heroId !== gulonghuoIds.hero || actor.hp <= 0 || !target) return [];
-      const rank = Math.max(1, Math.min(5, Number(parameters.rank ?? actor.skillLevel)));
+      const rank = Math.max(1, Math.min(6, Number(parameters.rank ?? actor.skillLevel)));
       const damageBonus = Number(parameters.damageBonus ?? damageBonusByLevel[rank - 1]);
       return applyEvilPrank(context, actor.unitId, target.unitId, damageBonus);
     },
@@ -84,7 +84,9 @@ function recoverFireWhenAttacked(context: BattleContext, event: BattleEvent): Ef
   if (!target || target.hp <= 0 || target.heroId !== gulonghuoIds.hero || target.unitKind === 'summon'
     || !passivesEnabled(target)) return;
   const fire = context.state.resources[target.side]?.fire ?? 0;
-  if (fire >= 8 || context.random() >= fireRecoveryChances[skillIndex(target.skillLevel)]!) return;
+  // 客户端 2742（被动）lv2「触发概率增至」⇒ 鬼火回复概率表按 2742 的等级
+  if (fire >= 8 || context.random() >= fireRecoveryChances[skillIndex(
+    target.skillLevels?.[gulonghuoIds.passive] ?? target.skillLevel ?? 1)]!) return;
   return [{ type: 'change-resource', source: gulonghuoSource(gulonghuoIds.passive, target.unitId), side: target.side,
     resourceId: 'fire', amount: 1, parentEventId: event.eventId }];
 }

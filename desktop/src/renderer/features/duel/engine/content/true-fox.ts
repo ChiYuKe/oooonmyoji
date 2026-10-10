@@ -16,6 +16,17 @@ export const trueFoxIds = {
   hitProgress: 'status.hero.559.hit-progress',
 } as const;
 
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端逐级证据（`game-skill-data.generated.json`）：
+ *   5592 passive lv2「灵狐守护提高至攻击 140%」→ lv3「汲魄：每攻击 1 个目标，自身增加 10% 行动条」
+ *        → lv4「灵狐守护消失时，恢复自身剩余护盾量 80% 生命」→ lv5「先机：获得灵狐守护与 3 层心焰」
+ *   5593 skill   lv5「直接触发选中目标的狐印」；逐级 addDmg = 1.05/1.25/1.35/1.45/1.45
+ * ⇒ 本文件的 `skillLevel` 判定要分别按 passive(5592) / skill(5593) 的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 /** 本真三尾狐 migration. Reactive threshold hits use the attack event window. */
 export function registerTrueFox(registry: ContentRegistry): void {
   registry.registerStatus({ id: trueFoxIds.guard, mechanicsCoverage: 'verified', category: 'shield', dispellable: false,
@@ -64,8 +75,8 @@ export function createTrueFoxDefinition(): HeroDefinition {
     mechanicsCoverage: 'partial',
     initialize(context, unitId) {
       const unit = context.getUnit(unitId);
-      if (!unit || unit.skillLevel < 5) return [];
-      return [guardCommand(unit, context.getEffectiveStats(unitId)?.attack ?? unit.stats.attack, unit.skillLevel, 'opening'),
+      if (!unit || rank(unit, trueFoxIds.passive) < 5) return [];
+      return [guardCommand(unit, context.getEffectiveStats(unitId)?.attack ?? unit.stats.attack, rank(unit, trueFoxIds.passive), 'opening'),
         flamesCommand(unit, 3, trueFoxIds.passive)];
     },
     handlers: {
@@ -118,7 +129,7 @@ export function createTrueFoxDefinition(): HeroDefinition {
           const ratios = [1.05, 1.25, 1.35, 1.45, 1.45];
           const result = context.calculateDamage({ attack: actorStats.attack, defense: targetStats.defense,
             defenseIgnore: effectiveDefenseIgnore(attacker),
-            ratio: ratios[Math.max(0, Math.min(4, attacker.skillLevel - 1))]!, critChance: actorStats.crit, critDamage: actorStats.critDamage }, attacker, target);
+            ratio: ratios[Math.max(0, Math.min(4, rank(attacker, trueFoxIds.skill) - 1))]!, critChance: actorStats.crit, critDamage: actorStats.critDamage }, attacker, target);
           commands.push({ type: 'add-status', source: updated.source, targetId: attacker.unitId,
             instance: { ...updated, values: { hits: hits + 1, nextThreshold: nextThreshold - .25 } }, parentEventId: event.eventId });
           commands.push({ type: 'deal-damage', source: { kind: 'skill', id: trueFoxIds.skill, unitId: attacker.unitId },
@@ -134,7 +145,7 @@ export function createTrueFoxDefinition(): HeroDefinition {
         if (event.source.unitId && event.source.id === trueFoxIds.skill) {
           const actor = context.getUnit(event.source.unitId);
           const primary = event.targetHealthChanges?.[0] && context.getUnit(event.targetHealthChanges[0].targetId);
-          if (actor?.skillLevel === 5 && primary && primary.hp > 0) commands.push(foxSealCommand(actor, primary,
+          if (actor && rank(actor, trueFoxIds.skill) === 5 && primary && primary.hp > 0) commands.push(foxSealCommand(actor, primary,
             context.getEffectiveStats(actor.unitId)?.attack ?? actor.stats.attack, `${event.eventId}:primary-mark`));
           if (actor) commands.push({ type: 'remove-statuses', source: { kind: 'system', id: 'fox-hit-sequence', unitId: actor.unitId },
             targetId: actor.unitId, statusIds: [trueFoxIds.hitProgress], reason: 'consumed', parentEventId: event.eventId });
@@ -165,7 +176,7 @@ export function createTrueFoxDefinition(): HeroDefinition {
               scheduling: 'assist', hits: [{ targetId: target.unitId, amount: result.amount, ...(result.damageOptions ? { damageOptions: result.damageOptions } : {}),
                 ...(result.isCritical ? { criticalBaseAmount: result.amount / Math.max(1, foxStats.critDamage) } : {}), isCritical: result.isCritical }],
               parentEventId: event.eventId });
-            if (fox.skillLevel >= 3) commands.push({ type: 'change-action-gauge', source: { kind: 'skill', id: trueFoxIds.followUp,
+            if (rank(fox, trueFoxIds.passive) >= 3) commands.push({ type: 'change-action-gauge', source: { kind: 'skill', id: trueFoxIds.followUp,
               unitId: fox.unitId }, targetId: fox.unitId, amount: 10, parentEventId: event.eventId });
             if (target.hp > 0) commands.push(foxSealCommand(fox, target, foxStats.attack, `${event.eventId}:follow-mark:${target.unitId}`));
           }
@@ -186,18 +197,18 @@ export function createTrueFoxDefinition(): HeroDefinition {
         const oldShield = Number(guard?.values?.shieldRemaining ?? 0);
         if (guard) commands.push({ type: 'remove-statuses', source: { kind: 'skill', id: trueFoxIds.passive, unitId: fox.unitId },
           targetId: fox.unitId, statusIds: [trueFoxIds.guard], reason: 'consumed', parentEventId: event.eventId });
-        if (oldShield > 0 && fox.skillLevel >= 4) commands.push({ type: 'heal',
+        if (oldShield > 0 && rank(fox, trueFoxIds.passive) >= 4) commands.push({ type: 'heal',
           source: { kind: 'skill', id: trueFoxIds.passive, unitId: fox.unitId }, targetId: fox.unitId, amount: oldShield * .8,
           parentEventId: event.eventId });
         const attack = context.getEffectiveStats(fox.unitId)?.attack ?? fox.stats.attack;
-        commands.push(guardCommand(fox, attack, fox.skillLevel, String(context.state.counters.action)), flamesCommand(fox, 3, trueFoxIds.passive));
+        commands.push(guardCommand(fox, attack, rank(fox, trueFoxIds.passive), String(context.state.counters.action)), flamesCommand(fox, 3, trueFoxIds.passive));
         return commands;
       } },
       'status-expiration': { priority: 10, handle(context, event) {
         if (event.type !== 'status-removed' || event.reason !== 'expired' || event.statusId !== trueFoxIds.guard) return;
         const target = context.getUnit(event.targetId);
         const remaining = Number(event.removedValues?.shieldRemaining ?? 0);
-        if (!target || target.heroId !== trueFoxIds.hero || target.skillLevel < 4 || remaining <= 0) return;
+        if (!target || target.heroId !== trueFoxIds.hero || rank(target, trueFoxIds.passive) < 4 || remaining <= 0) return;
         return [{ type: 'heal', source: { kind: 'skill', id: trueFoxIds.passive, unitId: target.unitId }, targetId: target.unitId,
           amount: remaining * .8, parentEventId: event.eventId }];
       } },

@@ -237,7 +237,10 @@ function tomatoDispelOnHit(context: BattleContext, event: BattleEvent): EffectCo
 function inviteTomato(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'attack-ended' || !event.source.unitId) return;
   const owner = context.getUnit(event.source.unitId);
-  if (!owner || owner.heroId !== jumpingSisterIds.hero || owner.unitKind === 'summon' || owner.skillLevel < 5) return;
+  // 客户端 2263（召唤）lv5：「跳跳妹妹攻击时，将邀战番茄」⇒ 按 2263 的等级
+  // （2262 被动明确写「此技能无法升级」，故这里不能用被动等级）
+  if (!owner || owner.heroId !== jumpingSisterIds.hero || owner.unitKind === 'summon'
+    || (owner.skillLevels?.[jumpingSisterIds.summon] ?? owner.skillLevel ?? 1) < 5) return;
   const targetId = event.targetHealthChanges?.[0]?.targetId;
   const tomato = context.getLivingUnits(owner.side).find(unit => unit.unitKind === 'summon'
     && unit.summonedByUnitId === owner.unitId && unit.statuses.some(status => status.statusId === jumpingSisterIds.tomato));

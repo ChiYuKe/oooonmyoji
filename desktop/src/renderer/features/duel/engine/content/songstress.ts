@@ -1,5 +1,5 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
-import type { ActionIntent, EffectCommand, StatusInstance } from '../core/types';
+import type { ActionIntent, EffectCommand, StatusInstance, UnitState } from '../core/types';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import type { ContentRegistry } from './registry';
 
@@ -14,6 +14,18 @@ export const songstressIds = {
 } as const;
 
 const basicRatios = [1, 1.05, 1.1, 1.15, 1.25] as const;
+
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端逐级文本（巡音流歌 582）：
+ *   5822 lv2「自身脱离控制后，提升 40 点速度，持续 1 回合」→ lv3「提升速度增至 60 点」
+ *        → lv4「每有 40% 初始效果抵抗，获得 10% 减伤」
+ *        → lv5「消耗 buff 驱散时，使目标获得 buff，持续 2 回合」
+ *   5823 lv5「消耗鬼火减少 1 点」
+ * ⇒ 本文件的 `skillLevel` 判定要分别按 passive(5822) / tour(5823) 的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
 
 /** Modular migration for 巡音流歌. Seal interactions and summon filtering remain partial. */
 export function registerSongstress(registry: ContentRegistry): void {
@@ -95,7 +107,7 @@ export function createSongstressDefinition(): HeroDefinition {
     aiCoverage: 'verified',
     mechanicsCoverage: 'partial',
     modifyIncomingDamage(_attacker, target, amount) {
-      if (target.skillLevel < 4) return amount;
+      if (rank(target, songstressIds.passive) < 4) return amount;
       const reduction = Math.min(.9, Math.floor(Math.max(0, target.stats.resist) / .4) * .1);
       return amount * (1 - reduction);
     },
@@ -130,16 +142,19 @@ export function createSongstressDefinition(): HeroDefinition {
         const target = context.getUnit(event.targetId);
         if (!target) return;
         const commands: EffectCommand[] = [];
-        if (event.statusCategory === 'control' && target.heroId === songstressIds.hero && target.hp > 0 && target.skillLevel >= 2) {
-          const amount = target.skillLevel >= 3 ? 60 : 40;
+        if (event.statusCategory === 'control' && target.heroId === songstressIds.hero && target.hp > 0
+          && rank(target, songstressIds.passive) >= 2) {
+          const amount = rank(target, songstressIds.passive) >= 3 ? 60 : 40;
           commands.push({ type: 'add-status', source: { kind: 'skill', id: songstressIds.passive, unitId: target.unitId },
             targetId: target.unitId, instance: { instanceId: `${songstressIds.controlSpeed}:${target.unitId}:${context.state.counters.action}`,
               statusId: songstressIds.controlSpeed, source: { kind: 'skill', id: songstressIds.passive, unitId: target.unitId },
               stacks: 1, duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, modifiers: [{ stat: 'speed', operation: 'flat', amount }] },
             parentEventId: event.eventId });
         }
-        if (event.reason === 'dispelled' && event.source.kind === 'skill' && event.source.id === songstressIds.tour
-          && (context.getUnit(event.source.unitId ?? '')?.skillLevel ?? 0) >= 4
+        // 客户端 5823 lv4：「施放后，若友方目标仍承受控制，额外增加其 30% 行动条」⇒ 按 tour 的等级
+        const tourCaster = event.reason === 'dispelled' && event.source.kind === 'skill'
+          && event.source.id === songstressIds.tour ? context.getUnit(event.source.unitId ?? '') : undefined;
+        if (tourCaster && rank(tourCaster, songstressIds.tour) >= 4
           && target.statuses.some(status => status.instanceId !== event.instanceId)) {
           const remainingControl = target.statuses.some(status => status.instanceId !== event.instanceId
             && context.getStatusCategory(status.statusId) === 'control');
@@ -148,7 +163,8 @@ export function createSongstressDefinition(): HeroDefinition {
         }
         const harmonySinger = event.source.kind === 'skill' && event.source.id === songstressIds.passive
           ? context.getUnit(event.source.unitId ?? '') : undefined;
-        if (event.reason === 'dispelled' && harmonySinger?.heroId === songstressIds.hero && harmonySinger.skillLevel >= 5
+        if (event.reason === 'dispelled' && harmonySinger?.heroId === songstressIds.hero
+          && rank(harmonySinger, songstressIds.passive) >= 5
           && event.statusCategory && ['control', 'debuff'].includes(event.statusCategory)) {
           const current = target.statuses.find(status => status.statusId === songstressIds.resonanceWall
             && status.source.unitId === harmonySinger.unitId);
@@ -196,7 +212,7 @@ export function createSongstressDefinition(): HeroDefinition {
       const allies = context.getLivingUnits(actor.side);
       const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
       if (enemies.length === 0) return undefined;
-      const cost = actor.skillLevel >= 5 ? 2 : 3;
+      const cost = rank(actor, songstressIds.tour) >= 5 ? 2 : 3;
       if ((context.state.resources[actor.side]?.fire ?? 0) >= cost) return { actorId: unitId, skillId: songstressIds.tour,
         targetIds: allies.map(ally => ally.unitId), shape: 'all-allies', targetRelation: 'ally' };
       return { actorId: unitId, skillId: songstressIds.basic, targetIds: [enemies[0]!.unitId], shape: 'single', targetRelation: 'enemy' };

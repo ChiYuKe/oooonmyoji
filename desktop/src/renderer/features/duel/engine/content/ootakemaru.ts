@@ -35,10 +35,10 @@ export function registerOotakemaru(registry: ContentRegistry): void {
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
   registry.registerStatus({ id: ootakemaruIds.rockBonusStatus, mechanicsCoverage: 'partial', category: 'other',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
-  registry.registerHero(createOotakemaruDefinition());
+  registry.registerHero(createOotakemaruDefinition(registry));
 }
 
-function createOotakemaruDefinition(): HeroDefinition {
+function createOotakemaruDefinition(registry: ContentRegistry): HeroDefinition {
   const basic = createBasic(ootakemaruIds.basic, false);
   const evolvedBasic = createBasic(ootakemaruIds.evolvedBasic, true);
   const shelterSkill: SkillDefinition = { id: ootakemaruIds.shelter, actionKind: 'passive', target: 'self',
@@ -54,6 +54,9 @@ function createOotakemaruDefinition(): HeroDefinition {
       const owner = context.getUnit(intent.actorId);
       const target = context.getUnit(intent.targetIds[0] ?? '');
       if (!owner || !target || target.hp <= 0 || target.side === owner.side || isBanished(target)) return [];
+      const enemies = context.getLivingUnits(opposingSide(owner.side));
+      if (enemies.length === 1 || hasBanishImmunity(target, statusId => registry.getStatus(statusId)))
+        return resolveUnopenedPrison(context, owner, target, enemies, Number(parameters.waveRatio ?? 2.85));
       return openPrison(context, owner, target, Number(parameters.waveRatio ?? 2.85), skillLevel(owner, ootakemaruIds.ultimate));
     },
   };
@@ -61,7 +64,7 @@ function createOotakemaruDefinition(): HeroDefinition {
     id: ootakemaruIds.hero,
     skills: [basic, shelterSkill, ultimate, evolvedBasic],
     aiCoverage: 'partial', mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['已接入麓鸣·轰/麓鸣·斩倍率、覆土之力20%至40%减伤与受击次数、无尽剑狱耗火/放逐/属性掠取上限/全体石浪/落石/行动条和麓鸣·斩伤害储存上限、队友普攻协战与三次必定协战。放逐免疫状态作用范围、特殊单敌/控制免疫时大招分支、覆土之力每次伤害封顶及盾刷新时点、插队和御魂交互需要真实战斗帧校准；大岳丸不在10点场阵容中。'],
+    mechanicsCoverageNotes: ['已接入麓鸣·轰/麓鸣·斩倍率、覆土之力20%至40%减伤与受击次数、无尽剑狱耗火/放逐/属性掠取上限/全体石浪/落石/行动条和麓鸣·斩伤害储存上限、队友普攻协战与三次必定协战。已按技能说明回归验证仅剩单敌或目标免疫放逐时不开启剑狱、全体承受石浪且选中目标受到双倍伤害；海原贝戟的免控/减益免疫不会被放逐绕过。其他特殊免疫状态作用范围、覆土之力每次伤害封顶及盾刷新时点、插队和御魂交互仍需实战帧校准；大岳丸不在10点场阵容中。'],
     initialize(context, unitId) {
       const owner = context.getUnit(unitId);
       if (!owner || !isOotakemaru(owner) || !passivesEnabled(owner)) return [];
@@ -165,6 +168,30 @@ function openPrison(context: BattleContext, owner: Readonly<UnitState>, target: 
       ...(hit.isCritical ? { criticalBaseAmount: hit.amount / Math.max(1, attack.critDamage) } : {}) });
   }
   return commands;
+}
+
+function resolveUnopenedPrison(context: BattleContext, owner: Readonly<UnitState>, target: Readonly<UnitState>,
+  enemies: readonly Readonly<UnitState>[], waveRatio: number): EffectCommand[] {
+  const source = ootakemaruSource(ootakemaruIds.ultimate, owner.unitId);
+  const attack = context.getEffectiveStats(owner.unitId) ?? owner.stats;
+  return enemies.map(enemy => {
+    const stats = context.getEffectiveStats(enemy.unitId) ?? enemy.stats;
+    const hit = context.calculateDamage({ attack: attack.attack, defense: stats.defense,
+      defenseIgnore: effectiveDefenseIgnore(owner), ratio: waveRatio * (enemy.unitId === target.unitId ? 2 : 1),
+      critChance: attack.crit, critDamage: attack.critDamage }, owner, enemy);
+    return { type: 'deal-damage' as const, source, targetId: enemy.unitId, amount: hit.amount,
+      ...(hit.damageOptions ? { damageOptions: hit.damageOptions } : {}), isCritical: hit.isCritical,
+      ...(hit.isCritical ? { criticalBaseAmount: hit.amount / Math.max(1, attack.critDamage) } : {}) };
+  });
+}
+
+function hasBanishImmunity(target: Readonly<UnitState>, resolveStatus: (statusId: string) => StatusDefinition | undefined): boolean {
+  return target.statuses.some(status => {
+    const definition = resolveStatus(status.statusId);
+    return definition?.preventsStatusApplications === true || definition?.statusImmunity === 'debuffs'
+      || definition?.controlImmunityTypes?.includes('放逐') === true
+      || definition?.controlProtection === 'immune' || definition?.controlProtection === 'single-application';
+  });
 }
 
 function onOwnerTurnStart(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
@@ -329,7 +356,7 @@ function intent(actorId: string, skillId: string, targetId: string): ActionInten
 function isOotakemaru(unit: Readonly<UnitState>): boolean { return unit.heroId === ootakemaruIds.hero && unit.unitKind !== 'summon'; }
 function isBanished(unit: Readonly<UnitState> | undefined): boolean { return Boolean(unit?.statuses.some(status => status.values?.banished === true)); }
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function opposingSide(side: UnitState['side']): UnitState['side'] { return side === 'blue' ? 'red' : 'blue'; }
 function ootakemaruSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

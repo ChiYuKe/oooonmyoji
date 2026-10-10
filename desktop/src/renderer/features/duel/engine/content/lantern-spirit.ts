@@ -74,8 +74,13 @@ export function createLanternSpiritDefinition(): HeroDefinition {
     },
     handlers: {
       'turn-start': { priority: 28, handle(context, event) { return grantLanternLight(context, event); } },
-      'attack-end': { priority: 28, handle(context, event) { return stealFireAndResolveDifference(context, event); } },
-      'action-end': { priority: 28, handle(context, event) { return consumeLanternLight(context, event); } },
+      // 命中即夺火（属施法过程内）
+      'attack-end': { priority: 28, handle(context, event) { return stealFireOnHit(context, event); } },
+      // 官方口径：「技能结算后」比较双方鬼火 ⇒ 必须在扣火（施法后）之后判定；
+      // 同一 phase 只能挂一个 handler，故与"消耗明灯"合并。
+      'action-end': { priority: 28, handle(context, event) {
+        return [...(consumeLanternLight(context, event) ?? []), ...(resolveFireAdvantage(context, event) ?? [])];
+      } },
       'unit-defeated': { priority: 28, handle(context, event) { return clearOwnerLanternLight(context, event); } },
     },
   };
@@ -136,7 +141,8 @@ function clearOwnerLanternLight(context: BattleContext, event: BattleEvent): Eff
   });
 }
 
-function stealFireAndResolveDifference(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
+/** 幽光/吸魂灯：命中后按概率夺取敌方 1 点鬼火（属施法过程内，仍在 attack-end）。 */
+function stealFireOnHit(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'attack-ended' || !event.source.unitId || !event.targetHealthChanges?.length
     || ![lanternSpiritIds.basic, lanternSpiritIds.ultimate].includes(event.source.id as typeof lanternSpiritIds.basic)) return;
   const actor = context.getUnit(event.source.unitId);
@@ -160,12 +166,28 @@ function stealFireAndResolveDifference(context: BattleContext, event: BattleEven
     commands.push({ type: 'change-resource', source, side: enemySide, resourceId: 'fire', amount: -1, parentEventId: event.eventId },
       { type: 'change-resource', source, side: actor.side, resourceId: 'fire', amount: 1, parentEventId: event.eventId });
   }
-  if (skillId !== lanternSpiritIds.ultimate) return commands;
-  let fireAdvantage = Math.max(0, ownFire - enemyFire);
-  if (fireAdvantage <= 0) return commands;
+  return commands;
+}
+
+/**
+ * 吸魂灯：「技能结算后，若己方鬼火多于敌方，则差额每 1 火对非怪物目标造成 5% 生命上限真实伤害」。
+ * 官方顺序（forceCastSkill: castSkill → getConsumeValue → 扣火 → 后置回调）里这次结算发生在
+ * **扣火之后**，所以挂在 `action-end`（runner 在发出该事件之前完成扣火），而不是 `attack-end`。
+ */
+function resolveFireAdvantage(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
+  if (event.type !== 'action-ended' || event.skillId !== lanternSpiritIds.ultimate || !event.source.unitId) return;
+  const actor = context.getUnit(event.source.unitId);
+  if (!actor || actor.heroId !== lanternSpiritIds.hero || actor.hp <= 0) return;
+  const enemySide = actor.side === 'blue' ? 'red' : 'blue';
+  const ownFire = Math.max(0, context.state.resources[actor.side]?.fire ?? 0);
+  const enemyFire = Math.max(0, context.state.resources[enemySide]?.fire ?? 0);
+  const fireAdvantage = Math.max(0, ownFire - enemyFire);
+  if (fireAdvantage <= 0) return;
   const attack = context.getEffectiveStats(actor.unitId)?.attack ?? actor.stats.attack;
-  for (const change of targetChanges) {
-    const target = context.getUnit(change.targetId);
+  const source = lanternSource(lanternSpiritIds.ultimate, actor.unitId);
+  const commands: EffectCommand[] = [];
+  for (const targetId of context.state.sides[enemySide] ?? []) {
+    const target = context.getUnit(targetId);
     if (!target || target.hp <= 0 || target.unitKind === 'monster') continue;
     let remainingCap = attack;
     for (let hit = 0; hit < fireAdvantage && remainingCap > 0; hit++) {
@@ -185,7 +207,7 @@ function highestAttack(units: readonly UnitState[], context: BattleContext): Uni
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 
 function lanternSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

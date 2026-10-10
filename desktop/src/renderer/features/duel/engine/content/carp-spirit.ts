@@ -78,7 +78,11 @@ export function createCarpSpiritDefinition(): HeroDefinition {
       return [{ ...control, instance: { ...control.instance,
         modifiers: [{ stat: 'crit', operation: 'flat', amount: -.2 }],
         values: { ...control.instance.values, controlType: '禁锢',
-          shieldRemaining: actor.stats.attack * Number(parameters.shieldRatio ?? 1.5),
+          // 客户端口径（基础版技能 2063 的 buff `[2063, 1]`）：
+          // 「泡泡血量相当于鲤鱼精**最大生命**的 p1%」，该行 hurtReductionParam = 1.5
+          // ⇒ 护盾量 = 鲤鱼精最大生命 × 逐级 p1%（不是攻击！）。
+          // （觉醒版另有一套：`[102063, lvl]` = 攻击 × 1.0/1.2/1.4/1.6/1.8，引擎当前建模的是基础版。）
+          shieldRemaining: actor.stats.hp * Number(parameters.shieldRatio ?? 1.5),
           followUpRatio: Number(parameters.damageRatio ?? 0) },
       } }];
     },
@@ -93,7 +97,9 @@ export function createCarpSpiritDefinition(): HeroDefinition {
         if (event.type !== 'damage' || event.source.id !== carpSpiritIds.basic || !event.source.unitId) return;
         const actor = context.getUnit(event.source.unitId);
         const target = context.getUnit(event.targetId);
-        if (!actor || actor.heroId !== carpSpiritIds.hero || actor.skillLevel < 3 || !target || target.hp <= 0) return;
+        // 客户端 2061（普攻）三级行的描述即「驱散1个增益状态」⇒ 按 2061 的等级判定
+        if (!actor || actor.heroId !== carpSpiritIds.hero
+          || (actor.skillLevels?.[carpSpiritIds.basic] ?? actor.skillLevel ?? 1) < 3 || !target || target.hp <= 0) return;
         const buffs = target.statuses.filter(status => context.getStatusCategory(status.statusId) === 'buff'
           && context.isStatusDispellable(status.statusId));
         if (!buffs.length) return;

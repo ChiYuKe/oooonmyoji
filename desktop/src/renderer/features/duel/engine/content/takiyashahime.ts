@@ -186,6 +186,6 @@ function activeMove(unit: Readonly<UnitState>): string {
 }
 function has(unit: Readonly<UnitState>, statusId: string): boolean { return unit.statuses.some(status => status.statusId === statusId); }
 function rank(unit: Readonly<UnitState> | undefined, skillId: string): number {
-  return Math.max(1, Math.min(5, unit?.skillLevels?.[skillId] ?? unit?.skillLevel ?? 1));
+  return Math.max(1, Math.min(6, unit?.skillLevels?.[skillId] ?? unit?.skillLevel ?? 1));
 }
 function takiyashahimeSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

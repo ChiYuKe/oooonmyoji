@@ -43,6 +43,7 @@ export function createFirstHaneMountainWindDefinition(): HeroDefinition {
   const basic = damageSkill(firstHaneMountainWindIds.basic, 'basic', basicRatios, 2);
   const ultimate = damageSkill(firstHaneMountainWindIds.ultimate, 'skill', ultimateRatios, 4, {
     resourceCost: { resourceId: 'fire', amount: 3 },
+    target: 'single', targetRelation: 'enemy',
   });
   const shield: SkillDefinition = {
     id: firstHaneMountainWindIds.shield, actionKind: 'skill', target: 'single', targetRelation: 'ally',
@@ -126,11 +127,11 @@ export function createFirstHaneMountainWindDefinition(): HeroDefinition {
       const target = executeTarget ?? enemies.slice().sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp))[0]!;
       if (!passivesEnabled(actor)) {
         if ((context.state.resources[actor.side]?.fire ?? 0) >= 3 && enemies.length >= 2)
-          return intent(actor, firstHaneMountainWindIds.ultimate, enemies.map(enemy => enemy.unitId), 'all-enemies', 'enemy');
+          return intent(actor, firstHaneMountainWindIds.ultimate, [target.unitId], 'single', 'enemy');
         return intent(actor, firstHaneMountainWindIds.basic, [target.unitId], 'single', 'enemy');
       }
       if ((context.state.resources[actor.side]?.fire ?? 0) >= 3 && enemies.length >= 2)
-        return intent(actor, firstHaneMountainWindIds.ultimate, enemies.map(enemy => enemy.unitId), 'all-enemies', 'enemy');
+        return intent(actor, firstHaneMountainWindIds.ultimate, [target.unitId], 'single', 'enemy');
       if (swiftPoints(actor) >= 80 && !hasOwnedStatus(target, passiveSuppressionStatusId, actor.unitId))
         return intent(actor, firstHaneMountainWindIds.lift, [target.unitId], 'single', 'enemy');
       if (criticallyInjured && criticallyInjured.hp / Math.max(1, criticallyInjured.stats.hp) < .2)
@@ -313,7 +314,7 @@ function hasOwnedStatus(unit: Readonly<UnitState>, statusId: string, ownerId: st
   return unit.statuses.some(status => status.statusId === statusId && status.source.unitId === ownerId);
 }
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function intent(actor: Readonly<UnitState>, skillId: string, targets: readonly string[], shape: ActionIntent['shape'], relation: ActionIntent['targetRelation']): ActionIntent {
   return { actorId: actor.unitId, skillId, targetIds: targets, shape, targetRelation: relation };

@@ -22,5 +22,5 @@ export function effectiveTargetResistance(targetResist: number, source: SourceRe
   const soulIgnore = wearer?.soulId === flyingEdgeIds.soul && soulsEnabled(wearer) ? .3 : 0;
   const skillIgnore = Number.isFinite(additionalIgnore) ? Math.max(0, Math.min(1, additionalIgnore)) : 0;
   const ignore = 1 - (1 - soulIgnore) * (1 - skillIgnore);
-  return Math.min(.95, Math.max(0, targetResist) * (1 - ignore));
+  return Math.max(0, targetResist) * (1 - ignore);
 }

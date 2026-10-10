@@ -130,5 +130,5 @@ function autoRevive(context: BattleContext, event: BattleEvent): EffectCommand[]
     { type: 'add-status', source, targetId: owner.unitId, instance: { instanceId: `${blazingPeachIds.autoRevives}:${owner.unitId}`,
       statusId: blazingPeachIds.autoRevives, source, stacks: 1, duration: { kind: 'permanent' }, values: { count: used + 1 } } }];
 }
-function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
+function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
 function peachSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

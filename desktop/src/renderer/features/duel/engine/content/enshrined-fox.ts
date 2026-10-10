@@ -150,6 +150,6 @@ function strike(context: BattleContext, intent: ActionIntent, skillId: string, r
 }
 
 function rank(unit: Readonly<UnitState> | undefined, skillId: string): number {
-  return Math.max(1, Math.min(5, unit?.skillLevels?.[skillId] ?? unit?.skillLevel ?? 1));
+  return Math.max(1, Math.min(6, unit?.skillLevels?.[skillId] ?? unit?.skillLevel ?? 1));
 }
 function enshrinedFoxSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

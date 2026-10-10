@@ -203,6 +203,6 @@ function consumeSpiritOnStun(context: BattleContext, event: BattleEvent): Effect
 }
 
 function skillRank(owner: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, owner.skillLevels?.[skillId] ?? owner.skillLevel));
+  return Math.max(1, Math.min(6, owner.skillLevels?.[skillId] ?? owner.skillLevel));
 }
 function deerSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

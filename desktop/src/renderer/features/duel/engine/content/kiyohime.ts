@@ -2,6 +2,7 @@ import type { HeroDefinition, SkillDefinition, StatusDefinition } from '../core/
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { attemptDebuff } from '../mechanics/control';
+import { continueHurtCommand } from '../mechanics/continue-hurt';
 import { calculateIndirectDamage } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import type { ContentRegistry } from './registry';
@@ -17,7 +18,9 @@ export const kiyohimeIds = {
 } as const;
 
 const basicRatios = [.86, .9, .94, .98, 1.02, 1.02] as const;
-const basicBurnRatios = [.22, .22, .22, .22, .22, .33] as const;
+// 客户端 `[2601, lvl]`（清姬普攻附带的持续伤害，家族 id 即技能 id）逐级 continueAttackHurt
+// = 0.24 / 0.32 / 0.40 / 0.48 / 0.56（第 6 级按客户端的"None 继承上一级"规则取 0.56）
+const basicBurnRatios = [.24, .32, .4, .48, .56, .56] as const;
 const ultimateRatios = [.36, .38, .4, .42, .42] as const;
 const ultimateBurnRatios = [.66, .66, .66, .66, .99] as const;
 const defenseLossPerPoison = 10;
@@ -154,14 +157,15 @@ function tickBurningFire(context: BattleContext, event: BattleEvent): EffectComm
   if (!target || target.hp <= 0) return;
   return target.statuses.filter(status => status.statusId === kiyohimeIds.burningFire).flatMap(status => {
     const owner = status.source.unitId ? context.getUnit(status.source.unitId) : undefined;
-    const attack = owner && context.getEffectiveStats(owner.unitId);
-    const defense = context.getEffectiveStats(target.unitId);
-    if (!owner || owner.heroId !== kiyohimeIds.hero || !attack || !defense) return [];
-    const ratio = Number(status.values?.indirectDamageRatio ?? .22);
-    const hit = calculateIndirectDamage({ attack: attack.attack, defense: defense.defense,
-      defenseIgnore: effectiveDefenseIgnore(owner), ratio, critDamage: attack.critDamage }, context.random);
-    return [{ type: 'lose-life' as const, source: status.source, targetId: target.unitId,
-      amount: hit.amount, lifeLossKind: 'indirect' as const, parentEventId: event.eventId }];
+    if (!owner || owner.heroId !== kiyohimeIds.hero) return [];
+    const ratio = Number(status.values?.indirectDamageRatio ?? .24);
+    // 客户端 `buffCalc` 的 DOT 口径：`hpChange = min(目标当前生命 × continueHurt, 攻击 × CONTINUE_HURT_LIMIT)`、
+    // `critical = False`，再把该值当"攻击"送进 `calcRawAttackDmg`（走完整管线：防御/增伤/减伤/护盾/玄血）。
+    // 另：`[2601]` 家族的 `indirectDmgType = 0` ⇒ 这不是间接伤害，**不应**走 calculateIndirectDamage
+    //（那条路会在有效防御为 0 时必暴，与 `critical = False` 冲突）。
+    const command = continueHurtCommand(context, { source: status.source, targetId: target.unitId,
+      attackRatio: ratio, parentEventId: event.eventId });
+    return command ? [command] : [];
   });
 }
 

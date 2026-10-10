@@ -13,6 +13,7 @@ const dreamRatios = [.3, .6, .5, .6, .6] as const;
 export function registerXiazhongshaonv(registry: ContentRegistry): void {
   registry.registerStatus({ id: xiazhongshaonvIds.shield, mechanicsCoverage: 'partial', category: 'shield', dispellable: true,
     sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace' } satisfies StatusDefinition);
+  // This allied HP record supports fatal protection/recovery; it is dispellable but not a negative effect for Soul Diver.
   registry.registerStatus({ id: xiazhongshaonvIds.dreamRecord, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
     sealable: false, durationOwner: 'source-turn', refreshPolicy: 'replace' });
   registry.registerStatus({ id: xiazhongshaonvIds.dreamGuard, mechanicsCoverage: 'partial', category: 'other', dispellable: true,
@@ -110,5 +111,5 @@ function settleDream(ally: Readonly<UnitState>, record: { source: SourceRef; val
   return commands;
 }
 
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function source(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

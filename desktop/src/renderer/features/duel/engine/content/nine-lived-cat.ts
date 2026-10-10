@@ -16,7 +16,7 @@ export const nineLivedCatIds = {
 export function registerNineLivedCat(registry: ContentRegistry): void {
   registry.registerStatus({ id: nineLivedCatIds.lives, mechanicsCoverage: 'partial', category: 'buff', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 4 });
-  registry.registerStatus({ id: nineLivedCatIds.revenge, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: nineLivedCatIds.revenge, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace' });
 
   const basic: SkillDefinition = {
@@ -72,7 +72,10 @@ export function registerNineLivedCat(registry: ContentRegistry): void {
         const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
         if (enemies.length > 0) {
           const target = enemies[Math.floor(context.random() * enemies.length)]!;
-          const ratio = [.73, .77, .81, .85, .89][Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+          // 客户端 2073（复仇普攻）逐级 addDmg = 0.73/0.77/0.81/0.85/0.89，与本表逐级一致 ⇒ 按 2073 的等级
+          // （2072 被动写明「此技能无法升级」，故这里不能用被动等级）
+          const ratio = [.73, .77, .81, .85, .89][Math.max(0, Math.min(4,
+            (actor.skillLevels?.[nineLivedCatIds.revengeAttack] ?? actor.skillLevel ?? 1) - 1))]!;
           const hits = Array.from({ length: 3 }, () => {
             const actorStats = context.getEffectiveStats(actor.unitId) ?? actor.stats;
             const targetStats = context.getEffectiveStats(target.unitId) ?? target.stats;

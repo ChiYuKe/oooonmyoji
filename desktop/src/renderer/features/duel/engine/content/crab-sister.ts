@@ -172,7 +172,7 @@ function findStatus(unit: Readonly<UnitState>, statusId: string): StatusInstance
   return unit.statuses.find(status => status.statusId === statusId);
 }
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function isCrabSister(unit: Readonly<UnitState>): boolean { return unit.heroId === crabSisterIds.hero && unit.unitKind !== 'summon'; }
 function crabSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

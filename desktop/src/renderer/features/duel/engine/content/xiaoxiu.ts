@@ -21,7 +21,7 @@ const transferredControlSourceId = '3022-control-transfer';
 const transferredDamageSourceId = '3022-damage-transfer';
 
 export function registerXiaoxiu(registry: ContentRegistry): void {
-  const link: StatusDefinition = { id: xiaoxiuIds.link, mechanicsCoverage: 'partial', category: 'mark',
+  const link: StatusDefinition = { id: xiaoxiuIds.link, mechanicsCoverage: 'partial', category: 'mark', negativeEffect: true,
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' };
   registry.registerStatus(link);
   registry.registerHero(createXiaoxiuDefinition());
@@ -166,7 +166,7 @@ function contextHasSecondEnemy(state: Readonly<import('../core/types').BattleSta
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 
 function isFreeze(controlType: unknown): boolean {

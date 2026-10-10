@@ -137,7 +137,7 @@ function attack(context: BattleContext, actor: Readonly<UnitState>, targetIds: r
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function skillIndex(unit: Readonly<UnitState>, skillId: string): number { return skillRank(unit, skillId) - 1; }
 function heitongziSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

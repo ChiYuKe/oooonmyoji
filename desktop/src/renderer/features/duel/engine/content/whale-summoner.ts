@@ -203,7 +203,7 @@ function hasArmor(unit: Readonly<UnitState>, statusId: string): boolean {
 }
 function whaleSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function costFor(unit: Readonly<UnitState>, skillId: string): number {
   return costs[Math.max(0, Math.min(4, skillLevel(unit, skillId) - 1))]!;

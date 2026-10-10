@@ -139,7 +139,10 @@ function jiaoTuPassiveOnHit(context: BattleContext, event: BattleEvent): EffectC
         stacks: 1, duration: { kind: 'count', remaining: 2, owner: 'target-turn' } } });
   }
   if (target?.heroId === jiaoTuIds.hero && target.hp > 0 && passivesEnabled(target)) {
-    const amount = nourishmentCritDamage[Math.max(0, Math.min(nourishmentCritDamage.length - 1, target.skillLevel - 1))]!;
+    // 客户端 2342（被动）lv2「[buff_2342_1]提升暴击伤害效果增至」⇒ 滋养暴伤表按 2342 的等级
+    // （该技能客户端未给逐级 param 数值，故只改归属，表值保持原样）
+    const amount = nourishmentCritDamage[Math.max(0, Math.min(nourishmentCritDamage.length - 1,
+      (target.skillLevels?.[jiaoTuIds.passive] ?? target.skillLevel ?? 1) - 1))]!;
     for (const ally of context.getLivingUnits(target.side).filter(unit => unit.unitKind !== 'summon' && unit.unitKind !== 'monster')) {
       if (context.random() >= .5) continue;
       const source = jiaoTuSource(jiaoTuIds.passive, target.unitId);

@@ -20,6 +20,10 @@ export const bellEmpressIds = {
 const basicRatios = [1, 1.05, 1.1, 1.15, 1.25] as const;
 const extraLifeCosts = [.25, .21, .17, .13, .13] as const;
 
+/** 与其它内容文件同形的"按技能等级取值"助手（缺 per-skill rank 时回落到全局 skillLevel）。 */
+const skillRank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 /** Partial modular migration for 铃彦姬; resource replacement and eternal-flame team exit need later work. */
 export function registerBellEmpress(registry: ContentRegistry): void {
   registry.registerStatus({ id: bellEmpressIds.divine, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
@@ -82,7 +86,9 @@ export function createBellEmpressDefinition(): HeroDefinition {
       addHits(Number(parameters.ratio ?? .72));
       let projectedHp = actor.hp;
       let fire = Math.max(0, context.state.resources[actor.side]?.fire ?? 0);
-      const lifeCost = extraLifeCosts[Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+      // 客户端 3763（五山火祭）逐级：「消耗生命降低至 25%/21%/17%/13%」，与 extraLifeCosts 一致 ⇒ 按 3763 的等级
+      const lifeCost = extraLifeCosts[Math.max(0, Math.min(4,
+        skillRank(actor, bellEmpressIds.fiveMountain) - 1))]!;
       while (fire > 0 && projectedHp / Math.max(1, actor.stats.hp) >= .5 && projectedHp > 0) {
         commands.push({ type: 'change-resource', source, side: actor.side, resourceId: 'fire', amount: -1 });
         commands.push({ type: 'lose-life', source, targetId: actor.unitId, amount: actor.stats.hp * lifeCost });
@@ -106,12 +112,14 @@ export function createBellEmpressDefinition(): HeroDefinition {
         const commands: EffectCommand[] = [];
         if (target?.heroId === bellEmpressIds.hero && target.hp > 0
           && !target.statuses.some(status => status.statusId === bellEmpressIds.divine || status.statusId === bellEmpressIds.eternal)) {
-          const threshold = target.skillLevel >= 2 ? .75 : .5;
+          // 客户端「铃焰灼心(3762)」逐级文本：`3762:2:0` 写「进入状态的生命提升至 75%」⇒ 按 3762 的等级判定
+        const threshold = skillRank(target, bellEmpressIds.flameHeal) >= 2 ? .75 : .5;
           if (target.hp / Math.max(1, target.stats.hp) < threshold) commands.push(divineFireCommand(target, event.eventId));
         }
         if (event.source.id === bellEmpressIds.fiveMountain && event.source.unitId) {
           const attacker = context.getUnit(event.source.unitId);
-          if (attacker && attacker.skillLevel >= 5) {
+          // 客户端 3763 lv5：「若五山火祭攻击次数达到 5 次，攻击时无视 30 防御，最多叠加 5 层」⇒ 按 3763 的等级
+          if (attacker && skillRank(attacker, bellEmpressIds.fiveMountain) >= 5) {
             const previous = attacker.statuses.find(status => status.statusId === bellEmpressIds.fiveMountainStacks);
             const attacks = Number(previous?.values?.attackCount ?? 0) + 1;
             const stacks = Math.min(5, Math.floor(attacks / 5));
@@ -128,7 +136,7 @@ export function createBellEmpressDefinition(): HeroDefinition {
         if (event.type !== 'unit-defeated') return;
         const target = context.getUnit(event.unitId);
         if (!target) return;
-        if (target.heroId === bellEmpressIds.hero && target.skillLevel >= 4) {
+        if (target.heroId === bellEmpressIds.hero && skillRank(target, bellEmpressIds.flameHeal) >= 4) {
           if (target.statuses.some(status => status.statusId === bellEmpressIds.eternal)) {
             const allySurvives = context.getLivingUnits(target.side).some(unit => unit.unitId !== target.unitId);
             return allySurvives ? [{ type: 'revive', source: { kind: 'status', id: bellEmpressIds.eternal, unitId: target.unitId },
@@ -140,7 +148,8 @@ export function createBellEmpressDefinition(): HeroDefinition {
           if (oldStatusIds.length > 0) commands.push({ type: 'remove-statuses', source, targetId: target.unitId,
             statusIds: oldStatusIds, reason: 'consumed', parentEventId: event.eventId });
           commands.push({ type: 'add-status', source, targetId: target.unitId, instance: eternalStatus(target, source) });
-          if (target.skillLevel >= 5) commands.push(addEternalShield(target));
+          // 客户端 `3762:5:0`：「进入心火永明时，获得攻击 120% 的护盾，无法驱散，持续 2 回合」⇒ 按 3762 的等级门控
+      if (skillRank(target, bellEmpressIds.flameHeal) >= 5) commands.push(addEternalShield(target));
           commands.push({ type: 'revive', source, targetId: target.unitId, hp: target.stats.hp * .5, parentEventId: event.eventId });
           for (const ally of context.getLivingUnits(target.side).filter(unit => unit.unitId !== target.unitId)) {
             commands.push(allyAura(ally, target));
@@ -161,7 +170,8 @@ export function createBellEmpressDefinition(): HeroDefinition {
           const target = context.getUnit(event.targetId);
           if (!target || target.heroId !== bellEmpressIds.hero || target.hp <= 0
             || target.statuses.some(status => status.statusId === bellEmpressIds.divine || status.statusId === bellEmpressIds.eternal)) return;
-          const threshold = target.skillLevel >= 2 ? .75 : .5;
+          // 客户端「铃焰灼心(3762)」逐级文本：`3762:2:0` 写「进入状态的生命提升至 75%」⇒ 按 3762 的等级判定
+        const threshold = skillRank(target, bellEmpressIds.flameHeal) >= 2 ? .75 : .5;
           if (target.hp / Math.max(1, target.stats.hp) < threshold) return [divineFireCommand(target, event.eventId)];
         }
         if (event.type === 'healing') {

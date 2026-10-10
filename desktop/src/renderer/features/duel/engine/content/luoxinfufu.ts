@@ -2,7 +2,7 @@ import type { HeroDefinition, SkillDefinition, StatusDefinition } from '../core/
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { attemptControl, attemptDebuff } from '../mechanics/control';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { battleSkillRow, skillNumber } from '../../../../../shared/game-skill-data';
 import { createBasicAttackSkill } from './common-skills';
@@ -143,7 +143,7 @@ function triggerMarkOnFireSkill(context: BattleContext, event: BattleEvent): Eff
   const attack = context.getEffectiveStats(spider.unitId), defense = context.getEffectiveStats(target.unitId);
   if (!attack || !defense) return;
   const damage = calculateIndirectDamage({ attack: attack.attack, defense: defense.defense,
-    defenseIgnore: effectiveDefenseIgnore(spider), ratio: 1, critDamage: attack.critDamage }, context.random);
+    defenseIgnore: effectiveDefenseIgnore(spider), ratio: 1, critDamage: attack.critDamage , layers: indirectBuffLv(target)}, context.random);
   return [
     { type: 'lose-life', source, targetId: target.unitId, amount: damage.amount, lifeLossKind: 'indirect', parentEventId: event.eventId },
     { type: 'add-status', source, targetId: target.unitId, parentEventId: event.eventId, instance: {
@@ -168,7 +168,7 @@ function createVenomStatus(): StatusDefinition {
         if (!owner || !attack || !defense) return [];
         const hit = calculateIndirectDamage({ attack: attack.attack, defense: defense.defense,
           defenseIgnore: effectiveDefenseIgnore(owner), ratio: Number(status.values?.indirectDamageRatio ?? 1.36),
-          critDamage: attack.critDamage }, context.random);
+          critDamage: attack.critDamage , layers: indirectBuffLv(target)}, context.random);
         return [{ type: 'lose-life' as const, source: status.source, targetId: target.unitId,
           amount: hit.amount, lifeLossKind: 'indirect' as const, parentEventId: event.eventId }];
       });

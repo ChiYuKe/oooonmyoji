@@ -17,8 +17,9 @@ export function registerLuminousMoonChaser(registry: ContentRegistry): void {
   registry.registerStatus({ id: luminousMoonChaserIds.unique, ...statusBase, durationOwner: 'permanent', refreshPolicy: 'keep' });
   registry.registerStatus({ id: luminousMoonChaserIds.flow, ...statusBase, category: 'buff', durationOwner: 'permanent', refreshPolicy: 'replace', maxStacks: 3 });
   registry.registerStatus({ id: luminousMoonChaserIds.shine, ...statusBase, category: 'buff', durationOwner: 'permanent', refreshPolicy: 'replace', maxStacks: 10 });
-  registry.registerStatus({ id: luminousMoonChaserIds.gathered, dispellable: true, sealable: false, category: 'buff', durationOwner: 'target-turn', refreshPolicy: 'replace' });
-  registry.registerStatus({ id: luminousMoonChaserIds.lostRadiance, dispellable: true, sealable: true, category: 'debuff',
+  // Client DATA_BUFF row 3953 (集落光) sets immuneDispele=1.
+  registry.registerStatus({ id: luminousMoonChaserIds.gathered, dispellable: false, sealable: false, category: 'buff', durationOwner: 'target-turn', refreshPolicy: 'replace' });
+  registry.registerStatus({ id: luminousMoonChaserIds.lostRadiance, dispellable: false, sealable: true, category: 'debuff',
     durationOwner: 'target-turn', refreshPolicy: 'refresh-duration', blocksResourceMeterAdvance: true });
   registry.registerStatus({ id: luminousMoonChaserIds.overflowBuff, dispellable: true, sealable: false, category: 'buff',
     durationOwner: 'target-turn', refreshPolicy: 'refresh-duration' });
@@ -53,8 +54,9 @@ export function createLuminousMoonChaserDefinition(): HeroDefinition {
           { ownerUnitId: actor.unitId, ultimateRank: skillRank(actor, luminousMoonChaserIds.ultimate) }) }];
       });
     } };
-  return { id: luminousMoonChaserIds.hero, skills: [basic, ultimate], aiCoverage: 'partial', mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['普攻、被动与大招等级分别读取；开局鬼火条、流光增益、技能费用、集落光状态等级均按对应技能结算；已覆盖回合结束封印校验、唯一流光持有者、五级普攻击退鬼火行动条且对怪物无效、一次扣火消耗1层流光并按实际扣火量推进鬼火条，以及对行动条最前敌方施加失彩；不同事件中多次扣火的顺序及失彩边界仍需核验'],
+  return { id: luminousMoonChaserIds.hero, skills: [basic, ultimate], aiCoverage: 'verified', mechanicsCoverage: 'partial',
+    aiCoverageNotes: ['按社区AI规则：鬼火足够时无条件施放3技能「集落光」，即使我方仅存活自身也选择自身为目标；鬼火不足时回退普攻。'],
+    mechanicsCoverageNotes: ['普攻、被动与大招等级分别读取；开局鬼火条、流光增益、技能费用、集落光状态等级均按对应技能结算；已覆盖回合结束封印校验、唯一流光持有者、五级普攻击退鬼火行动条且对怪物无效、友方正式技能扣火与效果结算扣火均触发集落光、一次扣火消耗1层流光并按实际扣火量推进鬼火条，以及对行动条最前敌方施加失彩；客户端 buff 3953 描述也明确扣火后推进等量鬼火条、消耗集落光、施加失彩 3954 并减少流光 3956，但没有给出失彩扣火回调是否另做命中/抵抗检定；已验证流光追月神被动封印不取消已施加集落光的扣火触发和到期效果，失彩免疫仍可阻止落地，客户端 3954 标记 immuneDispele=1，模拟按不可驱散处理并通过一般驱散回归；技能表 3952 的 addBuffRate=99 实际对应 buffId=3952，不证明失彩 3954 的扣火回调概率；最高行动条目标离场时选下一名在场敌人；客户端 useDebuffResist=false 不代表无视抵抗，多笔扣火顺序仍待实机核验'],
     initialize(context, unitId) {
       const unit = context.getUnit(unitId); if (!unit) return [];
       const owners = context.state.sides[unit.side].map(id => context.getUnit(id)).filter(other => other?.heroId === luminousMoonChaserIds.hero);
@@ -84,6 +86,7 @@ export function createLuminousMoonChaserDefinition(): HeroDefinition {
     },
     handlers: {
       'resource-overflow': { priority: 90, handle: (context, event) => onOverflow(context, event) },
+      'resource-payment': { priority: 90, handle: (context, event) => onFireLoss(context, event) },
       'effect-resolution': { priority: 90, handle: (context, event) => onFireLoss(context, event) },
       'turn-start': { priority: 90, handle: (context, event) => onTurnStart(context, event) },
       'turn-end': { priority: 90, handle: (context, event) => onTurnEnd(context, event) },
@@ -142,17 +145,24 @@ function onTurnStart(context: BattleContext, event: BattleEvent): EffectCommand[
 
 function onFireLoss(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'resource-changed' || event.resourceId !== 'fire' || event.after >= event.before) return;
-  const payerId = event.source.unitId; const payer = payerId && context.getUnit(payerId); if (!payer) return;
-  const gathered = statusFor(payer, luminousMoonChaserIds.gathered); if (!gathered) return;
+  // Fire is shared by side, so the event source can be an enemy draining our
+  // resource. Prefer the acting payer when it carries Gathered Light; otherwise
+  // resolve the mark from an allied carrier on the side whose fire was reduced.
+  const sourceUnit = event.source.unitId ? context.getUnit(event.source.unitId) : undefined;
+  const carriers = context.getLivingUnits(event.side).filter(unit => statusFor(unit, luminousMoonChaserIds.gathered));
+  const carrier = sourceUnit?.side === event.side && statusFor(sourceUnit, luminousMoonChaserIds.gathered)
+    ? sourceUnit : carriers[0];
+  if (!carrier) return;
+  const gathered = statusFor(carrier, luminousMoonChaserIds.gathered)!;
   const ownerId = String(gathered.values?.ownerUnitId ?? ''); const owner = context.getUnit(ownerId);
-  if (!owner || owner.hp <= 0 || !passivesEnabled(owner)) return;
+  if (!owner || owner.hp <= 0 || event.side !== owner.side || carrier.side !== owner.side) return;
   const flow = statusFor(owner, luminousMoonChaserIds.flow); if (!flow || flow.stacks <= 0) return;
   const enemies = context.getLivingUnits(owner.side === 'blue' ? 'red' : 'blue');
   const target = enemies.slice().sort((a, b) => b.actionGauge - a.actionGauge)[0];
   const source = moonSource(luminousMoonChaserIds.ultimate, owner.unitId);
   const flowSource = moonSource(luminousMoonChaserIds.passive, owner.unitId);
   const commands: EffectCommand[] = [setStacks(owner, luminousMoonChaserIds.flow, flow.stacks - 1, flowSource),
-    { type: 'remove-statuses', source, targetId: payer.unitId, statusIds: [luminousMoonChaserIds.gathered], reason: 'consumed' },
+    { type: 'remove-statuses', source, targetId: carrier.unitId, statusIds: [luminousMoonChaserIds.gathered], reason: 'consumed' },
     { type: 'advance-resource-meter', source, side: owner.side, resourceId: 'fire', steps: event.before - event.after }];
   if (target) commands.push({ type: 'add-status', source, targetId: target.unitId, instance: statusInstance(luminousMoonChaserIds.lostRadiance,
     `${owner.unitId}:${target.unitId}`, source, { kind: 'count',
@@ -164,7 +174,7 @@ function onFireLoss(context: BattleContext, event: BattleEvent): EffectCommand[]
 function onGatheredExpiry(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'status-removed' || event.reason !== 'expired' || event.statusId !== luminousMoonChaserIds.gathered) return;
   const ownerId = String(event.removedValues?.ownerUnitId ?? ''); const owner = context.getUnit(ownerId);
-  const holder = context.getUnit(event.targetId); if (!owner || !holder || !passivesEnabled(owner)) return;
+  const holder = context.getUnit(event.targetId); if (!owner || !holder) return;
   const source = moonSource(luminousMoonChaserIds.ultimate, owner.unitId);
   const rank = skillRank(owner, luminousMoonChaserIds.ultimate);
   const commands: EffectCommand[] = [];

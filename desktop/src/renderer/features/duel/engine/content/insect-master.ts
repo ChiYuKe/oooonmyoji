@@ -3,7 +3,9 @@ import { passivesEnabled } from '../core/passive-eligibility';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { attemptDebuff } from '../mechanics/control';
 import { createBasicAttackSkill } from './common-skills';
+import { lowHealthPriorityTarget } from './lineup-damage-skill';
 import type { ContentRegistry } from './registry';
+import { isUnitBanished } from '../core/types';
 
 export const insectMasterIds = {
   hero: 306,
@@ -20,7 +22,7 @@ const cleanseCounts = [3, 4, 4, 4, 4] as const;
 const reducedHealRatios = [.3, .3, .3, .2, .2] as const;
 
 export function registerInsectMaster(registry: ContentRegistry): void {
-  registry.registerStatus({ id: insectMasterIds.trace, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: insectMasterIds.trace, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
   registry.registerStatus({ id: insectMasterIds.triggerWindow, mechanicsCoverage: 'partial', category: 'other', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
@@ -62,8 +64,9 @@ export function registerInsectMaster(registry: ContentRegistry): void {
     id: insectMasterIds.hero,
     skills: [createBasicAttackSkill(insectMasterIds.basic, basicRatios), skill],
     aiCoverage: 'verified',
+    aiCoverageNotes: ['社区AI回归覆盖：友方血线低于70%且鬼火足够时使用虫之舞，否则普攻；普攻只在存在生命比例低于50%的敌人时优先选择其中最低者，否则按客户端自动目标函数从可选敌人中随机选择。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['被动每次攻击最多触发一次，25%免伤与虫之痕附加独立判定；虫之痕易伤按客户端参数应用，二级治疗技能的 AI 选取上限按技能自身等级读取；护盾全吸收与状态抵抗下的触发边界仍未完整核验'],
+    mechanicsCoverageNotes: ['被动每次攻击最多触发一次，无法动作或放逐时不触发；25%免伤与虫之痕附加独立判定，虫之痕效果抵抗边界有回归；虫之痕易伤按客户端参数应用，实际损失生命的间接伤害也触发15%治疗，纯护盾与额外生命吸收不触发；二级治疗技能的 AI 选取上限按技能自身等级读取'],
     policy(context: BattleContext, unitId): ActionIntent | undefined {
       const actor = context.getUnit(unitId);
       if (!actor || actor.hp <= 0) return undefined;
@@ -83,8 +86,7 @@ export function registerInsectMaster(registry: ContentRegistry): void {
         return { actorId: unitId, skillId: insectMasterIds.skill, targetIds: targets.map(ally => ally.unitId),
           shape: 'multi', targetRelation: 'ally' };
       }
-      const target = [...enemies].sort((left, right) => left.hp / Math.max(1, left.stats.hp)
-        - right.hp / Math.max(1, right.stats.hp))[0]!;
+      const target = lowHealthPriorityTarget(context, enemies, .5)!;
       return { actorId: unitId, skillId: insectMasterIds.basic, targetIds: [target.unitId], shape: 'single', targetRelation: 'enemy' };
     },
     interceptIncomingDamage(state, attacker, target, amount, _kind, interceptContext) {
@@ -98,7 +100,8 @@ export function registerInsectMaster(registry: ContentRegistry): void {
 function interceptInsectPassive(state: import('../core/types').BattleState, attacker: Readonly<UnitState> | undefined,
   target: Readonly<UnitState>, amount: number, context?: DamageInterceptionContext): DamageInterception | undefined {
   if (!context || !attacker || attacker.side === target.side || target.heroId !== insectMasterIds.hero
-    || target.hp <= 0 || amount <= 0 || !passivesEnabled(target) || isAsleep(target, context)) return undefined;
+    || target.hp <= 0 || amount <= 0 || !passivesEnabled(target) || context.isUnitUnableToAct(target.unitId)
+    || isUnitBanished(target)) return undefined;
   const existing = target.statuses.find(status => status.statusId === insectMasterIds.triggerWindow);
   if (Number(existing?.values?.attackId ?? -1) === context.attackId) return undefined;
   const source = insectSource(insectMasterIds.passive, target.unitId);
@@ -113,11 +116,6 @@ function interceptInsectPassive(state: import('../core/types').BattleState, atta
     baseChance: 1, duration: { kind: 'count', remaining: 2, owner: 'target-turn' },
     modifiers: [{ stat: 'damageTaken', operation: 'percent', amount: .3 }] }));
   return { amount: immune ? 0 : amount, effects };
-}
-
-function isAsleep(target: Readonly<UnitState>, context: DamageInterceptionContext): boolean {
-  return target.statuses.some(status => context.battle.getStatusCategory(status.statusId) === 'control'
-    && status.values?.controlType === '睡眠');
 }
 
 function healFromTracedDamage(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {

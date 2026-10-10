@@ -146,7 +146,7 @@ function basicSkillFireLoss(context: BattleContext, event: BattleEvent): EffectC
   const target = context.getUnit(event.intent.targetIds[0] ?? '');
   if (!actor || actor.hp <= 0 || actor.heroId !== huiyejiIds.hero || !target || target.hp <= 0 || target.side === actor.side
     || !passivesEnabled(actor)) return;
-  const chance = basicFireChances[Math.min(5, Math.max(0, (actor.skillLevels?.[huiyejiIds.basic] ?? actor.skillLevel) - 1))]!;
+  const chance = basicFireChances[Math.min(6, Math.max(0, (actor.skillLevels?.[huiyejiIds.basic] ?? actor.skillLevel) - 1))]!;
   if (context.random() >= chance) return;
   return [{ type: 'change-resource', source: huiyejiSource(actor.unitId, huiyejiIds.basic), side: target.side,
     resourceId: 'fire', amount: -1, parentEventId: event.eventId }];

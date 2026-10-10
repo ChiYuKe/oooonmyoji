@@ -164,5 +164,5 @@ function addShelter(owner: Readonly<UnitState>, sourceRef: StatusInstance['sourc
     statusId: engagementGodIds.shelter, source: sourceRef, stacks: 1,
     duration: { kind: 'count', remaining: 1, owner: 'target-turn' } } };
 }
-function skillRank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
+function skillRank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
 function source(id: string, unitId: string): StatusInstance['source'] { return { kind: 'skill', id, unitId }; }

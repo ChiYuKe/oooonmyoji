@@ -1,8 +1,10 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { createBasicAttackSkill } from './common-skills';
+import { lowHealthPriorityTarget } from './lineup-damage-skill';
 import type { ContentRegistry } from './registry';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
+import { passivesEnabled } from '../core/passive-eligibility';
 import { battleSkillRow, skillNumber } from '../../../../../shared/game-skill-data';
 
 export const seaMonkIds = {
@@ -46,9 +48,10 @@ export function registerSeaMonk(registry: ContentRegistry): void {
   registry.registerHero({
     id: seaMonkIds.hero,
     skills: [createBasicAttackSkill(seaMonkIds.basic, basicRatios), ultimate],
-    aiCoverage: 'partial',
+    aiCoverage: 'verified',
+    aiCoverageNotes: ['按社区 AI 规则：鬼火足够时优先施放3技能「巨浪」；普攻只在存在生命比例低于20%的敌方时优先选择其中最低者，否则按客户端自动目标函数从可选敌人中随机选择。3技能消耗3点鬼火，鬼火不足时按引擎可用技能回退普攻。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['祝福之水的觉醒治疗比例已按客户端技能参数区分；全盾吸收、致死命中及间接伤害的触发边界仍缺少实战事件样本核验'],
+    mechanicsCoverageNotes: ['祝福之水的觉醒治疗比例、被动封印、致死命中按实际生命损失治疗、单次行动内同目标递减15%均有专项回归；自身技能普通/真实伤害命中触发、御魂追加伤害及技能来源的间接生命流失事件不触发均有回归。客户端旧版官方攻略明确记载攻击晴明护盾也能得到治疗，当前模拟对全盾吸收的技能命中按护盾前伤害触发治疗；该边界依据旧版公开资料，尚无当前版本技能数据或客户端事件独立复核。某些技能来源间接伤害是否算作自身技能伤害，以及治疗相对伤害/其他事件的精确窗口也待客户端证据'],
     policy(context, unitId) {
       const actor = context.getUnit(unitId);
       if (!actor || actor.hp <= 0) return undefined;
@@ -58,8 +61,7 @@ export function registerSeaMonk(registry: ContentRegistry): void {
         return { actorId: unitId, skillId: seaMonkIds.ultimate, targetIds: enemies.map(enemy => enemy.unitId),
           shape: 'all-enemies', targetRelation: 'enemy' };
       }
-      const target = enemies.slice().sort((left, right) => left.hp / Math.max(1, left.stats.hp)
-        - right.hp / Math.max(1, right.stats.hp))[0]!;
+      const target = lowHealthPriorityTarget(context, enemies, .2)!;
       return { actorId: unitId, skillId: seaMonkIds.basic, targetIds: [target.unitId], shape: 'single', targetRelation: 'enemy' };
     },
     handlers: {
@@ -78,10 +80,13 @@ export function registerSeaMonk(registry: ContentRegistry): void {
 }
 
 function healLowestAlly(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
-  if (event.type !== 'damage' || event.hpLost <= 0 || (event.source.id !== seaMonkIds.basic && event.source.id !== seaMonkIds.ultimate)
+  if (event.type !== 'damage' || (event.source.id !== seaMonkIds.basic && event.source.id !== seaMonkIds.ultimate)
     || !event.source.unitId) return;
+  const healBasis = event.hpLost > 0 ? event.hpLost
+    : (event.shieldConsumed ?? 0) > 0 ? event.hurtBeforeAbsorb ?? event.amount : 0;
+  if (healBasis <= 0) return;
   const healer = context.getUnit(event.source.unitId);
-  if (!healer || healer.heroId !== seaMonkIds.hero || healer.hp <= 0) return;
+  if (!healer || healer.heroId !== seaMonkIds.hero || healer.hp <= 0 || !passivesEnabled(healer)) return;
   const target = context.getLivingUnits(healer.side).filter(unit => unit.unitKind !== 'summon')
     .slice().sort((left, right) => left.hp / Math.max(1, left.stats.hp) - right.hp / Math.max(1, right.stats.hp)
       || left.unitId.localeCompare(right.unitId))[0];
@@ -102,7 +107,7 @@ function healLowestAlly(context: BattleContext, event: BattleEvent): EffectComma
     source, stacks: 1, duration: { kind: 'permanent' }, values: { actionId, ...counts } };
   const diminish = Math.max(0, 1 - .15 * previousCount);
   return [{ type: 'add-status', source, targetId: healer.unitId, instance, parentEventId: event.eventId },
-    { type: 'heal', source, targetId: target.unitId, amount: event.hpLost * passiveRatio * diminish, parentEventId: event.eventId }];
+    { type: 'heal', source, targetId: target.unitId, amount: healBasis * passiveRatio * diminish, parentEventId: event.eventId }];
 }
 
 function seaMonkSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

@@ -378,5 +378,5 @@ function hasFieldFrom(unit: Readonly<UnitState>, ownerId: string): boolean {
   return unit.statuses.some(status => status.statusId === shiranuiIds.field && status.source.unitId === ownerId);
 }
 function hasStatus(unit: Readonly<UnitState>, statusId: string): boolean { return unit.statuses.some(status => status.statusId === statusId); }
-function skillLevel(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function skillLevel(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function source(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

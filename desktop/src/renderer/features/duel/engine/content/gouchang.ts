@@ -20,7 +20,7 @@ const ultimateRatios = [2.11, 2.23, 2.35, 2.47, 2.47] as const;
 export function registerGouchang(registry: ContentRegistry): void {
   registry.registerStatus({ id: gouchangIds.hitDown, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
-  registry.registerStatus({ id: gouchangIds.mildew, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: gouchangIds.mildew, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 4, stackScope: 'source-unit' });
   registry.registerStatus({ id: gouchangIds.resistance, mechanicsCoverage: 'partial', category: 'buff', dispellable: true,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });

@@ -115,7 +115,7 @@ function attackTargets(context: BattleContext, actor: UnitState, targetIds: read
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 
 function lowestHealthEnemy(enemies: readonly UnitState[]): UnitState {

@@ -259,5 +259,5 @@ function passiveWindow(target: Readonly<UnitState>, values: StatusInstance['valu
 function fireflySource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
 
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }

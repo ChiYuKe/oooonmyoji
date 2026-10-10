@@ -3,7 +3,7 @@ import type { EffectCommand, SourceRef, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { createBasicAttackSkill } from './common-skills';
 import { attemptControl } from '../mechanics/control';
-import { createLineupDamageSkill, lineupIntent, lowestHealthEnemy } from './lineup-damage-skill';
+import { createLineupDamageSkill, lineupIntent, lowHealthPriorityTarget } from './lineup-damage-skill';
 import type { ContentRegistry } from './registry';
 
 export const chihimeIds = { hero: 356, basic: '3561', dream: '3562', summon: '3563', release: '3564',
@@ -24,10 +24,10 @@ export function registerChihime(registry: ContentRegistry): void {
   registry.registerStatus({ id: chihimeIds.enemySkillGaugeTriggered, mechanicsCoverage: 'partial', category: 'other', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep' });
   registry.registerStatus({ id: chihimeIds.tideSound, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
-    sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 7 });
-  registry.registerStatus({ id: chihimeIds.tideDream, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
+    sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 6 });
+  registry.registerStatus({ id: chihimeIds.tideDream, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
-  registry.registerStatus({ id: chihimeIds.deepFreeze, mechanicsCoverage: 'partial', category: 'control', dispellable: true,
+  registry.registerStatus({ id: chihimeIds.deepFreeze, mechanicsCoverage: 'partial', category: 'control', dispellable: false,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true });
   registry.registerStatus({ id: chihimeIds.teamTideBonus, mechanicsCoverage: 'partial', category: 'buff', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5 });
@@ -74,6 +74,9 @@ function createChihimeDefinition(): HeroDefinition {
           amount: -damageReduction }] } : {}) } };
       const summon: UnitState = { unitId: summonId, heroId: chihimeIds.hero, displayName: '海原贝戟',
         unitKind: 'summon', summonedByUnitId: actor.unitId,
+        // 海原贝戟是"护盾实体"：客户端 AOE 打它时按 AOE_SKILL_TO_SHIELD_DMG_RATE=2.5 增伤
+        // （calcRawAttackDmg.txt:2104-2180；helpers.isShieldEntity 的判据尚未反汇编，此处按语义标记）。
+        shieldEntity: true,
         skillLevel: actor.skillLevel, ...(actor.skillLevels ? { skillLevels: actor.skillLevels } : {}), side: actor.side,
         stats: { ...stats, hp: Math.max(1, stats.attack * 5.5), attack: 0, speed: 0 }, hp: Math.max(1, stats.attack * 5.5),
         shield: 0, actionGauge: 0, statuses: [{ instanceId: `${chihimeIds.halberdProtection}:${summonId}`,
@@ -92,16 +95,16 @@ function createChihimeDefinition(): HeroDefinition {
     const actor = context.getUnit(intent.actorId); if (!actor) return [];
     const source = { kind: 'skill' as const, id: chihimeIds.release, unitId: actor.unitId };
     const lament = actor.statuses.find(status => status.statusId === chihimeIds.lament);
-    const stacks = Math.max(1, Math.min(5, lament?.stacks ?? 1));
+    const stacks = Math.max(0, Math.min(5, lament?.stacks ?? 0));
     const attack = releaseDamage.execute(context, intent, { ...parameters, ratio: 1.2 + stacks });
     const halberdUnit = findHalberd(context, actor);
     if (halberdUnit) return [...attack, { type: 'lose-life', source, targetId: halberdUnit.unitId, amount: halberdUnit.hp }];
     return [...attack, ...returnHalberd(actor, source)];
   }, canUse: (state, actor) => hasHalberdInState(state, actor) };
   return { id: chihimeIds.hero, skills: [basic, dream, summon, release], aiCoverage: 'partial',
-    aiCoverageNotes: ['参考本地整理的社区 AI 规则：持戟时优先汐梦并选当前生命值最高的敌人；普攻优先选生命比例低于20%的敌人。释放潮声阈值仍按客户端数据的7层处理；目标策略尚无官方 AI 序列或配对实战记录验证'],
+    aiCoverageNotes: ['技能选择分支有模拟回归；但当前社区AI页称2技能优先选攻击最高友方，而客户端技能行3562及技能定义将汐梦建模为敌方单体伤害，二者冲突。现保留合法敌方随机回退，不据此宣称汐梦目标AI已验证；普攻低血优先与召戟/收戟分支仍按现有依据处理。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['已按客户端行接入千汐等级倍率/五级普攻叠潮声、汐梦2火伤害与敌方非召唤回合末推千姬10%行动条/扣敌方3火/五级扣至0时深度冰冻及速度-20、海潮入梦召戟/5.5倍攻击生命/继承防御/二级起千姬与海原贝戟各30%减伤/三级起耗火必叠潮声/四级持戟免控放逐/五级召唤初始3层、海原贝戟免疫控制和减益、友方受击恢复30%而千姬自身50%、敌方施术每场首次推条30%、七层潮声返3火并永久给全队15%增伤至5层、永生之汐2火并按悲歌220%至620%攻击伤害及收戟。被动封印已抑制被动触发，召唤与收戟技能状态互斥。未以10点场帧验证；汐梦控制命中时窗、致命伤害后的恢复/阵亡处理、AI选择与御魂插入顺序、完整放逐移出与返回流程尚待帧核或引擎建模。'],
+    mechanicsCoverageNotes: ['已按客户端行接入千汐等级倍率/五级普攻叠潮声、汐梦2火伤害与敌方非召唤回合末推千姬10%行动条/扣敌方3火/五级敌方行动后鬼火为0时深度冰冻及速度-20、海潮入梦召戟/5.5倍攻击生命/继承防御/二级起千姬与海原贝戟各30%减伤/三级起耗火必叠潮声/四级持戟免控放逐/五级召唤初始3层、海原贝戟免疫控制和减益、友方受击恢复30%而千姬自身50%、敌方施术每场首次推条30%、七层潮声返3火并永久给全队15%增伤至5层、永生之汐2火并按120%基础倍率、每层悲歌增加100%（1至5层为220%至620%）造成伤害及收戟。被动封印已抑制被动触发，召唤与收戟技能状态互斥。回归已锁定海原贝戟致命命中后不再作为在场治疗源、阵亡事件清理持戟并恢复免控；此为模拟事件链验证，客户端的致命伤害/恢复精确时序仍无清晰录像证据。汐梦控制命中时窗、AI选择与御魂插入顺序、完整放逐移出与返回流程尚待帧核或引擎建模。'],
     handlers: {
       'action-end': { priority: 85, handle(context, event) {
         if (event.type !== 'action-ended' || event.actionKind !== 'skill' || !event.source.unitId) return;
@@ -173,7 +176,7 @@ function createChihimeDefinition(): HeroDefinition {
         const commands: EffectCommand[] = [];
         if (target.unitKind !== 'summon') {
           const chihimes = context.getLivingUnits(target.side === 'blue' ? 'red' : 'blue')
-            .filter(unit => unit.heroId === chihimeIds.hero && passivesEnabled(unit));
+            .filter(unit => unit.heroId === chihimeIds.hero && unit.unitKind !== 'summon' && passivesEnabled(unit));
           for (const chihime of chihimes) commands.push({ type: 'change-action-gauge',
             source: { kind: 'skill', id: chihimeIds.dream, unitId: chihime.unitId },
             targetId: chihime.unitId, amount: 10, parentEventId: event.eventId });
@@ -184,13 +187,18 @@ function createChihimeDefinition(): HeroDefinition {
         const chihime = typeof owner === 'string' ? context.getUnit(owner) : undefined;
         if (!mark || !chihime || target.side === chihime.side) return commands;
         const fire = context.state.resources[target.side]?.fire ?? 0;
+        const fireAfterTideDream = Math.max(0, fire - 3);
         const source = { kind: 'skill' as const, id: chihimeIds.dream, unitId: chihime.unitId };
         commands.push({ type: 'remove-statuses', source, targetId: target.unitId, statusIds: [chihimeIds.tideDream],
           reason: 'consumed', parentEventId: event.eventId });
-        if (!isHalberdActive(context, chihime)) return commands;
-        commands.push({ type: 'change-resource', source, side: target.side, resourceId: 'fire',
+        const dreamRank = skillRank(chihime, chihimeIds.dream);
+        const halberdActive = isHalberdActive(context, chihime);
+        // 客户端 buff 3562 的等级1只在行动后扣火；等级2（五级汐梦）才要求海原贝戟仍在场，
+        // 并追加深度冰冻。印记已施加后贝戟离场，不应让低等级的基础扣火效果消失。
+        if (dreamRank >= 5 && !halberdActive) return commands;
+        if (fire > 0) commands.push({ type: 'change-resource', source, side: target.side, resourceId: 'fire',
           amount: -Math.min(3, fire), parentEventId: event.eventId });
-        if (fire > 0 && fire <= 3 && target.unitKind !== 'monster' && skillRank(chihime, chihimeIds.dream) >= 5) {
+        if (fireAfterTideDream === 0 && target.unitKind !== 'monster' && dreamRank >= 5) {
           const control = attemptControl(context, { attemptId: `${chihimeIds.deepFreeze}:${event.eventId}`,
             source, targetId: target.unitId, statusId: chihimeIds.deepFreeze, controlType: '深度冰冻', baseChance: 1,
             duration: { kind: 'count', remaining: 1, owner: 'target-turn' },
@@ -206,17 +214,19 @@ function createChihimeDefinition(): HeroDefinition {
       if (actor.unitKind === 'summon') return undefined;
       const hasHalberd = isHalberdActive(context, actor);
       if (!hasHalberd) return lineupIntent(unitId, chihimeIds.summon, [unitId], 'self');
-      const tideSound = findHalberd(context, actor)?.statuses.find(status => status.statusId === chihimeIds.tideSound)?.stacks ?? 0;
-      if (tideSound >= 7 && (context.state.resources[actor.side]?.fire ?? 0) >= 2)
+      if (enemies.every(enemy => enemy.unitKind === 'monster')) {
+        const target = lowHealthPriorityTarget(context, enemies, .2)!;
+        return lineupIntent(unitId, chihimeIds.basic, [target.unitId], 'single');
+      }
+      const teamTideStacks = actor.statuses.find(status => status.statusId === chihimeIds.teamTideBonus)?.stacks ?? 0;
+      if (teamTideStacks >= 5 && (context.state.resources[actor.side]?.fire ?? 0) >= 2)
         return lineupIntent(unitId, chihimeIds.release, enemies.map(enemy => enemy.unitId), 'all-enemies');
       if ((context.state.resources[actor.side]?.fire ?? 0) >= 2) {
-        const target = [...enemies].sort((left, right) => right.hp - left.hp || left.unitId.localeCompare(right.unitId))[0]!;
+        // The community AI gives no target preference for 汐梦; client auto mode randomly picks a legal target.
+        const target = enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!;
         return lineupIntent(unitId, chihimeIds.dream, [target.unitId], 'single');
       }
-      const lowHealthTarget = enemies.filter(enemy => enemy.hp / Math.max(1, enemy.stats.hp) < .2)
-        .sort((left, right) => left.hp / Math.max(1, left.stats.hp) - right.hp / Math.max(1, right.stats.hp)
-          || left.unitId.localeCompare(right.unitId))[0];
-      const target = lowHealthTarget ?? lowestHealthEnemy(context, actor)!;
+      const target = lowHealthPriorityTarget(context, enemies, .2)!;
       return lineupIntent(unitId, chihimeIds.basic, [target.unitId], 'single');
     },
     initialize(context, unitId) {
@@ -236,17 +246,26 @@ function createChihimeDefinition(): HeroDefinition {
 function gainTideSound(chihime: Readonly<UnitState>, halberd: Readonly<UnitState>, source: SourceRef, requested: number,
   parentEventId?: string): EffectCommand[] {
   const current = halberd.statuses.find(status => status.statusId === chihimeIds.tideSound)?.stacks ?? 0;
-  const gained = Math.min(Math.max(0, requested), 7 - current);
-  if (gained <= 0) return [];
+  const amount = Math.max(0, Math.floor(requested));
+  if (amount <= 0) return [];
   const statusSource = { kind: 'skill' as const, id: chihimeIds.summon, unitId: chihime.unitId };
-  const commands: EffectCommand[] = [{ type: 'add-status', source, targetId: halberd.unitId, ...(parentEventId ? { parentEventId } : {}),
+  const total = current + amount;
+  const rewards = Math.floor(total / 7);
+  const remainder = total % 7;
+  const commands: EffectCommand[] = [];
+  if (rewards > 0 && current > 0) commands.push({ type: 'remove-statuses', source: statusSource,
+    targetId: halberd.unitId, statusIds: [chihimeIds.tideSound], reason: 'consumed',
+    ...(parentEventId ? { parentEventId } : {}) });
+  if (remainder > 0) commands.push({ type: 'add-status', source, targetId: halberd.unitId, ...(parentEventId ? { parentEventId } : {}),
     instance: { instanceId: `${chihimeIds.tideSound}:${halberd.unitId}`, statusId: chihimeIds.tideSound,
-      source: statusSource, stacks: gained, duration: { kind: 'permanent' } } }];
-  if (current < 7 && current + gained >= 7) {
-    commands.push({ type: 'add-status', source, targetId: chihime.unitId, ...(parentEventId ? { parentEventId } : {}), instance: {
+      source: statusSource, stacks: rewards > 0 ? remainder : amount, duration: { kind: 'permanent' } } });
+  if (rewards > 0) {
+    const bonus = chihime.statuses.find(status => status.statusId === chihimeIds.teamTideBonus)?.stacks ?? 0;
+    const bonusStacks = Math.min(rewards, 5 - bonus);
+    if (bonusStacks > 0) commands.push({ type: 'add-status', source, targetId: chihime.unitId, ...(parentEventId ? { parentEventId } : {}), instance: {
       instanceId: `${chihimeIds.teamTideBonus}:${chihime.unitId}`, statusId: chihimeIds.teamTideBonus,
-      source: statusSource, stacks: 1, duration: { kind: 'permanent' } } });
-    commands.push({ type: 'change-resource', source, side: chihime.side, resourceId: 'fire', amount: 3,
+      source: statusSource, stacks: bonusStacks, duration: { kind: 'permanent' } } });
+    commands.push({ type: 'change-resource', source, side: chihime.side, resourceId: 'fire', amount: 3 * rewards,
       ...(parentEventId ? { parentEventId } : {}) });
   }
   return commands;

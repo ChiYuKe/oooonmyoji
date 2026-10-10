@@ -118,7 +118,7 @@ function onDemonFoxHit(context: BattleContext, event: BattleEvent): EffectComman
 }
 
 function skillRank(owner: Readonly<UnitState>): number {
-  return Math.max(1, Math.min(5, Math.floor(owner.skillLevels?.[demonFoxIds.passive] ?? owner.skillLevel)));
+  return Math.max(1, Math.min(6, Math.floor(owner.skillLevels?.[demonFoxIds.passive] ?? owner.skillLevel)));
 }
 
 function foxSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

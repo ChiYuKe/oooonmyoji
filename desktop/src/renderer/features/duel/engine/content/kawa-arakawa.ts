@@ -249,7 +249,7 @@ function isSpirit(unit: Readonly<UnitState> | undefined): boolean {
   return Boolean(unit?.statuses.some(status => status.statusId === kawaArakawaIds.spirit && status.values?.fightingSpirit === true));
 }
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function opposingSide(side: UnitState['side']): UnitState['side'] { return side === 'blue' ? 'red' : 'blue'; }
 function kawaSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

@@ -55,10 +55,10 @@ export function registerXiaosongwan(registry: ContentRegistry): void {
     } };
 
   const definition: HeroDefinition = { id: xiaosongwanIds.hero, skills: [basic, ultimate], aiCoverage: 'partial', mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['已接入松果一击按等级100%至125%伤害、胆怯非间接伤害受击时按技能等级15%至25%概率闪避、单体攻击闪避后由当前生命最高的其他友方承受原伤害80%、闪避时按50%基础概率眩晕攻击者1回合；怒气消耗3火，四次踩踏首次选定目标后续随机目标，按等级150%至187%攻击，同一目标后续伤害每次递减40%，重复目标眩晕概率降为20%，控制最多叠2回合。客户端数据明确说明闪避免疫附带技能效果，但引擎拦截器只分摊伤害，技能追加效果是否同步免疫仍需补足事件级拦截；反击和多段攻击的逐击概率、踩踏选敌序列与御魂插入时序仍待帧核。'],
-    interceptIncomingDamage(state, attacker, target, amount, _kind, interception): DamageInterception | undefined {
+    mechanicsCoverageNotes: ['已接入松果一击按等级100%至125%伤害、胆怯仅在非间接伤害受击时按技能等级15%至25%概率闪避（对照官服历史修复，极寒之气不会触发胆怯）、单体攻击闪避后由当前生命最高的其他友方承受原伤害80%、闪避时按50%基础概率眩晕攻击者1回合；怒气消耗3火，四次踩踏首次选定目标后续随机目标，按等级150%至187%攻击，同一目标后续伤害每次递减40%，重复目标眩晕概率降为20%，控制最多叠2回合。客户端数据明确说明闪避免疫附带技能效果，但引擎拦截器只分摊伤害，技能追加效果是否同步免疫仍需补足事件级拦截；反击和多段攻击的逐击概率、踩踏选敌序列与御魂插入时序仍待帧核。'],
+    interceptIncomingDamage(state, attacker, target, amount, kind, interception): DamageInterception | undefined {
       if (target.heroId !== xiaosongwanIds.hero || target.hp <= 0 || target.unitKind === 'summon' || amount <= 0
-        || !passivesEnabled(target) || !attacker || attacker.side === target.side || !interception) return;
+        || kind === 'indirect' || !passivesEnabled(target) || !attacker || attacker.side === target.side || !interception) return;
       const chance = dodgeChances[rank(target, xiaosongwanIds.passive) - 1]!;
       if (interception.battle.random() >= chance) return;
       const source = xiaosongwanSource(xiaosongwanIds.passive, target.unitId);
@@ -100,5 +100,5 @@ function hit(context: BattleContext, actor: Readonly<UnitState>, target: Readonl
   return [{ type: 'deal-damage', source: xiaosongwanSource(skillId, actor.unitId), targetId: target.unitId, amount: damage.amount,
     ...(damage.damageOptions ? { damageOptions: damage.damageOptions } : {}), isCritical: damage.isCritical }];
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function xiaosongwanSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

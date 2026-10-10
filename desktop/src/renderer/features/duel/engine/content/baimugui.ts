@@ -152,6 +152,6 @@ function gainEyesOnEnemyCritical(context: BattleContext, event: BattleEvent): Ef
 }
 
 function skillRank(unit: Readonly<UnitState>, id: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[id] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[id] ?? unit.skillLevel));
 }
 function baimuguiSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

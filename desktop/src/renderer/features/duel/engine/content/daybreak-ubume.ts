@@ -70,5 +70,5 @@ function damage(context: BattleContext, owner: Readonly<UnitState>, target: Read
       ...(result.damageOptions ? { damageOptions: result.damageOptions } : {}) };
   });
 }
-function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
+function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
 function daybreakSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

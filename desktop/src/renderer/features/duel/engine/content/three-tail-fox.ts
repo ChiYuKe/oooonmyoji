@@ -1,9 +1,10 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import { passivesEnabled } from '../core/passive-eligibility';
-import type { ActionIntent, BattleContext, EffectCommand, SourceRef } from '../core/types';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import type { ActionIntent, BattleContext, EffectCommand, SourceRef, UnitState } from '../core/types';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { effectiveTargetResistance } from './flying-edge';
+import { rollAddBuffChance } from '../mechanics/control';
 import type { ContentRegistry } from './registry';
 
 export const threeTailFoxIds = {
@@ -16,13 +17,25 @@ export const threeTailFoxIds = {
   foxMark: 'status.hero.202.fox-mark',
 } as const;
 
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端逐级 param 已核对（`game-skill-data.generated.json`）：
+ *   2022 passive  lv1 param2=0.2 / lv2 param1=0.5,param2=0.25 / lv3 param1=1 / lv4 param2=0.4 / lv5 param4=0.15
+ *   2021 basic    lv2 param1=12（加速量）…
+ *   2023 ultimate … 每层印记伤害随等级变化
+ * ⇒ 本文件所有 `skillLevel >= n` 判定都应改用对应技能的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 export function registerThreeTailFox(registry: ContentRegistry): void {
   registry.registerStatus({ id: threeTailFoxIds.speed, mechanicsCoverage: 'partial', category: 'buff', dispellable: true,
     sealable: false, durationOwner: 'target-turn', refreshPolicy: 'refresh-duration' });
   registry.registerStatus({ id: threeTailFoxIds.poison, mechanicsCoverage: 'verified', category: 'debuff', dispellable: true,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'add-stack' });
-  registry.registerStatus({ id: threeTailFoxIds.foxMark, mechanicsCoverage: 'verified', category: 'mark', dispellable: true,
-    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'add-stack' });
+  // 客户端 `[2024, 1]`（印记）的 `indirectDmgType = 1` ⇒ 它计入目标的间接伤害层数（getIndirectBuffLv）
+  registry.registerStatus({ id: threeTailFoxIds.foxMark, mechanicsCoverage: 'verified', category: 'mark', dispellable: true, negativeEffect: true,
+    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'add-stack', indirectDamageLevel: 1 });
 
   const basic = createThreeTailBasic();
   const ultimate = createThreeTailUltimate();
@@ -32,7 +45,7 @@ export function registerThreeTailFox(registry: ContentRegistry): void {
     aiCoverage: 'verified',
     mechanicsCoverage: 'partial',
     modifyOutgoingDamage(attacker, _target, amount, _kind) {
-      return attacker.skillLevel >= 5 && attacker.hp >= attacker.stats.hp ? amount * 1.15 : amount;
+      return rank(attacker, threeTailFoxIds.passive) >= 5 && attacker.hp >= attacker.stats.hp ? amount * 1.15 : amount;
     },
     handlers: {
       hit: { priority: 135, handle(context, event) {
@@ -41,17 +54,17 @@ export function registerThreeTailFox(registry: ContentRegistry): void {
         const target = context.getUnit(event.targetId);
         if (!attacker || attacker.heroId !== threeTailFoxIds.hero || !passivesEnabled(attacker)) return;
         const commands: EffectCommand[] = [];
-        const lifeStealChance = attacker.skillLevel >= 3 ? 1 : .5;
+        const lifeStealChance = rank(attacker, threeTailFoxIds.passive) >= 3 ? 1 : .5;
         if (event.hpLost > 0 && context.random() < lifeStealChance) {
-          const ratio = attacker.skillLevel >= 4 ? .4 : attacker.skillLevel >= 2 ? .25 : .2;
+          const ratio = rank(attacker, threeTailFoxIds.passive) >= 4 ? .4 : rank(attacker, threeTailFoxIds.passive) >= 2 ? .25 : .2;
           commands.push({ type: 'restore-health', source: foxSource(threeTailFoxIds.passive, attacker.unitId),
             targetId: attacker.unitId, amount: event.hpLost * ratio, parentEventId: event.eventId });
         }
-        if (event.source.id === threeTailFoxIds.basic && attacker.skillLevel >= 2 && target?.hp && target.hp > 0) {
-          const chance = attacker.skillLevel >= 4 ? .3 : .2;
+        if (event.source.id === threeTailFoxIds.basic && rank(attacker, threeTailFoxIds.basic) >= 2 && target?.hp && target.hp > 0) {
+          const chance = rank(attacker, threeTailFoxIds.basic) >= 4 ? .3 : .2;
           if (context.random() < chance) {
-            const duration = attacker.skillLevel >= 6 ? 2 : 1;
-            const amount = attacker.skillLevel >= 5 ? 20 : 10;
+            const duration = rank(attacker, threeTailFoxIds.basic) >= 6 ? 2 : 1;
+            const amount = rank(attacker, threeTailFoxIds.basic) >= 5 ? 20 : 12;
             const source = foxSource(threeTailFoxIds.basic, attacker.unitId);
             commands.push({ type: 'add-status', source, targetId: attacker.unitId, instance: {
               instanceId: `${threeTailFoxIds.speed}:${attacker.unitId}:${event.eventId}`, statusId: threeTailFoxIds.speed,
@@ -60,13 +73,13 @@ export function registerThreeTailFox(registry: ContentRegistry): void {
             }, parentEventId: event.eventId });
           }
         }
-        if (event.source.id === threeTailFoxIds.ultimate && attacker.skillLevel >= 3 && target && target.hp > 0) {
-          const chance = Math.max(0, Math.min(1, 1 + Math.max(0, context.getEffectiveStats(attacker.unitId)?.hit ?? 0)))
-            * (1 - effectiveTargetResistance(context.getEffectiveStats(target.unitId)?.resist ?? 0,
+        if (event.source.id === threeTailFoxIds.ultimate && rank(attacker, threeTailFoxIds.ultimate) >= 3 && target && target.hp > 0) {
+          const result = rollAddBuffChance(context, 1 + (context.getEffectiveStats(attacker.unitId)?.hit ?? 0),
+            effectiveTargetResistance(context.getEffectiveStats(target.unitId)?.resist ?? 0,
               foxSource(threeTailFoxIds.ultimate, attacker.unitId), context.getUnit));
-          if (context.random() < chance) {
-            const duration = attacker.skillLevel >= 6 ? 3 : 2;
-            const damageRatio = attacker.skillLevel >= 5 ? .2 : .1;
+          if (result === 'success') {
+            const duration = rank(attacker, threeTailFoxIds.ultimate) >= 6 ? 3 : 2;
+            const damageRatio = rank(attacker, threeTailFoxIds.ultimate) >= 5 ? .2 : .1;
             const poisonSource = foxSource(threeTailFoxIds.ultimate, attacker.unitId);
             commands.push({ type: 'add-status', source: poisonSource, targetId: target.unitId, instance: {
               instanceId: `${threeTailFoxIds.poison}:${attacker.unitId}:${target.unitId}`,
@@ -96,7 +109,10 @@ export function registerThreeTailFox(registry: ContentRegistry): void {
           const poisonDefenseIgnore = target.statuses.filter(poison => poison.statusId === threeTailFoxIds.poison)
             .reduce((total, poison) => total + poison.stacks * 10 * Math.max(0, Number(poison.values?.level ?? 0)), 0);
           const indirect = calculateIndirectDamage({ attack: sourceStats.attack, defense: targetStats.defense,
-            defenseIgnore: poisonDefenseIgnore, ratio: ratio * status.stacks, critDamage: sourceStats.critDamage }, context.random);
+            defenseIgnore: poisonDefenseIgnore, ratio: ratio * status.stacks, critDamage: sourceStats.critDamage,
+            // 客户端 indirectDamageCalc：间接攻击额外无视 `getIndirectBuffLv() × 10` 防御
+            // （印记自己 indirectDmgType=1，按层计入；毒是 0，不计层，只走上面的 poisonDefenseIgnore）
+            layers: indirectBuffLv(target) }, context.random);
           return [{ type: 'lose-life' as const, source: status.source, targetId: target.unitId,
             amount: indirect.amount,
             lifeLossKind: 'indirect',

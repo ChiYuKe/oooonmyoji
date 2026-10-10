@@ -210,5 +210,5 @@ function damage(context: BattleContext, actor: Readonly<UnitState>, target: Read
   return [{ type: 'deal-damage', source: yujuwormSource(skillId, actor.unitId), targetId: target.unitId, amount: result.amount,
     ...(result.damageOptions ? { damageOptions: result.damageOptions } : {}), isCritical: result.isCritical }];
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function yujuwormSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

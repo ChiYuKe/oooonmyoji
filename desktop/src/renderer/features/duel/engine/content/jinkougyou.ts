@@ -28,9 +28,9 @@ export function registerJinkougyou(registry: ContentRegistry): void {
     } });
   registry.registerStatus({ id: jinkougyouIds.heartFragrance, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5 });
-  registry.registerStatus({ id: jinkougyouIds.soulBinder, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
+  registry.registerStatus({ id: jinkougyouIds.soulBinder, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 3 });
-  registry.registerStatus({ id: jinkougyouIds.trance, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
+  registry.registerStatus({ id: jinkougyouIds.trance, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace', preventsAction: true });
   registry.registerStatus({ id: jinkougyouIds.defenseRuin, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep' });
@@ -70,17 +70,17 @@ export function createJinkougyouDefinition(): HeroDefinition {
         const target = context.getUnit(targetId); if (!target || target.hp <= 0 || target.side === actor.side) continue;
         const amount = stats.attack * ratio * defenseGapMultiplier(actor, target, context.state);
         commands.push({ type: 'lose-life', source, targetId: target.unitId, amount, lifeLossKind: 'indirect' });
-        if (currentField) commands.push(...attemptDebuff(context, { source, targetId: target.unitId, statusId: jinkougyouIds.soulBinder,
+        if (currentField && target.unitKind !== 'summon') commands.push(...attemptDebuff(context, { source, targetId: target.unitId, statusId: jinkougyouIds.soulBinder,
           baseChance: target.unitKind === 'monster' ? 1 : .4, duration: { kind: 'permanent' },
           modifiers: soulBinderModifiers(fieldLevel(actor, currentField)) }));
       }
       return commands;
     } };
 
-  return { id: jinkougyouIds.hero, skills: [basic, field, wish], aiCoverage: 'partial',
-    aiCoverageNotes: ['参考本地整理的社区 AI 规则：未开启明香境且鬼火足够时先开场，场地存在且鬼火足够时使用菩提愿；普攻优先选择生命比例低于20%或带有失神的敌人。选招/目标规则尚无官方 AI 序列或配对实战记录验证'],
+  return { id: jinkougyouIds.hero, skills: [basic, field, wish], aiCoverage: 'verified',
+    aiCoverageNotes: ['已按社区式神AI条目实现并用回归验证：未开启明香境时优先2技能，场地存在且鬼火足够时使用3技能；普攻优先选择生命比例低于20%或带有失神的敌人，否则按客户端自动目标函数从可选敌人中随机选择。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['技能等级按各技能独立读取；二级明香境基础持续4回合，二级菩提愿额外延长1回合；三级明香境起技能鬼火减耗1点；缚魂香跨技能合层，三级明香境起每层降防由5%提升为10%，三层转化为失神和永久降低35%防御；明香境内菩提愿对怪物必中缚魂香；封印转化、特殊目标判定仍未全部覆盖'],
+    mechanicsCoverageNotes: ['技能等级按各技能独立读取；二级明香境基础持续4回合，二级菩提愿额外延长1回合；三级明香境起技能鬼火减耗1点；缚魂香跨技能合层，三级明香境起每层降防由5%提升为10%，三层转化为失神和永久降低35%防御；明香境内菩提愿对怪物必中缚魂香；封印时已存在明香境仍控制AI选招且可减耗，攻击被动挂香停止，主动施加的第三层缚魂香仍触发状态转换；特殊目标及客户端封印结算窗口仍待实机核验'],
     initialize(context, unitId) {
       const actor = context.getUnit(unitId); if (!actor) return [];
       const sameSide = context.state.sides[actor.side].map(id => context.getUnit(id)).filter(unit => unit?.heroId === jinkougyouIds.hero);
@@ -103,7 +103,7 @@ export function createJinkougyouDefinition(): HeroDefinition {
       const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue'); if (!enemies.length) return undefined;
       const fire = context.state.resources[actor.side]?.fire ?? 0;
       const fieldRank = skillRank(actor, jinkougyouIds.fieldSkill);
-      const activeField = hasUnique(actor) && passivesEnabled(actor) && Boolean(fieldStatus(actor));
+      const activeField = hasUnique(actor) && Boolean(fieldStatus(actor));
       if (hasUnique(actor) && !activeField && fire >= (fieldRank >= 4 ? 2 : 3))
         return intent(unitId, jinkougyouIds.fieldSkill, [unitId], 'self', 'ally');
       const activeFieldState = fieldStatus(actor);
@@ -111,9 +111,10 @@ export function createJinkougyouDefinition(): HeroDefinition {
       if (activeField && fire >= wishCost) return intent(unitId, jinkougyouIds.wishSkill, enemies.map(enemy => enemy.unitId), 'all-enemies', 'enemy');
       const preferred = enemies.filter(enemy => enemy.hp / Math.max(1, enemy.stats.hp) < .2
         || enemy.statuses.some(status => status.statusId === jinkougyouIds.trance));
-      const target = (preferred.length > 0 ? preferred : enemies).slice()
-        .sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp)
-          || a.unitId.localeCompare(b.unitId))[0]!;
+      const target = preferred.length > 0
+        ? preferred.slice().sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp)
+          || a.unitId.localeCompare(b.unitId))[0]!
+        : enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!;
       return intent(unitId, jinkougyouIds.basic, [target.unitId], 'single', 'enemy');
     },
     handlers: {
@@ -137,7 +138,7 @@ function applySoulBinder(context: BattleContext, event: BattleEvent): EffectComm
   if (event.type !== 'damage' || !event.source.unitId) return;
   const actor = context.getUnit(event.source.unitId); const target = context.getUnit(event.targetId);
   if (!actor || actor.heroId !== jinkougyouIds.hero || !hasUnique(actor) || !passivesEnabled(actor)
-    || !target || target.side === actor.side || !fieldStatus(actor)) return;
+    || !target || target.hp <= 0 || target.side === actor.side || !fieldStatus(actor)) return;
   const source = jinkouSource(event.source.id, actor.unitId);
   const field = fieldStatus(actor);
   return attemptDebuff(context, { source, targetId: target.unitId, statusId: jinkougyouIds.soulBinder, baseChance: .4,
@@ -149,7 +150,7 @@ function convertSoulBinder(context: BattleContext, event: BattleEvent): EffectCo
   if (event.type !== 'status-added' || event.instance.statusId !== jinkougyouIds.soulBinder || event.instance.stacks < 3) return;
   const target = context.getUnit(event.targetId); const ownerId = event.instance.source.unitId;
   const owner = ownerId && context.getUnit(ownerId);
-  if (!target || !owner || !hasUnique(owner) || !passivesEnabled(owner) || target.hp <= 0) return;
+  if (!target || !owner || !hasUnique(owner) || target.hp <= 0) return;
   const source = jinkouSource(event.instance.source.id, owner.unitId);
   const commands: EffectCommand[] = [
     { type: 'remove-statuses', source, targetId: target.unitId, statusIds: [jinkougyouIds.soulBinder], reason: 'consumed' },
@@ -168,8 +169,10 @@ function convertSoulBinder(context: BattleContext, event: BattleEvent): EffectCo
 function gainHeartFragrance(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'turn-ended') return;
   const actor = context.getUnit(event.unitId); if (!actor || actor.hp <= 0 || actor.unitKind === 'summon') return;
+  // This is the active Fragrance Field skill effect (3912), not Jinkougyou's
+  // attack passive; passive suppression must not turn off this field callback.
   const owner = context.getLivingUnits(actor.side).find(unit => unit.heroId === jinkougyouIds.hero && hasUnique(unit)
-    && passivesEnabled(unit) && fieldStatus(unit)
+    && fieldStatus(unit)
     && unit.unitId !== actor.unitId);
   if (!owner) return;
   const current = owner.statuses.find(status => status.statusId === jinkougyouIds.heartFragrance);
@@ -199,7 +202,7 @@ function fieldLevel(unit: { skillLevel: number; skillLevels?: Readonly<Record<st
 }
 function skillRank(unit: { skillLevel: number; skillLevels?: Readonly<Record<string, number>> }, skillId: string): number {
   const rank = unit.skillLevels?.[skillId];
-  return Number.isInteger(rank) ? Math.max(1, Math.min(5, rank!)) : Math.max(1, Math.min(5, unit.skillLevel));
+  return Number.isInteger(rank) ? Math.max(1, Math.min(6, rank!)) : Math.max(1, Math.min(6, unit.skillLevel));
 }
 function hasUnique(unit: { statuses: readonly StatusInstance[] }): boolean {
   return unit.statuses.some(status => status.statusId === jinkougyouIds.unique);

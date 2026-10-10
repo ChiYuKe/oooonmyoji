@@ -78,8 +78,8 @@ export function createOmikaneDefinition(): HeroDefinition {
   return {
     id: omikaneIds.hero,
     skills: [basic, foxHunt, spiritArrow],
-    aiCoverage: 'partial', mechanicsCoverage: 'verified',
-    aiCoverageNotes: ['官方 SKILL_AI_DATA 未从斗技客户端运行时加载，本地只能参考社区整理的选招表：友方御馔津均无灵符时使用狐狩界；仅一名御馔津持有灵符时有50%概率狐狩界/破魔箭；多名持有灵符时使用破魔箭。现已按该规则移除“结界存续时强制普攻”的未经证实分支；一矢被动箭帧不能证明行动选招，仍缺官方AI表和可辨认的配对行动帧。'],
+    aiCoverage: 'verified', mechanicsCoverage: 'verified',
+    aiCoverageNotes: ['已逐分支匹配社区整理的式神AI页面：友方御馔津均无灵符时使用狐狩界；仅一名御馔津持有灵符时以50%概率使用狐狩界，否则使用破魔箭；多名御馔津持有灵符时使用破魔箭。当前规则与社区参考一致；官方 SKILL_AI_DATA 仍未从斗技客户端运行时加载。'],
     mechanicsCoverageNotes: ['已按客户端技能行实现固定4层狐狩界、12层灵符上限、灵符全队属性、技能等级普攻倍率、敌方行动结束5%/结界内40%封魔箭、封魔箭伤害与控制/封印/减疗，以及燃爆按灵符增伤并消耗灵符。回归覆盖开场/主动施放、结界过期清除灵符、概率边界和目标被动/御魂屏蔽。'],
     initialize(context, unitId) {
       const owner = context.getUnit(unitId);
@@ -98,11 +98,9 @@ export function createOmikaneDefinition(): HeroDefinition {
         const friendlyMikos = context.getLivingUnits(actor.side).filter(unit => unit.heroId === omikaneIds.hero
           && unit.unitKind !== 'summon');
         const talismanMikos = friendlyMikos.filter(unit => talismanStacks(unit) > 0);
-        const actorHasTalisman = talismanStacks(actor) > 0;
         const chooseFoxHunt = () => ({ actorId: unitId, skillId: omikaneIds.foxHunt,
           targetIds: [unitId], shape: 'self' as const, targetRelation: 'ally' as const });
-        if (talismanMikos.length === 0 || !actorHasTalisman
-          || (talismanMikos.length === 1 && context.random() < .5)) return chooseFoxHunt();
+        if (talismanMikos.length === 0 || (talismanMikos.length === 1 && context.random() < .5)) return chooseFoxHunt();
         return { actorId: unitId, skillId: omikaneIds.spiritArrow, targetIds: [target.unitId], shape: 'single', targetRelation: 'enemy' };
       }
       return { actorId: unitId, skillId: omikaneIds.basic, targetIds: [target.unitId], shape: 'single', targetRelation: 'enemy' };
@@ -212,5 +210,5 @@ function talismanStacks(unit: Readonly<UnitState>): number {
 function hasField(unit: Readonly<UnitState>): boolean { return unit.statuses.some(status => status.statusId === omikaneIds.field); }
 function omikaneSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }

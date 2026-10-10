@@ -1,9 +1,10 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext } from '../core/types';
 import { createBasicAttackSkill } from './common-skills';
-import { lineupIntent, lowestHealthEnemy } from './lineup-damage-skill';
+import { lineupIntent, lowHealthPriorityTarget } from './lineup-damage-skill';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { passiveSuppressionStatusId, passivesEnabled } from '../core/passive-eligibility';
+import { soulSuppressionStatusId } from '../core/soul-eligibility';
 import { attemptDebuff } from '../mechanics/control';
 import type { EffectCommand } from '../core/types';
 import type { ContentRegistry } from './registry';
@@ -83,10 +84,13 @@ function createResentmentHannyaDefinition(): HeroDefinition {
         statusId: resentmentHannyaIds.sealBarrier, source, stacks: 9, duration: { kind: 'permanent' } } }];
       const opposingSide = actor.side === 'blue' ? 'red' : 'blue';
       for (const enemy of context.getLivingUnits(opposingSide)) {
+        if (enemy.unitKind === 'monster') continue;
         commands.push({ type: 'add-status', source, targetId: enemy.unitId, instance: { instanceId: `${resentmentHannyaIds.sealMask}:${actor.unitId}:${enemy.unitId}`,
           statusId: resentmentHannyaIds.sealMask, source, stacks: 1, duration: { kind: 'permanent' } } });
         commands.push({ type: 'add-status', source, targetId: enemy.unitId, instance: { instanceId: `${passiveSuppressionStatusId}:${actor.unitId}:${enemy.unitId}`,
           statusId: passiveSuppressionStatusId, source, stacks: 1, duration: { kind: 'permanent' } } });
+        commands.push({ type: 'add-status', source, targetId: enemy.unitId, instance: { instanceId: `${soulSuppressionStatusId}:${actor.unitId}:${enemy.unitId}`,
+          statusId: soulSuppressionStatusId, source, stacks: 1, duration: { kind: 'permanent' } } });
       }
       return commands;
     } };
@@ -131,8 +135,9 @@ function createResentmentHannyaDefinition(): HeroDefinition {
         commands.push(...gainHateMarks(context, actor.unitId, source, 3));
       return commands;
     } };
-  return { id: resentmentHannyaIds.hero, skills: [basic, barrierSkill, ultimate], aiCoverage: 'partial', mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['仇恨印记上限9层，每层+10个百分点效果抵抗/+5%减伤，满层解除控制并推45%行动条；五级先机6层，敌方暴击回印记40%/40%/40%/80%/100%，每行动最多一次；二级起友方式神阵亡+3层、攻击带仇恨蔓延的敌人每次攻击每目标最多+1层；封印期间普攻两段倍率80%/80%/88%/92%/100%并吸血15%；启阵耗3火（三级起免费），开9面且禁止继续得印；破阵技能耗1火破2面，结界全破时尝试给敌方附1回合仇恨蔓延；二级起大招在结界内多打一轮全体并获得3层印记，五级按每个低于50%生命的非召唤友方对随机敌方造成80%伤害。鬼面表外破碎条件、仇恨蔓延抵抗边界及御魂联动仍待核对；御怨般若不在10点场阵容中，没有直接触发帧。'],
+  return { id: resentmentHannyaIds.hero, skills: [basic, barrierSkill, ultimate], aiCoverage: 'verified', mechanicsCoverage: 'partial',
+    aiCoverageNotes: ['已按社区式神AI逐分支实现并回归：二技能可用时优先启阵；否则鬼火足够用三技能，社区AI未列出其目标偏好，按客户端无优先条件时从合法目标中随机选择；否则普攻只在存在低于20%生命的敌人时优先其中最低者，否则随机选择合法目标。'],
+    mechanicsCoverageNotes: ['仇恨印记上限9层，每层+10个百分点效果抵抗/+5%减伤，满层解除控制并推45%行动条；五级先机6层，敌方暴击回印记40%/40%/40%/80%/100%，每行动最多一次；二级起友方式神阵亡+3层、攻击带仇恨蔓延的敌人每次攻击每目标最多+1层；封印期间普攻两段倍率80%/80%/88%/92%/100%并吸血15%；启阵耗3火（三级起免费），开9面并封印非怪物敌方式神被动与御魂，禁止继续得印；破阵技能耗1火破2面，非召唤物敌方回合结束破1面，结界全破时尝试给敌方附1回合仇恨蔓延；二级起大招在结界内多打一轮全体并获得3层印记，五级按每个低于50%生命的非召唤友方对随机敌方造成80%伤害。额外回合的客户端回调边界已由 TurnMgrComp 队列行动→Lock→callBoutEndCb 调用链和 runBattle 专项回归核验；仇恨蔓延抵抗公式及御魂具体触发交互仍待核对。御怨般若不在10点场阵容中，没有直接触发帧。'],
     initialize(context, unitId) {
       const actor = context.getUnit(unitId);
       return skillLevel(actor, resentmentHannyaIds.passive) >= 5
@@ -197,14 +202,16 @@ function createResentmentHannyaDefinition(): HeroDefinition {
         const owner = ownerId ? context.getUnit(ownerId) : undefined;
         const barrier = owner?.statuses.find(status => status.statusId === resentmentHannyaIds.sealBarrier);
         if (!owner || !barrier) return;
-        const remaining = Math.max(0, barrier.stacks - 2);
-        const commands: EffectCommand[] = [{ type: 'remove-status-instances', source: barrier.source, targetId: owner.unitId,
-          instanceIds: [barrier.instanceId], parentEventId: event.eventId }];
-        if (remaining > 0) commands.push({ type: 'add-status', source: barrier.source, targetId: owner.unitId, parentEventId: event.eventId,
-          instance: { ...barrier, instanceId: `${resentmentHannyaIds.sealBarrier}:${owner.unitId}:${remaining}`,
-            stacks: remaining } });
-        else return closeSealBarrier(context, owner.unitId, event.eventId);
-        return commands;
+        return breakSealBarrierFaces(context, owner.unitId, 2, event.eventId);
+      } },
+      'turn-end': { priority: 60, handle(context, event) {
+        if (event.type !== 'turn-ended') return;
+        const enemy = context.getUnit(event.unitId);
+        if (!enemy || enemy.hp <= 0 || enemy.unitKind === 'summon') return;
+        const owners = context.getLivingUnits(enemy.side === 'blue' ? 'red' : 'blue')
+          .filter(unit => unit.heroId === resentmentHannyaIds.hero
+            && unit.statuses.some(status => status.statusId === resentmentHannyaIds.sealBarrier));
+        return owners.flatMap(owner => breakSealBarrierFaces(context, owner.unitId, 1, event.eventId));
       } },
       'unit-defeated': { priority: 60, handle(context, event) {
         if (event.type !== 'unit-defeated') return;
@@ -221,7 +228,8 @@ function createResentmentHannyaDefinition(): HeroDefinition {
             const unit = context.getUnit(unitId);
             if (!unit) continue;
             const ownedStatuses = unit.statuses.filter(status => status.source.unitId === defeated.unitId
-              && (status.statusId === resentmentHannyaIds.sealMask || status.statusId === passiveSuppressionStatusId));
+              && (status.statusId === resentmentHannyaIds.sealMask || status.statusId === passiveSuppressionStatusId
+                || status.statusId === soulSuppressionStatusId));
             if (ownedStatuses.length) commands.push({ type: 'remove-status-instances', source, targetId: unitId,
               instanceIds: ownedStatuses.map(status => status.instanceId), parentEventId: event.eventId });
           }
@@ -243,10 +251,12 @@ function createResentmentHannyaDefinition(): HeroDefinition {
         if ((context.state.resources[actor.side]?.fire ?? 0) >= cost)
           return lineupIntent(unitId, resentmentHannyaIds.passive, [unitId], 'self');
       }
-      return (context.state.resources[actor.side]?.fire ?? 0) >= 3
-        ? lineupIntent(unitId, resentmentHannyaIds.ultimate, [lowestHealthEnemy(context, actor)!.unitId,
-          ...enemies.filter(enemy => enemy.unitId !== lowestHealthEnemy(context, actor)!.unitId).map(enemy => enemy.unitId)], 'multi')
-        : lineupIntent(unitId, resentmentHannyaIds.basic, [lowestHealthEnemy(context, actor)!.unitId], 'single');
+      if ((context.state.resources[actor.side]?.fire ?? 0) >= 3) {
+        const target = enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!;
+        return lineupIntent(unitId, resentmentHannyaIds.ultimate, [target.unitId,
+          ...enemies.filter(enemy => enemy.unitId !== target.unitId).map(enemy => enemy.unitId)], 'multi');
+      }
+      return lineupIntent(unitId, resentmentHannyaIds.basic, [lowHealthPriorityTarget(context, enemies, .2)!.unitId], 'single');
     },
   };
 }
@@ -281,6 +291,21 @@ function createMaskBreakSkill(): SkillDefinition {
     target: 'self', targetRelation: 'ally', levels: [{ level: 1 }], execute: () => [] };
 }
 
+function breakSealBarrierFaces(context: BattleContext, ownerId: string, count: number, parentEventId: string): EffectCommand[] {
+  const owner = context.getUnit(ownerId);
+  const barrier = owner?.statuses.find(status => status.statusId === resentmentHannyaIds.sealBarrier);
+  if (!owner || !barrier) return [];
+  const remaining = Math.max(0, barrier.stacks - count);
+  if (remaining === 0) return closeSealBarrier(context, ownerId, parentEventId);
+  return [
+    { type: 'remove-status-instances', source: barrier.source, targetId: owner.unitId,
+      instanceIds: [barrier.instanceId], parentEventId },
+    { type: 'add-status', source: barrier.source, targetId: owner.unitId, parentEventId,
+      instance: { ...barrier, instanceId: `${resentmentHannyaIds.sealBarrier}:${owner.unitId}:${remaining}`,
+        stacks: remaining } },
+  ];
+}
+
 function closeSealBarrier(context: BattleContext, ownerId: string, parentEventId: string): EffectCommand[] {
   const owner = context.getUnit(ownerId);
   const barrier = owner?.statuses.find(status => status.statusId === resentmentHannyaIds.sealBarrier);
@@ -293,7 +318,8 @@ function closeSealBarrier(context: BattleContext, ownerId: string, parentEventId
     const unit = context.getUnit(unitId);
     if (!unit) continue;
     const ownedStatuses = unit.statuses.filter(status => status.source.unitId === ownerId
-      && (status.statusId === resentmentHannyaIds.sealMask || status.statusId === passiveSuppressionStatusId));
+      && (status.statusId === resentmentHannyaIds.sealMask || status.statusId === passiveSuppressionStatusId
+        || status.statusId === soulSuppressionStatusId));
     if (ownedStatuses.length) commands.push({ type: 'remove-status-instances', source, targetId: unitId,
       instanceIds: ownedStatuses.map(status => status.instanceId), parentEventId });
     if (unit.hp > 0) commands.push(...attemptDebuff(context, { source, targetId: unitId,
@@ -307,5 +333,5 @@ function closeSealBarrier(context: BattleContext, ownerId: string, parentEventId
 
 function skillLevel(unit: Readonly<import('../core/types').UnitState> | undefined, skillId: string): number {
   const level = unit?.skillLevels?.[skillId];
-  return Number.isInteger(level) ? Math.max(1, Math.min(5, level!)) : Math.max(1, Math.min(5, unit?.skillLevel ?? 1));
+  return Number.isInteger(level) ? Math.max(1, Math.min(6, level!)) : Math.max(1, Math.min(6, unit?.skillLevel ?? 1));
 }

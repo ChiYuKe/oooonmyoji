@@ -2,7 +2,7 @@ import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import { passivesEnabled } from '../core/passive-eligibility';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, StatusInstance, UnitState } from '../core/types';
 import { attemptDebuff } from '../mechanics/control';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
 import type { ContentRegistry } from './registry';
@@ -130,7 +130,7 @@ function poisonTick(context: BattleContext, event: BattleEvent): EffectCommand[]
     const ratio = Number(status.values?.indirectDamageRatio ?? .22);
     if (!sourceStats || !Number.isFinite(ratio) || ratio <= 0) return [];
     const damage = calculateIndirectDamage({ attack: sourceStats.attack, defense: targetStats.defense,
-      ratio, critDamage: sourceStats.critDamage }, context.random);
+      ratio, critDamage: sourceStats.critDamage, layers: indirectBuffLv(target) }, context.random);
     return [{ type: 'lose-life' as const, source: status.source, targetId: target.unitId,
       amount: damage.amount, ...(damage.damageOptions ? { damageOptions: damage.damageOptions } : {}), lifeLossKind: 'indirect' as const, parentEventId: event.eventId }];
   });

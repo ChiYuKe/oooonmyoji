@@ -1,7 +1,7 @@
 import type { DamageInterceptionContext, HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
 import type { ContentRegistry } from './registry';
@@ -177,7 +177,7 @@ function calculateFengliIndirect(context: BattleContext, owner: Readonly<UnitSta
   const lowerAttack = defense.attack < attack.attack;
   return calculateIndirectDamage({ attack: attack.attack, defense: defense.defense,
     defenseIgnore: effectiveDefenseIgnore(owner) + (lowerAttack ? 300 + growth : 0), ratio,
-    critDamage: attack.critDamage }, context.random);
+    critDamage: attack.critDamage , layers: indirectBuffLv(target)}, context.random);
 }
 
 function defenseIgnoreGrowth(owner: Readonly<UnitState>): number {

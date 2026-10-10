@@ -48,7 +48,7 @@ export function registerLittleGirl(registry: ContentRegistry): void {
     execute(context, intent, parameters) {
       const actor = context.getUnit(intent.actorId);
       if (!actor) return [];
-      const skillLevel = Math.max(1, Math.min(5, actor.skillLevel));
+      const skillLevel = Math.max(1, Math.min(6, actor.skillLevel));
       const shouldHealSelf = actor.hp / Math.max(1, actor.stats.hp) < .3;
       const targets = intent.targetIds.map(id => context.getUnit(id)).filter((unit): unit is NonNullable<typeof unit> =>
         Boolean(unit && unit.side === actor.side && unit.hp > 0
@@ -74,7 +74,9 @@ export function registerLittleGirl(registry: ContentRegistry): void {
     mechanicsCoverage: 'partial',
     modifyIncomingDamage(_attacker, target, amount) {
       if (target.heroId !== littleGirlIds.hero) return amount;
-      const ratio = [.03, .035, .04, .045, .05][Math.max(0, Math.min(4, target.skillLevel - 1))]!;
+      // 客户端 2132（被动）逐级 param1 = 0.03/0.035/0.04/0.045/0.05「抵挡比例增至 3.5%/4%/4.5%/5%」与本表一致 ⇒ 按 2132 的等级
+      const ratio = [.03, .035, .04, .045, .05][Math.max(0, Math.min(4,
+        (target.skillLevels?.[littleGirlIds.passive] ?? target.skillLevel ?? 1) - 1))]!;
       return cappedDamageReduction(amount, target.stats.hp, ratio);
     },
     policy(context, unitId): ActionIntent | undefined {

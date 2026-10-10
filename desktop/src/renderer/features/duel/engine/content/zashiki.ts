@@ -46,7 +46,9 @@ export function registerZashiki(registry: ContentRegistry): void {
       const actor = context.getUnit(unitId);
       if (!actor) return [];
       const current = context.state.resources[actor.side]?.fire ?? 0;
-      const gain = Math.min(openingFire[Math.max(0, Math.min(4, actor.skillLevel - 1))]!, Math.max(0, 8 - current));
+      // 客户端 2052（被动）逐级 param1 = 1/2/3（lv4/5 不变）与 openingFire [1,2,3,3,3] 一致 ⇒ 按 2052 的等级
+      const gain = Math.min(openingFire[Math.max(0, Math.min(4,
+        (actor.skillLevels?.[zashikiIds.passive] ?? actor.skillLevel ?? 1) - 1))]!, Math.max(0, 8 - current));
       return gain > 0 ? [{ type: 'change-resource', source: passiveSource(actor.unitId), side: actor.side,
         resourceId: 'fire', amount: gain }] : [];
     },

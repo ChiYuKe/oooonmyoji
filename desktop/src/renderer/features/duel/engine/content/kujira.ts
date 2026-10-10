@@ -308,7 +308,7 @@ function hasStatus(unit: Readonly<UnitState>, statusId: string, mode?: 'defense'
 }
 function isKujira(unit: Readonly<UnitState>): boolean { return unit.heroId === kujiraIds.hero && unit.unitKind !== 'summon'; }
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function isUniqueKujira(context: BattleContext, owner: Readonly<UnitState>): boolean {
   return context.getLivingUnits(owner.side).find(unit => isKujira(unit))?.unitId === owner.unitId;

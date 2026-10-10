@@ -77,7 +77,7 @@ export function registerYanyanluo(registry: ContentRegistry): void {
       if (!actor || actor.hp <= 0 || actor.unitKind === 'summon') return undefined;
       const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
       if (!enemies.length) return undefined;
-      const cost = ultimateCosts[Math.min(5, Math.max(0, (actor.skillLevels?.[yanyanluoIds.ultimate] ?? actor.skillLevel) - 1))]!;
+      const cost = ultimateCosts[Math.min(6, Math.max(0, (actor.skillLevels?.[yanyanluoIds.ultimate] ?? actor.skillLevel) - 1))]!;
       if ((context.state.resources[actor.side]?.fire ?? 0) >= cost)
         return yanyanluoIntent(actor.unitId, yanyanluoIds.ultimate, [enemies[0]!.unitId], 'single', 'enemy');
       return yanyanluoIntent(actor.unitId, yanyanluoIds.basic, [enemies[0]!.unitId], 'single', 'enemy');

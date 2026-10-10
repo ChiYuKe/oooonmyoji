@@ -56,7 +56,9 @@ export function registerBoySoulSacrifice(registry: ContentRegistry): void {
     mechanicsCoverage: 'partial',
     modifyIncomingDamage(_attacker, target, amount) {
       if (target.heroId !== boySoulSacrificeIds.hero) return amount;
-      const ratio = [.03, .035, .04, .045, .05][Math.max(0, Math.min(4, target.skillLevel - 1))]!;
+      // 客户端 2122（被动）逐级 param1 = 0.03/0.035/0.04/0.045/0.05「抵挡比例增至 3.5%/4%/4.5%/5%」与本表一致 ⇒ 按 2122 的等级
+      const ratio = [.03, .035, .04, .045, .05][Math.max(0, Math.min(4,
+        (target.skillLevels?.[boySoulSacrificeIds.passive] ?? target.skillLevel ?? 1) - 1))]!;
       return cappedDamageReduction(amount, target.stats.hp, ratio);
     },
     policy(context, unitId): ActionIntent | undefined {

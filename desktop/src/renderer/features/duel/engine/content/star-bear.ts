@@ -232,5 +232,5 @@ function strike(context: BattleContext, actor: Readonly<UnitState>, target: Read
     ...(hit.damageOptions ? { damageOptions: hit.damageOptions } : {}), isCritical: hit.isCritical }];
 }
 
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function starBearSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

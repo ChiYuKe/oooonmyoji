@@ -195,7 +195,7 @@ function resolveAmbushHealing(context: BattleContext, event: BattleEvent): Effec
 
 function source(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
 function sharedWeaknessSource(): SourceRef { return { kind: 'skill', id: haishinIds.basic }; }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function basicIntent(actorId: string, targetId: string): ActionIntent {
   return { actorId, skillId: haishinIds.basic, targetIds: [targetId], shape: 'single', targetRelation: 'enemy' };
 }

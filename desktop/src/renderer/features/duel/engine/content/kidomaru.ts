@@ -16,7 +16,7 @@ const hunterRatios = [.32, .34, .36, .4, .4] as const;
 export function registerKidomaru(registry: ContentRegistry): void {
   registry.registerStatus({ id: kidomaruIds.rage, mechanicsCoverage: 'partial', category: 'buff', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', maxStacks: 3 });
-  registry.registerStatus({ id: kidomaruIds.shackle, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: kidomaruIds.shackle, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'refresh-duration', preventsActionGaugeChange: true });
   registry.registerStatus({ id: kidomaruIds.hidden, mechanicsCoverage: 'partial', category: 'buff', dispellable: false,
     sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace', protectsFromDirectTargeting: true });
@@ -171,5 +171,5 @@ function shuraStatus(owner: Readonly<UnitState>, source: StatusInstance['source'
   return { instanceId: `${kidomaruIds.shura}:${owner.unitId}`, statusId: kidomaruIds.shura, source, stacks: 3,
     duration: { kind: 'count', remaining: 3, owner: 'event' }, values: { shieldRemaining: owner.stats.attack * 1.2 } };
 }
-function skillRank(unit: Readonly<UnitState>, id: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[id] ?? unit.skillLevel)); }
+function skillRank(unit: Readonly<UnitState>, id: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[id] ?? unit.skillLevel)); }
 function kidomaruSource(id: string, unitId: string): StatusInstance['source'] { return { kind: 'skill', id, unitId }; }

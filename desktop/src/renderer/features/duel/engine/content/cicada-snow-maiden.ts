@@ -2,9 +2,10 @@ import type { HeroDefinition, SkillDefinition, StatusDefinition } from '../core/
 import type { ActionIntent, BattleContext, EffectCommand, UnitState } from '../core/types';
 import { createBasicAttackSkill } from './common-skills';
 import { attemptControl } from '../mechanics/control';
-import { createLineupDamageSkill, lineupIntent, lowestHealthEnemy } from './lineup-damage-skill';
+import { createLineupDamageSkill, lineupIntent, lowestHealthEnemy, lowHealthPriorityTarget } from './lineup-damage-skill';
 import { passivesEnabled } from '../core/passive-eligibility';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
+import { applyHurtReduction, calcExtHpAbsorb } from '../mechanics/game-damage';
 import type { ContentRegistry } from './registry';
 
 export const cicadaSnowMaidenIds = { hero: 362, basic: '3621', revive: '3622', springCall: '3625', ultimate: '3623', iceBurst: '3624', freeze: 'status.hero.362.frost',
@@ -14,8 +15,10 @@ export const cicadaSnowMaidenIds = { hero: 362, basic: '3621', revive: '3622', s
   springCallReady: 'status.hero.362.spring-call-ready', springBlessing: 'status.hero.362.spring-blessing' } as const;
 
 export function registerCicadaSnowMaiden(registry: ContentRegistry): void {
+  // 霜冻属于客户端控制分类里不可驱散的强控（buff 表 immuneDispele=1）⇒ dispellable:false，
+  // 否则共潜一类「按可驱散负面实例抽取」的净化会把霜冻抽走（见 §49 恢复记录）。
   const freeze: StatusDefinition = { id: cicadaSnowMaidenIds.freeze, mechanicsCoverage: 'partial', category: 'control',
-    dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true,
+    dispellable: false, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true,
     preventsActionGaugeChange: true };
   registry.registerStatus(freeze);
   registry.registerStatus({ id: cicadaSnowMaidenIds.defenseAura, mechanicsCoverage: 'partial', category: 'buff',
@@ -39,7 +42,12 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
   const basic = createBasicAttackSkill(cicadaSnowMaidenIds.basic, [1, 1.05, 1.1, 1.15, 1.25]);
   const ultimateBase = createLineupDamageSkill(cicadaSnowMaidenIds.ultimate, [4.5, 4.5, 4.5, 4.5, 4.5],
     { cost: 3, stat: 'defense' });
-  const ultimate: SkillDefinition = { ...ultimateBase, execute(context, intent, parameters) {
+  const ultimate: SkillDefinition = { ...ultimateBase,
+    // 客户端：敌方仍有冰冻目标时「永冬」不可施放 —— 显式指定也要被可用性校验拒绝
+    // （AI 侧的回退见 policy() 里的 anyFrozen 分支）
+    canUse: (state, actor) => !Object.values(state.units).some(unit => unit.hp > 0 && unit.side !== actor.side
+      && unit.statuses.some(status => status.statusId === cicadaSnowMaidenIds.freeze)),
+    execute(context, intent, parameters) {
     const actor = context.getUnit(intent.actorId);
     if (!actor) return [];
     const wing = { type: 'add-status' as const, source: { kind: 'skill' as const, id: cicadaSnowMaidenIds.ultimate,
@@ -51,7 +59,10 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
     return [...ultimateBase.execute(context, intent, parameters), wing];
   } };
   const revive: SkillDefinition = { id: cicadaSnowMaidenIds.revive, target: 'single', targetRelation: 'ally',
-    allowDefeatedTargets: true, levels: [{}, {}, {}, {}, {}], execute(context: BattleContext, intent: ActionIntent) {
+    allowDefeatedTargets: true,
+    // 客户端：息吹被春告「替换」⇒ 持有 springCallReady 期间息吹不可用
+    canUse: (_state, actor) => !actor.statuses.some(status => status.statusId === cicadaSnowMaidenIds.springCallReady),
+    levels: [{}, {}, {}, {}, {}], execute(context: BattleContext, intent: ActionIntent) {
       const actor = context.getUnit(intent.actorId);
       if (!actor) return [];
       const source = { kind: 'skill' as const, id: cicadaSnowMaidenIds.revive, unitId: actor.unitId };
@@ -68,12 +79,15 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
       }
       const selected = crystallized.find(unit => intent.targetIds.includes(unit.unitId));
       if (selected) commands.push({ type: 'change-action-gauge', source, targetId: selected.unitId, amount: 100 });
-      if (crystallized.length > 0) commands.push({ type: 'add-status', source, targetId: actor.unitId, instance: {
+      // 客户端：不论是否有凝结友方，息吹施放后都替换为春告 ⇒ 无条件授予 springCallReady
+      commands.push({ type: 'add-status', source, targetId: actor.unitId, instance: {
         instanceId: `${cicadaSnowMaidenIds.springCallReady}:${actor.unitId}`, statusId: cicadaSnowMaidenIds.springCallReady,
         source, stacks: 1, duration: { kind: 'permanent' } } });
       return commands;
     } };
   const springCall: SkillDefinition = { id: cicadaSnowMaidenIds.springCall, target: 'all-allies', targetRelation: 'ally',
+    // 客户端：春告只在「息吹」施放后可用（息吹授予 springCallReady，春告消耗它）
+    canUse: (_state, actor) => actor.statuses.some(status => status.statusId === cicadaSnowMaidenIds.springCallReady),
     levels: [{}, {}, {}, {}, {}], execute(context, intent) {
       const actor = context.getUnit(intent.actorId); if (!actor) return [];
       const source = { kind: 'skill' as const, id: cicadaSnowMaidenIds.springCall, unitId: actor.unitId };
@@ -86,9 +100,9 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
       return commands;
     } };
   return { id: cicadaSnowMaidenIds.hero, skills: [basic, revive, springCall, ultimate], aiCoverage: 'partial',
-    aiCoverageNotes: ['参考本地整理的社区 AI 规则：可复活凝结友方时先息吹；可施放永冬时优先选攻击最高的非阴阳师敌人；普攻目标优先生命比例低于20%的敌人。官方 AI 序列和配对实战行为尚未核验'],
+    aiCoverageNotes: ['参考本地整理的社区 AI 规则：春告待施放时先春告；可施放永冬（敌方无冰冻且鬼火≥3）时优先选攻击最高的非阴阳师敌人；鬼火不足且自身被缴械时改施零火息吹（无凝结友方时以自身为目标）；普攻优先生命比例低于20%的敌人，均未低于阈值时回退随机目标。凝结友方本身不构成改用息吹的条件；官方 AI 序列和配对实战行为尚未核验'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['蝉翼不可驱散并于自身回合开始前到期，四级蝉翼提供100%暴击抵抗；蝉翼防护与冰花被动分别按对应技能等级计算；冰花每6层触发极寒之气及等级修正、凝结友方每个增加50速度均已接入；被动检查封印，霜冻锁定行动条；凝结目标替位及间接伤害与护盾交互仍待核验'],
+    mechanicsCoverageNotes: ['蝉翼不可驱散并于自身回合开始前到期，四级蝉翼提供100%暴击抵抗；蝉翼防护与冰花被动分别按对应技能等级计算；冰花每6层触发极寒之气及等级修正、凝结友方每个增加50速度均已接入；被动检查封印，霜冻锁定行动条且按客户端不可驱散（immuneDispele=1，不进净化候选池）；凝结只作用于友方式神（阴阳师/怪物/召唤物不适用），致死判定按减伤→护盾→额外生命与结算管线同序；极寒之气按间接伤害结算并屏蔽双方被动/御魂，可被护盾/额外血吸收；息吹与春告的替换（springCallReady 授予/消费）已接入'],
     initialize(context, unitId) {
       const actor = context.getUnit(unitId); if (!actor) return [];
       const source = { kind: 'skill' as const, id: cicadaSnowMaidenIds.basic, unitId };
@@ -105,14 +119,23 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
       return commands;
     },
     interceptIncomingDamage(state, _attacker, target, amount) {
-      if (target.hp <= 0 || target.unitKind === 'summon' || target.heroId === cicadaSnowMaidenIds.hero
+      // 客户端只对「友方式神」生效：阴阳师/怪物/召唤物都不进入凝结（手动构造的测试单位
+      // 未填 unitKind 时按式神处理）。
+      if (target.hp <= 0 || (target.unitKind !== undefined && target.unitKind !== 'shikigami')
         || target.statuses.some(status => status.statusId === cicadaSnowMaidenIds.crystallized)) return undefined;
+      // 「除自身外」：只排除正在触发保护的这名蝉冰雪女，其他蝉冰雪女仍可被保护。
       const protector = Object.values(state.units).find(unit => unit.side === target.side && unit.hp > 0
-        && unit.heroId === cicadaSnowMaidenIds.hero && passivesEnabled(unit));
+        && unit.heroId === cicadaSnowMaidenIds.hero && passivesEnabled(unit) && unit.unitId !== target.unitId);
       if (!protector) return undefined;
       const shieldStatuses = target.statuses.reduce((sum, status) => sum + (typeof status.values?.shieldRemaining === 'number'
         ? Math.max(0, status.values.shieldRemaining) : 0), 0);
-      if (amount < target.hp + target.shield + shieldStatuses) return undefined;
+      // 与 effects.ts 的同一顺序判定致死：减伤 → 固定减伤 → 护盾（含状态护盾）→ 额外生命。
+      const attrs = target.damageAttributes;
+      const reduced = Math.max(0, applyHurtReduction(amount, attrs?.hurtReductionRate ?? attrs?.parameterHurtReductionRate ?? 0)
+        - (attrs?.fixedHurtReductionVal ?? 0));
+      const afterShield = Math.max(0, reduced - (target.shield + shieldStatuses));
+      const absorbed = calcExtHpAbsorb(afterShield, target.resources?.extHp ?? 0, attrs?.extHpAbsorptionRate);
+      if (absorbed.damage < target.hp) return undefined;
       const source = { kind: 'skill' as const, id: cicadaSnowMaidenIds.revive, unitId: protector.unitId };
       return { amount, effects: [{ type: 'add-status', source, targetId: target.unitId, instance: {
         instanceId: `${cicadaSnowMaidenIds.crystallized}:${target.unitId}`, statusId: cicadaSnowMaidenIds.crystallized,
@@ -191,10 +214,16 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
               && target.statuses.some(status => status.statusId === cicadaSnowMaidenIds.freeze);
             const ratio = 4.5 * (frozenEnemy && skillRank(snowMaiden, cicadaSnowMaidenIds.revive) >= 2 ? 1.5 : 1);
             const hit = calculateIndirectDamage({ attack: sourceStats.defense, defense: targetStats.defense,
-              ratio, critDamage: sourceStats.critDamage }, context.random);
+              ratio, critDamage: sourceStats.critDamage , layers: indirectBuffLv(target)}, context.random);
             const allyReduction = target.side === snowMaiden.side && skillRank(snowMaiden, cicadaSnowMaidenIds.revive) >= 4 ? .7 : 1;
-            commands.push({ type: 'lose-life', source: burstSource, targetId: target.unitId,
-              amount: hit.amount * allyReduction, lifeLossKind: 'indirect', parentEventId: event.eventId });
+            // 极寒之气按间接伤害结算，且不触发双方被动与御魂（与客户端「无被动/御魂触发」口径一致）；
+            // 用 deal-damage 而非 lose-life，才能吃到护盾/额外血与减伤管线。
+            commands.push({ type: 'deal-damage', source: burstSource, targetId: target.unitId,
+              amount: hit.amount * allyReduction, damageKind: 'indirect', actionKind: 'skill',
+              suppressSoulTriggers: true, suppressTargetSoulTriggers: true,
+              suppressTargetPassiveTriggers: true, suppressSourcePassiveTriggers: true,
+              ...(hit.damageOptions ? { damageOptions: hit.damageOptions } : {}),
+              parentEventId: event.eventId });
           }
           return commands;
         });
@@ -205,20 +234,24 @@ function createCicadaSnowMaidenDefinition(): HeroDefinition {
       if (actor.statuses.some(status => status.statusId === cicadaSnowMaidenIds.springCallReady))
         return { actorId: unitId, skillId: cicadaSnowMaidenIds.springCall, targetIds: context.getLivingUnits(actor.side).map(ally => ally.unitId),
           shape: 'all-allies', targetRelation: 'ally' };
-      const crystallized = context.state.sides[actor.side].map(id => context.getUnit(id)).find(unit => Boolean(unit && unit.hp <= 0
-        && unit.statuses.some(status => status.statusId === cicadaSnowMaidenIds.crystallized)));
-      if (crystallized) return { actorId: unitId, skillId: cicadaSnowMaidenIds.revive, targetIds: [crystallized.unitId],
-        shape: 'single', targetRelation: 'ally' };
       const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
-      const target = lowestHealthEnemy(context, actor); if (!target) return undefined;
+      const fire = context.state.resources[actor.side]?.fire ?? 0;
       const anyFrozen = enemies.some(enemy => enemy.statuses.some(status => status.statusId === cicadaSnowMaidenIds.freeze));
-      if (!anyFrozen && (context.state.resources[actor.side]?.fire ?? 0) >= 3) {
+      if (!anyFrozen && fire >= 3) {
+        const target = lowestHealthEnemy(context, actor); if (!target) return undefined;
         const damageTarget = enemies.filter(enemy => enemy.unitKind !== 'onmyoji')
           .sort((left, right) => (context.getEffectiveStats(right.unitId)?.attack ?? right.stats.attack)
             - (context.getEffectiveStats(left.unitId)?.attack ?? left.stats.attack)
             || left.unitId.localeCompare(right.unitId))[0] ?? target;
         return lineupIntent(unitId, cicadaSnowMaidenIds.ultimate, [damageTarget.unitId], 'single');
       }
+      // 社区AI：鬼火不足以开永冬且自身被缴械时改施零火「息吹」；没有凝结友方时以自身为目标
+      // （息吹的 execute 本身会复活全部凝结友方，故目标只用于合法性校验）。
+      // 注意：凝结友方**本身**不构成改用息吹的条件 —— 技能可用时仍走上面的永冬分支。
+      if (actor.statuses.some(status => String(status.values?.controlType ?? '') === '缴械'))
+        return { actorId: unitId, skillId: cicadaSnowMaidenIds.revive, targetIds: [unitId], shape: 'single', targetRelation: 'ally' };
+      // 客户端自动选择：优先生命比例低于20%的敌人，均未低于阈值时回退随机目标。
+      const target = lowHealthPriorityTarget(context, enemies, .2); if (!target) return undefined;
       return lineupIntent(unitId, cicadaSnowMaidenIds.basic, [target.unitId], 'single');
     },
   };

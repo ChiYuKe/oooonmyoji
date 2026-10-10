@@ -119,7 +119,9 @@ function onDamage(context: BattleContext, event: BattleEvent): EffectCommand[] |
 
 function addFierce(actor: UnitState, parentEventId: string, pendingStacks = 0): EffectCommand[] {
   const current = actor.statuses.find(status => status.statusId === greatTenguIds.fierce);
-  const cap = fierceCaps[Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+  // 客户端 2172（被动）lv2/lv3/lv4 依次写「上限 30 层 / 50 层 / 80 层」，与 fierceCaps [10,30,50,80,80] 一致 ⇒ 按 2172 的等级
+  const cap = fierceCaps[Math.max(0, Math.min(4,
+    (actor.skillLevels?.[greatTenguIds.passive] ?? actor.skillLevel ?? 1) - 1))]!;
   if ((current?.stacks ?? 0) + pendingStacks >= cap) return [];
   const instance: StatusInstance = { instanceId: `${greatTenguIds.fierce}:${actor.unitId}`, statusId: greatTenguIds.fierce,
     source: source(greatTenguIds.passive, actor.unitId), stacks: 1, duration: { kind: 'count', remaining: 1, owner: 'round' } };
@@ -139,7 +141,10 @@ function finishAttack(context: BattleContext, event: BattleEvent): EffectCommand
 function freeUltimateAfterShelter(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'control-blocked' || event.protectionStatusId !== greatTenguIds.shelter) return;
   const actor = context.getUnit(event.targetId);
-  if (!actor || actor.heroId !== greatTenguIds.hero || actor.skillLevel < 5 || actor.hp <= 0 || !passivesEnabled(actor)) return;
+  // 客户端 2172 被动 lv5：「庇护抵挡控制效果后，无消耗施放『羽刃暴风』」⇒ 按 2172 的等级
+  if (!actor || actor.heroId !== greatTenguIds.hero
+    || (actor.skillLevels?.[greatTenguIds.passive] ?? actor.skillLevel ?? 1) < 5
+    || actor.hp <= 0 || !passivesEnabled(actor)) return;
   const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
   if (!enemies.length) return;
   const intent: ActionIntent = { actorId: actor.unitId, skillId: greatTenguIds.ultimate, targetIds: enemies.map(unit => unit.unitId),

@@ -39,8 +39,7 @@ export function createSkullGeneralDefinition(): HeroDefinition {
     execute(context, intent) {
       const actor = context.getUnit(intent.actorId);
       const target = context.getUnit(intent.targetIds[0] ?? '');
-      if (!actor || !target || target.hp <= 0 || target.side !== actor.side || target.unitId === actor.unitId
-        || target.unitKind === 'summon') return [];
+      if (!actor || !target || target.hp <= 0 || target.side !== actor.side || target.unitKind === 'summon') return [];
       const source = { kind: 'skill' as const, id: skullGeneralIds.transfer, unitId: actor.unitId };
       const commands: EffectCommand[] = [];
       for (const ally of context.state.sides[actor.side].map(id => context.getUnit(id)).filter((unit): unit is UnitState => Boolean(unit))) {
@@ -82,6 +81,7 @@ export function createSkullGeneralDefinition(): HeroDefinition {
     id: skullGeneralIds.hero,
     skills: [basic, transfer, banner],
     aiCoverage: 'verified',
+    aiCoverageNotes: ['按社区AI截图实现：攻击最高友方未持有血色之花且鬼火充足时施放2技能转移血色之花；该友方已有血色之花且鬼火充足时施放3技能，优先选择当前生命值最高的敌方单位。'],
     mechanicsCoverage: 'partial',
     mechanicsCoverageNotes: ['血色之花开局给最高攻击友方式神、主动转移排除召唤物；花吻烈魂等级控制40%/45%/50%伤害分担、三级致命保护护盾及五级花持有者回合末时之隙；分担、致命保护和时之隙均校验被动封印，并绑定标记授予者。唯一被动只由本队顺位第一名存活且未封印的荒骷髅生效。平氏铁壁累计非黄泉战旗生命流失，储存量和承花者护盾均按荒骷髅初始生命上限50%封顶；五级黄泉战旗在敌方式神阵亡时按开战基础上限增加35%最大生命并恢复等量生命，召唤物不触发。回归覆盖技能等级、召唤目标、封印、镜像唯一归属、伤害分担、额外回合、成长结算和初始生命封顶；连续帧仍未清楚展示这些被动触发数值。'],
     initialize(context, unitId) {
@@ -198,8 +198,7 @@ export function createSkullGeneralDefinition(): HeroDefinition {
         return { actorId: unitId, skillId: skullGeneralIds.transfer, targetIds: [highestAttackAlly.unitId], shape: 'single', targetRelation: 'ally' };
       }
       if (highestHasFlower && fire >= 2) {
-        const target = [...enemies].sort((left, right) => right.hp / Math.max(1, right.stats.hp)
-          - left.hp / Math.max(1, left.stats.hp))[0]!;
+        const target = [...enemies].sort((left, right) => right.hp - left.hp)[0]!;
         return { actorId: unitId, skillId: skullGeneralIds.banner, targetIds: [target.unitId], shape: 'single', targetRelation: 'enemy' };
       }
       const target = [...enemies].sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp))[0]!;
@@ -225,7 +224,7 @@ export function createSkullGeneralDefinition(): HeroDefinition {
 }
 
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 
 /** Only the first living, non-summoned, unsuppressed same-name unit owns the unique passive. */

@@ -15,9 +15,19 @@ export const redMapleIds = {
 const basicRatios = [1, 1.05, 1.1, 1.15, 1.25] as const;
 const danceRatios = [1.32, 1.39, 1.46, 1.52, 1.59] as const;
 
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端逐级文本（`game-skill-data.generated.json` 的 2312 被动）：
+ *   lv2「[buff_2312_1]的 tips_5 增至 p1%，触发概率增至 p5%」（人偶的诅咒量与触发率随等级升）
+ *   lv5「带有[buff_2312_1]的目标，施放消耗鬼火的技能后，50% 概率削减 1 点鬼火」
+ * ⇒ 本文件的 `skillLevel >= n` 判定都应按 2312 的等级，而不是单位全局等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 /** 鬼女红叶 content migration. The level-5 fire surcharge remains partial. */
 export function registerRedMaple(registry: ContentRegistry): void {
-  registry.registerStatus({ id: redMapleIds.doll, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: redMapleIds.doll, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
     sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace' });
   registry.registerHero(createRedMapleDefinition());
 }
@@ -59,8 +69,9 @@ export function createRedMapleDefinition(): HeroDefinition {
         const attacker = context.getUnit(event.source.unitId);
         const target = context.getUnit(event.targetId);
         if (!attacker || attacker.heroId !== redMapleIds.hero || attacker.hp <= 0 || !target || target.hp <= 0) return;
-        const chance = attacker.skillLevel >= 4 ? .8 : attacker.skillLevel >= 3 ? .7 : attacker.skillLevel >= 2 ? .6 : .5;
-        const curseRatio = attacker.skillLevel >= 4 ? .3 : attacker.skillLevel >= 3 ? .26 : attacker.skillLevel >= 2 ? .22 : .18;
+        const passiveRank = rank(attacker, redMapleIds.passive);
+        const chance = passiveRank >= 4 ? .8 : passiveRank >= 3 ? .7 : passiveRank >= 2 ? .6 : .5;
+        const curseRatio = passiveRank >= 4 ? .3 : passiveRank >= 3 ? .26 : passiveRank >= 2 ? .22 : .18;
         return [{ type: 'add-status', source: mapleSource(attacker.unitId), targetId: target.unitId,
           instance: dollStatus(attacker, context.getEffectiveStats(attacker.unitId)?.attack ?? attacker.stats.attack, chance, curseRatio),
           parentEventId: event.eventId }];
@@ -108,12 +119,12 @@ export function createRedMapleDefinition(): HeroDefinition {
         const markedEnemy = context.getLivingUnits(caster.side === 'blue' ? 'red' : 'blue')
           .some(target => target.statuses.some(status => status.statusId === redMapleIds.doll));
         const mapleThreat = context.getLivingUnits(caster.side === 'blue' ? 'red' : 'blue')
-          .some(unit => unit.heroId === redMapleIds.hero && unit.skillLevel >= 5);
+          .some(unit => unit.heroId === redMapleIds.hero && rank(unit, redMapleIds.passive) >= 5);
         if (!markedEnemy || !mapleThreat || context.random() >= .5) return;
         const remainingFire = context.state.resources[caster.side]?.fire ?? 0;
         if (remainingFire <= 0) return;
         return [{ type: 'change-resource', source: mapleSource(
-          context.getLivingUnits(caster.side === 'blue' ? 'red' : 'blue').find(unit => unit.heroId === redMapleIds.hero && unit.skillLevel >= 5)!.unitId),
+          context.getLivingUnits(caster.side === 'blue' ? 'red' : 'blue').find(unit => unit.heroId === redMapleIds.hero && rank(unit, redMapleIds.passive) >= 5)!.unitId),
           side: caster.side, resourceId: 'fire', amount: -1, parentEventId: event.eventId }];
       } },
     },

@@ -158,5 +158,5 @@ function foxBell(context: BattleContext, actor: Readonly<UnitState>, target: Rea
 function validEnemy(actor: Readonly<UnitState>, target: Readonly<UnitState>): boolean {
   return actor.heroId === inariMiketsuIds.hero && actor.hp > 0 && target.hp > 0 && target.side !== actor.side;
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function inariSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

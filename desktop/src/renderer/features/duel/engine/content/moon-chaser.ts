@@ -160,5 +160,5 @@ export function createMoonChaserDefinition(): HeroDefinition {
 }
 
 function skillLevel(unit: Readonly<import('../core/types').UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }

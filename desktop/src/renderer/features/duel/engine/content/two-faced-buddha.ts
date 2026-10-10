@@ -2,7 +2,7 @@ import type { HeroDefinition, SkillDefinition, StatusDefinition } from '../core/
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { attemptDebuff } from '../mechanics/control';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import type { ContentRegistry } from './registry';
 
@@ -147,7 +147,7 @@ function tickWindDamage(context: BattleContext, event: BattleEvent, statusId: st
     if (!targetStats) continue;
     const attack = ownerStats.attack;
     const ratio = Number(mark.values?.indirectDamageRatio ?? (statusId === twoFacedBuddhaIds.basicWind ? 1.25 : .55));
-    const hit = calculateIndirectDamage({ attack, defense: targetStats.defense, ratio, critDamage: ownerStats.critDamage }, context.random);
+    const hit = calculateIndirectDamage({ attack, defense: targetStats.defense, ratio, critDamage: ownerStats.critDamage , layers: indirectBuffLv(target)}, context.random);
     commands.push({ type: 'lose-life', source: mark.source, targetId: target.unitId,
       amount: hit.amount, lifeLossKind: 'indirect', parentEventId: event.eventId });
     if (owner.heroId === twoFacedBuddhaIds.hero

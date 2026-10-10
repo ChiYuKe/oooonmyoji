@@ -373,7 +373,7 @@ function emperorIntent(actorId: string, skillId: string, targetIds: string[], sh
 }
 function skillRank(owner: Readonly<UnitState>, skillId: string): number {
   const rank = owner.skillLevels?.[skillId];
-  return Number.isFinite(rank) ? Math.max(1, Math.min(5, Math.floor(rank!))) : Math.max(1, Math.min(5, owner.skillLevel));
+  return Number.isFinite(rank) ? Math.max(1, Math.min(6, Math.floor(rank!))) : Math.max(1, Math.min(6, owner.skillLevel));
 }
 function skillRankFromOwner(context: BattleContext, status: StatusInstance, skillId: string): number {
   const owner = status.source.unitId ? context.getUnit(status.source.unitId) : undefined;

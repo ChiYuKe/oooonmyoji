@@ -131,5 +131,5 @@ function cocoonCommand(target: Readonly<UnitState>, amount: number, skillId: str
     ...(modifiers ? { modifiers } : {}),
   } };
 }
-function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
+function rank(owner: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, owner.skillLevels?.[skillId] ?? owner.skillLevel)); }
 function dreamSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

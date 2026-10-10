@@ -1,5 +1,5 @@
 import type { SkillDefinition } from '../core/definitions';
-import type { ActionIntent } from '../core/types';
+import type { ActionIntent, UnitState } from '../core/types';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 
 export function createLineupDamageSkill(id: string, ratios: readonly number[], options: {
@@ -44,4 +44,13 @@ export function lineupIntent(actorId: string, skillId: string, targetIds: readon
 export function lowestHealthEnemy(context: import('../core/types').BattleContext, actor: import('../core/types').UnitState) {
   return context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue')
     .slice().sort((left, right) => left.hp / Math.max(1, left.stats.hp) - right.hp / Math.max(1, right.stats.hp))[0];
+}
+
+/** Apply a community-AI low-health preference below its threshold; otherwise mirror the client's random target fallback. */
+export function lowHealthPriorityTarget(context: import('../core/types').BattleContext,
+  enemies: readonly UnitState[], threshold: number): UnitState | undefined {
+  const preferred = enemies.filter(enemy => enemy.hp / Math.max(1, enemy.stats.hp) < threshold)
+    .slice().sort((left, right) => left.hp / Math.max(1, left.stats.hp) - right.hp / Math.max(1, right.stats.hp))[0]
+  if (preferred) return preferred;
+  return enemies.length ? enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))] : undefined;
 }

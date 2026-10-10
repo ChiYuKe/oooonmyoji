@@ -95,7 +95,9 @@ function summonPuppet(context: BattleContext, event: BattleEvent): EffectCommand
   const owner = mark?.source.unitId ? context.getUnit(mark.source.unitId) : undefined;
   if (!defeated || !mark || !owner || owner.hp <= 0 || owner.heroId !== wuguShiIds.hero || owner.unitKind === 'summon'
     || !passivesEnabled(owner)) return;
-  const levelIndex = Math.max(0, Math.min(4, owner.skillLevel - 1));
+  // 客户端 2162（被动）lv2「继承生命值增至」/lv3、lv5「继承攻击增至」⇒ 傀儡继承表按 2162 的等级
+  const levelIndex = Math.max(0, Math.min(4,
+    (owner.skillLevels?.[wuguShiIds.passive] ?? owner.skillLevel ?? 1) - 1));
   const stats = context.getEffectiveStats(owner.unitId) ?? owner.stats;
   const maxHp = Math.max(1, stats.hp * puppetHpByLevel[levelIndex]!);
   const unitId = `summon:${owner.unitId}:${defeated.unitId}:${event.eventId}`;

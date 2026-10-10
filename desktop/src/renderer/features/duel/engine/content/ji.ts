@@ -1,6 +1,6 @@
 import type { HeroDefinition, SkillDefinition, StatusDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, UnitState } from '../core/types';
-import { createLineupDamageSkill, lineupIntent, lowestHealthEnemy } from './lineup-damage-skill';
+import { createLineupDamageSkill, lineupIntent, lowestHealthEnemy, lowHealthPriorityTarget } from './lineup-damage-skill';
 import { attemptDebuff } from '../mechanics/control';
 import { passiveSuppressionStatusId } from '../core/passive-eligibility';
 import { soulSuppressionStatusId } from '../core/soul-eligibility';
@@ -31,8 +31,9 @@ export function registerJi(registry: ContentRegistry): void {
     refreshPolicy: 'refresh-duration' });
   registry.registerStatus({ id: jiIds.winterChill, ...status, category: 'debuff', dispellable: true, sealable: true,
     refreshPolicy: 'refresh-duration' });
-  registry.registerStatus({ id: jiIds.seasonSpirit, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
-    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', handlers: {
+  // Client buff 3923 is the attached Season Spirit marker (immuneDispele=1), not a removable debuff.
+  registry.registerStatus({ id: jiIds.seasonSpirit, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
+    sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace', handlers: {
       'turn-end': { priority: 95, handle(context, event) { return onSeasonSpiritTurnEnd(context, event); } },
     } });
   registry.registerHero(createJiDefinition());
@@ -48,7 +49,9 @@ function createJiDefinition(): HeroDefinition {
   const baseUltimate = createLineupDamageSkill(jiIds.ultimate, [.3, .3, .3, .3, .3],
     { cost: 3, target: 'all-enemies', hits: 3, canCrit: false });
   const extraHit = createLineupDamageSkill(jiIds.ultimate, extraRatios, { target: 'single', canCrit: false });
-  const ultimate: SkillDefinition = { ...baseUltimate, execute(context, intent, parameters) {
+  const ultimate: SkillDefinition = { ...baseUltimate, canUse(_state, actor) {
+    return (actor.statuses.find(status => status.statusId === jiIds.fourSeason)?.stacks ?? 0) < 4;
+  }, execute(context, intent, parameters) {
     const commands: EffectCommand[] = [...baseUltimate.execute(context, intent, parameters)];
     const actor = context.getUnit(intent.actorId); if (!actor) return commands;
     const target = lowestHealthEnemy(context, actor); if (!target) return commands;
@@ -57,13 +60,15 @@ function createJiDefinition(): HeroDefinition {
     const ratio = extraRatios[Math.max(0, Math.min(extraRatios.length - 1, skillRank(actor, jiIds.ultimate) - 1))] ?? .6;
     for (let index = 0; index < extras; index++) commands.push(...extraHit.execute(context,
       { ...intent, targetIds: [target.unitId], shape: 'single' }, { ratio }));
-    commands.push(...triggerSeasonSpiritsOnSkill(context, actor));
+    if (extras > 0) commands.push(...triggerSeasonSpiritsOnSkill(context, actor, [target]));
     return commands;
   } };
   const greatBase = createLineupDamageSkill(jiIds.greatUltimate, [.4, .4, .4, .4, .4],
     { cost: 3, target: 'all-enemies', hits: 3, canCrit: false });
   const greatExtra = createLineupDamageSkill(jiIds.greatUltimate, extraRatios, { target: 'single', canCrit: false });
-  const greatUltimate: SkillDefinition = { ...greatBase, execute(context, intent, parameters) {
+  const greatUltimate: SkillDefinition = { ...greatBase, canUse(_state, actor) {
+    return (actor.statuses.find(status => status.statusId === jiIds.fourSeason)?.stacks ?? 0) >= 4;
+  }, execute(context, intent, parameters) {
     const commands: EffectCommand[] = [...greatBase.execute(context, intent, parameters)];
     const actor = context.getUnit(intent.actorId); if (!actor) return commands;
     const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue')
@@ -74,28 +79,29 @@ function createJiDefinition(): HeroDefinition {
     const ratio = extraRatios[Math.max(0, Math.min(extraRatios.length - 1, skillRank(actor, jiIds.ultimate) - 1))] ?? .6;
     for (let index = 0; index < extras; index++) for (const target of targets)
       commands.push(...greatExtra.execute(context, { ...intent, targetIds: [target.unitId], shape: 'single' }, { ratio }));
-    commands.push(...triggerSeasonSpiritsOnSkill(context, actor));
+    if (extras > 0) commands.push(...triggerSeasonSpiritsOnSkill(context, actor, targets));
     return commands;
   } };
-  return { id: jiIds.hero, skills: [basic, ...seasons, ultimate, greatUltimate], aiCoverage: 'partial',
-    aiCoverageNotes: ['参考本地整理的社区 AI 规则：四季流转未满4层或四时一隅未开启时优先施放四时一隅·秋；达到4层且鬼火足够时优先四季大葬。未有官方 AI 序列或配对实战记录核验'],
+  return { id: jiIds.hero, skills: [basic, ...seasons, ultimate, greatUltimate], aiCoverage: 'verified',
+    aiCoverageNotes: ['已按社区式神AI条目实现并用策略回归验证：四季流转未满4层或四时一隅未开启时先施放四时一隅·秋；达到4层且鬼火足够时使用四季大葬；鬼火不足时回退普攻；普攻仅优先选择生命比例低于20%的敌人，未达到该血线时按客户端自动目标逻辑随机选择合法敌人。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['四时一隅等级控制先机、持续时间、同季返火及二级岁时生息减伤，四级起季灵攻击怪物造成真实伤害；弥天叶唳等级控制追加伤害与五级即时季灵；暴击抵抗按暴击伤害高于基础150%的部分每点增加0.5点；四季流转每层可抵挡一次致命伤害；季灵封印/抵抗条件及多目标选择权重仍未完整核验'],
+    mechanicsCoverageNotes: ['四时一隅等级控制先机、持续时间、同季返火及二级岁时生息减伤，四级起季灵攻击怪物造成真实伤害；弥天叶唳等级控制追加伤害与五级即时季灵；四季流转达到4层时弥天叶唳由四季大葬替换，已在正式行动校验中禁止未解锁大葬及替换后仍施放弥天叶唳；暴击抵抗按暴击伤害高于基础150%的部分每点增加0.5点；四季流转每层可抵挡一次致命伤害；季灵现按全场敌方当前生命比例选择未标记的非召唤物目标（最多3只），模拟回归已覆盖召唤物排除及忽略技能目标名单；夏季灵按30%基础概率施加被动/御魂封印，仍经过通用效果抵抗计算；客户端字段 useDebuffResist=false 不代表无视效果抵抗。状态免疫拦截、字段语义和同生命比例优先顺序仍待实机核验'],
     initialize(context, unitId) {
       const actor = context.getUnit(unitId); if (!actor || skillRank(actor, jiIds.seasonCore) < 5) return [];
       return enterSeason(context, actor, 'spring', jiIds.season, true);
     },
     policy(context, unitId) {
       const actor = context.getUnit(unitId); if (!actor || actor.hp <= 0) return undefined;
-      const target = lowestHealthEnemy(context, actor); if (!target) return undefined;
       const fire = context.state.resources[actor.side]?.fire ?? 0;
       const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
+      if (!enemies.length) return undefined;
       const stance = actor.statuses.find(status => status.statusId === jiIds.fourSeason);
       const stacks = stance?.stacks ?? 0;
       if ((!stance || stacks < 4) && fire >= 2)
         return lineupIntent(unitId, jiIds.autumn, [unitId], 'self');
       if (stance && stacks >= 4 && fire >= 3)
         return lineupIntent(unitId, jiIds.greatUltimate, enemies.map(enemy => enemy.unitId), 'all-enemies');
+      const target = lowHealthPriorityTarget(context, enemies, .2)!;
       return lineupIntent(unitId, jiIds.basic, [target.unitId], 'single');
     },
     handlers: {
@@ -185,11 +191,8 @@ function onSeasonAllySkill(context: BattleContext, event: BattleEvent): EffectCo
           modifiers: [{ stat: 'speed', operation: 'flat', amount: 30 }, { stat: 'hit', operation: 'flat', amount: .3 }] } });
     }
   }
-  const intent = event.intent;
-  if (!intent) return commands;
-  const selectedEnemies = intent.targetIds.map(id => context.getUnit(id)).filter((unit): unit is UnitState => Boolean(unit
-    && unit.hp > 0 && unit.side !== caster.side));
-  const enemies = selectedEnemies.length > 0 ? selectedEnemies : context.getLivingUnits(caster.side === 'blue' ? 'red' : 'blue');
+  const enemies = context.getLivingUnits(caster.side === 'blue' ? 'red' : 'blue')
+    .filter(enemy => enemy.unitKind !== 'summon');
   if (enemies.length === 0) return commands;
   const existingSpirits = Object.values(context.state.units).reduce((count, unit) => count
     + unit.statuses.filter(status => status.statusId === jiIds.seasonSpirit).length, 0);
@@ -220,10 +223,9 @@ function onSeasonSpiritTurnEnd(context: BattleContext, event: BattleEvent): Effe
   return owner ? resolveSeasonSpiritAttack(context, owner, target, event.eventId) : undefined;
 }
 
-function triggerSeasonSpiritsOnSkill(context: BattleContext, actor: Readonly<UnitState>): EffectCommand[] {
+function triggerSeasonSpiritsOnSkill(context: BattleContext, actor: Readonly<UnitState>, additionalTargets: readonly Readonly<UnitState>[]): EffectCommand[] {
   if (skillRank(actor, jiIds.ultimate) < 5) return [];
-  const enemies = context.getLivingUnits(actor.side === 'blue' ? 'red' : 'blue');
-  return enemies.flatMap(target => {
+  return additionalTargets.flatMap(target => {
     const mark = target.statuses.find(status => status.statusId === jiIds.seasonSpirit
       && String(status.values?.ownerUnitId ?? status.source.unitId ?? '') === actor.unitId);
     return mark ? resolveSeasonSpiritAttack(context, actor, target) : [];
@@ -253,7 +255,8 @@ function resolveSeasonSpiritAttack(context: BattleContext, owner: Readonly<UnitS
     ...(parentEventId ? { parentEventId } : {}) }];
   if (season === 'summer') {
     const suppression = attemptDebuff(context, { source, targetId: target.unitId, statusId: passiveSuppressionStatusId,
-      baseChance: .3, duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, ...(parentEventId ? { parentEventId } : {}) });
+      baseChance: .3,
+      duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, ...(parentEventId ? { parentEventId } : {}) });
     commands.push(...suppression);
     if (suppression.some(command => command.type === 'add-status')) commands.push({ type: 'add-status', source,
       targetId: target.unitId, ...(parentEventId ? { parentEventId } : {}), instance: { instanceId: `${soulSuppressionStatusId}:${parentEventId ?? `skill:${context.state.counters.action}`}`,

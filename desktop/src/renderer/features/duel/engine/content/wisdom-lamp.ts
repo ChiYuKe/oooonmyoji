@@ -1,5 +1,5 @@
 import type { DamageInterceptionContext, HeroDefinition, SkillDefinition } from '../core/definitions';
-import type { ActionIntent, BattleContext, BattleEvent, BattleState, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
+import type { ActionIntent, BattleContext, BattleEvent, BattleState, DamageKind, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { attemptControl } from '../mechanics/control';
 import { createBasicAttackSkill } from './common-skills';
@@ -94,7 +94,7 @@ function summonLamp(context: BattleContext, owner: Readonly<UnitState>, defense:
 }
 
 function interceptForWisdomLamp(state: Readonly<BattleState>, attacker: Readonly<UnitState> | undefined,
-  target: Readonly<UnitState>, amount: number, kind: 'normal' | 'true', context?: DamageInterceptionContext) {
+  target: Readonly<UnitState>, amount: number, kind: DamageKind, context?: DamageInterceptionContext) {
   if (!attacker || attacker.side === target.side || target.heroId === wisdomLampIds.hero || amount <= 0
     || context?.attackShape !== 'single' || context.targetIds.length !== 1) return undefined;
   const lamp = state.sides[target.side].map(unitId => state.units[unitId]).find(unit => unit?.hp && unit.hp > 0
@@ -125,7 +125,7 @@ function addKarmaAndBind(context: BattleContext, event: BattleEvent): EffectComm
     source, stacks: 1, duration: { kind: 'permanent' }, modifiers: [{ stat: 'attack', operation: 'percent', amount: -.05, perStack: true }],
   }, parentEventId: event.eventId }];
   const currentStacks = attacker.statuses.find(status => status.statusId === wisdomLampIds.karma && status.source.unitId === target.unitId)?.stacks ?? 0;
-  if (hasLight(target) && currentStacks >= 2) {
+  if (hasLight(target) && currentStacks === 2) {
     const control = attemptControl(context, { attemptId: `${wisdomLampIds.soulBind}:${target.unitId}:${attacker.unitId}:${event.eventId}`,
       source, targetId: attacker.unitId, statusId: wisdomLampIds.soulBind, controlType: '拘魂', baseChance: 1,
       duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, parentEventId: event.eventId,

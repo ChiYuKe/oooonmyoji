@@ -55,7 +55,9 @@ export function registerLanternGhost(registry: ContentRegistry): void {
         const target = context.getUnit(event.targetId);
         if (!target || target.heroId !== lanternGhostIds.hero || target.hp <= 0 || !passivesEnabled(target) || event.amount <= 0) return;
         const fire = context.state.resources[target.side]?.fire ?? 0;
-        if (fire >= 8 || context.random() >= fireChances[Math.max(0, Math.min(4, target.skillLevel - 1))]!) return;
+        // 客户端 2032（被动）lv2「概率增至」⇒ 鬼火回复概率表按 2032 的等级
+        if (fire >= 8 || context.random() >= fireChances[Math.max(0, Math.min(4,
+          (target.skillLevels?.[lanternGhostIds.passive] ?? target.skillLevel ?? 1) - 1))]!) return;
         return [{ type: 'change-resource', source: { kind: 'skill', id: lanternGhostIds.passive, unitId: target.unitId },
           side: target.side, resourceId: 'fire', amount: 1, parentEventId: event.eventId }];
       } },

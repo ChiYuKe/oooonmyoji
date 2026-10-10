@@ -81,7 +81,10 @@ function grantVajraAndReflect(context: BattleContext, event: BattleEvent): Effec
   if (!damaged) return;
   const commands: EffectCommand[] = [];
   if (damaged.heroId === oneEyedMonkIds.hero && damaged.unitKind !== 'summon' && damaged.hp > 0 && passivesEnabled(damaged)) {
-    const levelIndex = Math.max(0, Math.min(4, damaged.skillLevel - 1));
+    // 客户端 2302（被动）lv2「提升效果抵抗」/lv3「反伤效果增至」/lv5「反伤效果增至」⇒ 抵抗/反伤表按 2302 的等级
+    // （该技能在客户端未给出逐级 param 数值，故只改归属，表值保持原样）
+    const levelIndex = Math.max(0, Math.min(4,
+      (damaged.skillLevels?.[oneEyedMonkIds.passive] ?? damaged.skillLevel ?? 1) - 1));
     const source = monkSource(oneEyedMonkIds.passive, damaged.unitId);
     for (const ally of context.getLivingUnits(damaged.side)) {
       const resistBonus = resistBonuses[levelIndex]!;

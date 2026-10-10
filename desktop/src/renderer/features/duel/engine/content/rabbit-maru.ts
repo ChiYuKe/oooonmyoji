@@ -17,6 +17,14 @@ const basicRatios = [1, 1.05, 1.1, 1.15, 1.25] as const;
 const actionGaugeRatios = [.1, .15, .2, .25, .3] as const;
 const removableControlTypes = new Set(['冰冻', '睡眠', '变形', '眩晕', '深度冰冻']);
 
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端 2892 被动逐级文本：lv3「触发概率增至」、lv5「触发概率增至」
+ * ⇒ 引擎的三档概率（.4/.5/.6）应按 2892 的等级判定。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 /** 兔丸的胡萝卜资源、受击被动和守护之心行动条技能迁移。 */
 export function registerRabbitMaru(registry: ContentRegistry): void {
   registry.registerStatus({ id: rabbitMaruIds.carrots, mechanicsCoverage: 'verified', category: 'other', dispellable: false,
@@ -85,7 +93,7 @@ export function createRabbitMaruDefinition(): HeroDefinition {
           statusId: rabbitMaruIds.triggeredAttack, source: markerSource, stacks: 1,
           duration: { kind: 'count', remaining: 1, owner: 'event', event: 'attack-end' },
           values: { attackId: event.attackId } };
-        const chance = wearer.skillLevel >= 5 ? .6 : wearer.skillLevel >= 3 ? .5 : .4;
+        const chance = rank(wearer, rabbitMaruIds.passive) >= 5 ? .6 : rank(wearer, rabbitMaruIds.passive) >= 3 ? .5 : .4;
         const commands: EffectCommand[] = [{ type: 'add-status', source: markerSource, targetId: wearer.unitId,
           instance: marker, parentEventId: event.eventId }];
         if (context.random() < chance) commands.unshift(carrotCommand(wearer, 1, marker.instanceId));

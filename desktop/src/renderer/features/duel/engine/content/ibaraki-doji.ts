@@ -1,6 +1,7 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance } from '../core/types';
 import { battleSkillRow, skillNumber } from '../../../../../shared/game-skill-data';
+import { lowestHealthEnemy } from './lineup-damage-skill';
 import { ContentRegistry } from './registry';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { passivesEnabled } from '../core/passive-eligibility';
@@ -32,19 +33,30 @@ export function createIbarakiDojiDefinition(): HeroDefinition {
     execute(context, intent, parameters) {
       const actor = context.getUnit(intent.actorId);
       const row = actor && battleSkillRow(ibarakiDojiIds.ultimate,
-        Math.max(1, Math.min(5, actor.skillLevels?.[ibarakiDojiIds.ultimate] ?? actor.skillLevel)), actor.awakeFilter,
+        Math.max(1, Math.min(6, actor.skillLevels?.[ibarakiDojiIds.ultimate] ?? actor.skillLevel)), actor.awakeFilter,
         actor.unitKind === 'monster' || actor.unitKind === 'summon');
       return attackTarget(context, intent.actorId, intent.targetIds[0], skillNumber(row, 'addDmg') ?? Number(parameters.ratio ?? 4.6),
         ibarakiDojiIds.ultimate);
     },
   };
   return {
-    id: ibarakiDojiIds.hero, skills: [basic, ultimate], aiCoverage: 'partial', mechanicsCoverage: 'partial',
+    id: ibarakiDojiIds.hero, skills: [basic, ultimate], aiCoverage: 'verified',
+    aiCoverageNotes: ['按当前社区 AI：鬼火足够时无条件优先地狱之手；普攻与地狱之手都优先生命比例最低的敌方，地狱之手的优先目标包含召唤物。鬼火不足时由技能可用性回退普攻。'],
+    mechanicsCoverage: 'partial',
     mechanicsCoverageNotes: ['基础攻击与地狱之手倍率、分支鬼火、怒火增伤、30%生命损失叠层、满层致命保护和迁怒过量伤害已接入。',
       '致命命中后的替代效果和目标客户端动画/触发帧尚待录像核验。'],
     handlers: {
       'attack-end': { priority: 55, handle(context, event) { return resolveRageAfterAttack(context, event); } },
       hit: { priority: 55, handle(context, event) { return gainRageFromHpLoss(context, event); } },
+    },
+    policy(context, unitId) {
+      const actor = context.getUnit(unitId);
+      if (!actor || actor.hp <= 0) return undefined;
+      const target = lowestHealthEnemy(context, actor);
+      if (!target) return undefined;
+      const hasFire = (context.state.resources[actor.side]?.fire ?? 0) >= 3;
+      return { actorId: unitId, skillId: hasFire ? ibarakiDojiIds.ultimate : ibarakiDojiIds.basic,
+        targetIds: [target.unitId], shape: 'single', targetRelation: 'enemy' };
     },
   };
 }
@@ -116,7 +128,7 @@ function attackTarget(context: BattleContext, actorId: string, targetId: string 
   if (!actor || actor.hp <= 0 || !target || target.hp <= 0) return [];
   const actorStats = context.getEffectiveStats(actorId) ?? actor.stats;
   const targetStats = context.getEffectiveStats(target.unitId) ?? target.stats;
-  const row = battleSkillRow(skillId, Math.max(1, Math.min(5, actor.skillLevels?.[skillId] ?? actor.skillLevel)), actor.awakeFilter,
+  const row = battleSkillRow(skillId, Math.max(1, Math.min(6, actor.skillLevels?.[skillId] ?? actor.skillLevel)), actor.awakeFilter,
     actor.unitKind === 'monster' || actor.unitKind === 'summon');
   const rageStacks = actor.statuses.find(status => status.statusId === ibarakiDojiIds.rage)?.stacks ?? 0;
   const damage = context.calculateDamage({ attack: actorStats.attack, defense: targetStats.defense,

@@ -2,7 +2,7 @@ import type { HeroDefinition, SkillDefinition, StatusDefinition } from '../core/
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { effectiveDamageMultiplier, effectiveDefenseIgnore } from '../mechanics/stats';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { battleSkillRow, skillNumber } from '../../../../../shared/game-skill-data';
 import type { ContentRegistry } from './registry';
 
@@ -87,7 +87,7 @@ export function createMenreikiDefinition(): HeroDefinition {
         const defense = context.getEffectiveStats(enemy.unitId) ?? enemy.stats;
         const hit = calculateIndirectDamage({ attack: offense.attack * damageMultiplier, defense: defense.defense,
           defenseIgnore: effectiveDefenseIgnore(actor), ratio: damageRatio + masks * perEvilMask,
-          critDamage: offense.critDamage }, context.random);
+          critDamage: offense.critDamage, layers: indirectBuffLv(enemy) }, context.random);
         commands.push({ type: 'lose-life', source, targetId: enemy.unitId, amount: hit.amount,
           lifeLossKind: 'indirect' });
       }
@@ -181,7 +181,7 @@ function resolveWhiteMask(context: BattleContext, event: BattleEvent): EffectCom
     if (!owner || !offense || !defense) continue;
     const ratio = Number(mask.values?.damageRatio ?? 1);
     const hit = calculateIndirectDamage({ attack: offense.attack * effectiveDamageMultiplier(owner),
-      defense: defense.defense, defenseIgnore: effectiveDefenseIgnore(owner), ratio, critDamage: offense.critDamage }, context.random);
+      defense: defense.defense, defenseIgnore: effectiveDefenseIgnore(owner), ratio, critDamage: offense.critDamage , layers: indirectBuffLv(target)}, context.random);
     commands.push({ type: 'lose-life', source: mask.source, targetId: target.unitId, amount: hit.amount,
       lifeLossKind: 'indirect', parentEventId: event.eventId });
     commands.push({ type: 'remove-status-instances', source: mask.source, targetId: target.unitId,

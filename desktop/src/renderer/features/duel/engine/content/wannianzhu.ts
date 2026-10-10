@@ -29,7 +29,7 @@ export function registerWannianzhu(registry: ContentRegistry): void {
     execute(context, intent, parameters) {
       const actor = context.getUnit(intent.actorId);
       if (!actor || actor.heroId !== wannianzhuIds.hero || actor.hp <= 0 || actor.unitKind === 'summon') return [];
-      const rank = Math.max(1, Math.min(5, Number(parameters.rank ?? actor.skillLevels?.[wannianzhuIds.ultimate] ?? actor.skillLevel)));
+      const rank = Math.max(1, Math.min(6, Number(parameters.rank ?? actor.skillLevels?.[wannianzhuIds.ultimate] ?? actor.skillLevel)));
       const attackRate = Number(parameters.attackRate ?? attackRates[rank - 1]);
       const attack = context.getEffectiveStats(actor.unitId)?.attack ?? actor.stats.attack;
       return intent.targetIds.flatMap(targetId => {

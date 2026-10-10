@@ -201,5 +201,5 @@ function triggerSurge(context: BattleContext, owner: Readonly<UnitState>, source
     reason: 'consumed', parentEventId });
   return commands;
 }
-function skillRank(owner: Readonly<UnitState>, id: string): number { return Math.max(1, Math.min(5, owner.skillLevels?.[id] ?? owner.skillLevel)); }
+function skillRank(owner: Readonly<UnitState>, id: string): number { return Math.max(1, Math.min(6, owner.skillLevels?.[id] ?? owner.skillLevel)); }
 function goldfishSource(id: string, unitId: string): StatusInstance['source'] { return { kind: 'skill', id, unitId }; }

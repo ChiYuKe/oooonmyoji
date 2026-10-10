@@ -229,7 +229,7 @@ function skillRow(actor: Readonly<UnitState>, skillId: string) {
 }
 
 function skillRank(actor: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, actor.skillLevels?.[skillId] ?? actor.skillLevel));
+  return Math.max(1, Math.min(6, actor.skillLevels?.[skillId] ?? actor.skillLevel));
 }
 
 function sesshomaruSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

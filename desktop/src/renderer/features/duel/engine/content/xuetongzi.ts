@@ -151,5 +151,5 @@ function isFreezeStatus(context: BattleContext | undefined, status: StatusInstan
   return status.statusId === xuetongziIds.freeze || label.includes('冰冻') || label.includes('深度冰冻') || label.includes('霜冻')
     || context?.getStatusCategory(status.statusId) === 'control' && ['freeze', 'deep-freeze', 'frost'].includes(label.toLowerCase());
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function xuetongziSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

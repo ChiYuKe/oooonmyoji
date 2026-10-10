@@ -138,6 +138,6 @@ function fearStatus(ownerId: string, source: SourceRef, stacks: number): import(
     modifiers: [{ stat: 'damage', operation: 'percent', amount: .75, perStack: true }] };
 }
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function nuraRikuSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

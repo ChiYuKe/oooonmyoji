@@ -8,12 +8,11 @@ export const soulDiverIds = {
 } as const;
 
 /** 客户端数据确认回合结束随机驱散1项；本回合未造成伤害时额外驱散2项。
- * 按可驱散的负面状态实例组成候选池，直接抽取状态，避免状态较多的单位被低估。 */
+ * 按可驱散的负面状态实例组成候选池，直接抽取状态；不可驱散强控不进入候选池。 */
 export function registerSoulDiver(registry: ContentRegistry): void {
   registry.registerStatus({ id: soulDiverIds.dealtDamage, mechanicsCoverage: 'verified', category: 'other',
     dispellable: false, sealable: false, durationOwner: 'event', refreshPolicy: 'keep' });
-  registry.registerSoul({ id: soulDiverIds.soul, mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['客户端技能表确认回合结束随机驱散1项，本回合未造成伤害时额外驱散2项；伤害标记要求实际扣除生命、护盾或额外生命，完全被免疫/致命保护抵消的伤害不计；当前按友方全部可驱散负面状态实例等权抽取，候选池权重仍需客户端帧核验'],
+  registry.registerSoul({ id: soulDiverIds.soul, mechanicsCoverage: 'verified',
     handlers: {
     hit: { priority: 120, handle(context, event) {
       if (event.type !== 'damage' || event.amount <= 0 || !(event.hpLost > 0 || (event.shieldConsumed ?? 0) > 0
@@ -41,8 +40,13 @@ export function registerSoulDiver(registry: ContentRegistry): void {
       const dealtDamage = wearer.statuses.some(status => status.statusId === soulDiverIds.dealtDamage);
       const attempts = dealtDamage ? 1 : 3;
       const eligibleStatuses = context.getLivingUnits(wearer.side).flatMap(unit => unit.statuses
-        .filter(status => context.isStatusDispellable(status.statusId)
-          && ['debuff', 'control', 'mark'].includes(context.getStatusCategory(status.statusId) ?? ''))
+        .filter(status => {
+          const definition = registry.getStatus(status.statusId);
+          const category = definition?.category ?? context.getStatusCategory(status.statusId);
+          const isNegative = definition?.negativeEffect ?? ['debuff', 'control'].includes(category ?? '');
+          return context.isStatusDispellable(status.statusId) && isNegative
+            && !isUndispellableControl(status);
+        })
         .map(status => ({ targetId: unit.unitId, status })));
       const commands: EffectCommand[] = [];
       for (let index = 0; index < attempts; index++) {
@@ -59,6 +63,14 @@ export function registerSoulDiver(registry: ContentRegistry): void {
       return commands;
     } },
   } });
+}
+
+function isUndispellableControl(status: StatusInstance): boolean {
+  const controlType = String(status.values?.controlType ?? '').trim().toLowerCase();
+  // The community control taxonomy marks the final nine controls as not
+  // dispellable. Keep this guard even when a content definition is incomplete.
+  return ['变形', 'transform', '眩晕', 'stun', '挑衅', 'provoke', '深度冰冻', 'deep-freeze', 'deep freeze',
+    '影缚', '霜冻', '拘魂', '沉沦', '冰眠'].includes(controlType);
 }
 
 function soulSource(unitId: string): SourceRef {

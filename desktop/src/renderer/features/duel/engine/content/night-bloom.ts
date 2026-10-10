@@ -10,7 +10,7 @@ export const nightBloomIds = {
 } as const;
 
 export function registerNightBloom(registry: ContentRegistry): void {
-  registry.registerStatus({ id: nightBloomIds.seed, mechanicsCoverage: 'partial', category: 'mark', dispellable: true,
+  registry.registerStatus({ id: nightBloomIds.seed, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
     sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 6, stackScope: 'source-unit' });
   registry.registerStatus({ id: nightBloomIds.flower, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 10 });
@@ -255,7 +255,7 @@ function addStatus(targetId: string, statusId: string, source: SourceRef, durati
   return { type: 'add-status', source, targetId, instance: { instanceId: `${statusId}:${source.unitId}:${targetId}`,
     statusId, source, stacks: 1, duration, ...(modifiers ? { modifiers } : {}) } };
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function has(unit: Readonly<UnitState>, statusId: string): boolean { return unit.statuses.some(status => status.statusId === statusId); }
 function enemySide(side: UnitState['side']): UnitState['side'] { return side === 'blue' ? 'red' : 'blue'; }
 function nightBloomSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

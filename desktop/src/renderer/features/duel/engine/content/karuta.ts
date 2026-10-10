@@ -1,7 +1,7 @@
 import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
 import type { ContentRegistry } from './registry';
@@ -92,7 +92,7 @@ function indirectHit(context: BattleContext, owner: Readonly<UnitState>, target:
   source: SourceRef): EffectCommand[] {
   const offense = context.getEffectiveStats(owner.unitId) ?? owner.stats, defense = context.getEffectiveStats(target.unitId) ?? target.stats;
   const calculated = calculateIndirectDamage({ attack: offense.attack, defense: defense.defense,
-    defenseIgnore: effectiveDefenseIgnore(owner) + extraIgnore, ratio, critDamage: offense.critDamage }, context.random);
+    defenseIgnore: effectiveDefenseIgnore(owner) + extraIgnore, ratio, critDamage: offense.critDamage , layers: indirectBuffLv(target)}, context.random);
   return [{ type: 'lose-life', source, targetId: target.unitId, amount: calculated.amount, lifeLossKind: 'indirect' }];
 }
 function memoryStacks(target: Readonly<UnitState>, ownerId: string): number {

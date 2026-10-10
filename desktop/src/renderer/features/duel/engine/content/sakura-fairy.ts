@@ -182,7 +182,7 @@ function attack(context: BattleContext, actorId: string, targetId: string | unde
 }
 
 function skillRank(actor: UnitState, skillId: string): number {
-  return Math.max(1, Math.min(5, actor.skillLevels?.[skillId] ?? actor.skillLevel));
+  return Math.max(1, Math.min(6, actor.skillLevels?.[skillId] ?? actor.skillLevel));
 }
 
 function skillRow(actor: UnitState, skillId: string) {

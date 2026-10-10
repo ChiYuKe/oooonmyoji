@@ -196,6 +196,6 @@ function fearStatus(ownerId: string, source: SourceRef): import('../core/types')
     duration: { kind: 'count', remaining: 1, owner: 'target-turn' } };
 }
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function mountainWindSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

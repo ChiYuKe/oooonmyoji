@@ -2,6 +2,7 @@ import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef
 import type { DamageInterception, HeroDefinition, SkillDefinition } from '../core/definitions';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { effectiveDefenseIgnore } from '../mechanics/stats';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { createBasicAttackSkill } from './common-skills';
 import type { ContentRegistry } from './registry';
 
@@ -77,7 +78,7 @@ export function createShinkiHuangDefinition(): HeroDefinition {
   return {
     id: shinkiHuangIds.hero, skills: [basic, realm, starfall], aiCoverage: 'partial', mechanicsCoverage: 'partial',
     aiCoverageNotes: ['按可用客户端技能规则：无幻境且有2火时先开星罗云布；星辰之力达到3层且有3火时转用星流霆击。官方自动选招表及目标优先级仍未提取。'],
-    mechanicsCoverageNotes: ['接入陨星等级伤害、四级先机星罗云布、命运星河最多6次星爆、敌方回合未消耗鬼火触发全体间接伤害/自疗/星辰之力、普通攻击延长次数、星流霆击消耗星辰之力并在四级幻境中续期。基础星爆逐级伤害提升、幻境中自身减伤、五级星爆被动屏蔽及额外伤害御魂屏蔽已按客户端技能行建模；星爆触发窗口、鬼火消耗判定及额外伤害的御魂屏蔽仍需实战帧核验。'],
+    mechanicsCoverageNotes: ['接入陨星等级伤害、四级先机星罗云布、命运星河最多6次星爆、敌方回合未消耗鬼火触发全体间接伤害/自疗/星辰之力、普通攻击延长次数、星流霆击消耗星辰之力并在四级幻境中续期。星爆按客户端 indirectDamageCalc 结算（无条件暴击 + 目标间接伤害层数×10 额外无视防御），并以 life-lost(kind=indirect) 上报而非普通伤害事件；基础星爆逐级伤害提升、幻境中自身减伤、五级星爆被动屏蔽及额外伤害御魂屏蔽已按客户端技能行建模；星爆触发窗口、鬼火消耗判定及额外伤害的御魂屏蔽仍需实战帧核验。'],
     initialize(context, unitId) {
       const owner = context.getUnit(unitId);
       if (!owner || owner.heroId !== shinkiHuangIds.hero || skillRank(owner, shinkiHuangIds.realm) < 4
@@ -156,10 +157,13 @@ function resolveEnemyTurn(context: BattleContext, event: BattleEvent): EffectCom
   const attack = context.getEffectiveStats(owner.unitId) ?? owner.stats;
   for (const enemy of context.getLivingUnits(owner.side === 'blue' ? 'red' : 'blue')) {
     const defense = context.getEffectiveStats(enemy.unitId) ?? enemy.stats;
-    const damage = context.calculateDamage({ attack: attack.attack, defense: defense.defense,
-      defenseIgnore: effectiveDefenseIgnore(owner), ratio, critChance: 0, critDamage: attack.critDamage }, owner, enemy);
-    commands.push({ type: 'deal-damage', source: burstSource, targetId: enemy.unitId, amount: damage.amount,
-      damageKind: 'normal', actionKind: 'skill', ...(rank >= 5 ? { suppressTargetPassiveTriggers: true } : {}),
+    // 星爆按客户端 indirectDamageCalc 结算：无条件暴击，并叠加目标的间接伤害层数（额外无视防御）。
+    const damage = calculateIndirectDamage({ attack: attack.attack, defense: defense.defense,
+      defenseIgnore: effectiveDefenseIgnore(owner), ratio, critDamage: attack.critDamage,
+      layers: indirectBuffLv(enemy) }, context.random);
+    // 星爆以「间接生命损失」结算（不是普通伤害事件）；五级再把封被动标记传给该事件。
+    commands.push({ type: 'lose-life', source: burstSource, targetId: enemy.unitId, amount: damage.amount,
+      lifeLossKind: 'indirect', ...(rank >= 5 ? { suppressTargetPassiveTriggers: true } : {}),
       parentEventId: event.eventId });
   }
   commands.push({ type: 'heal', source: burstSource, targetId: owner.unitId, amount: owner.stats.hp * .08,

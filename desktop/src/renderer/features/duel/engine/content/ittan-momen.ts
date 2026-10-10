@@ -16,7 +16,7 @@ export function registerIttanMomen(registry: ContentRegistry): void {
   const statuses: StatusDefinition[] = [
     { id: ittanMomenIds.obstruction, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
       durationOwner: 'target-turn', refreshPolicy: 'replace' },
-    { id: ittanMomenIds.wrap, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, sealable: true,
+    { id: ittanMomenIds.wrap, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true, sealable: true,
       durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 99 },
     { id: ittanMomenIds.stolenStats, mechanicsCoverage: 'partial', category: 'buff', dispellable: true, sealable: true,
       durationOwner: 'permanent', refreshPolicy: 'replace' },
@@ -196,5 +196,5 @@ function damage(context: BattleContext, actor: Readonly<UnitState>, target: Read
   return [{ type: 'deal-damage', source: ittanMomenSource(skillId, actor.unitId), targetId: target.unitId, amount: result.amount,
     ...(result.damageOptions ? { damageOptions: result.damageOptions } : {}), isCritical: result.isCritical }];
 }
-function skillRank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function skillRank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function ittanMomenSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

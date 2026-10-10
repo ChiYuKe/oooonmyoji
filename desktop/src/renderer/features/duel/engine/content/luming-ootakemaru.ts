@@ -242,7 +242,7 @@ function chooseAction(context: BattleContext, unitId: string): ActionIntent | un
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function hasStatus(unit: Readonly<UnitState>, statusId: string): boolean { return unit.statuses.some(status => status.statusId === statusId); }
 function enemySide(side: UnitState['side']): UnitState['side'] { return side === 'blue' ? 'red' : 'blue'; }

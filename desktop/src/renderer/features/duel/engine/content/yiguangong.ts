@@ -51,7 +51,7 @@ export function createYiguangongDefinition(): HeroDefinition {
     skills: [createBasicAttackSkill(yiguangongIds.basic, basicRatios), skill],
     aiCoverage: 'partial',
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['已按客户端技能行实现：饴细工为当前生命比例最低的友方分担15%至30%伤害；一物一心消耗自身当前生命15%，给非自身、非召唤友方施加2至3回合糖渍，饴细工受伤时按每个目标每回合最多3次治疗糖渍目标10%生命上限，治疗溢出推进8%行动条，五级治疗友方时另治疗自身5%生命上限。伤害分担的低血目标动态切换、护盾吸收计次和多饴细工归属仍需实战帧核验。'],
+    mechanicsCoverageNotes: ['已按客户端技能行和社区AI实现：被动唯一生效者保护当前生命比例最低的友方并按等级分担15%至30%伤害；一物一心消耗自身当前生命15%，给非自身、非召唤友方施加2至3回合糖渍，饴细工受伤时按每个目标每回合最多3次治疗糖渍目标10%生命上限，治疗溢出推进8%行动条，五级治疗友方时另治疗自身5%生命上限。拦截时动态计算最低生命比例，社区AI在有鬼火且存在未糖渍友方时使用三技能。御魂/被动触发顺序、盾吸收后是否计次、多饴细工唯一效果接替窗口仍需实战帧核验。'],
     policy(context, unitId) {
       const actor = context.getUnit(unitId);
       if (!actor || actor.hp <= 0 || actor.unitKind === 'summon') return undefined;
@@ -60,8 +60,7 @@ export function createYiguangongDefinition(): HeroDefinition {
       const allies = context.getLivingUnits(actor.side).filter(ally => ally.unitId !== actor.unitId && ally.unitKind !== 'summon');
       const target = [...allies].filter(ally => !ally.statuses.some(status => status.statusId === yiguangongIds.sugar))
         .sort((left, right) => left.hp / Math.max(1, left.stats.hp) - right.hp / Math.max(1, right.stats.hp))[0];
-      if (target && (context.state.resources[actor.side]?.fire ?? 0) >= 2
-        && target.hp / Math.max(1, target.stats.hp) < .8) {
+      if (target && (context.state.resources[actor.side]?.fire ?? 0) >= 2) {
         return { actorId: actor.unitId, skillId: yiguangongIds.skill, targetIds: [target.unitId], shape: 'single', targetRelation: 'ally' };
       }
       const enemy = [...enemies].sort((left, right) => left.hp / Math.max(1, left.stats.hp)
@@ -82,14 +81,14 @@ export function createYiguangongDefinition(): HeroDefinition {
 function interceptYiguangongDamage(state: import('../core/types').BattleState, attacker: Readonly<UnitState> | undefined,
   target: Readonly<UnitState>, amount: number, context?: DamageInterceptionContext) {
   if (context?.cannotBeShared || !attacker || attacker.side === target.side || amount <= 0) return undefined;
-  const protectors = state.sides[target.side].map(unitId => state.units[unitId]).filter((unit): unit is UnitState => Boolean(unit
-    && unit.hp > 0 && unit.heroId === yiguangongIds.hero && passivesEnabled(unit)));
-  for (const protector of protectors) {
+  const protector = state.sides[target.side].map(unitId => state.units[unitId]).find((unit): unit is UnitState => Boolean(unit
+    && unit.hp > 0 && unit.unitKind !== 'summon' && unit.heroId === yiguangongIds.hero && passivesEnabled(unit)));
+  if (protector) {
     const allies = state.sides[protector.side].map(unitId => state.units[unitId]).filter((unit): unit is UnitState => Boolean(unit
       && unit.hp > 0));
     const lowest = [...allies].sort((left, right) => left.hp / Math.max(1, left.stats.hp)
       - right.hp / Math.max(1, right.stats.hp) || left.unitId.localeCompare(right.unitId))[0];
-    if (!lowest || lowest.unitId !== target.unitId || target.unitId === protector.unitId) continue;
+    if (!lowest || lowest.unitId !== target.unitId || target.unitId === protector.unitId) return undefined;
     const rank = skillLevel(protector, yiguangongIds.passive);
     const ratio = shareRatios[Math.max(0, Math.min(4, rank - 1))]!;
     const shared = amount * ratio;
@@ -103,7 +102,8 @@ function interceptYiguangongDamage(state: import('../core/types').BattleState, a
 function healSugarDippedAllies(context: BattleContext, event: BattleEvent): EffectCommand[] | undefined {
   if (event.type !== 'damage' || event.amount <= 0 || !event.targetId) return;
   const wearer = context.getUnit(event.targetId);
-  if (!wearer || wearer.heroId !== yiguangongIds.hero || wearer.hp <= 0 || !passivesEnabled(wearer)) return;
+  if (!wearer || wearer.heroId !== yiguangongIds.hero || wearer.hp <= 0 || !passivesEnabled(wearer)
+    || uniquePassiveOwner(context, wearer.side)?.unitId !== wearer.unitId) return;
   const source = yiguangongSource(yiguangongIds.passive, wearer.unitId);
   const commands: EffectCommand[] = [];
   for (const ally of context.getLivingUnits(wearer.side)) {
@@ -148,6 +148,10 @@ function rewardSugarOverflow(context: BattleContext, event: BattleEvent): Effect
 }
 
 function yiguangongSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
+function uniquePassiveOwner(context: BattleContext, side: UnitState['side']): Readonly<UnitState> | undefined {
+  return context.getLivingUnits(side).find(unit => unit.unitKind !== 'summon' && unit.heroId === yiguangongIds.hero
+    && passivesEnabled(unit));
+}
 function skillLevel(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }

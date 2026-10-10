@@ -87,7 +87,9 @@ export function registerEater(registry: ContentRegistry): void {
         const eaters = context.getLivingUnits(ally.side).filter(unit => unit.heroId === eaterIds.hero && unit.unitId !== ally.unitId
           && passivesEnabled(unit));
         return eaters.flatMap(eater => {
-          const chance = [.1, .15, .2, .25, .3][Math.max(0, Math.min(4, eater.skillLevel - 1))]!;
+          // 客户端 2142（被动）逐级 param1 = 0.1/0.15/0.2/0.25/0.3，与本表逐级一致 ⇒ 按 2142 的等级
+          const chance = [.1, .15, .2, .25, .3][Math.max(0, Math.min(4,
+            (eater.skillLevels?.[eaterIds.passive] ?? eater.skillLevel ?? 1) - 1))]!;
           if (context.random() >= chance) return [];
           const markedTargets = (event.targetHealthChanges ?? []).map(change => context.getUnit(change.targetId))
             .filter((unit): unit is UnitState => Boolean(unit && unit.hp > 0 && unit.side !== eater.side));
@@ -96,7 +98,9 @@ export function registerEater(registry: ContentRegistry): void {
           const target = enemies[Math.floor(context.random() * enemies.length)]!;
           const actorStats = context.getEffectiveStats(eater.unitId) ?? eater.stats;
           const targetStats = context.getEffectiveStats(target.unitId) ?? target.stats;
-          const ratio = [1, 1.05, 1.1, 1.15, 1.25][Math.max(0, Math.min(4, eater.skillLevel - 1))]!;
+          // 客户端 2141（普攻）逐级 addDmg = 1/1.05/1.1/1.15/1.25，与本表逐级一致 ⇒ 按 2141 的等级
+          const ratio = [1, 1.05, 1.1, 1.15, 1.25][Math.max(0, Math.min(4,
+            (eater.skillLevels?.[eaterIds.basic] ?? eater.skillLevel ?? 1) - 1))]!;
           const hit = context.calculateDamage({ attack: actorStats.attack, defense: targetStats.defense,
             defenseIgnore: effectiveDefenseIgnore(eater), ratio, critChance: actorStats.crit,
             critDamage: actorStats.critDamage }, eater, target);

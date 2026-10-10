@@ -169,7 +169,9 @@ function grantResistance(context: BattleContext, event: BattleEvent): EffectComm
     const actor = context.getUnit(unitId);
     if (!actor || actor.heroId !== jumpingBrotherIds.hero || actor.unitKind === 'summon' || !passivesEnabled(actor)
       || actor.statuses.some(status => status.statusId === jumpingBrotherIds.resistance)) continue;
-    const amount = resistanceByLevel[Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+    // 客户端 2332（不屈）lv2「提升效果抵抗增至」⇒ 抵抗表按 2332 的等级
+    const amount = resistanceByLevel[Math.max(0, Math.min(4,
+      (actor.skillLevels?.[jumpingBrotherIds.unyielding] ?? actor.skillLevel ?? 1) - 1))]!;
     const passive = source(jumpingBrotherIds.unyielding, actor.unitId);
     const instance: StatusInstance = { instanceId: `${jumpingBrotherIds.resistance}:${actor.unitId}`,
       statusId: jumpingBrotherIds.resistance, source: passive, stacks: 1, duration: { kind: 'permanent' },

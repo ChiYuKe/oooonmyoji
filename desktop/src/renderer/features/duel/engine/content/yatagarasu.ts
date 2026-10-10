@@ -16,6 +16,17 @@ const ultimateRatios = [1.19, 1.31, 1.31, 1.43, 1.43] as const;
 const inviteChances = [.3, .3, .4, .4, .5] as const;
 const cleanseChances = [.5, .7, 1, 1, 1] as const;
 
+/**
+ * 按**技能等级**取值（缺 per-skill rank 时回落到全局 skillLevel）。
+ * 客户端 2182（羽清，被动）逐级证据：
+ *   lv1 param1=0.5 / lv2「触发概率增至」param1=0.7 / lv3 param1=1
+ *   lv4「『正义之刺』、『群鸦乱舞』邀战友方时，驱散或解除其带有的**所有控制效果**」
+ *   lv5「额外驱散或解除 **1 名随机友方**带的 1 个控制」
+ * ⇒ 净化概率表 `cleanseChances`（0.5/0.7/1/1/1）与 lv4/lv5 的两个分支都按 2182 的等级。
+ */
+const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1, Math.min(6,
+  unit.skillLevels?.[skillId] ?? unit.skillLevel ?? 1));
+
 export function registerYatagarasu(registry: ContentRegistry): void {
   const definition: HeroDefinition = {
     id: yatagarasuIds.hero,
@@ -91,7 +102,7 @@ function cleanseControls(context: BattleContext, event: BattleEvent): EffectComm
   if (event.type !== 'turn-started') return;
   const actor = context.getUnit(event.unitId);
   if (!actor || actor.heroId !== yatagarasuIds.hero || actor.unitKind === 'summon' || !passivesEnabled(actor)) return;
-  const chance = cleanseChances[Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+  const chance = cleanseChances[Math.max(0, Math.min(4, rank(actor, yatagarasuIds.passive) - 1))]!;
   if (context.random() >= chance) return;
   const commands: EffectCommand[] = [];
   const ownControls = actor.statuses.filter(status => context.getStatusCategory(status.statusId) === 'control');
@@ -100,7 +111,7 @@ function cleanseControls(context: BattleContext, event: BattleEvent): EffectComm
     commands.push({ type: 'remove-statuses', source: source(yatagarasuIds.passive, actor.unitId), targetId: actor.unitId,
       statusIds: [selected.statusId], reason: 'consumed', parentEventId: event.eventId });
   }
-  if (actor.skillLevel >= 5) {
+  if (rank(actor, yatagarasuIds.passive) >= 5) {
     const allies = context.getLivingUnits(actor.side).filter(ally => ally.statuses.some(status =>
       context.getStatusCategory(status.statusId) === 'control'));
     if (allies.length) {
@@ -129,7 +140,9 @@ function inviteAllies(context: BattleContext, event: BattleEvent, registry: Cont
     typeof yatagarasuIds.basic | typeof yatagarasuIds.ultimate) || event.actionKind === 'passive') return;
   const actor = context.getUnit(event.source.unitId);
   if (!actor || actor.heroId !== yatagarasuIds.hero || actor.unitKind === 'summon' || !passivesEnabled(actor)) return;
-  const chance = inviteChances[Math.max(0, Math.min(4, actor.skillLevel - 1))]!;
+  // 客户端 2183（群鸦乱舞）逐级 param3 = 0.3/0.3/0.4/0.4/0.5，与 inviteChances 逐级一致 ⇒ 按 2183 的等级
+  const chance = inviteChances[Math.max(0, Math.min(4,
+    (actor.skillLevels?.[yatagarasuIds.ultimate] ?? actor.skillLevel ?? 1) - 1))]!;
   const allies = context.getLivingUnits(actor.side).filter(unit => unit.unitId !== actor.unitId && unit.unitKind !== 'summon');
   const invited = allies.slice().sort((left, right) => right.stats.attack - left.stats.attack)[0];
   if (!invited) return;
@@ -147,7 +160,7 @@ function inviteAllies(context: BattleContext, event: BattleEvent, registry: Cont
       ? currentTarget : enemies[Math.floor(context.random() * enemies.length)]!;
     const intent: ActionIntent = { actorId: invited.unitId, skillId: basic.id, targetIds: [target.unitId],
       shape: basic.target, targetRelation: basic.targetRelation ?? 'enemy', kind: 'passive' };
-    if (actor.skillLevel >= 4) {
+    if (rank(actor, yatagarasuIds.passive) >= 4) {
       const controls = invited.statuses.filter(status => context.getStatusCategory(status.statusId) === 'control');
       if (controls.length) commands.push({ type: 'remove-statuses', source: source(yatagarasuIds.passive, actor.unitId),
         targetId: invited.unitId, statusIds: [...new Set(controls.map(status => status.statusId))], reason: 'consumed', parentEventId: event.eventId });

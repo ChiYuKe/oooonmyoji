@@ -235,5 +235,5 @@ function attack(context: BattleContext, actor: Readonly<UnitState>, target: Read
 function randomUnit(context: BattleContext, units: readonly Readonly<UnitState>[]): Readonly<UnitState> {
   return units[Math.min(units.length - 1, Math.floor(context.random() * units.length))]!;
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function cangfengSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

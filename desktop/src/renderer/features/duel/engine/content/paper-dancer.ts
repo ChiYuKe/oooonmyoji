@@ -193,5 +193,5 @@ function strike(context: BattleContext, actor: Readonly<UnitState>, target: Read
 function hasPaper(unit: Readonly<UnitState>, sourceUnitId: string): boolean {
   return unit.statuses.some(status => status.statusId === paperDancerIds.paper && status.source.unitId === sourceUnitId);
 }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function paperDancerSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

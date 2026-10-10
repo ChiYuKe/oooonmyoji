@@ -239,7 +239,7 @@ function allEnemies(context: BattleContext, owner: Readonly<UnitState>): UnitSta
 function hasStatus(owner: Readonly<UnitState>, statusId: string): boolean { return owner.statuses.some(status => status.statusId === statusId); }
 function skillRank(owner: Readonly<UnitState>, skillId: string): number {
   const rank = owner.skillLevels?.[skillId];
-  return Number.isFinite(rank) ? Math.max(1, Math.min(5, Math.floor(rank!))) : Math.max(1, Math.min(5, owner.skillLevel));
+  return Number.isFinite(rank) ? Math.max(1, Math.min(6, Math.floor(rank!))) : Math.max(1, Math.min(6, owner.skillLevel));
 }
 function nezukoSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
 function intent(actorId: string, skillId: string, targetIds: string[], targetRelation: 'enemy' | 'ally') {

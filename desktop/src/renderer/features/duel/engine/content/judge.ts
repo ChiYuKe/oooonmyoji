@@ -2,7 +2,7 @@ import type { HeroDefinition, SkillDefinition } from '../core/definitions';
 import type { ActionIntent, BattleContext, BattleEvent, EffectCommand, SourceRef, StatusInstance, UnitState } from '../core/types';
 import { passivesEnabled } from '../core/passive-eligibility';
 import { attemptDebuff } from '../mechanics/control';
-import { calculateIndirectDamage } from '../mechanics/indirect-damage';
+import { calculateIndirectDamage, indirectBuffLv } from '../mechanics/indirect-damage';
 import { effectiveDefenseIgnore, effectiveIndirectDamageTakenMultiplier, effectiveStats } from '../mechanics/stats';
 import { createBasicAttackSkill } from './common-skills';
 import type { ContentRegistry } from './registry';
@@ -110,7 +110,7 @@ function tickDeathSentence(context: BattleContext, event: BattleEvent): EffectCo
     if (!owner || !ownerStats) continue;
     const targetStats = context.getEffectiveStats(target.unitId) ?? target.stats;
     const result = calculateIndirectDamage({ attack: ownerStats.attack, defense: targetStats.defense,
-      ratio: 1, critDamage: ownerStats.critDamage }, context.random);
+      ratio: 1, critDamage: ownerStats.critDamage , layers: indirectBuffLv(target)}, context.random);
     let amount = result.amount;
     if (owner.heroId === judgeIds.hero && passivesEnabled(owner)
       && target.statuses.some(instance => instance.statusId === judgeIds.revivedTarget)) {

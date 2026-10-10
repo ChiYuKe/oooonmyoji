@@ -198,7 +198,7 @@ function cooldownStatus(owner: UnitState, turns: number): StatusInstance {
 }
 
 function hasDoll(unit: UnitState): boolean { return unit.statuses.some(status => status.statusId === rihefangIds.doll); }
-function skillRank(unit: UnitState, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function skillRank(unit: UnitState, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function rihefangSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }
 function lowestRatio<T extends UnitState>(units: readonly T[]): T | undefined {
   return [...units].sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp))[0];

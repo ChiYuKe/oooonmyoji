@@ -33,8 +33,11 @@ export function createPeachMakiDefinition(): HeroDefinition {
       const actor = context.getUnit(intent.actorId);
       if (!actor || actor.heroId !== peachMakiIds.hero || actor.hp <= 0) return [];
       const source = peachMakiSource(peachMakiIds.ultimate, actor.unitId);
-      const healRatio = Number(parameters.healRatio ?? healingRatios[Math.max(0, Math.min(4, actor.skillLevel - 1))]);
-      const actionGauge = Number(parameters.actionGauge ?? actionGaugeByRank[Math.max(0, Math.min(4, actor.skillLevel - 1))]);
+      // 客户端 3103（大招）逐级 param1 = 0.06/0.08/(…)/0.1/0.1「治疗增至」与 healingRatios 一致；
+      // 行动条增量同属 3103（lv3/lv5「增加行动条增至」）⇒ 两表都按 3103 的等级
+      const ultimateRank = (actor.skillLevels?.[peachMakiIds.ultimate] ?? actor.skillLevel ?? 1) - 1;
+      const healRatio = Number(parameters.healRatio ?? healingRatios[Math.max(0, Math.min(4, ultimateRank))]);
+      const actionGauge = Number(parameters.actionGauge ?? actionGaugeByRank[Math.max(0, Math.min(4, ultimateRank))]);
       return context.getLivingUnits(actor.side).flatMap(ally => [
         { type: 'heal' as const, source, targetId: ally.unitId, amount: ally.stats.hp * healRatio },
         { type: 'change-action-gauge' as const, source, targetId: ally.unitId, amount: actionGauge },

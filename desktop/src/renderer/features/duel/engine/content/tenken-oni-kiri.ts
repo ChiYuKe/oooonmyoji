@@ -274,5 +274,5 @@ function statusInstance(statusId: string, instanceId: string, source: SourceRef,
   return { statusId, instanceId, source, stacks, duration: { kind: 'permanent' }, values, ...(modifiers ? { modifiers } : {}) };
 }
 
-function skillRank(unit: Readonly<UnitState>, id: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[id] ?? unit.skillLevel)); }
+function skillRank(unit: Readonly<UnitState>, id: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[id] ?? unit.skillLevel)); }
 function tenkenSource(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

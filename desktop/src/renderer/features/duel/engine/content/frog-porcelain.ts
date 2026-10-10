@@ -79,7 +79,9 @@ function resolveFortune(context: BattleContext, event: BattleEvent): EffectComma
   const commands: EffectCommand[] = [];
   for (let index = 0; index < enemies.length; index += 1) {
     const target = enemies[index]!;
-    commands.push(...throwDice(context, frog, target, ultimateRatios[Math.max(0, Math.min(4, frog.skillLevel - 1))]!,
+    // 客户端 2503（大招）逐级 addDmg = 0.49/0.52/0.54/0.57/0.59，与 ultimateRatios 完全一致 ⇒ 按 2503 的等级
+    commands.push(...throwDice(context, frog, target, ultimateRatios[Math.max(0, Math.min(4,
+      (frog.skillLevels?.[frogPorcelainIds.ultimate] ?? frog.skillLevel ?? 1) - 1))]!,
       event.eventId));
   }
 

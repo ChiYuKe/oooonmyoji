@@ -254,7 +254,7 @@ function clearSealedPassiveStatuses(context: BattleContext, event: BattleEvent):
   return commands;
 }
 function skillRank(unit: UnitState, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 function lowestRatio(units: readonly UnitState[]): UnitState | undefined {
   return [...units].sort((a, b) => a.hp / Math.max(1, a.stats.hp) - b.hp / Math.max(1, b.stats.hp))[0];

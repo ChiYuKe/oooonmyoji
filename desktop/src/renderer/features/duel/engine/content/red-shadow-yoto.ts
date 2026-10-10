@@ -206,6 +206,6 @@ function validEnemy(actor: Readonly<UnitState>, target: Readonly<UnitState>): bo
   return actor.heroId === redShadowYotoIds.hero && actor.hp > 0 && target.hp > 0 && target.side !== actor.side;
 }
 function hpRatio(unit: Readonly<UnitState>): number { return unit.hp / Math.max(1, unit.stats.hp); }
-function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
+function rank(unit: Readonly<UnitState>, skillId: string): number { return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel)); }
 function lockedTarget(unit: Readonly<UnitState>): StatusInstance | undefined { return unit.statuses.find(status => status.statusId === redShadowYotoIds.lockedTarget); }
 function source(id: string, unitId: string): SourceRef { return { kind: 'skill', id, unitId }; }

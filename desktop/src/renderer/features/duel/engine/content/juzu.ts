@@ -200,7 +200,7 @@ function livingJuzu(context: BattleContext, side: UnitState['side']): UnitState[
 }
 
 function skillRank(unit: Readonly<UnitState>, skillId: string): number {
-  return Math.max(1, Math.min(5, unit.skillLevels?.[skillId] ?? unit.skillLevel));
+  return Math.max(1, Math.min(6, unit.skillLevels?.[skillId] ?? unit.skillLevel));
 }
 
 function juzuIntent(actorId: string, skillId: string, targetIds: readonly string[], shape: ActionIntent['shape'], targetRelation: NonNullable<ActionIntent['targetRelation']>): ActionIntent {

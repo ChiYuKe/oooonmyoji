@@ -5,6 +5,8 @@ export interface ScheduledActor {
   state: BattleState;
   actorId: UnitId;
   scheduling?: 'extra-turn';
+  /** Natural bar progress applied by the last motion tick, before the selected actor is reset. */
+  gaugeChanges?: readonly { unitId: UnitId; before: number; after: number }[];
 }
 
 export const MOTION_SLOT_MAX_LEN = 120;
@@ -18,7 +20,7 @@ export function scheduleNextActor(state: BattleState, random: () => number): Sch
   while (extraTurns.length > 0) {
     const actorId = extraTurns.shift()!;
     if (((state.units[actorId]?.hp ?? 0) <= 0 && !isUnitFightingSpirit(state.units[actorId])) || isUnitBanished(state.units[actorId])) continue;
-    return { actorId, scheduling: 'extra-turn', state: { ...state,
+    return { actorId, scheduling: 'extra-turn', gaugeChanges: [], state: { ...state,
       scheduling: { ...state.scheduling, extraTurns } } };
   }
   const advancedUnits = { ...state.units };
@@ -55,11 +57,33 @@ export function scheduleNextActor(state: BattleState, random: () => number): Sch
       lastSide = actor.side;
     }
   }
+  const gaugeChanges = orderedGaugeChanges(state, advancedUnits);
   const actor = advancedUnits[normalTurns.shift()!];
   if (!actor) return undefined;
   // TryLock offset 3228 resets the normal actor when locking, before any turn-start callbacks.
   advancedUnits[actor.unitId] = { ...actor, actionGauge: 0, turnPos: 0 };
-  return { state: { ...state, units: advancedUnits, scheduling: { extraTurns, normalTurns, lastSide: actor.side } }, actorId: actor.unitId };
+  return { state: { ...state, units: advancedUnits, scheduling: { extraTurns, normalTurns, lastSide: actor.side } },
+    actorId: actor.unitId, gaugeChanges };
+}
+
+function orderedGaugeChanges(state: BattleState, advancedUnits: BattleState['units']): ScheduledActor['gaugeChanges'] {
+  const changes = Object.values(advancedUnits).flatMap(after => {
+    const before = state.units[after.unitId];
+    if (!before) return [];
+    const beforeGauge = position(before) * 100 / MOTION_SLOT_MAX_LEN;
+    const afterGauge = position(after) * 100 / MOTION_SLOT_MAX_LEN;
+    return afterGauge > beforeGauge + 1e-7 ? [{ unitId: after.unitId, before: beforeGauge, after: afterGauge }] : [];
+  });
+  // Resolve crossing events in the order their units reach the shared action-bar midpoint.
+  return changes.sort((left, right) => {
+    const leftUnit = state.units[left.unitId]!;
+    const rightUnit = state.units[right.unitId]!;
+    const leftCrosses = left.before < 50 && left.after >= 50;
+    const rightCrosses = right.before < 50 && right.after >= 50;
+    const leftTime = leftCrosses ? (60 - position(leftUnit)) / Math.max(1e-8, effectiveStat(leftUnit, 'speed')) : Number.POSITIVE_INFINITY;
+    const rightTime = rightCrosses ? (60 - position(rightUnit)) / Math.max(1e-8, effectiveStat(rightUnit, 'speed')) : Number.POSITIVE_INFINITY;
+    return leftTime - rightTime || left.unitId.localeCompare(right.unitId);
+  });
 }
 
 function position(unit: BattleState['units'][string]): number {

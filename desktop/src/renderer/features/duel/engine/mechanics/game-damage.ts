@@ -55,6 +55,27 @@
 
 export const DEFENSE_CORRECT_FACTOR = 300;
 
+/**
+ * AOE（range skill）打**护盾实体**的伤害倍率。
+ * 依据 `calcRawAttackDmg.txt:2104-2180`（`const.AOE_SKILL_TO_SHIELD_DMG_RATE = 2.5`）：
+ *     if isRangeSkill(skillData['selectRange']) and helpers.isShieldEntity(targetEntity):
+ *         realHurt *= 2.5
+ * 位置在 `(1 + extDmgRate)` 之后、`extCritPower`/`maxHurt`/下限 1.0 之前。
+ */
+export const AOE_SKILL_TO_SHIELD_DMG_RATE = 2.5;
+
+/**
+ * 间接伤害：目标每 1 层「间接伤害层」额外无视的防御值。
+ * 依据 `indirectDamageCalc.txt:656-744`（`const.INDIRECT_REDUCE_VALUE = 10`）：
+ *     total_lv       = targetEntity.BuffMgrComp.getIndirectBuffLv()
+ *     reduce_defense = total_lv * const.INDIRECT_REDUCE_VALUE
+ *     calcDmgParam.ignoreDefenseValue += reduce_defense       # 累加到"无视防御值"，在 calcAttackDmg 之前
+ * `getIndirectBuffLv` 的判据来自 buff 数据字段 `indirectDmgType`（`table_DATA_BUFF.json`：
+ * 7458 条里 0 有 4074 条、1 有 48 条；取 1 的那些正是「回合后造成/受到…」「永久降低基础防御」这类间接伤害 debuff）。
+ * 引擎侧对应 `StatusDefinition.indirectDamageLevel`（每层贡献，写入 `values.indirectDamageLevel`）。
+ */
+export const INDIRECT_REDUCE_VALUE = 10;
+
 export interface GameDefenseReduction {
   /** defanse = max(defanse - v, 0) */
   ignoreDefenseValue?: number;
@@ -116,6 +137,10 @@ export interface GameDamageInput {
   extAddCritPower?: number;
   extCritPower?: number;
   extDmgRate?: number;
+  /** isRangeSkill(skillData['selectRange'])：本技能是否 AOE（range skill）。 */
+  isRangeSkill?: boolean;
+  /** helpers.isShieldEntity(target)：目标是否为"护盾实体"（由内容模块显式标记）。 */
+  isShieldEntity?: boolean;
   /** 管线第 6 步：固定减伤 flat */
   fixedHurtReductionVal?: number;
   /** 直接替换最终伤害（damageReplace） */
@@ -182,13 +207,21 @@ export function calcRawAttackDmg(input: GameDamageInput): GameDamageResult {
   if (input.defenseOverride) defense = input.defenseOverride(defense);
 
   // ---- 重伤（1294-1346）----
-  // ⚠ 极性修正：反汇编里 1296/1308 两个跳转的目标分别落在 1342(critical=True) 与 1348，
-  //   而本项目的反汇编器不区分 POP_JUMP_IF_TRUE / IF_FALSE（统一显示 POP_JUMP_FORWARD），
-  //   所以下面这句「谁被清零」是**按游戏语义**定的：
-  //     · 防御在普通命中里必须参与 K/(K+def)，否则防御属性毫无意义；
-  //     · record_defense 的消费方是 make_serious_injury_overflow_value_defense
-  //       （它做 v *= K/(K + record_defense)），说明被记账的防御是给**重伤溢伤**用的。
-  //   ⇒ 因此：重伤目标 ⇒ 直接伤害按 def=0 计并记账；普通目标 ⇒ 防御照常参与。
+  // 结论：重伤命中按 def=0 计算，并把清零前的防御记进 record_defense。
+  // 依据（两条都不依赖跳转目标 ⇒ 不受本项目反汇编器缺陷影响；
+  //       完整推导与复现命令见 yys-lineup/DISASM-JUMP-TARGETS.md）：
+  //   ① 记账值 = 清零前的防御：1298-1326 的 `if defanse > 0:` 体内先
+  //      STORE_ATTR record_defense = defanse，紧接 STORE_FAST defanse = 0
+  //      （两条相邻且顺序固定，与跳转走向无关）。
+  //   ② 消费方 make_serious_injury_overflow_value_defense 对溢伤做
+  //      overflow_value *= K / (K + record_defense)（BINARY_OP 18 = *=），再依次回放
+  //      record_hurt_reduction_rate / record_indirect_hurt_reduction_rate /
+  //      record_target_hp_change_reduce_rate —— 只有「溢伤进入该函数时没乘过防御削减」
+  //      才成立，否则同一份防御会被算两遍。
+  //   ⇒ 重伤目标：直接伤害按 def=0 计并记账；普通目标：防御照常参与。
+  //   （原注释称本项因反汇编器不区分 POP_JUMP_IF_TRUE/FALSE 而「按游戏语义定」，
+  //     现已由上述两条替代，极性不再是未知项。附注：全库前向跳转目标经标定只有
+  //     87% 落在指令边界，引用跳转结构前仍需复核。）
   let recordDefense = 0;
   if (input.seriousInjury) {
     critical = true;
@@ -228,6 +261,8 @@ export function calcRawAttackDmg(input: GameDamageInput): GameDamageResult {
   // ---- 暴击倍率（2014–2058）----
   if (critical) raw *= input.critDamage + (input.extAddCritPower ?? 0); // 2014–2058; panel is 1 + critPower
   raw *= 1 + (input.extDmgRate ?? 0); // 2060–2084
+  // ---- AOE 打护盾实体（2104–2180）----
+  if (input.isRangeSkill && input.isShieldEntity) raw *= AOE_SKILL_TO_SHIELD_DMG_RATE;
   if (critical) raw *= 1 + (input.extCritPower ?? 0); // 2206–2248
 
   // ---- 替换（damageReplace）+ 上限 + 下限（2308-2322）----
@@ -321,8 +356,19 @@ export function checkDodge(dodge: number, random: () => number): boolean {
 }
 
 /**
- * 护盾吸收（calcShieldAbsorb 的要点）。
- * shieldDmgAddRate = result.shield_dmg_add_rate（群体技能打护盾的额外承伤）
+ * 护盾吸收（`calcShieldAbsorb` 的忠实移植）。
+ *
+ * 游戏侧语义（依据 `yys-lineup/out/disasm/com_utils_formula/calcShieldAbsorb.txt` 的块布局；
+ * `shield_dmg_add_rate` 由 `calcAttackDmg.txt:870-884` 取自 `calcDmgParam.extShieldDmgRate`）：
+ *   extHurt = rate × realHurt
+ *   if extHurt > 0 and extHurt >= shield:  consume = shield ; shieldLeft = 0      # 盾被放大消耗打爆
+ *   else:                                  consume = extHurt ; shieldLeft = shield − extHurt
+ *   if realHurt > shieldLeft: consume += shieldLeft ; damage = realHurt − shieldLeft
+ *   else:                     consume += realHurt   ; damage = 0
+ * ⇒ **放大消耗先吃盾、且不挡伤害；只有剩余容量按 1:1 挡伤**。
+ * 消耗量与旧实现恒等（`min(shield, realHurt + extHurt)`）；差别只在穿透量：
+ * 旧实现让放大部分也去挡伤害，会**高估护盾**。
+ * 例：(realHurt 3000, shield 2000, rate 0.5) → 官方 consume 2000 / damage 2500（旧实现给 1000）。
  */
 export function calcShieldAbsorb(
   realHurt: number,
@@ -332,7 +378,8 @@ export function calcShieldAbsorb(
 ): { damage: number; consumeShield: number } {
   if (absorbAllDamage) return { damage: 0, consumeShield: realHurt };
   const extHurt = realHurt * shieldDmgAddRate;
+  const shieldLeft = extHurt > 0 && extHurt >= shieldHp ? 0 : Math.max(0, shieldHp - extHurt);
   const consume = Math.min(shieldHp, realHurt + extHurt);
-  const damage = realHurt > shieldHp ? realHurt - shieldHp : 0;
+  const damage = Math.max(0, realHurt - shieldLeft);
   return { damage, consumeShield: consume };
 }

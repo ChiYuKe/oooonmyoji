@@ -3,6 +3,8 @@ import { calcRawAttackDmg, calcShieldAbsorb, type GameDamageInput } from './game
 
 export interface DamageResolution {
   amount: number;
+  /** Damage that penetrates shields before HP and extra-HP caps are applied. */
+  damage: number;
   shieldAbsorbed: number;
   hpLost: number;
   hpAfter: number;
@@ -55,7 +57,7 @@ export function resolveDamage(target: Pick<UnitState, 'hp'>, amount: number, shi
     : calcShieldAbsorb(normalized, Math.max(0, shield), shieldDmgAddRate, absorbAllDamage);
   const shieldAbsorbed = Math.min(Math.max(0, shield), absorption.consumeShield);
   const hpLost = Math.min(Math.max(0, target.hp), absorption.damage);
-  return { amount: normalized, shieldAbsorbed, hpLost, hpAfter: Math.max(0, target.hp - hpLost) };
+  return { amount: normalized, damage: absorption.damage, shieldAbsorbed, hpLost, hpAfter: Math.max(0, target.hp - hpLost) };
 }
 
 function finite(value: number, fallback: number): number {

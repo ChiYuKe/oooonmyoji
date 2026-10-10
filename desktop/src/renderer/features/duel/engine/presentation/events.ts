@@ -31,6 +31,7 @@ export function presentBattleEvent(event: BattleEvent, label: (id: string) => st
     case 'resource-changed': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}：${event.before}→${event.after}。`;
     case 'resource-overflow': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}溢出${event.amount}。`;
     case 'resource-meter-set': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}行动条设为${event.progressAfter}格。`;
+    case 'resource-cap-changed': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}上限：${event.before}→${event.after}。`;
     case 'resource-meter-advanced': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}行动条：${event.progressBefore}→${event.progressAfter}格${event.supplied > 0 ? `，补充${event.supplied}` : ''}。`;
     case 'action-gauge-changed': return `${label(event.unitId)}行动条：${Math.round(event.before)}→${Math.round(event.after)}。`;
     case 'status-added': return `${label(event.targetId)}获得${statusLabel(event.instance.statusId)}。`;
@@ -60,6 +61,7 @@ export function presentBattleEvents(events: readonly BattleEvent[], label?: (id:
   const lines: string[] = [];
   for (let index = 0; index < visible.length; index++) {
     const event = visible[index]!;
+    if ((event.type === 'healing' || event.type === 'health-restored') && event.hpGained <= 0) continue;
     if (event.type === 'resource-changed' && event.phase === 'resource-payment' && paidActionEvents.has(event.eventId)) continue;
     if (event.type !== 'action-declared') {
       lines.push(presentBattleEvent(event, label));
@@ -81,6 +83,13 @@ function sideLabel(side: SideId): string {
 
 const knownStatusLabels: Record<string, string> = {
   'core.shield': '护盾',
+  'core.passive-suppression': '被动封印',
+  'core.soul-suppression': '御魂封印',
+  'status.hero.552.karma': '业障',
+  'status.hero.552.light-summoned': '明识灯',
+  'status.hero.552.light-defense': '明识灯·防御提升',
+  'status.hero.552.soul-bind': '拘魂',
+  'status.hero.304.silence': '沉默',
   'status.hero.238.blessing-seed': '祝福种子',
   'status.hero.238.photosynthesis': '光合作用',
   'status.hero.585.blood-flower': '血花',

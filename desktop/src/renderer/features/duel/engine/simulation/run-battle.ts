@@ -9,7 +9,7 @@ import { applyEffectCommands, type CriticalDamageModifier, type DamageIntercepto
 import { settleEvents } from '../core/settlement';
 import { createSeededRandom, deriveSampleSeed } from '../core/random';
 import { TriggerBudget, type TriggerBudgetDiagnostic } from '../core/trigger-budget';
-import { isUnitFightingSpirit, type BattleEvent, type BattlePhase, type BattleState, type SourceRef, type UnitState } from '../core/types';
+import { isUnitFightingSpirit, type BattleEvent, type BattlePhase, type BattleState, type DamageKind, type SourceRef, type UnitState } from '../core/types';
 import type { BattleRunOptions, BattleRunResult } from '../core/result';
 import { EventDispatcher } from '../core/event-dispatcher';
 import { applyCriticalDamageTakenModifiers, effectiveDamageMultiplier, effectiveDamageTakenMultiplier, effectiveDefenseIgnore, effectiveHealingTakenMultiplier, effectiveStats } from '../mechanics/stats';
@@ -223,6 +223,14 @@ export function runBattle(initialState: BattleState, registry: ContentRegistry, 
       break;
     }
     state = scheduled.state;
+    for (const change of scheduled.gaugeChanges ?? []) {
+      const motionActionId = state.counters.action + 1;
+      settle({ eventId: `turn-${motionActionId}-motion-${change.unitId}`, phase: 'effect-resolution',
+        source: { kind: 'system', id: 'turn-motion' }, actionId: motionActionId, type: 'action-gauge-changed',
+        unitId: change.unitId, before: change.before, after: change.after, requestedAmount: change.after - change.before });
+      if (triggerBudget) break;
+    }
+    if (triggerBudget) break;
     const actor = state.units[scheduled.actorId];
     if (!actor) continue;
     const extraTurnQueue = pendingExtraTurns.get(actor.unitId);
@@ -436,7 +444,7 @@ function modifyContentDamage(
   attacker: UnitState | undefined,
   target: UnitState,
   amount: number,
-  kind: 'normal' | 'true',
+  kind: DamageKind,
   state: BattleState,
   source: SourceRef | undefined,
   random: () => number,

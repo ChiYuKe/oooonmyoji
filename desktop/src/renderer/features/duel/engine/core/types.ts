@@ -4,7 +4,10 @@ export type SkillId = string;
 export type SoulId = string;
 export type StatusId = string;
 export type ActionKind = 'basic' | 'skill' | 'passive';
+
+import type { CureAttributes } from '../mechanics/game-heal';
 export type ActionScheduling = 'counter' | 'assist' | 'extra-action' | 'extra-turn';
+export type DamageKind = 'normal' | 'true' | 'indirect';
 export type StatusCategory = 'buff' | 'debuff' | 'control' | 'shield' | 'mark' | 'other';
 export type UnitKind = 'shikigami' | 'summon' | 'monster' | 'onmyoji';
 export type BattlePhase =
@@ -80,6 +83,13 @@ export interface UnitState {
   readonly unitKind?: UnitKind;
   /** Entity that created a summon; kept as an ID reference for replay and ownership rules. */
   readonly summonedByUnitId?: UnitId;
+  /**
+   * `helpers.isShieldEntity` 口径：护盾类单位——AOE（range skill）打它时伤害 ×
+   * `AOE_SKILL_TO_SHIELD_DMG_RATE (2.5)`（`calcRawAttackDmg.txt:2104-2180`）。
+   * 由内容模块在创建这类单位（结界/护盾实体，如千姬的海原贝戟）时显式标记。
+   * ⚠️ 客户端 `helpers.isShieldEntity` 的判据尚未反汇编出来，此处按语义近似。
+   */
+  readonly shieldEntity?: boolean;
   readonly skillLevel: number;
   /** Optional per-skill ranks from lineup exports; missing IDs use skillLevel. */
   readonly skillLevels?: Readonly<Record<SkillId, number>>;
@@ -92,6 +102,12 @@ export interface UnitState {
   /** Native motion-slot position (0–120); actionGauge remains the percentage API for content. */
   readonly turnPos?: number;
   readonly soulId?: SoulId;
+  /**
+   * 治疗相关属性（对应客户端 AttrComp 的 cureStrenthRate / equipCureStrenthRate /
+   * curedStrenthRate / PvpCuredStrenthRate 与 hero_no_crit）；公式见
+   * `mechanics/game-heal.ts` 的 `calcCure`（_calcCure 逐偏移移植）。
+   */
+  readonly cureAttributes?: Readonly<CureAttributes>;
   readonly statuses: readonly StatusInstance[];
   readonly resources: Readonly<Record<string, number>>;
   readonly damageAttributes?: Readonly<DamageAttributes>;
@@ -176,12 +192,13 @@ export type BattleEvent =
   | (EventEnvelope & { type: 'resource-overflow'; side: SideId; resourceId: string; amount: number; before: number; after: number; attempted: number })
   | (EventEnvelope & { type: 'resource-meter-advanced'; side: SideId; resourceId: string; progressBefore: number; progressAfter: number; supplied: number })
   | (EventEnvelope & { type: 'resource-meter-set'; side: SideId; resourceId: string; progressBefore: number; progressAfter: number })
+  | (EventEnvelope & { type: 'resource-cap-changed'; side: SideId; resourceId: string; before: number; after: number })
   | (EventEnvelope & { type: 'action-gauge-changed'; unitId: UnitId; before: number; after: number;
       requestedAmount?: number; blockedByImmunity?: boolean })
-  | (EventEnvelope & { type: 'damage'; targetId: UnitId; damageKind: 'normal' | 'true'; actionKind?: ActionKind; amount: number; hpBefore?: number; hpAfter?: number; hpLost: number; mitigated: number; overkillDamage?: number; criticalAbsorbed?: number; isCritical: boolean; suppressSoulTriggers?: boolean; suppressTargetSoulTriggers?: boolean; suppressTargetPassiveTriggers?: boolean; suppressSourcePassiveTriggers?: boolean; fatalProtectionStatusId?: StatusId;
+  | (EventEnvelope & { type: 'damage'; targetId: UnitId; damageKind: DamageKind; actionKind?: ActionKind; amount: number; hpBefore?: number; hpAfter?: number; hpLost: number; mitigated: number; overkillDamage?: number; criticalAbsorbed?: number; isCritical: boolean; suppressSoulTriggers?: boolean; suppressTargetSoulTriggers?: boolean; suppressTargetPassiveTriggers?: boolean; suppressSourcePassiveTriggers?: boolean; fatalProtectionStatusId?: StatusId;
       hurtBeforeAbsorb?: number; shieldConsumed?: number; extHpConsumed?: number; reboundDamage?: number; leechDamage?: number;
       seriousInjury?: boolean; recordDefense?: number; recordHurtReductionRate?: number; recordIndirectHurtReductionRate?: number })
-  | (EventEnvelope & { type: 'life-lost'; targetId: UnitId; amount: number; hpLost: number; lifeLossKind?: 'direct' | 'indirect' })
+  | (EventEnvelope & { type: 'life-lost'; targetId: UnitId; amount: number; hpLost: number; lifeLossKind?: 'direct' | 'indirect'; suppressTargetPassiveTriggers?: boolean })
   | (EventEnvelope & { type: 'unit-defeated'; unitId: UnitId; defeatedBy?: SourceRef })
   | (EventEnvelope & { type: 'unit-revived'; unitId: UnitId; hp: number })
   | (EventEnvelope & { type: 'revive-blocked'; unitId: UnitId; protectionStatusId: StatusId })
@@ -216,7 +233,7 @@ export interface ScheduledHit {
   targetId: UnitId;
   amount: number;
   criticalBaseAmount?: number;
-  damageKind?: 'normal' | 'true';
+  damageKind?: DamageKind;
   isCritical?: boolean;
   suppressTargetSoulTriggers?: boolean;
   suppressTargetPassiveTriggers?: boolean;
@@ -225,9 +242,9 @@ export interface ScheduledHit {
 }
 
 export type EffectCommand =
-  | { type: 'deal-damage'; source: SourceRef; targetId: UnitId; amount: number; criticalBaseAmount?: number; damageKind?: 'normal' | 'true'; actionKind?: ActionKind; isCritical?: boolean; precalculated?: boolean; countsAsHit?: boolean; suppressSoulTriggers?: boolean; suppressTargetSoulTriggers?: boolean; suppressTargetPassiveTriggers?: boolean; suppressSourcePassiveTriggers?: boolean; cannotBeShared?: boolean; parentEventId?: string;
+  | { type: 'deal-damage'; source: SourceRef; targetId: UnitId; amount: number; criticalBaseAmount?: number; damageKind?: DamageKind; actionKind?: ActionKind; isCritical?: boolean; precalculated?: boolean; countsAsHit?: boolean; suppressSoulTriggers?: boolean; suppressTargetSoulTriggers?: boolean; suppressTargetPassiveTriggers?: boolean; suppressSourcePassiveTriggers?: boolean; cannotBeShared?: boolean; parentEventId?: string;
       ignoreShield?: boolean; shieldDmgAddRate?: number; leechRate?: number; suppressRebound?: boolean; damageOptions?: import('../mechanics/damage').DamageOptions }
-  | { type: 'lose-life'; source: SourceRef; targetId: UnitId; amount: number; lifeLossKind?: 'direct' | 'indirect'; parentEventId?: string }
+  | { type: 'lose-life'; source: SourceRef; targetId: UnitId; amount: number; lifeLossKind?: 'direct' | 'indirect'; suppressTargetPassiveTriggers?: boolean; parentEventId?: string }
   | { type: 'heal'; source: SourceRef; targetId: UnitId; amount: number; parentEventId?: string }
   /** Restores HP directly without healing modifiers or healing conversion. */
   | { type: 'restore-health'; source: SourceRef; targetId: UnitId; amount: number; parentEventId?: string }
@@ -247,6 +264,7 @@ export type EffectCommand =
       checkImmunity?: boolean }
   | { type: 'advance-resource-meter'; source: SourceRef; side: SideId; resourceId: string; steps: number; parentEventId?: string }
   | { type: 'set-resource-meter-progress'; source: SourceRef; side: SideId; resourceId: string; progress: number; parentEventId?: string }
+  | { type: 'change-resource-meter-cap'; source: SourceRef; side: SideId; resourceId: string; amount: number; parentEventId?: string }
   | { type: 'add-status'; source: SourceRef; targetId: UnitId; instance: StatusInstance; parentEventId?: string }
   | { type: 'change-status-stacks'; source: SourceRef; targetId: UnitId; instanceId: string; amount: number; parentEventId?: string }
   | { type: 'change-resource'; source: SourceRef; side: SideId; resourceId: string; amount: number; parentEventId?: string }

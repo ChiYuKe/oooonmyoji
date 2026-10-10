@@ -1,8 +1,9 @@
-import { isUnitBanished, type ActionKind, type BattleEvent, type BattlePhase, type BattleState, type EffectCommand, type EventEnvelope, type StatusCategory, type StatusInstance, type UnitState } from './types';
+import { isUnitBanished, type ActionKind, type BattleEvent, type BattlePhase, type BattleState, type DamageKind, type EffectCommand, type EventEnvelope, type StatusCategory, type StatusInstance, type UnitState } from './types';
 import type { DamageInterception, StatusDefinition } from './definitions';
 import { resolveDamage } from '../mechanics/damage';
 import { resolveHealing } from '../mechanics/healing';
-import { effectiveIndirectDamageTakenMultiplier } from '../mechanics/stats';
+import { calcCure } from '../mechanics/game-heal';
+import { effectiveIndirectDamageTakenMultiplier, effectiveStats } from '../mechanics/stats';
 import { applyHurtReduction, calcExtHpAbsorb } from '../mechanics/game-damage';
 import type { DamageCalculationHooks } from './definitions';
 import { passivesEnabled } from './passive-eligibility';
@@ -13,10 +14,10 @@ export interface EffectResolution {
   events: readonly BattleEvent[];
 }
 
-export type DamageModifier = ((attacker: UnitState | undefined, target: UnitState, amount: number, kind: 'normal' | 'true',
+export type DamageModifier = ((attacker: UnitState | undefined, target: UnitState, amount: number, kind: DamageKind,
   state: BattleState, source?: EffectCommand['source'], actionKind?: ActionKind) => number) & DamageCalculationHooks;
 export type DamageInterceptor = (state: BattleState, attacker: UnitState | undefined, target: UnitState, amount: number,
-  kind: 'normal' | 'true', attackId?: number, hitIndex?: number, source?: EffectCommand['source'],
+  kind: DamageKind, attackId?: number, hitIndex?: number, source?: EffectCommand['source'],
   cannotBeShared?: boolean, isCritical?: boolean, actionKind?: ActionKind) => DamageInterception | undefined;
 export type CriticalDamageModifier = (attacker: UnitState | undefined, target: UnitState, amount: number,
   criticalBaseAmount: number, state: BattleState) => number;
@@ -32,6 +33,8 @@ export function applyEffectCommands(
   interceptDamage?: DamageInterceptor,
   modifyHealing?: HealingModifier,
   modifyCriticalDamage?: CriticalDamageModifier,
+  /** 治疗暴击等需要随机数的规则用它；不传则按"不暴击"处理（见 _calcCure 302-376）。 */
+  random?: () => number,
 ): EffectResolution {
   let state = initialState;
   const events: BattleEvent[] = [];
@@ -218,8 +221,7 @@ export function applyEffectCommands(
       const result = resolveDamage(currentTarget, amount, currentTarget.shield + statusShield,
         command.shieldDmgAddRate ?? command.damageOptions?.shieldDmgAddRate, ignoreShield, attrs?.absorbAllDamage);
       // Immunity, rebound, leech, then extra HP: calcAttackDmg 1052–1348.
-      const unboundedDamage = attrs?.damageImmune || (!ignoreShield && attrs?.absorbAllDamage) ? 0
-        : Math.max(0, amount - Math.min(currentTarget.shield + statusShield, ignoreShield ? 0 : amount));
+      const unboundedDamage = attrs?.damageImmune || (!ignoreShield && attrs?.absorbAllDamage) ? 0 : result.damage;
       const reboundDamage = !command.suppressRebound && !activeAttacker?.damageAttributes?.damageImmune
         && (attrs?.hurtReboundRate ?? 0) > 0 && hurtBeforeAbsorb > 0
         ? Math.max(1, (attrs?.hurtReboundRate ?? 0) * hurtBeforeAbsorb) : 0;
@@ -312,7 +314,8 @@ export function applyEffectCommands(
       const hpLost = Math.min(Math.max(0, target.hp), amount);
       updateUnit(target.unitId, current => ({ ...current, hp: current.hp - hpLost }));
       const lifeLostEvent: BattleEvent = { ...envelope(command.source, command.parentEventId), phase: 'effect-resolution', type: 'life-lost',
-        targetId: target.unitId, amount, hpLost, ...(command.lifeLossKind ? { lifeLossKind: command.lifeLossKind } : {}) };
+        targetId: target.unitId, amount, hpLost, ...(command.lifeLossKind ? { lifeLossKind: command.lifeLossKind } : {}),
+        ...(command.suppressTargetPassiveTriggers ? { suppressTargetPassiveTriggers: true } : {}) };
       events.push(lifeLostEvent);
       if (target.hp > 0 && target.hp - hpLost <= 0) events.push({ ...envelope(command.source, lifeLostEvent.eventId),
         phase: 'unit-defeated', type: 'unit-defeated', unitId: target.unitId, defeatedBy: command.source });
@@ -353,7 +356,8 @@ export function applyEffectCommands(
       const target = state.units[command.targetId];
       if (!target || target.hp <= 0 || isUnitBanished(target)) continue;
       const scopeId = command.scopeId ?? `action:${state.counters.action || eventPrefix}`;
-      const debuffImmunity = target.statuses.find(status => resolveStatus?.(status.statusId)?.statusImmunity === 'debuffs');
+      const debuffImmunity = target.statuses.find(status => resolveStatus?.(status.statusId)?.preventsStatusApplications
+        || resolveStatus?.(status.statusId)?.statusImmunity === 'debuffs');
       if (debuffImmunity) {
         events.push({ ...envelope(command.source, command.parentEventId), phase: 'control-application', type: 'control-blocked',
           targetId: target.unitId, controlStatusId: command.instance.statusId, protectionStatusId: debuffImmunity.statusId,
@@ -526,7 +530,20 @@ export function applyEffectCommands(
         continue;
       }
       const healer = command.source.unitId ? state.units[command.source.unitId] : undefined;
-      const modifiedAmount = modifyHealing?.(healer, target, command.amount) ?? command.amount;
+      // 官方治疗数值（_calcCure，见 mechanics/game-heal.ts 的逐偏移注释）：
+      // 治疗强度/受治疗强度相加后乘算、御魂治疗强度按 cureValue 线性加算、
+      // PVP 受治疗强度乘算、阵营 cureRate 取**目标**阵营、下限 1、治疗可暴击（不吃抗暴）。
+      const cured = calcCure({ cureValue: command.amount,
+        cureStrengthRate: healer?.cureAttributes?.cureStrengthRate,
+        equipCureStrengthRate: healer?.cureAttributes?.equipCureStrengthRate,
+        curedStrengthRate: target.cureAttributes?.curedStrengthRate,
+        pvpCuredStrengthRate: target.cureAttributes?.pvpCuredStrengthRate,
+        campCureRate: state.resources[target.side]?.campCureRate,
+        critRate: healer ? effectiveStats(healer).crit : 0,
+        critDamage: healer ? effectiveStats(healer).critDamage : 1,
+        heroNoCrit: healer?.cureAttributes?.heroNoCrit === true,
+        random: random ?? (() => 1) });
+      const modifiedAmount = modifyHealing?.(healer, target, cured.cureValue) ?? cured.cureValue;
       let amount = Math.max(0, Number.isFinite(modifiedAmount) ? modifiedAmount : 0);
       let healingAbsorbed = 0;
       const depletedAbsorptions = new Set<string>();
@@ -685,15 +702,31 @@ export function applyEffectCommands(
           blockReason: 'protection' });
         continue;
       }
-      const debuffImmunity = target.statuses.find(status => resolveStatus?.(status.statusId)?.statusImmunity === 'debuffs');
+      const debuffImmunity = target.statuses.find(status => resolveStatus?.(status.statusId)?.preventsStatusApplications
+        || resolveStatus?.(status.statusId)?.statusImmunity === 'debuffs');
       if (debuffImmunity && (category === 'debuff' || category === 'control')) {
         events.push({ ...envelope(command.source, command.parentEventId), phase: 'effect-resolution', type: 'status-application-blocked',
           targetId: target.unitId, attemptedStatusId: command.instance.statusId, protectionStatusId: debuffImmunity.statusId,
           blockReason: 'immunity' });
         continue;
       }
-      const instance = { ...command.instance, appliedByEventId: command.instance.appliedByEventId ?? command.parentEventId };
-      const statusDefinition = resolveStatus?.(instance.statusId);
+      const allStatusBlocker = target.statuses.find(status => resolveStatus?.(status.statusId)?.preventsStatusApplications);
+      if (allStatusBlocker) {
+        events.push({ ...envelope(command.source, command.parentEventId), phase: 'effect-resolution', type: 'status-application-blocked',
+          targetId: target.unitId, attemptedStatusId: command.instance.statusId, protectionStatusId: allStatusBlocker.statusId,
+          blockReason: 'immunity' });
+        continue;
+      }
+      const baseInstance = { ...command.instance, appliedByEventId: command.instance.appliedByEventId ?? command.parentEventId };
+      const statusDefinition = resolveStatus?.(baseInstance.statusId);
+      // 间接伤害层数：定义里声明 `indirectDamageLevel` 时抄进实例 values，
+      // 供 mechanics/indirect-damage.ts 的 indirectBuffLv 求和（= 客户端 getIndirectBuffLv()，
+      // 判据是 buff 的 indirectDmgType；内容未显式给值时才用定义里的默认值）。
+      const declaredIndirectLevel = statusDefinition?.indirectDamageLevel;
+      const instance = typeof declaredIndirectLevel === 'number' && declaredIndirectLevel !== 0
+        && baseInstance.values?.indirectDamageLevel === undefined
+        ? { ...baseInstance, values: { ...baseInstance.values, indirectDamageLevel: declaredIndirectLevel } }
+        : baseInstance;
       const policy = statusDefinition?.refreshPolicy ?? 'replace';
       const matching = target.statuses.filter(current => current.statusId === instance.statusId
         && (policy === 'add-stack' && statusDefinition?.stackScope === 'source-unit'
@@ -786,6 +819,24 @@ export function applyEffectCommands(
         [command.resourceId]: { ...meter, progress } } } };
       events.push({ ...envelope(command.source, command.parentEventId), phase, type: 'resource-meter-set', side: command.side,
         resourceId: command.resourceId, progressBefore: meter.progress, progressAfter: progress });
+      continue;
+    }
+    if (command.type === 'change-resource-meter-cap') {
+      const meter = state.resourceMeters[command.side]?.[command.resourceId];
+      if (!meter || !Number.isFinite(command.amount) || command.amount === 0) continue;
+      const cap = Math.max(0, meter.resourceCap + command.amount);
+      const beforeResource = state.resources[command.side]?.[command.resourceId] ?? 0;
+      const afterResource = Math.min(beforeResource, cap);
+      state = { ...state,
+        resourceMeters: { ...state.resourceMeters, [command.side]: { ...state.resourceMeters[command.side],
+          [command.resourceId]: { ...meter, resourceCap: cap } } },
+        resources: afterResource === beforeResource ? state.resources : { ...state.resources,
+          [command.side]: { ...state.resources[command.side], [command.resourceId]: afterResource } },
+      };
+      events.push({ ...envelope(command.source, command.parentEventId), phase, type: 'resource-cap-changed',
+        side: command.side, resourceId: command.resourceId, before: meter.resourceCap, after: cap });
+      if (beforeResource !== afterResource) events.push({ ...envelope(command.source, command.parentEventId), phase,
+        type: 'resource-changed', side: command.side, resourceId: command.resourceId, before: beforeResource, after: afterResource });
       continue;
     }
     if (command.type === 'advance-resource-meter') {

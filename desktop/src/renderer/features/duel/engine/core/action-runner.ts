@@ -87,8 +87,12 @@ export function executeAction(
   }
   const effectiveActionKind = resolvedIntent.kind ?? skill.actionKind ?? 'skill';
   if (skill.actionKind !== effectiveActionKind) skill = { ...skill, actionKind: effectiveActionKind };
-  const declaredAdjustment = resolveActionAdjustment(initialState, actor, skill, registry);
-  if (!runtime.ignoreResourceCost && !resolvePayment(initialState, actor, skill, declaredAdjustment, registry, runtime.scheduling)) {
+  const declaredAdjustment = resolveActionAdjustment(initialState, actor, skill, registry, runtime.scheduling);
+  // ① 施法前的门禁：与客户端 forceCastSkill 一致——先用「重算后的价格」判火够不够。
+  //    （重算 = calc_guihuo_consume：每个抵扣提供者按当前状态重新给价，不累计。）
+  const gatePlan = runtime.ignoreResourceCost ? undefined
+    : resolvePayment(initialState, actor, skill, declaredAdjustment, registry, runtime.scheduling);
+  if (!runtime.ignoreResourceCost && !gatePlan) {
     return { accepted: false, failure: 'insufficient-resource', state: initialState, events: [] };
   }
 
@@ -156,26 +160,21 @@ export function executeAction(
   if (!validTargets(state, resolvedIntent, targetRelation ?? resolvedIntent.targetRelation, skill.allowDefeatedTargets === true))
     return { accepted: false, failure: 'invalid-target', state, events };
 
-  const actionAdjustment = resolveActionAdjustment(state, validatedActor, skill, registry);
+  const actionAdjustment = resolveActionAdjustment(state, validatedActor, skill, registry, runtime.scheduling);
   if (actionAdjustment?.label && validatedActor.soulId) {
     appendAndSettle({ eventId: `${actionEvent.eventId}-adjustment-${validatedActor.soulId}`, phase: 'resource-payment',
       source: { kind: 'soul', id: validatedActor.soulId, unitId: validatedActor.unitId }, parentEventId: actionEvent.eventId,
       actionId, type: 'content-triggered', contentType: 'soul', contentId: validatedActor.soulId, label: actionAdjustment.label });
     if (exceeded) return { accepted: true, state, events, triggerBudget: exceeded };
   }
-  const paymentPlan = runtime.ignoreResourceCost ? { resourceAmount: 0, meterAmount: 0 }
+  // 按客户端 forceCastSkill 的顺序：抵扣在施法前重算（calc_guihuo_consume），
+  // 但鬼火/供火条本身在 castSkill 之后才扣（getConsumeValue → guiHuo -= consumeVal）。
+  // 因此本段只结清"抵扣的消耗部分"（层数/愿力等），火与条留到施法后（见 ③ 施法后扣火）。
+  const paymentPlan = runtime.ignoreResourceCost ? { resourceAmount: 0, meterAmount: 0, statusSubstitutions: [] }
     : resolvePayment(state, validatedActor, skill, actionAdjustment, registry, runtime.scheduling);
   if (!paymentPlan) return { accepted: false, failure: 'insufficient-resource', state, events };
-  if (paymentPlan.resourceAmount > 0 || paymentPlan.meterAmount > 0 || paymentPlan.statusSubstitutions?.length) {
+  {
     const paymentCommands: EffectCommand[] = [];
-    if (paymentPlan.resourceAmount > 0 && paymentPlan.resourceId) paymentCommands.push({ type: 'change-resource', source,
-      side: validatedActor.side, resourceId: paymentPlan.resourceId, amount: -paymentPlan.resourceAmount, parentEventId: actionEvent.eventId });
-    if (paymentPlan.meterAmount > 0 && paymentPlan.meterResourceId) {
-      const meter = state.resourceMeters[validatedActor.side]?.[paymentPlan.meterResourceId];
-      if (!meter) return { accepted: false, failure: 'insufficient-resource', state, events };
-      paymentCommands.push({ type: 'set-resource-meter-progress', source, side: validatedActor.side,
-        resourceId: paymentPlan.meterResourceId, progress: meter.progress - paymentPlan.meterAmount, parentEventId: actionEvent.eventId });
-    }
     for (const substitution of paymentPlan.statusSubstitutions ?? []) {
       const owner = state.units[substitution.sourceUnitId];
       const status = owner?.statuses.find(item => item.instanceId === substitution.instanceId);
@@ -194,12 +193,19 @@ export function executeAction(
             instance: { ...linkedStatus, stacks: linkedStatus.stacks - substitution.stacks }, parentEventId: actionEvent.eventId });
         }
       }
+      if (substitution.recordStatusId) {
+        const counter = owner.statuses.find(item => item.statusId === substitution.recordStatusId);
+        if (counter) paymentCommands.push({ type: 'change-status-stacks', source, targetId: owner.unitId,
+          instanceId: counter.instanceId, amount: substitution.stacks, parentEventId: actionEvent.eventId });
+      }
     }
-    const payment = applyEffectCommands(state, paymentCommands, 'resource-payment', `${actionPrefix}-cost`, runtime.resolveStatus,
-      runtime.modifyDamage, runtime.interceptDamage, runtime.modifyHealing, runtime.modifyCriticalDamage);
-    state = payment.state;
-    for (const event of payment.events) appendAndSettle(event);
-    if (exceeded) return { accepted: true, state, events, triggerBudget: exceeded };
+    if (paymentCommands.length) {
+      const payment = applyEffectCommands(state, paymentCommands, 'resource-payment', `${actionPrefix}-cost`, runtime.resolveStatus,
+        runtime.modifyDamage, runtime.interceptDamage, runtime.modifyHealing, runtime.modifyCriticalDamage);
+      state = payment.state;
+      for (const event of payment.events) appendAndSettle(event);
+      if (exceeded) return { accepted: true, state, events, triggerBudget: exceeded };
+    }
   }
 
   const actionSkillLevel = skillRank(validatedActor, skill.id);
@@ -217,7 +223,7 @@ export function executeAction(
         return definition?.preventsActionGaugeChange
           || (amount < 0 ? definition?.preventsActionGaugeDecrease : definition?.preventsActionGaugeIncrease);
       });
-    });
+    }, resolvedIntent.shape);
   const fallbackParameters = skill.levels[Math.max(0, Math.min(actionSkillLevel - 1, skill.levels.length - 1))] ?? skill.levels.at(-1) ?? {};
   const addDmg = skillNumber(row, 'addDmg');
   const clientRatio = skill.useClientDamageData !== false && 'ratio' in fallbackParameters && (addDmg ?? 0) > 0 ? addDmg : undefined;
@@ -260,7 +266,8 @@ export function executeAction(
   let resolvedIndex = 0;
   for (const command of resolvedCommands) {
     const resolution = applyEffectCommands(state, [command], 'effect-resolution', `${actionPrefix}-effect-${++resolvedIndex}`,
-      runtime.resolveStatus, runtime.modifyDamage, runtime.interceptDamage, runtime.modifyHealing, runtime.modifyCriticalDamage);
+      runtime.resolveStatus, runtime.modifyDamage, runtime.interceptDamage, runtime.modifyHealing, runtime.modifyCriticalDamage,
+      random);
     state = resolution.state;
     for (const event of resolution.events) appendAndSettle(event);
     resolveReactions();
@@ -282,6 +289,27 @@ export function executeAction(
       ...(hitEvents.some(event => event.suppressTargetPassiveTriggers) ? { suppressTargetPassiveTriggers: true } : {}),
       targetHealthChanges });
     state = { ...state, activeAttackTargetIds: undefined, activeAttackShape: undefined };
+  }
+  // ③ 施法后扣火（客户端顺序：castSkill → getConsumeValue() → guiHuo -= consumeVal
+  //    → triggerUniversalEvent(Skill_Cast_Consume_Guihuo)）。价格在施法前已按
+  //    calc_guihuo_consume 重算并定下（paymentPlan），这里只执行"扣"这个动作，
+  //    因此技能自身逻辑读到的是**付费前**的鬼火——与客户端一致。
+  //    扣火事件是 phase='resource-payment' 的 resource-changed，内容模块可挂它。
+  if (!runtime.ignoreResourceCost && (paymentPlan.resourceAmount > 0 || paymentPlan.meterAmount > 0)) {
+    const consumeCommands: EffectCommand[] = [];
+    if (paymentPlan.resourceAmount > 0 && paymentPlan.resourceId) consumeCommands.push({ type: 'change-resource', source,
+      side: validatedActor.side, resourceId: paymentPlan.resourceId, amount: -paymentPlan.resourceAmount, parentEventId: actionEvent.eventId });
+    if (paymentPlan.meterAmount > 0 && paymentPlan.meterResourceId) {
+      const meter = state.resourceMeters[validatedActor.side]?.[paymentPlan.meterResourceId];
+      if (meter) consumeCommands.push({ type: 'set-resource-meter-progress', source, side: validatedActor.side,
+        resourceId: paymentPlan.meterResourceId, progress: meter.progress - paymentPlan.meterAmount, parentEventId: actionEvent.eventId });
+    }
+    if (consumeCommands.length) {
+      const consume = applyEffectCommands(state, consumeCommands, 'resource-payment', `${actionPrefix}-consume`, runtime.resolveStatus,
+        runtime.modifyDamage, runtime.interceptDamage, runtime.modifyHealing, runtime.modifyCriticalDamage);
+      state = consume.state;
+      for (const event of consume.events) appendAndSettle(event);
+    }
   }
   resolveReactions();
   if (!exceeded) appendAndSettle({ eventId: `${actionPrefix}-end`, phase: 'action-end', source,
@@ -309,7 +337,8 @@ interface ResolvedPayment {
   resourceAmount: number;
   meterResourceId?: string;
   meterAmount: number;
-  statusSubstitutions?: { statusId: string; instanceId: string; sourceUnitId: string; stacks: number; linkedStatusId?: string }[];
+  statusSubstitutions?: { statusId: string; instanceId: string; sourceUnitId: string; stacks: number;
+    linkedStatusId?: string; recordStatusId?: string }[];
 }
 
 function resolvePayment(state: BattleState, actor: NonNullable<BattleState['units'][string]>, skill: SkillDefinition,
@@ -342,7 +371,8 @@ function resolvePayment(state: BattleState, actor: NonNullable<BattleState['unit
     const stacks = Math.min(wanted, status.stacks);
     if (stacks <= 0) continue;
     statusSubstitutions.push({ statusId: status.statusId, instanceId: status.instanceId, sourceUnitId: owner!.unitId, stacks,
-      ...(substitution.linkedStatusId ? { linkedStatusId: substitution.linkedStatusId } : {}) });
+      ...(substitution.linkedStatusId ? { linkedStatusId: substitution.linkedStatusId } : {}),
+      ...(substitution.recordStatusId ? { recordStatusId: substitution.recordStatusId } : {}) });
     cost = { ...cost, amount: cost.amount - stacks };
   }
   const substitutions = statusSubstitutions.length ? { statusSubstitutions } : {};
@@ -362,12 +392,13 @@ function resolvePayment(state: BattleState, actor: NonNullable<BattleState['unit
 }
 
 function resolveActionAdjustment(state: BattleState, actor: NonNullable<BattleState['units'][string]>, skill: SkillDefinition,
-  registry: ContentRegistry): ActionAdjustment | undefined {
+  registry: ContentRegistry, scheduling?: ActionScheduling): ActionAdjustment | undefined {
   const carriers = [actor, ...state.sides[actor.side].map(unitId => state.units[unitId])
     .filter((unit): unit is NonNullable<typeof unit> => Boolean(unit && unit.unitId !== actor.unitId && unit.hp > 0 && !isUnitBanished(unit)))];
-  const adjustments = carriers.flatMap(carrier => carrier.soulId
-    ? [registry.getSoul(carrier.soulId)?.resolveActionAdjustment?.(state, actor, skill)].filter((value): value is ActionAdjustment => Boolean(value))
-    : []);
+  const adjustments = carriers.flatMap(carrier => [
+    ...(carrier.soulId ? [registry.getSoul(carrier.soulId)?.resolveActionAdjustment?.(state, actor, skill)] : []),
+    registry.getHero(carrier.heroId)?.resolveActionAdjustment?.(state, actor, skill, scheduling),
+  ].filter((value): value is ActionAdjustment => Boolean(value)));
   if (!adjustments.length) return undefined;
   const additionalCosts = adjustments.flatMap(adjustment => adjustment.additionalResourceCost ? [adjustment.additionalResourceCost] : []);
   const additionalResourceCost = additionalCosts.length && additionalCosts.every(cost => cost.resourceId === additionalCosts[0]!.resourceId)

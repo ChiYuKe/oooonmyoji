@@ -38,6 +38,8 @@ export function settleEvents(
       if ('suppressTargetPassiveTriggers' in event && event.suppressTargetPassiveTriggers && handler.id.startsWith('hero:')) {
         const targetHeroIds = event.type === 'damage'
           ? [state.units[event.targetId]?.heroId]
+          : event.type === 'life-lost'
+            ? [state.units[event.targetId]?.heroId]
           : event.type === 'attack-ended'
             ? (event.targetHealthChanges ?? []).map(change => state.units[change.targetId]?.heroId)
             : [];
@@ -62,7 +64,7 @@ export function settleEvents(
       }));
       if (commands.length === 0) continue;
       const resolution = applyEffectCommands(state, commands, 'effect-resolution', `${event.eventId}-${handler.id}`,
-        resolveStatus, modifyDamage, interceptDamage, modifyHealing, modifyCriticalDamage);
+        resolveStatus, modifyDamage, interceptDamage, modifyHealing, modifyCriticalDamage, random);
       state = resolution.state;
       queue.push(...resolution.events.map(child => ({ ...child,
         ...(event.actionId !== undefined && child.actionId === undefined ? { actionId: event.actionId } : {}),

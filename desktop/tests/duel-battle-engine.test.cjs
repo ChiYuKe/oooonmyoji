@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { simulateBattle } = require('../dist-test-renderer/renderer/features/duel/engine/battle-engine.js');
 const { predictionCoverageWarning } = require('../dist-test-renderer/renderer/features/duel/prediction/coverage-warning.js');
 const { heroSkillsCatalog } = require('../dist-test-renderer/shared/hero-skills-data.js');
+const { createSkullGeneralDefinition, skullGeneralIds } = require('../dist-test-renderer/renderer/features/duel/engine/content/skull-general.js');
 
 const fighter = (heroId, panel, skillLevel = 5) => ({ heroId, fourSuit: '', skillLevel, panel });
 
@@ -19,7 +20,7 @@ test('未迁移专属 AI 或机制时，胜率旁明确提示其不是实战概�
   assert.equal(predictionCoverageWarning([{ contentType: 'hero', contentId: '295', status: 'verified' }]), undefined);
 });
 
-test('10点场实战阵容含9名部分覆盖式神时，预测结果必须提示方向可能失真', () => {
+test('10点场截图阵容只剩荒骷髅机制部分覆盖时，胜率提示应准确反映未覆盖数量', () => {
   const panel = (attack, hp, defense, speed, crit, critDamage, hit, resist) =>
     ({ attack, hp, defense, speed, crit, critDamage: critDamage / 100, hit, resist });
   const state = {
@@ -34,11 +35,23 @@ test('10点场实战阵容含9名部分覆盖式神时，预测结果必须提�
       fighter(324, panel(4520, 18145, 686, 129, 25, 227, 0, 63)),
       fighter(238, panel(5256, 14585, 668, 115, 80, 255, 0, 55))],
   };
+  const fourSuits = { 552: '300090', 585: '300021', 295: '300021', 304: '300030', 330: '300034',
+    323: '300007', 357: '300022', 313: '300036', 324: '300033', 238: '300080' };
+  for (const unit of [...state.red, ...state.blue]) unit.fourSuit = fourSuits[unit.heroId];
   const outcome = simulateBattle(state, 1, 0);
   const warning = predictionCoverageWarning(outcome.diagnostics);
-  assert.match(warning, /9 名式神/);
-  for (const name of ['天井下', '初翎山风', '犬夜叉', '化鲸', '慧明灯', '御馔津', '不知火'])
-    assert.ok(warning.includes(name), `${name} 应出现在未迁移规则提示中`);
+  assert.match(warning, /1 名式神/);
+  assert.ok(warning.includes('荒骷髅'), '荒骷髅仍应作为部分覆盖机制显示');
+  const flower = outcome.sampleResult.events.find(event => event.type === 'status-added'
+    && event.instance.statusId === 'status.hero.585.blood-flower' && event.source.unitId === 'red:2:585');
+  assert.equal(flower?.targetId, 'red:4:304', '模拟结果应记录荒骷髅被动把血色之花交给攻击最高的御馔津');
+  const skullAction = outcome.sampleResult.events.find(event => event.type === 'action-declared'
+    && event.intent.actorId === 'red:2:585');
+  assert.equal(skullAction?.intent.skillId, '5853', '最高攻击友方持花时应施放黄泉战旗');
+  assert.equal(skullAction?.intent.targetIds[0], 'blue:1:323', '黄泉战旗优先选择当前生命最高的天井下');
+  assert.deepEqual(outcome.diagnostics.filter(item => item.status !== 'verified')
+    .map(item => `${item.contentType}:${item.contentId}:${item.aspect}`).sort(),
+  ['hero:585:mechanics'], '本阵容当前仅保留荒骷髅机制这一部分覆盖项');
 });
 
 test('图鉴中的每个式神都能进入模块化行动流程，未迁移规则会被标记', () => {
@@ -82,9 +95,26 @@ test('截图中的两队阵容完整走模块化战斗并报告部分覆盖项',
   for (const unit of [...state.red, ...state.blue]) unit.fourSuit = souls[unit.heroId];
   const result = simulateBattle(state, 1, 0);
   assert.equal(result.engine, 'modular');
+  assert.equal(result.sampleReason, 'elimination', '截图阵容样例应正常以一方全灭结束');
   assert.ok(result.sampleResult.events.some(event => event.type === 'action-declared'));
   assert.ok(result.diagnostics.some(item => item.status === 'partial'));
   assert.equal(result.diagnostics.some(item => item.status === 'unsupported'), false);
+});
+
+test('修罗鬼童丸在无魂网时按AI规则随机选择敌方施放骨锁拥魂', () => {
+  const panel = (speed, attack = 100) => ({ hp: 100000, attack, defense: 1000, speed, crit: 0, critDamage: 1.5, hit: 0, resist: 0 });
+  const fighter = (heroId, speed, attack = 100) => ({ heroId, fourSuit: '', skillLevel: 5, panel: panel(speed, attack) });
+  const targets = [];
+  for (let salt = 0; salt < 6; salt++) {
+    const battle = simulateBattle({ blue: [fighter(396, 300, 100 + salt)],
+      red: [fighter(251, 1), fighter(231, 2), fighter(252, 3)] }, 1);
+    const action = battle.sampleResult.events.find(event => event.type === 'action-declared'
+      && event.intent.actorId === 'blue:1:396');
+    assert.equal(action?.intent.skillId, '3962');
+    assert.ok(['red:1:251', 'red:2:231', 'red:3:252'].includes(action.intent.targetIds[0]));
+    targets.push(action.intent.targetIds[0]);
+  }
+  assert.ok(new Set(targets).size > 1, '固定随机种子样本应覆盖多个敌方目标');
 });
 
 test('式神AI资料标注为无条件施放三技能的式神会按规则选技', () => {
@@ -207,6 +237,46 @@ test('式神AI参考中的新状态能驱动猫川、祸津神、卑弥呼、时
   assert.ok(firstBlueAction(585)?.includes('技能「黄泉战旗」'), '荒骷髅的战斗开始被动已把血色之花交给最高攻击友方');
 });
 
+test('荒骷髅 AI：最高攻击友方无花时转花，有花时攻击当前生命最高敌方，缺火回退普攻', () => {
+  const definition = createSkullGeneralDefinition();
+  const skull = { unitId: 'blue:1:585', heroId: 585, side: 'blue', hp: 1000, stats: { hp: 1000, attack: 100 },
+    skillLevel: 5, statuses: [] };
+  const bearer = { unitId: 'blue:2:251', heroId: 251, side: 'blue', hp: 1000, stats: { hp: 1000, attack: 300 },
+    skillLevel: 5, statuses: [] };
+  const ally = { unitId: 'blue:3:251', heroId: 251, side: 'blue', hp: 1000, stats: { hp: 1000, attack: 200 },
+    skillLevel: 5, statuses: [] };
+  const lowerRatio = { unitId: 'red:1:231', heroId: 231, side: 'red', hp: 700, stats: { hp: 800, attack: 100 },
+    skillLevel: 5, statuses: [] };
+  const higherHp = { unitId: 'red:2:231', heroId: 231, side: 'red', hp: 900, stats: { hp: 5000, attack: 100 },
+    skillLevel: 5, statuses: [] };
+  const units = [skull, bearer, ally, lowerRatio, higherHp];
+  const context = { state: { resources: { blue: { fire: 2 } }, sides: { blue: units.slice(0, 3).map(unit => unit.unitId),
+    red: units.slice(3).map(unit => unit.unitId) } },
+    getUnit: unitId => units.find(unit => unit.unitId === unitId),
+    getLivingUnits: side => units.filter(unit => unit.side === side && unit.hp > 0),
+    getEffectiveStats: () => undefined };
+
+  const transfer = definition.policy(context, skull.unitId);
+  assert.equal(transfer.skillId, skullGeneralIds.transfer);
+  assert.deepEqual(transfer.targetIds, [bearer.unitId], '最高攻击友方未持花时，二技能应把花转给该友方');
+
+  ally.statuses = [{ statusId: skullGeneralIds.flower }];
+  const transferFromLowerAttackBearer = definition.policy(context, skull.unitId);
+  assert.equal(transferFromLowerAttackBearer.skillId, skullGeneralIds.transfer,
+    '低攻击友方持花不应覆盖“攻击最高友方是否持花”的AI条件');
+  assert.deepEqual(transferFromLowerAttackBearer.targetIds, [bearer.unitId],
+    '最高攻击友方无花时，二技能仍应把花转给该友方');
+
+  bearer.statuses = [{ statusId: skullGeneralIds.flower }];
+  const banner = definition.policy(context, skull.unitId);
+  assert.equal(banner.skillId, skullGeneralIds.banner);
+  assert.deepEqual(banner.targetIds, [higherHp.unitId], '三技能按当前生命值绝对值选最高的敌方，不按生命比例');
+
+  context.state.resources.blue.fire = 1;
+  const basic = definition.policy(context, skull.unitId);
+  assert.equal(basic.skillId, skullGeneralIds.basic, '鬼火不足时应回退普攻');
+});
+
 test('式神AI会在状态建立后切换后续技能', () => {
   const panel = (hp, attack, speed) => ({ hp, attack, defense: 1000, speed, crit: 0, critDamage: 1.5, hit: 0, resist: 0 });
   const run = heroId => simulateBattle({
@@ -296,8 +366,8 @@ test('御馔津依灵符数量决策，神启荒依星辰之力层数切换技�
     red: [fighter(251, panel(100000, 1, 300))],
   }, 1);
   const oracle = oracleBattle.sampleLog;
-  assert.ok(oracleBattle.sampleResult.events.some(event => event.type === 'damage' && event.source.id === '3902'),
-    '敌方未消耗鬼火时命运星河触发星爆伤害');
+  assert.ok(oracleBattle.sampleResult.events.some(event => event.type === 'life-lost' && event.source.id === '3902'
+    && event.lifeLossKind === 'indirect'), '敌方未消耗鬼火时命运星河触发间接星爆');
   assert.ok(oracleBattle.sampleResult.events.some(event => event.type === 'status-added'
     && event.instance.statusId === 'status.hero.390.star-power'), '星爆后获得星辰之力');
   assert.ok(oracle.some(line => line.startsWith('行动 ') && line.includes('神启荒使用技能「星流霆击」')),
@@ -1029,19 +1099,25 @@ test('10点场阵容的部分覆盖和未迁移机制都保留在结果诊断中
     ],
   }, 1, 0);
   assert.equal(battle.engine, 'modular');
+  const flowerApplied = battle.sampleResult.events.find(event => event.type === 'status-added'
+    && event.instance.statusId === 'status.hero.585.blood-flower'
+    && event.source.unitId === 'red:2:585');
+  assert.equal(flowerApplied?.targetId, 'red:4:304', '模拟事件应记录荒骷髅开局被动触发，并把血色之花交给攻击最高的御馔津');
+  const skullAction = battle.sampleResult.events.find(event => event.type === 'action-declared'
+    && event.intent.actorId === 'red:2:585');
+  assert.equal(skullAction?.intent.skillId, '5853', '最高攻击友方已持有血色之花时，荒骷髅应使用3技能');
+  assert.equal(skullAction?.intent.targetIds[0], 'blue:1:323', '3技能应选当前生命值最高的敌方天井下');
   const lineupHeroes = ['585'];
   for (const heroId of lineupHeroes) {
     assert.ok(battle.diagnostics.some(item => item.contentType === 'hero' && item.contentId === heroId
       && item.aspect === 'mechanics' && item.status !== 'verified'), `${heroId} 的未验证机制应披露在诊断中`);
   }
   assert.ok(battle.diagnostics.some(item => item.contentType === 'hero' && item.contentId === '304'
-    && item.aspect === 'ai' && item.status === 'partial'), '官方AI表不可用，御馔津选招仍应披露为部分覆盖');
+    && item.aspect === 'ai' && item.status === 'verified'), '御馔津选招已逐分支匹配用户提供的社区AI参考');
   const uncovered = battle.diagnostics.filter(item => item.status !== 'verified');
-  assert.equal(uncovered.length, 3, '天井下、初翎山风、犬夜叉、慧明灯、萤草、不知火、化鲸与薙魂机制已验证；仍披露1项机制、1项AI和1种御魂的部分覆盖');
-  for (const soulId of ['soul:300080']) {
-    assert.ok(battle.diagnostics.some(item => item.contentType === 'soul' && item.contentId === soulId
-      && item.status === 'partial'), `${soulId} 的部分覆盖应保留在诊断中`);
-  }
+  assert.equal(uncovered.length, 1, '当前仅保留荒骷髅机制这一部分覆盖');
+  assert.ok(battle.diagnostics.some(item => item.contentType === 'soul' && item.contentId === 'soul:300080'
+    && item.status === 'verified'), '共潜按用户确认的等概率可驱散负面候选规则标记为已验证');
 });
 
 test('不知火星火结界按技能等级追加完整普攻并跳过目标御魂触发', () => {
@@ -1332,14 +1408,23 @@ test('荒骷髅黄泉战旗按损失生命造成两段真实伤害并将自损�
     blue: [fighter(231, panel(1, 1))],
     red: [fighter(585, panel(300, 1000)), fighter(251, panel(1, 100))],
   }, 1);
-  const opening = battle.sampleLog.findIndex(line => line.includes('荒骷髅使用技能「黄泉战旗」'));
-  const flagLog = battle.sampleLog.slice(opening, opening + 5).join('\n');
+  const events = battle.sampleResult.events;
+  const cast = events.find(event => event.type === 'action-declared' && event.intent.actorId === 'red:1:585'
+    && event.intent.skillId === '5853');
+  const baseHp = events.find(event => event.type === 'status-added' && event.targetId === 'red:1:585'
+    && event.instance.statusId === 'status.hero.585.max-hp-growth')?.instance.values.baseMaxHp;
+  const selfLoss = events.find(event => event.type === 'life-lost' && event.eventId === `${cast?.eventId}-effect-1-1`);
+  const hits = events.filter(event => event.type === 'damage' && event.source.unitId === 'red:1:585'
+    && event.source.id === '5853' && event.parentEventId?.startsWith(`${cast?.eventId}-attack-`));
+  const ironWall = events.find(event => event.type === 'status-added' && event.targetId === 'red:1:585'
+    && event.instance.statusId === 'status.hero.585.ping-iron-wall' && event.parentEventId === cast?.eventId);
 
-  assert.ok(opening >= 0);
-  assert.match(flagLog, /舍命损失30000点生命/);
-  assert.match(flagLog, /第1击.*真实伤害/);
-  assert.match(flagLog, /第2击.*真实伤害/);
-  assert.match(flagLog, /平氏铁壁30000/);
+  assert.ok(cast, '模拟应声明黄泉战旗');
+  assert.ok(baseHp > 0);
+  assert.ok(Math.abs(selfLoss?.hpLost - baseHp * .3) < 1e-6, '自损应为荒骷髅开战生命上限的30%');
+  assert.equal(hits.length, 2, '黄泉战旗应产生两段伤害事件');
+  assert.equal(ironWall?.instance.values.totalLost, selfLoss.hpLost, '平氏铁壁应记录本次自损');
+  assert.equal(ironWall?.instance.values.shieldRemaining, selfLoss.hpLost, '铁壁护盾应等于累计自损且不超过初始生命上限50%');
 });
 
 test('荒骷髅血色之花把携带者一半单体伤害转为自身生命流失', () => {
@@ -1348,9 +1433,21 @@ test('荒骷髅血色之花把携带者一半单体伤害转为自身生命流�
     blue: [fighter(231, panel(300, 500))],
     red: [fighter(585, panel(1, 100)), fighter(251, panel(1, 2000, 10000))],
   }, 1);
+  const events = battle.sampleResult.events;
+  const flower = events.find(event => event.type === 'status-added'
+    && event.instance.statusId === 'status.hero.585.blood-flower' && event.targetId === 'red:2:251');
+  const sharedLoss = events.find(event => event.type === 'life-lost'
+    && event.source.id === 'status.hero.585.blood-flower' && event.source.unitId === 'red:1:585'
+    && event.targetId === 'red:1:585' && event.hpLost > 0);
+  const matchingHit = events.find(event => event.type === 'damage' && event.targetId === 'red:2:251'
+    && event.parentEventId === sharedLoss?.parentEventId);
+  const ironWall = events.find(event => event.type === 'status-added' && event.targetId === 'red:1:585'
+    && event.instance.statusId === 'status.hero.585.ping-iron-wall' && event.parentEventId === sharedLoss?.eventId);
 
-  assert.ok(battle.sampleLog.some(line => line.includes('「血色之花」分担50%伤害')));
-  assert.ok(battle.sampleLog.some(line => line.includes('存入平氏铁壁')));
+  assert.ok(flower, '开局应将血色之花授予攻击最高的友方');
+  assert.ok(sharedLoss, '血色之花应把携带者受到的单体伤害转为荒骷髅生命流失');
+  assert.ok(matchingHit, '分担生命流失应关联到携花友方实际受到的伤害事件');
+  assert.equal(ironWall?.instance.values.totalLost, sharedLoss.hpLost, '荒骷髅的平氏铁壁应记录分担生命流失');
 });
 
 test('血色之花携带者回合结束会触发荒骷髅的时之隙行动', () => {
@@ -1359,9 +1456,18 @@ test('血色之花携带者回合结束会触发荒骷髅的时之隙行动', ()
     blue: [fighter(231, panel(1, 1))],
     red: [fighter(585, panel(1, 100)), fighter(251, panel(300, 2000))],
   }, 1);
+  const events = battle.sampleResult.events;
+  const bearerTurnEnd = events.find(event => event.type === 'turn-ended' && event.unitId === 'red:2:251');
+  const extraTurn = events.find(event => event.type === 'action-scheduled' && event.source.unitId === 'red:1:585'
+    && event.intent.skillId === '5853' && event.scheduling === 'extra-turn'
+    && event.parentEventId === bearerTurnEnd?.eventId);
+  const extraCast = events.find(event => event.type === 'action-declared' && event.intent.actorId === 'red:1:585'
+    && event.intent.skillId === '5853' && event.scheduling === 'extra-turn'
+    && event.parentEventId === `${extraTurn?.parentEventId}-hero:585:turn-end-2`);
 
-  assert.ok(battle.sampleLog.some(line => line.includes('血色之花携带者回合结束，荒骷髅进入时之隙并立即行动')));
-  assert.ok(battle.sampleLog.some(line => line.includes('荒骷髅使用技能「黄泉战旗」')));
+  assert.ok(bearerTurnEnd, '模拟应结束血色之花携带者的回合');
+  assert.ok(extraTurn, '五级荒骷髅应在携花友方回合结束时排入时之隙额外行动');
+  assert.ok(extraCast, '调度器应实际执行荒骷髅的额外回合黄泉战旗');
 });
 
 test('敌方式神阵亡时满级荒骷髅提高生命上限并回复生命', () => {
@@ -1370,8 +1476,18 @@ test('敌方式神阵亡时满级荒骷髅提高生命上限并回复生命', ()
     blue: [fighter(251, panel(300, 100000)), fighter(585, panel(1, 1))],
     red: [fighter(231, panel(1, 1, 1))],
   }, 1);
+  const defeat = battle.sampleResult.events.find(event => event.type === 'unit-defeated' && event.unitId === 'red:1:231');
+  const growth = battle.sampleResult.events.find(event => event.type === 'max-health-changed'
+    && event.targetId === 'blue:2:585' && event.source.id === 'status.hero.585.max-hp-growth'
+    && event.parentEventId === defeat?.eventId);
+  const healing = battle.sampleResult.events.find(event => event.type === 'health-restored'
+    && event.targetId === 'blue:2:585' && event.source.id === 'status.hero.585.max-hp-growth'
+    && event.parentEventId === defeat?.eventId);
 
-  assert.ok(battle.sampleLog.some(line => line.includes('荒骷髅「黄泉战旗」使生命上限提高')));
+  assert.ok(defeat, '模拟应记录敌方式神阵亡');
+  assert.ok(growth, '满级荒骷髅应在敌方式神阵亡后增加生命上限');
+  assert.equal(growth.after - growth.before, 242000 * .35, '每次成长按荒骷髅开战生命上限的35%');
+  assert.equal(healing?.hpGained, 242000 * .35, '生命上限成长时同时恢复等量生命');
 });
 
 test('天井下再会之音获得欢愉并提升友方伤害', () => {
@@ -1492,10 +1608,87 @@ test('指定截图十人阵容的御魂进入模块化对局，并保留部分�
   assert.equal(battle.sampleResult.events.filter(event => event.type === 'action-declared')
     .some(event => event.intent.skillId.startsWith('fallback.hero.')), false,
   '指定阵容实际发起的行动应使用对应式神的模块化技能定义');
+  const invalidIntentSkips = battle.sampleResult.events.filter(event => event.type === 'action-skipped'
+    && event.reason === 'invalid-intent');
+  assert.deepEqual(invalidIntentSkips.map(event => [event.actorId, event.source.id, event.parentEventId]), [],
+    '固定阵容模拟不应产生目标非法、技能不可用或火量不足导致的跳过行动');
+  assert.deepEqual(battle.sampleResult.events.filter(event => event.type === 'action-declared').slice(0, 10)
+    .map(event => [event.intent.actorId, event.intent.skillId]), [
+    ['blue:1:391', '3913'], ['red:1:247', '2473'], ['blue:2:306', '3061'], ['red:2:396', '3962'],
+    ['red:3:600', '6002'], ['blue:4:356', '3563'], ['red:4:331', '3313'], ['blue:3:362', '3621'],
+    ['red:2:396', '3963'], ['blue:5:392', '3921'],
+  ], '首轮行动应按模拟器策略使用对应专属技能');
+  const heartFragrance = battle.sampleResult.events.find(event => event.type === 'status-added'
+    && event.targetId === 'blue:1:391' && event.instance.statusId === 'status.hero.391.heart-fragrance');
+  assert.ok(heartFragrance, '14点阵容实际事件流应记录寻香行明香境为友方非召唤物回合末叠心香');
+  const heartTrigger = battle.sampleResult.events.find(event => event.eventId === heartFragrance.parentEventId);
+  assert.equal(heartTrigger?.type, 'turn-ended', '心香增加应挂在真实友方回合结束事件上');
+  assert.notEqual(heartTrigger?.unitId, 'blue:1:391', '寻香行自身回合结束不叠心香');
+  assert.notEqual(battle.sampleResult.state.units[heartTrigger.unitId]?.unitKind, 'summon', '召唤物回合结束不叠心香');
+  const shuraPursuit = battle.sampleResult.events.find(event => event.type === 'action-scheduled'
+    && event.intent.actorId === 'red:2:396' && event.intent.skillId === '3963'
+    && event.scheduling === 'extra-action' && event.preResolved);
+  assert.ok(shuraPursuit, '固定阵容模拟事件应记录修罗鬼童丸五级追猎绝击被动触发');
+  const shuraPursuitHits = battle.sampleResult.events.filter(event => event.type === 'damage'
+    && event.attackId === shuraPursuit.attackId && event.source.id === '3963');
+  assert.equal(shuraPursuitHits.length, shuraPursuit.intent.targetIds.length * 2,
+    '追猎绝击应对当时选中的每个敌方单位各造成两段伤害');
+  assert.deepEqual(shuraPursuitHits.reduce((counts, event) => ({
+    ...counts, [event.targetId]: (counts[event.targetId] ?? 0) + 1,
+  }), {}), Object.fromEntries(shuraPursuit.intent.targetIds.map(targetId => [targetId, 2])),
+  '追猎绝击的模拟伤害事件应覆盖当时全体敌方（含召唤物）且每个目标两段');
+  const cityActorId = 'red:3:600';
+  const cityStanceIndex = battle.sampleResult.events.findIndex(event => event.type === 'action-declared'
+    && event.intent.actorId === cityActorId && event.intent.skillId === '6002');
+  const citySpeedIndex = battle.sampleResult.events.findIndex(event => event.type === 'status-added'
+    && event.targetId === cityActorId && event.instance.statusId === 'status.hero.600.speed'
+    && event.source.id === '6002');
+  const cityUltimateIndex = battle.sampleResult.events.findIndex(event => event.type === 'action-declared'
+    && event.intent.actorId === cityActorId && event.intent.skillId === '6003');
+  assert.ok(cityStanceIndex >= 0 && citySpeedIndex > cityStanceIndex && cityUltimateIndex > citySpeedIndex,
+    '此固定样本中市加美先施放二技能获得垂悯速度状态，随后使用三技能；该序列不证明通用社区AI规则');
+  assert.ok(battle.sampleResult.events.some(event => event.type === 'damage'
+    && event.source.id === '3624'), '固定阵容的模拟结果应记录蝉冰雪女被动触发的极寒之气伤害');
+  const seaMonkPassiveHealing = battle.sampleResult.events.filter(event => event.type === 'healing'
+    && event.source.id === '2472' && event.source.unitId === 'red:1:247');
+  assert.ok(seaMonkPassiveHealing.length > 0, '固定阵容模拟结果应记录海坊主祝福之水被动治疗事件');
+  assert.ok(seaMonkPassiveHealing.every(healing => {
+    const damage = battle.sampleResult.events.find(event => event.eventId === healing.parentEventId);
+    return damage?.type === 'damage' && damage.source.unitId === 'red:1:247'
+      && ['2471', '2473'].includes(damage.source.id) && (damage.hpLost > 0 || (damage.shieldConsumed ?? 0) > 0);
+  }), '海坊主被动治疗事件应能追溯到自身技能造成生命损失或被护盾吸收的伤害');
+  const seaMonkNeedleDamage = battle.sampleResult.events.filter(event => event.type === 'damage'
+    && event.source.kind === 'soul' && event.source.id === 'soul:300036' && event.source.unitId === 'red:1:247');
+  assert.ok(seaMonkNeedleDamage.some(event => event.hpLost > 0), '固定阵容样本应实际触发海坊主的针女追加伤害');
+  assert.ok(seaMonkNeedleDamage.every(damage => !seaMonkPassiveHealing.some(healing => healing.parentEventId === damage.eventId)),
+    '正式模拟事件应确认针女追加伤害不触发海坊主祝福之水');
+  const gatheredConsumed = battle.sampleResult.events.find(event => event.type === 'status-removed'
+    && event.statusId === 'status.hero.395.gathered-light' && event.reason === 'consumed');
+  assert.ok(gatheredConsumed, '14点场完整模拟中应出现集落光响应友方实际扣火');
+  const firePayment = battle.sampleResult.events.find(event => event.type === 'resource-changed'
+    && event.eventId === gatheredConsumed.parentEventId && event.phase === 'resource-payment');
+  assert.ok(firePayment, '集落光消费应挂在正式技能扣火事件上');
+  assert.ok(battle.sampleResult.events.some(event => event.type === 'status-added'
+    && event.instance.statusId === 'status.hero.395.lost-radiance' && event.parentEventId === firePayment.eventId),
+  '正常扣火后应将失彩施加给行动条最前敌方');
   assert.equal(battle.diagnostics.some(item => item.status === 'unsupported'), false,
     '截图中的十名式神和七种御魂均应有专属规则注册');
-  assert.ok(battle.diagnostics.some(item => item.status === 'partial'),
-    '已知未完成机制应继续在结果中披露');
+  assert.deepEqual(battle.diagnostics.filter(item => item.status !== 'verified')
+    .map(item => `${item.contentType}:${item.contentId}:${item.aspect}`).sort(), [
+    'hero:247:mechanics', 'hero:306:mechanics', 'hero:331:mechanics', 'hero:356:ai', 'hero:356:mechanics',
+    'hero:362:mechanics', 'hero:391:mechanics', 'hero:392:mechanics', 'hero:395:mechanics', 'hero:396:mechanics',
+    'hero:600:ai', 'hero:600:mechanics',
+  ], '14点阵容的12条剩余诊断需逐条列出，不能仅以“存在部分覆盖”带过');
+  const lineupHeroAi = battle.diagnostics.filter(item => item.contentType === 'hero' && item.aspect === 'ai')
+    .map(item => [item.contentId, item.status]).sort((left, right) => Number(left[0]) - Number(right[0]));
+  assert.deepEqual(lineupHeroAi, ['247', '306', '331'].map(heroId => [heroId, 'verified'])
+    .concat([['356', 'partial']], ['362', '391', '392', '395', '396'].map(heroId => [heroId, 'verified']), [['600', 'partial']]),
+  '8条式神AI规则已验证；千姬目标偏好冲突和市加美buff条件映射仍应显示为部分覆盖');
+  const lineupSouls = battle.diagnostics.filter(item => item.contentType === 'soul')
+    .map(item => [item.contentId, item.status]).sort((left, right) => left[0].localeCompare(right[0]));
+  assert.deepEqual(lineupSouls, ['soul:300003', 'soul:300006', 'soul:300010', 'soul:300036', 'soul:300049',
+    'soul:300080', 'soul:300083'].map(soulId => [soulId, 'verified']),
+  '截图中的7种不同御魂需逐个保留诊断；当前共潜等规则均为已验证');
 });
 
 test('海月火玉在资源足够时追加消耗1点并提高本次技能伤害40%', () => {

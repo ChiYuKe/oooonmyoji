@@ -4,7 +4,7 @@ const path = '../dist-test-renderer/renderer/features/duel/engine/';
 const { calcRawAttackDmg, calcAttackDmg, calcShieldAbsorb, calcExtHpAbsorb } = require(path + 'mechanics/game-damage.js');
 const { composeLinear, composeMaxHp } = require(path + 'mechanics/game-stats.js');
 const { calculateDamage } = require(path + 'mechanics/damage.js');
-const { effectiveStats, effectiveDamageMultiplier, effectiveDamageTakenMultiplier, applyCriticalDamageTakenModifiers } = require(path + 'mechanics/stats.js');
+const { effectiveStats, effectiveDamageMultiplier, effectiveDamageTakenMultiplier, effectiveHealingTakenMultiplier, applyCriticalDamageTakenModifiers } = require(path + 'mechanics/stats.js');
 const { applyEffectCommands } = require(path + 'core/effects.js');
 const { createBattleContext } = require(path + 'core/context.js');
 const { scheduleNextActor } = require(path + 'core/action-scheduler.js');
@@ -23,9 +23,14 @@ const { registerControlSouls, controlSoulIds } = require(path + 'content/control
 const { registerBaselineSouls, baselineSoulIds, guardAttackStatusId } = require(path + 'content/baseline-souls.js');
 const { registerWhaleSummoner, whaleSummonerIds } = require(path + 'content/whale-summoner.js');
 const { registerOmikane, omikaneIds } = require(path + 'content/omikane.js');
+const { registerShinkiHuang, shinkiHuangIds } = require(path + 'content/shinki-huang.js');
 const { registerWisdomLamp, wisdomLampIds } = require(path + 'content/wisdom-lamp.js');
 const { registerSkullGeneral, skullGeneralIds } = require(path + 'content/skull-general.js');
+const { registerSeaMonk, seaMonkIds } = require(path + 'content/sea-monk.js');
 const { registerAsura, asuraIds } = require(path + 'content/asura.js');
+const { registerInnejaku, innejakuIds } = require(path + 'content/innejaku.js');
+const { registerEmptyFaceAura, emptyFaceAuraIds } = require(path + 'content/empty-face-aura.js');
+const { registerPaintingFlowerBird, paintingFlowerBirdIds } = require(path + 'content/painting-flower-bird.js');
 const { registerShiranui, shiranuiIds } = require(path + 'content/shiranui.js');
 const { registerFirstHaneMountainWind, firstHaneMountainWindIds } = require(path + 'content/first-hane-mountain-wind.js');
 const { registerGhostServantWhite, ghostServantWhiteIds } = require(path + 'content/ghost-servant-white.js');
@@ -40,6 +45,7 @@ const { registerFengli, fengliIds } = require(path + 'content/fengli.js');
 const { registerBoneBoundPrincess, boneBoundPrincessIds } = require(path + 'content/bone-bound-princess.js');
 const { registerKinnara, kinnaraIds } = require(path + 'content/kinnara.js');
 const { registerChihime, chihimeIds } = require(path + 'content/chihime.js');
+const { registerCicadaSnowMaiden, cicadaSnowMaidenIds } = require(path + 'content/cicada-snow-maiden.js');
 const { registerTanjiro, tanjiroIds } = require(path + 'content/tanjiro.js');
 const { registerNezuko, nezukoIds } = require(path + 'content/nezuko.js');
 const { registerEmperorOfHeaven, emperorOfHeavenIds } = require(path + 'content/emperor-of-heaven.js');
@@ -57,6 +63,15 @@ const { registerOniMask, oniMaskIds } = require(path + 'content/oni-mask.js');
 const { registerLumingOotakemaru, lumingOotakemaruIds } = require(path + 'content/luming-ootakemaru.js');
 const { registerNightBloom, nightBloomIds } = require(path + 'content/night-bloom.js');
 const { registerFoodSpirit, foodSpiritIds } = require(path + 'content/food-spirit.js');
+const { registerFanShi, fanShiIds } = require(path + 'content/fan-shi.js');
+const { registerChuanYuan, chuanYuanIds } = require(path + 'content/chuan-yuan.js');
+const { registerInabaKaguyaHime, inabaKaguyaHimeIds } = require(path + 'content/inaba-kaguya-hime.js');
+const { registerYatoNoKami, yatoNoKamiIds } = require(path + 'content/yato-no-kami.js');
+const { registerShadowCroc, shadowCrocIds } = require(path + 'content/shadow-croc.js');
+const { registerDreamYamausagi, dreamYamausagiIds } = require(path + 'content/dream-yamausagi.js');
+const { registerGaruda, garudaIds } = require(path + 'content/garuda.js');
+const { registerFujiMountain, fujiMountainIds } = require(path + 'content/fuji-mountain.js');
+const { registerLinghaiButterfly, linghaiButterflyIds } = require(path + 'content/linghai-butterfly.js');
 const { registerBeichuifang, beichuifangIds } = require(path + 'content/beichuifang.js');
 const { registerWorldConch, worldConchIds } = require(path + 'content/world-conch.js');
 const { registerEvilFloor, evilFloorIds } = require(path + 'content/evil-floor.js');
@@ -118,6 +133,7 @@ const { registerOnikiri, onikiriIds } = require(path + 'content/onikiri.js');
 const { registerSesshomaru, sesshomaruIds } = require(path + 'content/sesshomaru.js');
 const { registerYouthfulOotengu, youthfulOotenguIds } = require(path + 'content/youthful-ootengu.js');
 const { registerKamaitachi, kamaitachiIds } = require(path + 'content/kamaitachi.js');
+const { registerShuraKidomaru, shuraKidomaruIds } = require(path + 'content/shura-kidomaru.js');
 const { registerFoodHairDemon, foodHairDemonIds } = require(path + 'content/food-hair-demon.js');
 const { passiveSuppressionStatusDefinition, passiveSuppressionStatusId } = require(path + 'core/passive-eligibility.js');
 const { soulSuppressionStatusDefinition, soulSuppressionStatusId } = require(path + 'core/soul-eligibility.js');
@@ -136,6 +152,52 @@ function state() {
       red: { fire: { progress: 0, threshold: 5, nextSupply: 3, maxSupply: 5, resourceCap: 8 } } },
     counters: { round: 1, action: 0, attack: 0, hit: 0 }, ended: false };
 }
+
+test('修罗鬼童丸二技能冷却期间按社区AI切换三技能，并在下一行动后恢复', () => {
+  assert.equal(gameSkillRow(shuraKidomaruIds.trapSkill, 2, -1).maxCd, 2,
+    '客户端技能行记录骨锁拥魂冷却为2，包含施放回合');
+  const registry = new ContentRegistry(); registerShuraKidomaru(registry);
+  const definition = registry.getHero(shuraKidomaruIds.hero);
+  const trap = definition.skills.find(skill => skill.id === shuraKidomaruIds.trapSkill);
+  let initial = state();
+  initial.units.r2 = unit('r2', 'red');
+  initial.sides.red.push('r2');
+  initial.units.b = { ...initial.units.b, heroId: shuraKidomaruIds.hero, skillLevel: 5 };
+  initial.resources.blue.fire = 3;
+  const makeContext = battleState => createBattleContext(battleState, () => 0, id => registry.getStatus(id)?.category,
+    id => registry.getStatus(id)?.dispellable === true);
+  const resolveStatus = id => registry.getStatus(id);
+  const context = makeContext(initial);
+
+  assert.equal(definition.policy(context, 'b').skillId, shuraKidomaruIds.trapSkill,
+    '无魂网且二技能可用时先用骨锁拥魂');
+  const cooldownCommand = trap.execute(context,
+    { actorId: 'b', skillId: shuraKidomaruIds.trapSkill, targetIds: ['r'], shape: 'single', targetRelation: 'enemy' },
+    { level: 5 }).find(command => command.type === 'add-status' && command.instance.statusId === shuraKidomaruIds.trapCooldown);
+  assert.ok(cooldownCommand, '施放二技能应建立冷却状态');
+  initial = applyEffectCommands(initial, [cooldownCommand], 'action', 'shura-trap-cast', resolveStatus).state;
+
+  const coolingContext = makeContext(initial);
+  assert.equal(trap.canUse(initial, initial.units.b), false, '冷却期间二技能不可用');
+  assert.equal(definition.policy(coolingContext, 'b').skillId, shuraKidomaruIds.citySkill,
+    '冷却期间鬼火足够时转用迷迹鬼城');
+  initial.resources.blue.fire = 2;
+  assert.equal(definition.policy(makeContext(initial), 'b').skillId, shuraKidomaruIds.basic,
+    '冷却期间鬼火不足时回退普攻');
+
+  const sameAction = definition.handlers['turn-end'].handle(coolingContext,
+    { type: 'turn-ended', eventId: 'shura-same-action-end', phase: 'turn-end', source: { kind: 'unit', id: 'b', unitId: 'b' }, unitId: 'b', actionId: 0 });
+  assert.deepEqual(sameAction, [], '施放二技能的这次行动结束时不应消耗冷却回合');
+  initial.resources.blue.fire = 3;
+  const nextContext = makeContext(initial);
+  const nextTurn = definition.handlers['turn-end'].handle(nextContext,
+    { type: 'turn-ended', eventId: 'shura-next-action-end', phase: 'turn-end', source: { kind: 'unit', id: 'b', unitId: 'b' }, unitId: 'b', actionId: 1 });
+  assert.ok(nextTurn?.some(command => command.type === 'remove-status-instances'
+    && command.instanceIds.includes(cooldownCommand.instance.instanceId)), '下一次行动结束时应清除冷却');
+  initial = applyEffectCommands(initial, nextTurn, 'turn-end', 'shura-next-action-end', resolveStatus).state;
+  assert.equal(definition.policy(makeContext(initial), 'b').skillId, shuraKidomaruIds.trapSkill,
+    '冷却清除后恢复骨锁拥魂的AI选择');
+});
 
 test('垢尝规则按客户端技能行读取倍率、驱散上限、霉球上限和四层回合末代价', () => {
   assert.match(gameSkillRow(gouchangIds.basic, 1, -1).desc, /降低25%效果命中/);
@@ -233,6 +295,10 @@ test('饴细工按最低生命比例友方分担伤害并尊重不可分担攻�
   initial.units.b2 = protectedAlly;
   initial.sides.blue = ['b', 'b2'];
   const definition = registry.getHero(yiguangongIds.hero);
+  initial.resources.blue.fire = 2;
+  const fullHealthIntent = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(fullHealthIntent.skillId, yiguangongIds.skill, '社区AI为无条件三技能，不要求目标低于80%生命');
+  assert.equal(fullHealthIntent.targetIds[0], 'b2');
   const hit = definition.interceptIncomingDamage(initial, initial.units.r, protectedAlly, 1000, 'normal', {});
   assert.equal(hit.amount, 750, '四级被动转移25%伤害');
   assert.equal(hit.effects[0].amount, 250);
@@ -240,6 +306,11 @@ test('饴细工按最低生命比例友方分担伤害并尊重不可分担攻�
   const ownLowest = { ...initial, units: { ...initial.units, b: { ...initial.units.b, hp: 2000 } } };
   assert.equal(definition.interceptIncomingDamage(ownLowest, ownLowest.units.r, ownLowest.units.b2, 1000, 'normal', {}), undefined,
     '若垢尝自己生命比例最低，则不会替第二低目标分担');
+
+  const duplicate = { ...initial, units: { ...initial.units, b3: { ...unit('b3', 'blue'), heroId: yiguangongIds.hero,
+    skillLevel: 5, skillLevels: { [yiguangongIds.passive]: 5 } } }, sides: { ...initial.sides, blue: ['b', 'b3', 'b2'] } };
+  const singleOwner = definition.interceptIncomingDamage(duplicate, duplicate.units.r, duplicate.units.b2, 1000, 'normal', {});
+  assert.equal(singleOwner.effects[0].source.unitId, 'b', '同名式神被动只由队伍顺位第一个存活且未封被动者生效');
 });
 
 test('饴细工施加糖渍消耗当前生命，受击治疗每个目标每回合至多三次且溢出推条', () => {
@@ -748,14 +819,16 @@ test('灼华桃花妖携芳意治疗并授新蕊，醒时花复活并以新蕊�
   initial.sides.blue.push('b2'); initial.resources.blue.fire = 3;
   const bud = executeAction(initial, { actorId: 'b', skillId: blazingPeachIds.budSkill, targetIds: ['b2'], shape: 'single', targetRelation: 'ally' },
     registry, () => .5, { resolveStatus });
-  assert.equal(bud.state.units.b2.hp, 6500);
+  // 官方 _calcCure：治疗吃暴击（本用例治疗方 crit=1 ⇒ 必暴，×面板总暴伤 1.5）
+  //   携芳意治疗 15% 生命上限 = 1500 → 2250 ⇒ 5000 + 2250 = 7250
+  assert.equal(bud.state.units.b2.hp, 7250);
   assert.ok(bud.state.units.b2.statuses.some(status => status.statusId === blazingPeachIds.bud));
 
   let defeated = { ...bud.state, units: { ...bud.state.units, b2: { ...bud.state.units.b2, hp: 0, statuses: [] } },
     resources: { ...bud.state.resources, blue: { ...bud.state.resources.blue, fire: 3 } } };
   const revived = executeAction(defeated, { actorId: 'b', skillId: blazingPeachIds.reviveSkill, targetIds: ['b2'], shape: 'single', targetRelation: 'ally' },
     registry, () => .5, { resolveStatus });
-  assert.equal(revived.state.units.b2.hp, 6000, `50%复活后，二级起再治疗桃花妖生命上限10%；事件：${JSON.stringify(revived.events
+  assert.equal(revived.state.units.b2.hp, 6500, `复活本身不是 heal 命令（5000 不暴击），二级起的额外治疗 1000 吃暴击 → 1500 ⇒ 6500；事件：${JSON.stringify(revived.events
     .filter(event => event.unitId === 'b2' || event.targetId === 'b2').map(event => ({ type: event.type, amount: event.amount, hp: event.hp, hpGained: event.hpGained })))}`);
   assert.equal(revived.state.units.b2.actionGauge, 50, '三级起复活目标增加50%行动条');
   assert.ok(revived.state.units.b2.statuses.some(status => status.statusId === blazingPeachIds.bud));
@@ -1747,10 +1820,10 @@ test('初翎山风回合开始快照迅风暴伤，猎目减益通过效果抵�
   assert.ok(Math.abs(effectiveStats(moreWind).critDamage - 1.95) < 1e-10, '回合中的新迅风不改写已形成的快照');
 
   const mark = definition.skills.find(skill => skill.id === firstHaneMountainWindIds.mark);
-  const resisted = mark.execute(createBattleContext(initial, () => .5), { actorId: 'b', skillId: firstHaneMountainWindIds.mark,
+  const resisted = mark.execute(createBattleContext(initial, () => .7), { actorId: 'b', skillId: firstHaneMountainWindIds.mark,
     targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, {});
   assert.ok(resisted.some(command => command.type === 'report-status-resisted'));
-  const applied = mark.execute(createBattleContext(initial, () => .49), { actorId: 'b', skillId: firstHaneMountainWindIds.mark,
+  const applied = mark.execute(createBattleContext(initial, () => .66), { actorId: 'b', skillId: firstHaneMountainWindIds.mark,
     targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, {});
   assert.ok(applied.some(command => command.type === 'add-status' && command.instance.statusId === firstHaneMountainWindIds.hunterMark));
 });
@@ -3008,14 +3081,23 @@ test('清姬普攻6级中毒与焚火，淬毒逐次永久降防，焚身之火3
   assert.equal(poison.stacks, 3);
   assert.equal(poison.duration.remaining, 5);
   assert.deepEqual(poison.modifiers.map(modifier => modifier.amount), [-.1, -10]);
-  assert.equal(burning.values.indirectDamageRatio, .33);
+  // 客户端 `[2601, 6]` 不存在（家族只到 5 级）⇒ 按"None 继承上一级"规则，第 6 级沿用 5 级的 0.56
+  // （客户端逐级 continueAttackHurt = 0.24 / 0.32 / 0.40 / 0.48 / 0.56）
+  assert.equal(burning.values.indirectDamageRatio, .56);
   assert.equal(defenseLoss.values.defenseReduced, 20);
   assert.equal(effectiveStats(basic.state.units.r).defense, 950);
   const tickCommands = registry.getStatus(kiyohimeIds.burningFire).handlers['turn-end'].handle(
     createBattleContext(basic.state, () => .5, id => registry.getStatus(id)?.category,
       id => registry.getStatus(id)?.dispellable === true),
     { eventId: 'kiyohime-burning-fire-tick', phase: 'turn-end', source, type: 'turn-ended', unitId: 'r' });
-  assert.ok(tickCommands.some(command => command.type === 'lose-life' && command.lifeLossKind === 'indirect'));
+  // 客户端 buffCalc 的 DOT 口径：走完整伤害管线（不是 lose-life/间接），且 critical = False
+  // （`[2601]` 家族 indirectDmgType = 0 ⇒ 不是间接伤害）
+  {
+    const tickDamage = tickCommands.find(command => command.type === 'deal-damage');
+    assert.ok(tickDamage, `焚身之火 tick 应为 deal-damage：${JSON.stringify(tickCommands)}`);
+    assert.equal(tickDamage.isCritical, false);
+    assert.ok(!tickCommands.some(command => command.type === 'lose-life'));
+  }
 
   const ultimateStart = state();
   ultimateStart.units.b = { ...initial.units.b };
@@ -3375,14 +3457,26 @@ test('P1: before/after callbacks, shield, rebound, leech and extra HP run in gam
     random: () => { order.push('roll'); return .5; },
     before: [input => { order.push('before'); return input; }], after: [damage => { order.push('after'); return damage; }] }));
   assert.deepEqual(order, ['before', 'roll', 'roll', 'after']);
+  // 官方护盾口径：放大消耗(0.5×3000=1500)先吃盾且不挡伤害 ⇒ 剩余容量 500，
+  // 穿透 = 3000−500 = 2500；随后 extHp 吸收 100×2=200 ⇒ damage 2300，吸血按穿透量 2500 计。
   assert.equal(result.consumeShield, 2000);
   assert.equal(result.hurtBeforeAbsorb, 3000);
   assert.equal(result.reboundDamage, 900);
-  assert.equal(result.leechDamage, 200);
-  assert.equal(result.damage, 800);
+  assert.equal(result.leechDamage, 500);
+  assert.equal(result.damage, 2300);
   assert.equal(result.consumeExtHp, 100);
   assert.equal(calcAttackDmg(formula({ attack: 2000, defense: 0, reboundRate: .0001 })).reboundDamage, 1);
-  assert.deepEqual(calcShieldAbsorb(3000, 2000, .5), { damage: 1000, consumeShield: 2000 });
+  assert.deepEqual(calcShieldAbsorb(3000, 2000, .5), { damage: 2500, consumeShield: 2000 });
+  assert.deepEqual(calcShieldAbsorb(3000, 1000, .5), { damage: 3000, consumeShield: 1000 },
+    '放大消耗打爆护盾时，整段原始伤害穿透');
+  assert.deepEqual(calcShieldAbsorb(1000, 500, 2.5), { damage: 1000, consumeShield: 500 },
+    '高额放大消耗打爆较小护盾时不额外降低伤害');
+  assert.deepEqual(calcShieldAbsorb(1000, 2000, .5), { damage: 0, consumeShield: 1500 },
+    '护盾仍有余量时，仅余量按一比一抵伤');
+  assert.deepEqual(calcShieldAbsorb(1000, 500, 0), { damage: 500, consumeShield: 500 },
+    '无放大消耗时按普通护盾吸收');
+  assert.deepEqual(calcShieldAbsorb(1000, 0, .5), { damage: 1000, consumeShield: 0 },
+    '没有护盾时放大率不产生虚假吸收');
   assert.deepEqual(calcExtHpAbsorb(5, 10, 2), { damage: 0, consumed: 3 });
 });
 
@@ -3396,18 +3490,162 @@ test('P1: serious injury records deferred nonnegative reductions', () => {
   assert.equal(calcRawAttackDmg(formula({ seriousInjury: true, targetHurtReductionRate: -.3 })).recordHurtReductionRate, 0);
 });
 
+test('间接攻击按目标间接伤害层数降防（INDIRECT_REDUCE_VALUE=10，indirectDamageCalc 656-744）', () => {
+  const { indirectBuffLv, indirectDefenseReduction } = require(path + 'mechanics/indirect-damage.js');
+  const { INDIRECT_REDUCE_VALUE } = require(path + 'mechanics/game-damage.js');
+  assert.equal(INDIRECT_REDUCE_VALUE, 10);
+  const marked = { statuses: [
+    { instanceId: 'a', statusId: 'debuff.a', stacks: 2, values: { indirectDamageLevel: 1 } },
+    { instanceId: 'b', statusId: 'debuff.b', stacks: 3, values: { indirectDamageLevel: 2 } },
+    { instanceId: 'c', statusId: 'buff.c', stacks: 5 },                     // 未标记 ⇒ 不计
+  ] };
+  assert.equal(indirectBuffLv(marked), 2 * 1 + 3 * 2);
+  assert.equal(indirectDefenseReduction(marked), 80);
+  assert.equal(indirectBuffLv({ statuses: [] }), 0);
+  // 端到端：间接攻击把 lv×10 累加进 ignoreDefenseValue（在 calcAttackDmg 之前）
+  const initial = state();
+  initial.units.r = { ...initial.units.r, statuses: [{ instanceId: 'poison:r', statusId: 'debuff.poison',
+    source: { kind: 'skill', id: 'debuff.poison' }, stacks: 2, duration: { kind: 'count', remaining: 2, owner: 'target-turn' },
+    values: { indirectDamageLevel: 1 } }] };
+  const context = createBattleContext(initial, () => .5);
+  const input = { attack: 1000, defense: 300, ratio: 1, critChance: 0, critDamage: 1 };
+  const direct = context.calculateDamage(input, initial.units.b, initial.units.r);
+  const indirect = context.calculateDamage({ ...input, isIndirectDamage: true }, initial.units.b, initial.units.r);
+  // 直接：1000 × 300/(300+300) = 500；间接：防御无视 2×10=20 ⇒ 1000 × 300/(300+280) ≈ 517.241
+  assert.ok(Math.abs(direct.amount - 500) < 1e-9, `direct=${direct.amount}`);
+  assert.ok(Math.abs(indirect.amount - 1000 * 300 / 580) < 1e-9, `indirect=${indirect.amount}`);
+});
+
+test('重伤溢伤回流按 make_serious_injury_overflow_value_defense：补回防禦与三种减伤率', () => {
+  const { seriousInjuryOverflowValue } = require(path + 'mechanics/serious-injury.js');
+  // ≤0 直接返回
+  assert.equal(seriousInjuryOverflowValue(0), 0);
+  assert.equal(seriousInjuryOverflowValue(-50, { recordDefense: 300 }), -50);
+  // 只有防御：溢伤 1000、清零前防御 300 ⇒ 1000 × 300/(300+300) = 500
+  assert.equal(seriousInjuryOverflowValue(1000, { recordDefense: 300 }), 500);
+  // 再加两种减伤率：/= (1+0.25) → 400，/= (1+0.6) → 250
+  assert.equal(seriousInjuryOverflowValue(1000, { recordDefense: 300, recordHurtReductionRate: .25,
+    recordIndirectHurtReductionRate: .6 }), 250);
+  // 最后一项是"生命变化削减率"：×(1−0.2) ⇒ 200
+  assert.equal(seriousInjuryOverflowValue(1000, { recordDefense: 300, recordHurtReductionRate: .25,
+    recordIndirectHurtReductionRate: .6, recordTargetHpChangeReduceRate: .2 }), 200);
+  // 防御为 0 / 未记账 ⇒ 该步等效 ×1
+  assert.equal(seriousInjuryOverflowValue(1000, {}), 1000);
+});
+
+test('持续伤害与间接伤害的免疫口径（Immunity.CONTINUE_HURT / DEBUFF_INDIRECT）', () => {
+  const { continueHurtImmune, continueHurtCommand } = require(path + 'mechanics/continue-hurt.js');
+  const { indirectDamageImmune } = require(path + 'mechanics/indirect-damage.js');
+  const immuneDef = { continueHurtImmune: true, dispellable: false, sealable: false,
+    durationOwner: 'round', refreshPolicy: 'replace' };
+  const resolve = id => (id === 'status.test.immune' ? immuneDef : undefined);
+  assert.equal(continueHurtImmune({ statuses: [{ statusId: 'status.test.immune' }] }, resolve), true);
+  assert.equal(continueHurtImmune({ statuses: [{ statusId: 'status.other' }] }, resolve), false);
+  assert.equal(continueHurtImmune({ statuses: [{ statusId: 'status.test.immune' }] }), false, '不传 resolver 则不检查');
+  // 带免疫 ⇒ DOT 命令不生成；去掉免疫 ⇒ 正常生成
+  const initial = state();
+  initial.units.r = { ...initial.units.r, statuses: [{ instanceId: 'i', statusId: 'status.test.immune',
+    source: { kind: 'skill', id: 'x' }, stacks: 1, duration: { kind: 'permanent' } }] };
+  const context = createBattleContext(initial, () => 0);
+  assert.equal(continueHurtCommand(context, { source, targetId: 'r', percentOfTargetHp: 1, resolveStatus: resolve }), undefined);
+  assert.ok(continueHurtCommand(context, { source, targetId: 'r', percentOfTargetHp: 1 }));
+  const indirectDef = { indirectDamageImmune: true, dispellable: false, sealable: false,
+    durationOwner: 'round', refreshPolicy: 'replace' };
+  const resolveIndirect = id => (id === 'status.test.indirect-immune' ? indirectDef : undefined);
+  assert.equal(indirectDamageImmune({ statuses: [{ statusId: 'status.test.indirect-immune' }] }, resolveIndirect), true);
+  assert.equal(indirectDamageImmune({ statuses: [{ statusId: 'status.test.indirect-immune' }] }), false);
+});
+
+test('持续伤害按 buffCalc 口径：min(目标当前生命×比例, 攻击×CONTINUE_HURT_LIMIT) 且永不暴击', () => {
+  const { calcContinueHurt, CONTINUE_HURT_LIMIT, continueHurtCommand } = require(path + 'mechanics/continue-hurt.js');
+  assert.equal(CONTINUE_HURT_LIMIT, 1);
+  // 按目标当前生命 10000×0.3=3000，但上限 = 攻击 2000×1.0 ⇒ 截断到 2000
+  assert.deepEqual(calcContinueHurt({ targetHp: 10000, sourceAttack: 2000, percentOfTargetHp: .3 }),
+    { baseDamage: 2000, rawValue: 3000, capped: true });
+  assert.deepEqual(calcContinueHurt({ targetHp: 4000, sourceAttack: 2000, percentOfTargetHp: .3 }),
+    { baseDamage: 1200, rawValue: 1200, capped: false });
+  // 另一支：按攻击方攻击
+  assert.equal(calcContinueHurt({ targetHp: 10000, sourceAttack: 2000, attackRatio: .5 }).baseDamage, 1000);
+  // 端到端：DOT 命令还是走完整伤害管线（目标防御 300 ⇒ K/(K+def) 那一层仍然生效），且不暴击
+  const initial = state();
+  initial.units.r = { ...initial.units.r, stats: { ...initial.units.r.stats, defense: 300 } };
+  const context = createBattleContext(initial, () => 0);
+  const command = continueHurtCommand(context, { source, targetId: 'r', percentOfTargetHp: 1 });
+  const attack = context.getEffectiveStats('b').attack;
+  assert.equal(command.isCritical, false);
+  assert.ok(Math.abs(command.amount - attack * 300 / (300 + 300)) < 1e-9, `amount=${command.amount} attack=${attack}`);
+});
+
+test('治疗按 _calcCure 官方公式：强弱相加、御魂线性加项、PVP 受治疗、阵营系数、下限 1、可暴击', () => {
+  const { calcCure, applyCureAbsorb } = require(path + 'mechanics/game-heal.js');
+  assert.equal(calcCure({ cureValue: 100, random: () => 1 }).cureValue, 100);
+  // stren = cureStrenthRate + curedStrenthRate（相加）；PVP 受治疗与 stren 都是乘区；
+  // equipCureStrenthRate 是 cureValue×rate 的线性加项：
+  //   100 ×(1+0.5) = 150 → ×(1+0.3) = 195 → +100×0.04 = 199
+  assert.equal(calcCure({ cureValue: 100, cureStrengthRate: .2, curedStrengthRate: .1,
+    pvpCuredStrengthRate: .5, equipCureStrengthRate: .04, random: () => 1 }).cureValue, 199);
+  assert.equal(calcCure({ cureValue: 100, campCureRate: 2, random: () => 1 }).cureValue, 200);
+  assert.equal(calcCure({ cureValue: .1, campCureRate: 0, random: () => 1 }).cureValue, 1, '下限是 1 不是 0');
+  assert.equal(calcCure({ cureValue: 100, critRate: .5, critDamage: 1.5, random: () => 0 }).cureValue, 150);
+  assert.equal(calcCure({ cureValue: 100, critRate: .5, critDamage: 1.5, random: () => .9 }).cureValue, 100);
+  assert.equal(calcCure({ cureValue: 100, critRate: .5, critDamage: 1.5, heroNoCrit: true, random: () => 0 }).cureValue, 100);
+  // 治疗吸收（doCureAbsord）：池子先吃治疗、耗尽标记移除、剩余治疗继续生效
+  assert.deepEqual(applyCureAbsorb(100, [30, 50]), { cureValue: 20, consumed: [30, 50], depleted: [true, true] });
+  assert.deepEqual(applyCureAbsorb(40, [30, 50]), { cureValue: 0, consumed: [30, 10], depleted: [true, false] });
+  // 端到端：治疗方的 cureStrengthRate 经 applyEffectCommands 的 heal 分支生效
+  const initial = state();
+  initial.units.b = { ...initial.units.b, hp: 9000, cureAttributes: { cureStrengthRate: .5 } };
+  const healed = applyEffectCommands(initial, [{ type: 'heal', source, targetId: 'b', amount: 100 }],
+    'effect-resolution', 'cure-e2e', undefined, undefined, undefined, undefined, undefined, () => 1);
+  assert.equal(healed.state.units.b.hp, 9150, '100 ×(1+0.5) = 150');
+});
+
 test('P1: production effects consume shields separately and absorb extra HP before real HP', () => {
   const initial = state();
   initial.units.r = { ...initial.units.r, shield: 2000, resources: { extHp: 100 }, damageAttributes: { hurtReboundRate: .3, extHpAbsorptionRate: 2 } };
   initial.units.b = { ...initial.units.b, hp: 9000, damageAttributes: { leechRate: .2 } };
   const result = applyEffectCommands(initial, [{ type: 'deal-damage', source, targetId: 'r', amount: 3000, shieldDmgAddRate: .5 }], 'hit');
-  assert.equal(result.state.units.r.hp, 9200);
+  // 官方护盾口径：放大消耗 1500 先吃盾不挡伤害 ⇒ 剩余容量 500 ⇒ 穿透 2500，
+  // extHp 吸 200 ⇒ 实际扣 2300 生命；吸血按穿透量 2500 的 20% = 500。
+  assert.equal(result.state.units.r.hp, 7700);
   assert.equal(result.state.units.r.shield, 0);
   assert.equal(result.state.units.r.resources.extHp, 0);
-  assert.equal(result.state.units.b.hp, 8300); // -900 rebound +200 leech
-  assert.equal(result.events[0].leechDamage, 200);
+  assert.equal(result.state.units.b.hp, 8600); // -900 rebound +500 leech
+  assert.equal(result.events[0].leechDamage, 500);
   assert.equal(result.events[0].shieldConsumed, 2000);
   assert.equal(result.events.filter(event => event.type === 'damage').length, 2);
+});
+
+test('AOE 打护盾实体按 AOE_SKILL_TO_SHIELD_DMG_RATE(2.5) 增伤且位于 extDmgRate 之后、maxHurt 之前', () => {
+  const base = formula({ attack: 1000, defense: 0, ratio: 1 });
+  assert.equal(calcRawAttackDmg(base).rawDamage, 1000);
+  assert.equal(calcRawAttackDmg({ ...base, isRangeSkill: true }).rawDamage, 1000, '只满足 AOE 不增伤');
+  assert.equal(calcRawAttackDmg({ ...base, isShieldEntity: true }).rawDamage, 1000, '只满足护盾实体不增伤');
+  assert.equal(calcRawAttackDmg({ ...base, isRangeSkill: true, isShieldEntity: true }).rawDamage, 2500);
+  // 位置：calcRawAttackDmg 2104-2180 在 (1+extDmgRate) 之后、extCritPower/maxHurt/下限之前
+  assert.equal(calcRawAttackDmg({ ...base, isRangeSkill: true, isShieldEntity: true, extDmgRate: .5 }).rawDamage, 3750);
+  assert.equal(calcRawAttackDmg({ ...base, isRangeSkill: true, isShieldEntity: true, maxHurt: 2000 }).rawDamage, 2000);
+});
+
+test('executeAction 在执行技能伤害公式时传入 AOE 形态，使护盾实体倍率进入真实战斗事件', () => {
+  const registry = new ContentRegistry();
+  const skillId = 'test.aoe-shield';
+  registry.registerHero({ id: 99001, skills: [{ id: skillId, actionKind: 'skill', target: 'all-enemies',
+    targetRelation: 'enemy', levels: [{}], execute(context, intent) {
+      const actor = context.getUnit(intent.actorId), target = context.getUnit(intent.targetIds[0]);
+      const damage = context.calculateDamage({ attack: 1000, defense: 0, ratio: 1, critRate: 0,
+        critDamage: 1.5, dmgFluctuation: 0 }, actor, target);
+      return [{ type: 'deal-damage', source: { kind: 'skill', id: skillId, unitId: actor.unitId },
+        targetId: target.unitId, amount: damage.amount }];
+    } }] });
+  const initial = state();
+  initial.units.b = { ...initial.units.b, heroId: 99001 };
+  initial.units.r = { ...initial.units.r, shieldEntity: true };
+  const result = executeAction(initial, { actorId: 'b', skillId, targetIds: ['r'], shape: 'all-enemies',
+    targetRelation: 'enemy' }, registry, () => .5);
+  const hit = result.events.find(event => event.type === 'damage' && event.source.id === skillId);
+  assert.equal(hit.amount, 2500);
+  assert.equal(result.state.units.r.hp, 7500);
 });
 
 test('P1: immunity and shield bypass cannot leak damage through extra HP', () => {
@@ -4842,6 +5080,10 @@ test('小松丸胆怯按等级概率闪避并把单体攻击的80%转给生命�
   assert.equal(intercepted.effects.find(command => command.type === 'deal-damage').targetId, 'b2');
   assert.equal(intercepted.effects.find(command => command.type === 'deal-damage').amount, 4000);
   assert.ok(intercepted.effects.some(command => command.type === 'apply-control' && command.instance.statusId === xiaosongwanIds.stun));
+  const indirect = definition.interceptIncomingDamage(initial, attacker, target, 5000, 'indirect', {
+    ...interception, battle: createBattleContext(initial, () => 0),
+  });
+  assert.equal(indirect, undefined, '胆怯不会闪避极寒之气等间接伤害');
   const failed = definition.interceptIncomingDamage(initial, attacker, target, 5000, 'normal', {
     ...interception, battle: createBattleContext(initial, () => .25),
   });
@@ -6317,6 +6559,14 @@ test('御馔津单人持有灵符时自动AI按50%分支选择重开结界或燃
   initial.sides.blue.push('friend');
   assert.equal(definition.policy(createBattleContext(initial, () => .49), 'b').skillId, omikaneIds.spiritArrow,
     '有多个持符御馔津时按表使用破魔箭，不再套用单人50%分支');
+
+  const allyOnly = { ...initial, units: { ...initial.units,
+    b: { ...initial.units.b, statuses: initial.units.b.statuses.filter(status => status.statusId !== omikaneIds.talisman) },
+    friend: initial.units.friend }, sides: initial.sides };
+  assert.equal(definition.policy(createBattleContext(allyOnly, () => .49), 'b').skillId, omikaneIds.foxHunt,
+    '唯一灵符在队友身上时仍执行50%分支的狐狩界');
+  assert.equal(definition.policy(createBattleContext(allyOnly, () => .5), 'b').skillId, omikaneIds.spiritArrow,
+    '唯一灵符在队友身上时另一半概率使用破魔箭');
 });
 
 test('不知火自动AI在未起舞时优先开结界，低生命不会擅自进入离殇', () => {
@@ -6332,7 +6582,7 @@ test('不知火自动AI在未起舞时优先开结界，低生命不会擅自进
   assert.equal(definition.policy(createBattleContext(initial), 'b').skillId, shiranuiIds.basic);
 });
 
-test('荒骷髅自动AI把血色之花给攻击最高友方，已有花时优先攻击血量最高敌人', () => {
+test('荒骷髅自动AI把血色之花给攻击最高友方，已有花时优先攻击当前生命值最高敌人', () => {
   const registry = new ContentRegistry(); registerSkullGeneral(registry);
   const definition = registry.getHero(skullGeneralIds.hero);
   const initial = state();
@@ -6342,16 +6592,72 @@ test('荒骷髅自动AI把血色之花给攻击最高友方，已有花时优先
     source: { kind: 'skill', id: skullGeneralIds.passive, unitId: 'b' }, stacks: 1, duration: { kind: 'permanent' },
   }] };
   initial.units.friend2 = { ...unit('friend2', 'blue'), stats: { ...unit('friend2', 'blue').stats, attack: 3000 } };
-  initial.units.r = { ...initial.units.r, hp: 9000, stats: { ...initial.units.r.stats, hp: 10000 } };
+  initial.units.r = { ...initial.units.r, hp: 4000, stats: { ...initial.units.r.stats, hp: 5000 } };
   initial.units.r2 = { ...unit('r2', 'red'), hp: 6000, stats: { ...unit('r2', 'red').stats, hp: 10000 } };
   initial.sides.blue.push('friend', 'friend2'); initial.sides.red.push('r2'); initial.resources.blue.fire = 2;
   let policy = definition.policy(createBattleContext(initial), 'b');
   assert.equal(policy.skillId, skullGeneralIds.banner);
-  assert.deepEqual(policy.targetIds, ['r']);
+  assert.deepEqual(policy.targetIds, ['r2'], '按当前生命绝对值选择，不能按生命比例选');
   initial.units.friend = { ...initial.units.friend, statuses: [] };
   policy = definition.policy(createBattleContext(initial), 'b');
   assert.equal(policy.skillId, skullGeneralIds.transfer);
   assert.deepEqual(policy.targetIds, ['friend']);
+  initial.units.b = { ...initial.units.b, stats: { ...initial.units.b.stats, attack: 9000 } };
+  initial.units.friend = { ...initial.units.friend, stats: { ...initial.units.friend.stats, attack: 8000 } };
+  policy = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(policy.skillId, skullGeneralIds.transfer);
+  assert.deepEqual(policy.targetIds, ['b'], '荒骷髅自身是最高攻击友方时，应允许把花转给自己');
+  const transfer = definition.skills.find(skill => skill.id === skullGeneralIds.transfer);
+  assert.ok(transfer.execute(createBattleContext(initial), policy).some(command => command.type === 'add-status'
+    && command.targetId === 'b' && command.instance.statusId === skullGeneralIds.flower), '自我转移应实际施加血色之花');
+});
+
+test('海坊主AI鬼火充足时施放巨浪，普攻优先选低于20%生命的敌人', () => {
+  const registry = new ContentRegistry(); registerSeaMonk(registry);
+  const definition = registry.getHero(seaMonkIds.hero);
+  const initial = state();
+  initial.units.b = { ...initial.units.b, heroId: seaMonkIds.hero };
+  initial.units.r = { ...initial.units.r, hp: 1900, stats: { ...initial.units.r.stats, hp: 10000 } };
+  initial.units.r2 = { ...unit('r2', 'red'), hp: 8000, stats: { ...unit('r2', 'red').stats, hp: 10000 } };
+  initial.sides.red.push('r2');
+
+  initial.resources.blue.fire = 3;
+  let intent = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(intent.skillId, seaMonkIds.ultimate);
+  assert.deepEqual(intent.targetIds, ['r', 'r2'], '巨浪覆盖全部存活敌人');
+
+  initial.resources.blue.fire = 0;
+  intent = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(intent.skillId, seaMonkIds.basic);
+  assert.deepEqual(intent.targetIds, ['r'], '优先锁定生命比例低于20%的敌人');
+});
+
+test('蝉冰雪女AI在鬼火不足且被缴械时转用息吹，其余条件施放永冬', () => {
+  const registry = new ContentRegistry(); registerCicadaSnowMaiden(registry);
+  registry.registerStatus({ id: 'test.disarm', category: 'control', dispellable: true, sealable: true,
+    durationOwner: 'target-turn', refreshPolicy: 'replace' });
+  const definition = registry.getHero(cicadaSnowMaidenIds.hero);
+  const initial = state();
+  initial.units.b = { ...unit('b', 'blue'), heroId: cicadaSnowMaidenIds.hero, skillLevel: 5, statuses: [{
+    instanceId: 'disarm', statusId: 'test.disarm', source, stacks: 1,
+    duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, values: { controlType: '缴械' },
+  }] };
+  initial.units.r2 = { ...unit('r2', 'red'), stats: { ...unit('r2', 'red').stats, attack: 8000 } };
+  initial.sides.red.push('r2');
+  initial.resources.blue.fire = 2;
+  let intent = definition.policy(createBattleContext(initial, () => .5, id => registry.getStatus(id)?.category), 'b');
+  assert.equal(intent.skillId, cicadaSnowMaidenIds.revive);
+  assert.deepEqual(intent.targetIds, ['b'], '无凝结友方可复活时，缴械分支仍能合法选择自身施放零火技能');
+
+  const enoughFire = { ...initial, resources: { ...initial.resources, blue: { ...initial.resources.blue, fire: 3 } } };
+  intent = definition.policy(createBattleContext(enoughFire, () => .5, id => registry.getStatus(id)?.category), 'b');
+  assert.equal(intent.skillId, cicadaSnowMaidenIds.ultimate);
+  assert.deepEqual(intent.targetIds, ['r2'], '永冬优先选择攻击最高的非阴阳师敌人');
+
+  const noDisarm = { ...initial, units: { ...initial.units,
+    b: { ...initial.units.b, statuses: [] } } };
+  intent = definition.policy(createBattleContext(noDisarm, () => .5, id => registry.getStatus(id)?.category), 'b');
+  assert.equal(intent.skillId, cicadaSnowMaidenIds.basic, '鬼火不足且未缴械时回普攻');
 });
 
 test('多荒骷髅阵容中唯一被动只由队伍顺位第一名生效', () => {
@@ -6392,13 +6698,223 @@ test('阿修罗进入疯狂后正确封印被动和御魂', () => {
     eventId: 'asura-final-sanity', phase: 'attack-start', type: 'attack-start',
     source: { kind: 'skill', id: asuraIds.basic, unitId: 'b' }, targetIds: ['r'],
   });
-  const madness = commands.find(command => command.type === 'add-status' && command.instance.statusId === asuraIds.madness);
+  assert.ok(commands.some(command => command.type === 'add-status' && command.instance.statusId === asuraIds.sanityGuard));
+  const applied = applyEffectCommands(initial, commands, 'attack-start', 'asura-attack', id => registry.getStatus(id)).state;
+  assert.equal(applied.units.b.statuses.some(status => status.statusId === asuraIds.sanity), false,
+    '理性归零时移除理性计数标记');
+  const madnessCommands = definition.handlers['attack-end'].handle(createBattleContext(applied), {
+    eventId: 'asura-final-sanity-end', phase: 'attack-end', type: 'attack-ended', source: { kind: 'skill', id: asuraIds.basic, unitId: 'b' },
+    actionKind: 'basic', hitCount: 1, targetHealthChanges: [],
+  });
+  const madness = madnessCommands.find(command => command.type === 'add-status' && command.instance.statusId === asuraIds.madness);
   assert.equal(madness.instance.values.sealPassives, true);
   assert.equal(madness.instance.values.sealSouls, true);
-  const applied = applyEffectCommands(initial, commands, 'attack-start', 'asura-madness', id => registry.getStatus(id)).state;
-  const activeMadness = applied.units.b.statuses.find(status => status.statusId === asuraIds.madness);
+  const activated = applyEffectCommands(applied, madnessCommands, 'attack-end', 'asura-madness', id => registry.getStatus(id)).state;
+  const activeMadness = activated.units.b.statuses.find(status => status.statusId === asuraIds.madness);
   assert.equal(activeMadness.values.sealPassives, true);
   assert.equal(activeMadness.values.sealSouls, true);
+});
+
+test('阿修罗诛灭永久降低攻击但不阻止复活，速度领先时增伤10%', () => {
+  const registry = new ContentRegistry(); registerAsura(registry);
+  const definition = registry.getHero(asuraIds.hero), resolveStatus = id => registry.getStatus(id);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: asuraIds.hero,
+    stats: { ...initial.units.b.stats, speed: 150 } };
+  const markCommands = definition.handlers['unit-defeated'].handle(createBattleContext(initial), {
+    eventId: 'asura-doom-mark', phase: 'unit-defeated', type: 'unit-defeated', unitId: 'r',
+    defeatedBy: { kind: 'skill', id: asuraIds.ultimate, unitId: 'b' },
+  });
+  assert.equal(markCommands[0].instance.statusId, asuraIds.doom);
+  assert.equal(registry.getStatus(asuraIds.doom).preventsRevive, undefined,
+    '诛灭是永久降攻印记，文本没有禁止复活');
+  initial = applyEffectCommands(initial, markCommands, 'unit-defeated', 'asura-doom-mark', resolveStatus).state;
+  const { effectiveStats } = require(path + 'mechanics/stats.js');
+  assert.equal(effectiveStats(initial.units.r).attack, unit('r', 'red').stats.attack * .5);
+  initial.units.b = { ...initial.units.b, stats: { ...initial.units.b.stats, speed: 120 } };
+  assert.ok(Math.abs(definition.modifyOutgoingDamage(initial.units.b, initial.units.r, 100, 'normal', initial) - 110) < 1e-9);
+  initial.units.r = { ...initial.units.r, stats: { ...initial.units.r.stats, speed: 140 } };
+  assert.equal(definition.modifyOutgoingDamage(initial.units.b, initial.units.r, 100, 'normal', initial), 100);
+});
+
+test('阿修罗理性动态压制伤害、控制免疫及友方回合理性恢复治疗', () => {
+  const registry = new ContentRegistry(); registerAsura(registry);
+  registry.registerStatus({ id: 'test.asura-stun', category: 'control', dispellable: true, sealable: true,
+    durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true });
+  const definition = registry.getHero(asuraIds.hero), resolveStatus = id => registry.getStatus(id);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: asuraIds.hero, skillLevel: 5,
+    skillLevels: { [asuraIds.sanitySkill]: 5 }, hp: 5000 };
+  initial.units.r2 = { ...unit('r2', 'red') }; initial.units.r3 = { ...unit('r3', 'red') };
+  initial.units.friend = { ...unit('friend', 'blue'), hp: 1000 };
+  initial.sides.red = ['r', 'r2', 'r3']; initial.sides.blue = ['b', 'friend'];
+  initial = applyEffectCommands(initial, definition.initialize(createBattleContext(initial), 'b'),
+    'battle-start', 'asura-sanity-init', resolveStatus).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === asuraIds.sanity).stacks, 9);
+
+  const attackStart = definition.handlers['attack-start'].handle(createBattleContext(initial), {
+    eventId: 'asura-aoe-start', phase: 'attack-start', type: 'attack-start',
+    source: { kind: 'skill', id: asuraIds.ultimate, unitId: 'b' }, targetIds: ['r', 'r2', 'r3'],
+  });
+  initial = applyEffectCommands(initial, attackStart, 'attack-start', 'asura-aoe-cost', resolveStatus).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === asuraIds.sanity).stacks, 6);
+  assert.ok(initial.units.b.statuses.some(status => status.statusId === asuraIds.sanityGuard));
+  const blocked = applyEffectCommands(initial, [{ type: 'apply-control', source, targetId: 'b', instance: {
+    instanceId: 'asura-stun', statusId: 'test.asura-stun', source, stacks: 1,
+    duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, values: { controlType: '眩晕' },
+  } }], 'control-application', 'asura-control-check', resolveStatus);
+  assert.ok(blocked.events.some(event => event.type === 'control-blocked' && event.protectionStatusId === asuraIds.sanityGuard));
+
+  const { effectiveDamageMultiplier, effectiveDamageTakenMultiplier } = require(path + 'mechanics/stats.js');
+  assert.equal(effectiveDamageMultiplier(initial.units.b), .64, '六点理性各压制6%输出');
+  assert.ok(Math.abs(effectiveDamageTakenMultiplier(initial.units.b) - .82) < 1e-9, '失去三点理性后五级减伤18%');
+
+  const restored = definition.handlers['turn-end'].handle(createBattleContext(initial), {
+    eventId: 'asura-friend-end', phase: 'turn-end', type: 'turn-ended', unitId: 'friend', source,
+  });
+  assert.ok(restored.some(command => command.type === 'change-status-stacks' && command.targetId === 'b' && command.amount === 1));
+  assert.ok(restored.some(command => command.type === 'heal' && command.targetId === 'b' && command.amount === 800));
+  const emperor = { ...unit('emperor', 'blue'), heroId: emperorOfHeavenIds.hero };
+  initial.units.emperor = emperor; initial.sides.blue.push('emperor');
+  const emperorEnd = definition.handlers['turn-end'].handle(createBattleContext(initial), {
+    eventId: 'asura-emperor-end', phase: 'turn-end', type: 'turn-ended', unitId: 'emperor', source,
+  });
+  assert.ok(emperorEnd.some(command => command.type === 'change-status-stacks' && command.targetId === 'b' && command.amount === 3));
+  assert.ok(emperorEnd.some(command => command.type === 'heal' && command.targetId === 'b' && command.amount === 2400));
+});
+
+test('阿修罗炼狱虐杀按理性追加段数，无间杀戮随机重击并由帝释天回合解除', () => {
+  const registry = new ContentRegistry(); registerAsura(registry);
+  const definition = registry.getHero(asuraIds.hero), resolveStatus = id => registry.getStatus(id);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: asuraIds.hero, skillLevel: 5,
+    skillLevels: { [asuraIds.sanitySkill]: 5, [asuraIds.ultimate]: 5 }, statuses: [{
+      instanceId: 'asura-sanity', statusId: asuraIds.sanity, source: { kind: 'skill', id: asuraIds.sanitySkill, unitId: 'b' },
+      stacks: 9, duration: { kind: 'permanent' }, modifiers: [{ stat: 'damage', operation: 'percent', amount: -.06, perStack: true }],
+    }] };
+  initial.units.r2 = { ...unit('r2', 'red') }; initial.units.r3 = { ...unit('r3', 'red') };
+  initial.sides.red = ['r', 'r2', 'r3']; initial.resources.blue.fire = 3;
+  const ultimate = definition.skills.find(skill => skill.id === asuraIds.ultimate);
+  assert.equal(ultimate.resourceCost.amount, 3);
+  const intent = { actorId: 'b', skillId: asuraIds.ultimate, targetIds: ['r', 'r2', 'r3'], selectedTargetId: 'r',
+    shape: 'all-enemies', targetRelation: 'enemy' };
+  const attacks = ultimate.execute(createBattleContext(initial, () => .5), intent, { ratio: 3.15, chaseRatio: .63 });
+  assert.equal(attacks.filter(command => command.type === 'deal-damage').length, 9,
+    '3段全体主攻消耗3点理性，其余6点用于选中目标的追击');
+  assert.equal(attacks.filter(command => command.type === 'deal-damage' && command.targetId === 'r').length, 7);
+
+  const madnessStatus = registry.getStatus(asuraIds.madness);
+  const madness = { instanceId: 'asura-madness', statusId: asuraIds.madness,
+    source: { kind: 'skill', id: asuraIds.madnessSkill, unitId: 'b' }, stacks: 1, duration: { kind: 'permanent' },
+    values: { sealPassives: true, sealSouls: true } };
+  const randomAction = madnessStatus.selectAction(createBattleContext({ ...initial,
+    units: { ...initial.units, b: { ...initial.units.b, statuses: [...initial.units.b.statuses, madness] } } }),
+  { ...initial.units.b, statuses: [...initial.units.b.statuses, madness] }, madness);
+  assert.equal(randomAction.skillId, asuraIds.madnessSkill);
+  assert.equal(randomAction.targetIds.includes('b'), false);
+  const freeAttack = registry.getStatus(asuraIds.madness).grantedSkills[0].execute(
+    createBattleContext(initial, () => 0), randomAction, { ratio: 2.63, rainRatio: 1.13 });
+  assert.equal(freeAttack.length, 3, '自身外非召唤物中1名承受巨剑，其余2名承受剑雨');
+  assert.equal(freeAttack.find(command => command.targetId === 'r').amount > freeAttack.find(command => command.targetId === 'r2').amount, true);
+
+  const lowSanity = { ...initial, units: { ...initial.units,
+    emperor: { ...unit('emperor', 'blue'), heroId: emperorOfHeavenIds.hero },
+    b: { ...initial.units.b, statuses: [{ ...initial.units.b.statuses[0], stacks: 6 }, madness], hp: 4000 } },
+    sides: { ...initial.sides, blue: [...initial.sides.blue, 'emperor'] } };
+  const replenished = definition.handlers['turn-end'].handle(createBattleContext(lowSanity), {
+    eventId: 'asura-emperor-recover', phase: 'turn-end', type: 'turn-ended', unitId: 'emperor', source,
+  });
+  assert.ok(replenished.some(command => command.type === 'change-status-stacks' && command.amount === 3));
+  assert.ok(replenished.some(command => command.type === 'remove-status-instances' && command.instanceIds.includes('asura-madness')));
+});
+
+test('入内雀开战附身最高攻击友方，致命保护转换腐血且腐化扣生命上限', () => {
+  const registry = new ContentRegistry(); registerInnejaku(registry);
+  const definition = registry.getHero(innejakuIds.hero), resolveStatus = id => registry.getStatus(id);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: innejakuIds.hero, stats: { ...initial.units.b.stats, defense: 500 } };
+  initial.units.ally = { ...unit('ally', 'blue'), stats: { ...unit('ally', 'blue').stats, attack: 6000 } };
+  initial.sides.blue.push('ally');
+  const open = definition.handlers['battle-start'].handle(createBattleContext(initial), {
+    eventId: 'innejaku-open', phase: 'battle-start', type: 'battle-started', round: 1,
+  });
+  assert.equal(open.length, 1);
+  assert.equal(open[0].targetId, 'ally', '附身应给攻击最高友方');
+  initial = applyEffectCommands(initial, open, 'battle-start', 'innejaku-open', resolveStatus).state;
+  const protection = definition.interceptIncomingDamage(initial, unit('enemy', 'red'), initial.units.ally, 12000, 'normal');
+  assert.equal(protection.amount, 0, '致命攻击被附身拦截');
+  assert.ok(protection.effects.some(command => command.type === 'reduce-max-health'));
+  assert.ok(protection.effects.some(command => command.type === 'add-status' && command.instance.statusId === innejakuIds.blood));
+
+  initial.units.ally.statuses = [];
+  initial.resources.blue.fire = 3;
+  const corrupt = definition.skills.find(skill => skill.id === innejakuIds.corruptSkill);
+  const commands = corrupt.execute(createBattleContext(initial), { actorId: 'b', skillId: innejakuIds.corruptSkill,
+    targetIds: ['ally'], shape: 'single', targetRelation: 'ally' }, { ratio: 10 });
+  assert.ok(commands.some(command => command.type === 'reduce-max-health' && command.amount === 5000));
+  const blood = commands.find(command => command.type === 'add-status' && command.instance.statusId === innejakuIds.blood);
+  assert.equal(blood.instance.values.shieldRemaining, 15000, '每点腐血可吸收3点伤害');
+  assert.ok(blood.instance.modifiers.some(modifier => modifier.stat === 'damage' && modifier.amount === .25));
+});
+
+test('空相面灵气阵亡叠未面，梦虚空境推进全队行动条并标记高血量敌人', () => {
+  const registry = new ContentRegistry(); registerEmptyFaceAura(registry);
+  const definition = registry.getHero(emptyFaceAuraIds.hero);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: emptyFaceAuraIds.hero, skillLevel: 2,
+    stats: { ...initial.units.b.stats, attack: 10000 },
+    skillLevels: { [emptyFaceAuraIds.passive]: 2, [emptyFaceAuraIds.dream]: 2 } };
+  initial.units.ally = unit('ally', 'blue'); initial.units.r = { ...initial.units.r, hp: 6000 };
+  initial.units.r2 = { ...unit('r2', 'red'), hp: 8000 };
+  initial.sides.blue.push('ally'); initial.sides.red.push('r2'); initial.resources.blue.fire = 3;
+  const gained = definition.handlers['unit-defeated'].handle(createBattleContext(initial), {
+    eventId: 'face-mask-gain', phase: 'unit-defeated', type: 'unit-defeated', unitId: 'r',
+  });
+  assert.equal(gained.length, 1);
+  initial = applyEffectCommands(initial, gained, 'unit-defeated', 'face-mask-gain', id => registry.getStatus(id)).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === emptyFaceAuraIds.masks).stacks, 1);
+  const selected = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(selected.skillId, emptyFaceAuraIds.dream);
+  assert.equal(selected.targetIds[0], 'r2', '三技能按绝对生命值优先选择目标');
+  const dream = definition.skills.find(skill => skill.id === emptyFaceAuraIds.dream);
+  const commands = dream.execute(createBattleContext(initial), selected, {});
+  assert.equal(commands.filter(command => command.type === 'change-action-gauge').length, 2);
+  const eye = commands.find(command => command.type === 'add-status' && command.instance.statusId === emptyFaceAuraIds.oneEye);
+  assert.equal(eye.instance.duration.remaining, 3);
+  assert.equal(eye.instance.values.resentment, 0, '挂上一线目时怨痕尚未增加');
+  const resentment = definition.handlers['turn-start'].handle(createBattleContext({ ...initial,
+    units: { ...initial.units, r2: { ...initial.units.r2, statuses: [eye.instance] } } }), {
+    eventId: 'face-resentment-turn', phase: 'turn-start', type: 'turn-started', unitId: 'b',
+  });
+  assert.equal(resentment[0].instance.values.resentment, 13100, '二级梦境在空相面灵气回合开始刻入131%攻击怨痕');
+});
+
+test('空相面灵气四张未面抵挡致命伤害转黑光并按等级开放轮回追击', () => {
+  const registry = new ContentRegistry(); registerEmptyFaceAura(registry);
+  const definition = registry.getHero(emptyFaceAuraIds.hero), resolveStatus = id => registry.getStatus(id);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: emptyFaceAuraIds.hero, skillLevel: 3, hp: 2500,
+    skillLevels: { [emptyFaceAuraIds.passive]: 3 }, statuses: [{ instanceId: 'face-masks', statusId: emptyFaceAuraIds.masks,
+      source: { kind: 'skill', id: emptyFaceAuraIds.passive, unitId: 'b' }, stacks: 4, duration: { kind: 'permanent' },
+      modifiers: [{ stat: 'defenseIgnore', operation: 'flat', amount: 50, perStack: true }] },
+    { instanceId: 'rebirth-ready', statusId: emptyFaceAuraIds.rebirth,
+      source: { kind: 'skill', id: emptyFaceAuraIds.passive, unitId: 'b' }, stacks: 1, duration: { kind: 'permanent' } }] };
+  initial.units.r2 = { ...unit('r2', 'red'), hp: 9000 }; initial.sides.red.push('r2');
+  initial.resources.blue.fire = 3;
+  const fatal = applyEffectCommands(initial, [{ type: 'deal-damage', source: { kind: 'skill', id: 'enemy.attack', unitId: 'r' },
+    targetId: 'b', amount: 3000, precalculated: true }], 'hit', 'face-lethal', resolveStatus);
+  assert.equal(fatal.state.units.b.hp, 1, '四张未面状态只把致死伤害压到1生命');
+  const removed = fatal.events.find(event => event.type === 'status-removed' && event.statusId === emptyFaceAuraIds.rebirth);
+  const transform = definition.handlers['effect-resolution'].handle(createBattleContext(fatal.state), removed);
+  initial = applyEffectCommands(fatal.state, transform, 'effect-resolution', 'face-dark', resolveStatus).state;
+  assert.equal(initial.units.b.hp, 10000, '进入黑光时恢复生命上限');
+  assert.ok(initial.units.b.statuses.some(status => status.statusId === emptyFaceAuraIds.dark));
+  const selected = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(selected.skillId, emptyFaceAuraIds.return);
+  const follow = definition.skills.find(skill => skill.id === emptyFaceAuraIds.return);
+  const commands = follow.execute(createBattleContext(initial, () => .5), selected, { ratio: .63 });
+  assert.equal(commands.filter(command => command.type === 'deal-damage').length, 5,
+    '三级表里之相的基础段加每张未面各一段');
 });
 
 test('荒骷髅伤害分担按花吻烈魂等级生效，且不致死、受封印和不可分担限制', () => {
@@ -6865,7 +7381,7 @@ test('千姬召戟后的潮声、受击回复、控制免疫和敌方施术推�
   '敌方召唤物回合结束不推条');
 });
 
-test('千姬持戟汐梦在敌方回合末扣火，五级仅在实际扣至0时冻结非怪物', () => {
+test('千姬持戟汐梦在敌方回合末扣火，五级在行动后鬼火为0时冻结非怪物', () => {
   const registry = new ContentRegistry(); registerChihime(registry);
   const definition = registry.getHero(chihimeIds.hero);
   const makeTurn = (fire, kind = 'shikigami') => {
@@ -6897,7 +7413,10 @@ test('千姬持戟汐梦在敌方回合末扣火，五级仅在实际扣至0时�
   const empty = makeTurn(0);
   const emptyCommands = definition.handlers['turn-end'].handle(createBattleContext(empty, () => 0,
     id => registry.getStatus(id)?.category), endEvent);
-  assert.ok(!emptyCommands.some(command => command.type === 'apply-control'), '目标原本0火时没有“扣至0”事件');
+  assert.ok(emptyCommands.some(command => command.type === 'apply-control'
+    && command.instance.statusId === chihimeIds.deepFreeze), '目标行动前已为0火，行动后仍为0火，应触发深度冰冻');
+  assert.equal(emptyCommands.some(command => command.type === 'change-resource' && command.amount === 0), false,
+    '0火无需产生鬼火变更事件');
 
   const monster = makeTurn(3, 'monster');
   const monsterCommands = definition.handlers['turn-end'].handle(createBattleContext(monster, () => 0,
@@ -6905,7 +7424,7 @@ test('千姬持戟汐梦在敌方回合末扣火，五级仅在实际扣至0时�
   assert.ok(!monsterCommands.some(command => command.type === 'apply-control'), '深度冰冻不作用于怪物');
 });
 
-test('千姬每点耗火按等级叠潮声，七层返火并叠加最多五层全队永久增伤', () => {
+test('千姬每累计七层潮声返3火、重置潮声并叠加最多五层全队永久增伤', () => {
   const registry = new ContentRegistry(); registerChihime(registry);
   const definition = registry.getHero(chihimeIds.hero);
   let initial = state();
@@ -6925,11 +7444,28 @@ test('千姬每点耗火按等级叠潮声，七层返火并叠加最多五层�
   assert.ok(commands.some(command => command.type === 'change-resource' && command.side === 'blue' && command.amount === 3));
   const gained = applyEffectCommands(initial, commands, 'resource-payment', payment.eventId,
     id => registry.getStatus(id)).state;
-  assert.equal(gained.units.h.statuses.find(status => status.statusId === chihimeIds.tideSound).stacks, 7);
+  assert.equal(gained.units.h.statuses.some(status => status.statusId === chihimeIds.tideSound), false,
+    '达到七层后潮声计数重置，才能开始下一轮累计');
   assert.equal(gained.units.b.statuses.find(status => status.statusId === chihimeIds.teamTideBonus).stacks, 1);
   assert.equal(gained.resources.blue.fire, 5, '七层潮声额外返还3火');
   assert.ok(Math.abs(definition.modifyOutgoingDamage(gained.units.b, gained.units.r, 100, 'normal', gained) - 115) < 1e-9);
   assert.equal(registry.getStatus(chihimeIds.teamTideBonus).maxStacks, 5);
+
+  const nextCycle = { ...initial, units: { ...initial.units,
+    b: { ...initial.units.b, statuses: [...initial.units.b.statuses, { instanceId: 'tide-bonus',
+      statusId: chihimeIds.teamTideBonus, source: { kind: 'skill', id: chihimeIds.summon, unitId: 'b' },
+      stacks: 4, duration: { kind: 'permanent' } }] } } };
+  const nextCommands = definition.handlers['resource-payment'].handle(createBattleContext(nextCycle, () => .99), payment);
+  const fifthReward = applyEffectCommands(nextCycle, nextCommands, 'resource-payment', payment.eventId,
+    id => registry.getStatus(id)).state;
+  assert.equal(fifthReward.units.b.statuses.find(status => status.statusId === chihimeIds.teamTideBonus).stacks, 5,
+    '重复跨过七层时全队永久增伤累积到五层上限');
+  assert.equal(fifthReward.resources.blue.fire, 5, '第五轮仍返还3火');
+  const ai = definition.policy;
+  assert.equal(ai(createBattleContext(nextCycle, () => .5), 'b').skillId, chihimeIds.dream,
+    '全队增伤未满五层时仍优先汐梦');
+  assert.equal(ai(createBattleContext(fifthReward), 'b').skillId, chihimeIds.release,
+    '全队增伤满五层后按社区AI收回海原贝戟');
 
   const sealed = { ...initial, units: { ...initial.units, b: { ...initial.units.b, statuses: [
     ...initial.units.b.statuses, { instanceId: 'passive-seal', statusId: passiveSuppressionStatusId,
@@ -6976,12 +7512,16 @@ test('千姬持戟才能施放永生之汐，按悲歌层数增伤并消耗2火�
 
 test('食灵备餐按等级结算并在三个全局单位回合后发动飨食', () => {
   const registry = new ContentRegistry(); registerFoodSpirit(registry);
+  registry.registerStatus({ id: 'food.test-healing-reduction', category: 'debuff', dispellable: true, sealable: true,
+    durationOwner: 'target-turn', refreshPolicy: 'replace' });
   const resolveStatus = id => registry.getStatus(id);
   let initial = state();
   initial.units.b = { ...initial.units.b, heroId: foodSpiritIds.hero, skillLevel: 5,
     skillLevels: { [foodSpiritIds.basic]: 5, [foodSpiritIds.passive]: 5, [foodSpiritIds.meal]: 5 },
     stats: { ...initial.units.b.stats, attack: 1000 }, hp: 10000 };
-  initial.units.b2 = { ...unit('b2', 'blue'), stats: { ...unit('b2', 'blue').stats, hp: 10000, critDamage: 2 }, hp: 5000 };
+  initial.units.b2 = { ...unit('b2', 'blue'), stats: { ...unit('b2', 'blue').stats, hp: 10000, critDamage: 2 }, hp: 5000,
+    statuses: [{ instanceId: 'food-healing-reduction', statusId: 'food.test-healing-reduction', source,
+      stacks: 1, duration: { kind: 'permanent' }, modifiers: [{ stat: 'healingTaken', operation: 'percent', amount: -.75 }] }] };
   initial.units.h = { ...unit('h', 'blue'), unitKind: 'summon' };
   initial.units.r = { ...initial.units.r, stats: { ...initial.units.r.stats, hp: 100000, defense: 0 }, hp: 100000 };
   initial.units.r2 = { ...unit('r2', 'red'), stats: { ...unit('r2', 'red').stats, hp: 100000, defense: 0 }, hp: 100000 };
@@ -6996,34 +7536,63 @@ test('食灵备餐按等级结算并在三个全局单位回合后发动飨食',
     targetIds: ['h'], shape: 'single', targetRelation: 'ally' }), [], '不能给召唤物备餐');
   const mealCommands = meal.execute(createBattleContext(initial), { actorId: 'b', skillId: foodSpiritIds.meal,
     targetIds: ['b2'], shape: 'single', targetRelation: 'ally' });
-  const served = applyEffectCommands(initial, mealCommands, 'action-resolution', 'food-meal', resolveStatus).state;
+  let served = applyEffectCommands(initial, mealCommands, 'action-resolution', 'food-meal', resolveStatus).state;
   assert.equal(served.units.b.hp, 8500, '消耗施放者当前生命的15%');
   assert.equal(effectiveDamageMultiplier(served.units.b2), .7, '用餐期间造成伤害降低30%');
   assert.equal(effectiveDamageTakenMultiplier(served.units.b2), .6, '用餐期间受到伤害降低40%');
 
+  for (const [index, amount] of [[1, 1000], [2, 500]]) {
+    const damage = { eventId: `food-diner-damage-${index}`, phase: 'hit', type: 'damage', source: { kind: 'skill',
+      id: 'food.diner-test', unitId: 'b2' }, targetId: 'r', amount, hpLost: amount, damageKind: 'normal' };
+    const record = definition.handlers.hit.handle(createBattleContext(served), damage);
+    assert.ok(record?.some(command => command.type === 'add-status' && command.instance.values.damageRecord === (index === 1 ? 1000 : 1500)));
+    served = applyEffectCommands(served, record, 'hit', damage.eventId, resolveStatus).state;
+  }
+
   const endEvent = (unitId, eventId) => ({ eventId, phase: 'turn-end', type: 'turn-ended', unitId,
     source: { kind: 'unit', id: unitId } });
   const ate = definition.handlers['turn-end'].handle(createBattleContext(served), endEvent('b2', 'food-eat'));
-  assert.ok(ate.some(command => command.type === 'heal' && command.targetId === 'b2' && command.amount === 780),
-    '五级备餐为全体友方治疗食灵攻击的78%');
-  let fed = applyEffectCommands(served, ate, 'turn-end', 'food-eat', resolveStatus).state;
+  assert.ok(ate.some(command => command.type === 'restore-health' && command.targetId === 'b2' && command.amount === 780),
+    '五级备餐直接恢复食灵攻击的78%生命，不受减疗影响');
+  let fed = applyEffectCommands(served, ate, 'turn-end', 'food-eat', resolveStatus);
+  assert.equal(fed.events.some(event => event.type === 'healing'), false, '恢复不产生治疗事件');
+  assert.equal(fed.events.find(event => event.type === 'health-restored' && event.targetId === 'b2').hpGained, 780);
+  fed = fed.state;
   assert.ok(fed.units.b2.statuses.some(status => status.statusId === foodSpiritIds.protection), '吃下料理后获得单次控制保护');
   assert.equal(fed.units.b2.statuses.find(status => status.statusId === foodSpiritIds.satiated).values.remainingTurns, 3);
+  assert.equal(fed.units.b.statuses.find(status => status.statusId === foodSpiritIds.attackGrowth).stacks, 1,
+    '友方进入饱食时立即为食灵增加一层攻击');
 
   for (const [index, expectedRemaining] of [[1, 2], [2, 1]]) {
     const tick = definition.handlers['turn-end'].handle(createBattleContext(fed, () => .5), endEvent('r', `food-tick-${index}`));
     fed = applyEffectCommands(fed, tick, 'turn-end', `food-tick-${index}`, resolveStatus).state;
     assert.equal(fed.units.b2.statuses.find(status => status.statusId === foodSpiritIds.satiated).values.remainingTurns, expectedRemaining);
   }
+  const beforeFeast = structuredClone(fed);
   const feast = definition.handlers['turn-end'].handle(createBattleContext(fed, () => .5), endEvent('r', 'food-feast'));
+  assert.ok(feast.some(command => command.type === 'deal-damage' && command.precalculated
+    && command.targetId === 'r' && command.amount === 1777.5), '飨食读取用餐友方造成的1500伤害，158%均分并受食灵50%增伤');
   assert.equal(feast.filter(command => command.type === 'deal-damage' && command.damageKind === 'true').length, 2,
     '五级飨食按敌人数对每个敌方追加真实伤害');
   assert.ok(feast.some(command => command.type === 'deal-damage' && command.targetId === 'r' && command.amount === 1716),
-    '食灵已因友方饱食获得30%攻击成长后再计算真实伤害');
+    '食灵已在友方进入饱食时获得30%攻击成长后再计算真实伤害');
+  assert.ok(feast.filter(command => command.type === 'deal-damage').every(command => command.suppressSoulTriggers
+    && command.suppressSourcePassiveTriggers && command.suppressTargetPassiveTriggers), '飨食跳过御魂及来源/受击方被动');
   fed = applyEffectCommands(fed, feast, 'turn-end', 'food-feast', resolveStatus).state;
   assert.ok(!fed.units.b2.statuses.some(status => status.statusId === foodSpiritIds.satiated));
-  assert.equal(fed.units.b.statuses.find(status => status.statusId === foodSpiritIds.attackGrowth).stacks, 1,
-    '友方进入饱食时食灵获得一层攻击成长');
+  assert.equal(fed.units.b.statuses.find(status => status.statusId === foodSpiritIds.attackGrowth).stacks, 1);
+
+  const overCap = beforeFeast;
+  const satiated = { ...overCap.units.b2.statuses.find(status => status.statusId === foodSpiritIds.satiated),
+    values: { ...overCap.units.b2.statuses.find(status => status.statusId === foodSpiritIds.satiated).values,
+      remainingTurns: 1, damageRecord: 1000000 } };
+  overCap.units.b2.statuses = [...overCap.units.b2.statuses.filter(status => status.statusId !== foodSpiritIds.satiated), satiated];
+  const cappedFeast = definition.handlers['turn-end'].handle(createBattleContext(overCap), endEvent('r', 'food-cap'));
+  assert.equal(cappedFeast.filter(command => command.type === 'deal-damage' && command.precalculated
+    && command.damageKind !== 'true').length, 2);
+  assert.ok(cappedFeast.filter(command => command.type === 'deal-damage' && command.precalculated
+    && command.damageKind !== 'true').every(command => command.amount === 270000),
+  '每名敌方的158%基础飨食伤害先封顶于我方初始攻击总和3000%，再乘五级50%增伤');
 });
 
 test('食灵五级热浪只在最高暴伤友方选择单体敌方目标时确定协战', () => {
@@ -7412,4 +7981,811 @@ test('帝释天大招对金莲目标追加两段，怪物金莲追加真实伤�
   const freeCast = definition.handlers['effect-resolution'].handle(createBattleContext(removed.state), expiry);
   assert.ok(freeCast.some(command => command.type === 'schedule-action' && command.freeCast));
   assert.ok(freeCast.some(command => command.type === 'add-status' && command.instance.statusId === emperorOfHeavenIds.freeUltimate));
+});
+
+test('神启荒星爆按间接伤害结算，敌方回合消耗鬼火则跳过星爆', () => {
+  const registry = new ContentRegistry(); registerShinkiHuang(registry);
+  const definition = registry.getHero(shinkiHuangIds.hero);
+  const resolveStatus = id => registry.getStatus(id);
+  const source = { kind: 'skill', id: shinkiHuangIds.realm, unitId: 'b' };
+  const river = { instanceId: `${shinkiHuangIds.river}:b`, statusId: shinkiHuangIds.river,
+    source, stacks: 1, duration: { kind: 'permanent' }, values: { remaining: 6, burstCount: 0 } };
+  const tracker = { instanceId: `${shinkiHuangIds.enemyTurn}:r`, statusId: shinkiHuangIds.enemyTurn,
+    source, stacks: 1, duration: { kind: 'count', remaining: 1, owner: 'target-turn' }, values: { fireSpent: false } };
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: shinkiHuangIds.hero, skillLevel: 2,
+    skillLevels: { [shinkiHuangIds.realm]: 2 }, statuses: [river] };
+  initial.units.r = { ...initial.units.r, statuses: [tracker] };
+
+  const turnEnd = { eventId: 'shinki-enemy-turn-end', phase: 'turn-end', type: 'turn-ended', unitId: 'r', source };
+  const burst = definition.handlers['turn-end'].handle(createBattleContext(initial, () => .5), turnEnd);
+  const applied = applyEffectCommands(initial, burst, 'turn-end', 'shinki-starburst', resolveStatus);
+  assert.ok(applied.events.some(event => event.type === 'life-lost' && event.source.id === shinkiHuangIds.realm
+    && event.targetId === 'r' && event.lifeLossKind === 'indirect'), '星爆以间接生命损失结算');
+  assert.equal(applied.events.some(event => event.type === 'damage' && event.source.id === shinkiHuangIds.realm), false,
+    '间接星爆不冒充普通伤害事件');
+  assert.ok(applied.state.units.b.statuses.some(status => status.statusId === shinkiHuangIds.starPower));
+
+  const rankFiveState = { ...initial, units: { ...initial.units, b: { ...initial.units.b, skillLevel: 5,
+    skillLevels: { [shinkiHuangIds.realm]: 5 } } } };
+  const rankFiveBurst = definition.handlers['turn-end'].handle(createBattleContext(rankFiveState, () => .5), turnEnd);
+  const rankFiveApplied = applyEffectCommands(rankFiveState, rankFiveBurst, 'turn-end', 'shinki-starburst-r5', resolveStatus);
+  const suppressedLoss = rankFiveApplied.events.find(event => event.type === 'life-lost' && event.targetId === 'r');
+  assert.ok(suppressedLoss?.suppressTargetPassiveTriggers, '五级星爆将封被动标记传递到间接伤害事件');
+  const passiveDispatcher = new EventDispatcher();
+  passiveDispatcher.register({ id: 'hero:2:life-lost-passive-test', phase: 'effect-resolution', priority: 1,
+    handle: () => [{ type: 'change-resource', source, side: 'red', resourceId: 'fire', amount: 1 }] });
+  const settledLoss = settleEvents(rankFiveApplied.state, [suppressedLoss], passiveDispatcher, () => .5,
+    undefined, resolveStatus);
+  assert.equal(settledLoss.state.resources.red.fire, 0, '五级星爆的间接伤害跳过受击方被动监听');
+
+  const payment = { eventId: 'shinki-fire-payment', phase: 'resource-payment', type: 'resource-changed',
+    source: { kind: 'skill', id: 'enemy-skill', unitId: 'r' }, resourceId: 'fire', before: 3, after: 1 };
+  const markSpent = definition.handlers['resource-payment'].handle(createBattleContext(initial), payment);
+  const spentState = applyEffectCommands(initial, markSpent, 'resource-payment', 'shinki-fire-spent', resolveStatus).state;
+  const skipped = definition.handlers['turn-end'].handle(createBattleContext(spentState, () => .5), turnEnd);
+  assert.equal(skipped.some(command => command.type === 'lose-life'), false, '本回合花费鬼火时不触发星爆');
+});
+
+test('绘世花鸟卷核对墨萦、画影标记与繁花治疗暴击传导', () => {
+  const registry = new ContentRegistry(); registerPaintingFlowerBird(registry);
+  const definition = registry.getHero(paintingFlowerBirdIds.hero), resolveStatus = id => registry.getStatus(id);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: paintingFlowerBirdIds.hero, skillLevel: 5, hp: 10000,
+    skillLevels: { [paintingFlowerBirdIds.basic]: 5, [paintingFlowerBirdIds.passive]: 5,
+      [paintingFlowerBirdIds.dream]: 5 }, stats: { ...initial.units.b.stats, crit: .5 } };
+  initial.units.b2 = { ...unit('b2', 'blue'), hp: 1000 };
+  initial.units.r2 = { ...unit('r2', 'red'), hp: 20000, stats: { ...unit('r2', 'red').stats, hp: 20000 } };
+  initial.sides.blue = ['b', 'b2']; initial.sides.red = ['r', 'r2']; initial.resources.blue.fire = 2;
+  const start = definition.handlers['battle-start'].handle(createBattleContext(initial), {
+    eventId: 'flower-start', phase: 'battle-start', type: 'battle-started', source,
+  });
+  initial = applyEffectCommands(initial, start, 'battle-start', 'flower-passive', resolveStatus).state;
+  const moYing = initial.units.b2.statuses.find(status => status.statusId === paintingFlowerBirdIds.moYing);
+  assert.equal(moYing.modifiers.find(modifier => modifier.stat === 'healingTaken').amount, .3);
+  assert.equal(moYing.modifiers.find(modifier => modifier.stat === 'resist').amount, .2);
+  assert.ok(initial.units.b2.statuses.some(status => status.statusId === paintingFlowerBirdIds.maxHealth));
+
+  const basicFallbackState = { ...initial, resources: { ...initial.resources, blue: { ...initial.resources.blue, fire: 0 } },
+    units: { ...initial.units, r: { ...initial.units.r, hp: 1000 } } };
+  const basicFallback = definition.policy(createBattleContext(basicFallbackState), 'b');
+  assert.equal(basicFallback.skillId, paintingFlowerBirdIds.basic);
+  assert.equal(basicFallback.targetIds[0], 'r', '无火且有低于20%生命目标时普攻优先收割');
+
+  const policy = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(policy.skillId, paintingFlowerBirdIds.dream);
+  assert.equal(policy.targetIds[0], 'r2', '未有逐墨時優先以繪夢浮生標記當前生命值最高敵方');
+  const dream = definition.skills.find(skill => skill.id === paintingFlowerBirdIds.dream);
+  assert.equal(dream.resourceCost.amount, 2, '绘梦浮生实际需要2点鬼火');
+  const dreamCommands = dream.execute(createBattleContext(initial), policy, {});
+  assert.ok(dreamCommands.some(command => command.type === 'add-status' && command.targetId === 'r2'
+    && command.instance.statusId === paintingFlowerBirdIds.ink));
+  assert.ok(dreamCommands.some(command => command.type === 'add-status' && command.targetId === 'b'
+    && command.instance.duration.remaining === 4));
+  assert.equal(dreamCommands.filter(command => command.type === 'add-status'
+    && command.instance.statusId === paintingFlowerBirdIds.paintingDamage)[0].instance.values.ratio, .2);
+  initial = applyEffectCommands(initial, dreamCommands, 'effect-resolution', 'flower-dream', resolveStatus).state;
+
+  const conduit = definition.handlers.hit.handle(createBattleContext(initial), {
+    eventId: 'flower-conduit-hit', phase: 'hit', type: 'damage', source: { kind: 'skill', id: 'test.damage', unitId: 'r' },
+    targetId: 'r', amount: 5000, hpLost: 5000, damageKind: 'normal',
+  });
+  assert.equal(conduit.length, 1);
+  assert.equal(conduit[0].targetId, 'r2');
+  assert.equal(conduit[0].amount, 1000, '非傳导伤害的20%传给逐墨目标');
+  assert.equal(conduit[0].suppressSoulTriggers, true);
+
+  const bloomPolicy = definition.policy(createBattleContext(initial), 'b');
+  assert.equal(bloomPolicy.skillId, paintingFlowerBirdIds.bloom);
+  assert.equal(bloomPolicy.targetIds[0], 'b2', '有逐墨时优先治疗生命比例最低的友方');
+  const bloom = definition.skills.find(skill => skill.id === paintingFlowerBirdIds.bloom);
+  const healCommands = bloom.execute(createBattleContext(initial, () => 0), bloomPolicy, {});
+  const healed = applyEffectCommands(initial, healCommands, 'effect-resolution', 'flower-bloom', resolveStatus,
+    undefined, undefined, (_healer, target, amount) => amount * effectiveHealingTakenMultiplier(target));
+  const healing = healed.events.find(event => event.type === 'healing' && event.source.id === paintingFlowerBirdIds.bloom);
+  assert.ok(healing && healing.amount > healing.requestedAmount, '繁花治疗按友方墨萦加成后记录实际治疗');
+  const critTransfer = definition.handlers['effect-resolution'].handle(createBattleContext(healed.state, () => 0), healing);
+  assert.equal(critTransfer[0].targetId, 'r2');
+  assert.equal(critTransfer[0].amount, healing.amount * .2, '治疗暴击以最终生效治疗量的20%传导');
+
+  const removedSource = { kind: 'skill', id: paintingFlowerBirdIds.dream, unitId: 'b' };
+  const dispelled = definition.handlers['effect-resolution'].handle(createBattleContext(initial), {
+    eventId: 'flower-painting-dispelled', phase: 'effect-resolution', type: 'status-removed',
+    source: removedSource, targetId: 'b', instanceId: 'painting', statusId: paintingFlowerBirdIds.painting, reason: 'dispelled',
+  });
+  assert.ok(dispelled.some(command => command.type === 'change-action-gauge' && command.targetId === 'b' && command.amount === 30),
+    '五级被动在画影非自身回合到期移除时推进30%行动条');
+  const expired = definition.handlers['status-expiration'].handle(createBattleContext(initial), {
+    eventId: 'flower-painting-expired', phase: 'status-expiration', type: 'status-removed',
+    source: removedSource, targetId: 'b', instanceId: 'painting', statusId: paintingFlowerBirdIds.painting, reason: 'expired',
+  });
+  assert.equal(expired?.some(command => command.type === 'change-action-gauge'), false, '画影自然在自身回合结束时不返条');
+});
+
+test('饭笥先机储备粮、食欲加层、两技能提速和10层自动吞食解控', () => {
+  const registry = new ContentRegistry(); registerFanShi(registry);
+  registry.registerStatus({ id: 'fan.test-stun', category: 'control', dispellable: true, sealable: true,
+    durationOwner: 'target-turn', refreshPolicy: 'replace' });
+  const resolveStatus = id => registry.getStatus(id);
+  const makeContext = battleState => createBattleContext(battleState, () => .5,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable,
+    unitId => battleState.units[unitId]?.statuses.some(status => registry.getStatus(status.statusId)?.category === 'control') ?? false);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: fanShiIds.hero, skillLevel: 5,
+    skillLevels: { [fanShiIds.basic]: 5, [fanShiIds.passive]: 5, [fanShiIds.ultimate]: 5 }, stats: { ...initial.units.b.stats, attack: 1000 } };
+  initial.units.b2 = { ...unit('b2', 'blue') };
+  initial.units.r = { ...initial.units.r, hp: 100000, stats: { ...initial.units.r.stats, hp: 100000, attack: 0 } };
+  initial.units.r2 = { ...unit('r2', 'red'), hp: 100000, stats: { ...unit('r2', 'red').stats, hp: 100000, attack: 0 } };
+  initial.sides.blue.push('b2'); initial.sides.red.push('r2'); initial.resources.blue.fire = 3;
+  const definition = registry.getHero(fanShiIds.hero);
+  const battleStart = definition.handlers['battle-start'].handle(makeContext(initial), {
+    eventId: 'fan-start', phase: 'battle-start', type: 'battle-started', source });
+  let begun = applyEffectCommands(initial, battleStart, 'battle-start', 'fan-start', resolveStatus).state;
+  assert.equal(begun.units.b.statuses.find(status => status.statusId === fanShiIds.reserve).stacks, 7,
+    '先机只初始化7层储备粮');
+  const statsAtSeven = effectiveStats(begun.units.b);
+  assert.ok(Math.abs(statsAtSeven.attack - 1700) < 1e-6, '储备粮每层提高10%攻击');
+  assert.ok(Math.abs(statsAtSeven.critDamage - 2.025) < 1e-6, '储备粮每层提高5%暴伤');
+
+  const duplicate = structuredClone(initial);
+  duplicate.units.b2 = { ...duplicate.units.b2, heroId: fanShiIds.hero, skillLevel: 5 };
+  const duplicateStart = definition.handlers['battle-start'].handle(makeContext(duplicate), {
+    eventId: 'fan-duplicate-start', phase: 'battle-start', type: 'battle-started', source });
+  const duplicateState = applyEffectCommands(duplicate, duplicateStart, 'battle-start', 'fan-duplicate-start', resolveStatus).state;
+  assert.equal(duplicateState.units.b.statuses.find(status => status.statusId === fanShiIds.reserve).stacks, 7);
+  assert.equal(duplicateState.units.b2.statuses.some(status => status.statusId === fanShiIds.reserve), false,
+    '唯一效果只由队伍顺位第一名饭笥先机获得储备粮');
+
+  const endEvent = unitId => ({ eventId: `fan-end-${unitId}`, phase: 'turn-end', type: 'turn-ended', unitId,
+    source: { kind: 'unit', id: unitId } });
+  const allyTurn = definition.handlers['turn-end'].handle(makeContext(begun), endEvent('b2'));
+  begun = applyEffectCommands(begun, allyTurn, 'turn-end', 'fan-ally-end', resolveStatus).state;
+  assert.equal(begun.units.b.statuses.find(status => status.statusId === fanShiIds.reserve).stacks, 8,
+    '非召唤友方回合结束时加1层');
+
+  const passive = definition.skills.find(skill => skill.id === fanShiIds.passive);
+  assert.equal(definition.policy(makeContext(begun), 'b').skillId, fanShiIds.passive,
+    '社区AI按优先使用2技能');
+  const mealCommands = passive.execute(makeContext(begun), {
+    actorId: 'b', skillId: fanShiIds.passive, targetIds: ['b'], shape: 'self', targetRelation: 'ally' });
+  begun = applyEffectCommands(begun, mealCommands, 'action-resolution', 'fan-meal', resolveStatus).state;
+  assert.equal(begun.units.b.statuses.find(status => status.statusId === fanShiIds.reserve).stacks, 10);
+  assert.ok(begun.units.b2.statuses.some(status => status.statusId === fanShiIds.speed
+    && status.modifiers[0].amount === 30), '主动2技能提升其他非召唤友方30速度');
+  assert.ok(begun.units.b.statuses.some(status => status.statusId === fanShiIds.appetite));
+
+  const enemyProcState = applyEffectCommands(begun, [{ type: 'change-status-stacks', source, targetId: 'b',
+    instanceId: `${fanShiIds.reserve}:b`, amount: -1 }], 'effect-resolution', 'fan-reset-food', resolveStatus).state;
+  const appetiteEnd = definition.handlers['turn-end'].handle(makeContext(enemyProcState), endEvent('r'));
+  assert.ok(appetiteEnd.some(command => command.type === 'schedule-action' && command.intent.skillId === fanShiIds.devour),
+    '处于食欲大增时，非召唤敌方回合结束也叠储备粮并触发10层吞食');
+
+  begun.units.b.statuses.push({ instanceId: 'fan-stun', statusId: 'fan.test-stun', source,
+    stacks: 1, duration: { kind: 'permanent' } });
+  const auto = definition.handlers['action-end'].handle(makeContext(begun), {
+    eventId: 'fan-action-end', phase: 'action-end', type: 'action-ended', skillId: fanShiIds.passive,
+    actionKind: 'skill', soulTriggersAllowed: true, source: { kind: 'skill', id: fanShiIds.passive, unitId: 'b' },
+    intent: { actorId: 'b', skillId: fanShiIds.passive, targetIds: ['b'], shape: 'self', targetRelation: 'ally' } });
+  assert.ok(auto.some(command => command.type === 'schedule-action' && command.intent.skillId === fanShiIds.devour
+    && command.freeCast), '达到10层安排无消耗吞食天地');
+
+  const devour = definition.skills.find(skill => skill.id === fanShiIds.devour);
+  const controlState = structuredClone(begun);
+  const afterControl = definition.handlers['action-end'].handle(makeContext(controlState), {
+    eventId: 'fan-action-end-control', phase: 'action-end', type: 'action-ended', skillId: fanShiIds.passive,
+    actionKind: 'skill', soulTriggersAllowed: true, source: { kind: 'skill', id: fanShiIds.passive, unitId: 'b' },
+    intent: { actorId: 'b', skillId: fanShiIds.passive, targetIds: ['b'], shape: 'self', targetRelation: 'ally' } });
+  const release = afterControl.find(command => command.type === 'schedule-action');
+  assert.ok(release, '受控时仍安排自动技能');
+  const cleansed = applyEffectCommands(controlState, afterControl.filter(command => command.type !== 'schedule-action'),
+    'action-end', 'fan-control-cleanse', resolveStatus).state;
+  assert.equal(cleansed.units.b.statuses.find(status => status.statusId === fanShiIds.reserve).stacks, 5,
+    '自动吞食前受控时先消耗5层');
+  assert.ok(!cleansed.units.b.statuses.some(status => status.statusId === 'fan.test-stun'));
+  assert.equal(devour.canUse(cleansed, cleansed.units.b), true, '解控后的自动施放标记允许剩余5层完成技能');
+
+  const devourCommands = devour.execute(makeContext(cleansed), release.intent,
+    { ratio: 2.3, randomHitRatio: .33, hitCount: 9 });
+  let fired = applyEffectCommands(cleansed, devourCommands, 'action-resolution', 'fan-devour', resolveStatus);
+  assert.equal(devourCommands.filter(command => command.type === 'deal-damage').length, 1,
+    '首段伤害命中后逐段抽取后续目标，避免抽中已阵亡单位');
+  const split = definition.handlers.hit.handle(makeContext(fired.state), {
+    eventId: 'fan-devour-first', phase: 'hit', type: 'damage', source: { kind: 'skill', id: fanShiIds.devour, unitId: 'b' },
+    targetId: 'r', amount: 2300, hpLost: 2300, damageKind: 'normal', hitIndex: 1 });
+  assert.equal(split.filter(command => command.type === 'deal-damage' && command.damageKind === 'true').length, 1);
+  assert.equal(split.find(command => command.type === 'deal-damage' && command.damageKind === 'true').amount, 1840,
+    '五级把首次伤害80%均分给其他存活敌方');
+  assert.equal(split.filter(command => command.type === 'deal-damage' && command.damageKind !== 'true').length, 1,
+    '首次伤害后追加第一段动态随机攻击');
+  fired = applyEffectCommands(fired.state, split, 'hit', 'fan-devour-first', resolveStatus);
+  assert.ok(!fired.state.units.b.statuses.some(status => status.statusId === fanShiIds.reserve),
+    '吞食天地结束后消耗全部储备粮');
+
+  const dispatcher = new EventDispatcher();
+  for (const [phase, rule] of Object.entries(definition.handlers))
+    dispatcher.register({ id: `hero:${fanShiIds.hero}:${phase}`, phase, priority: rule.priority, handle: rule.handle });
+  const simulated = executeAction(cleansed, release.intent, registry, () => 0, { dispatcher, resolveStatus,
+    scheduling: 'extra-action', ignoreResourceCost: true });
+  assert.equal(simulated.accepted, true);
+  const normalHits = simulated.events.filter(event => event.type === 'damage' && event.source.id === fanShiIds.devour
+    && event.damageKind === 'normal');
+  const trueHit = simulated.events.find(event => event.type === 'damage' && event.source.id === `${fanShiIds.devour}:split`);
+  assert.equal(normalHits.length, 10, '真实结算共10段，并在每段后从当前存活目标重新随机');
+  assert.ok(trueHit && Math.abs(trueHit.amount - normalHits[0].amount * .8) < 1e-6,
+    '真实伤害基于首次普通伤害结果，而不是按饭笥面板攻击预估');
+
+  const ultimateState = structuredClone(initial);
+  ultimateState.units.b.statuses.push({ instanceId: `${fanShiIds.reserve}:b`, statusId: fanShiIds.reserve,
+    source: { kind: 'skill', id: fanShiIds.passive, unitId: 'b' }, stacks: 6, duration: { kind: 'permanent' },
+    modifiers: [{ stat: 'attack', operation: 'percent', amount: .1, perStack: true },
+      { stat: 'critDamage', operation: 'percent', amount: .05, perStack: true }] });
+  ultimateState.resources.blue.fire = 3;
+  const ultimate = executeAction(ultimateState, { actorId: 'b', skillId: fanShiIds.ultimate,
+    targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, registry, () => 0,
+  { dispatcher, resolveStatus });
+  assert.equal(ultimate.accepted, true);
+  assert.equal(ultimate.state.resources.blue.fire, 0, '胃口大开消耗3点鬼火');
+  assert.equal(ultimate.events.filter(event => event.type === 'damage' && event.source.id === fanShiIds.ultimate
+    && event.damageKind === 'normal').length, 9, '胃口大开为首段加8次逐段随机攻击');
+  assert.equal(ultimate.state.units.b.statuses.find(status => status.statusId === fanShiIds.reserve).stacks, 2,
+    '胃口大开攻击后消耗4层储备粮');
+});
+
+test('川猿按三种形态各变身一次，盾破解除形态，覆盖鬼火控制花纸与终局普攻被动', () => {
+  const registry = new ContentRegistry(); registerChuanYuan(registry);
+  const resolveStatus = id => registry.getStatus(id);
+  const makeContext = battleState => createBattleContext(battleState, () => 0,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: chuanYuanIds.hero, skillLevel: 5,
+    skillLevels: { [chuanYuanIds.basic]: 5, [chuanYuanIds.passive]: 5, [chuanYuanIds.transform]: 5 },
+    stats: { ...initial.units.b.stats, hp: 10000, attack: 1000, resist: 0 }, hp: 10000 };
+  initial.units.b2 = { ...unit('b2', 'blue'), hp: 5000 };
+  initial.units.r = { ...initial.units.r, hp: 100000, stats: { ...initial.units.r.stats, hp: 100000, attack: 100 } };
+  initial.units.r2 = { ...unit('r2', 'red'), hp: 100000, stats: { ...unit('r2', 'red').stats, hp: 100000, attack: 200 } };
+  initial.sides.blue.push('b2'); initial.sides.red.push('r2'); initial.resources.blue.fire = 2;
+  const definition = registry.getHero(chuanYuanIds.hero);
+  const dispatcher = new EventDispatcher();
+  for (const [phase, rule] of Object.entries(definition.handlers))
+    dispatcher.register({ id: `hero:${chuanYuanIds.hero}:${phase}`, phase, priority: rule.priority, handle: rule.handle });
+  const start = definition.handlers['battle-start'].handle(makeContext(initial), {
+    eventId: 'monkey-start', phase: 'battle-start', type: 'battle-started', source });
+  initial = applyEffectCommands(initial, start, 'battle-start', 'monkey-start', resolveStatus).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === chuanYuanIds.papers).stacks, 3,
+    '开战获得3张变身花纸');
+  const confusePolicy = definition.policy(makeContext(initial), 'b');
+  assert.equal(confusePolicy.skillId, chuanYuanIds.confuse, '社区AI顺序第一形态为你是坏人');
+  assert.equal(confusePolicy.targetIds[0], 'r2', '你是坏人优先选择攻击最高敌方');
+  const confused = executeAction(initial, { actorId: 'b', skillId: chuanYuanIds.confuse,
+    targetIds: ['r2'], shape: 'single', targetRelation: 'enemy' }, registry, () => 0,
+  { dispatcher, resolveStatus });
+  assert.equal(confused.accepted, true);
+  assert.equal(confused.state.resources.blue.fire, 0, '混乱形态消耗2火');
+  assert.equal(confused.state.units.b.statuses.find(status => status.statusId === chuanYuanIds.papers).stacks, 2);
+  assert.equal(confused.state.units.b.statuses.find(status => status.statusId === chuanYuanIds.paperShield).values.shieldRemaining, 3000,
+    '五级变幻获得最大生命30%的花纸盾');
+  assert.ok(confused.state.units.r2.statuses.some(status => status.statusId === chuanYuanIds.confusion));
+  assert.equal(registry.getHero(chuanYuanIds.hero).skills.find(skill => skill.id === chuanYuanIds.confuse)
+    .canUse(confused.state, confused.state.units.b), true, '当前形态仍在时可重复施放该形态技能');
+  assert.ok(confused.events.some(event => event.type === 'damage' && event.source.id === chuanYuanIds.confuse),
+    '三级变幻起混乱形态额外造成180%攻击伤害');
+
+  const broken = structuredClone(confused.state);
+  broken.units.b.statuses = broken.units.b.statuses.map(status => status.statusId === chuanYuanIds.paperShield
+    ? { ...status, values: { ...status.values, shieldRemaining: 0 } } : status);
+  const breakCommands = definition.handlers.hit.handle(makeContext(broken), { eventId: 'monkey-shield-broke', phase: 'hit',
+    type: 'damage', source: { kind: 'skill', id: 'test-break', unitId: 'r' }, targetId: 'b', amount: 1,
+    hpLost: 1, damageKind: 'normal' });
+  const untransformed = applyEffectCommands(broken, breakCommands, 'hit', 'monkey-shield-break', resolveStatus).state;
+  assert.ok(!untransformed.units.b.statuses.some(status => status.statusId === chuanYuanIds.form
+    || status.statusId === chuanYuanIds.paperShield), '花纸盾耗尽后立即解除形态');
+  assert.equal(registry.getHero(chuanYuanIds.hero).skills.find(skill => skill.id === chuanYuanIds.confuse)
+    .canUse(untransformed, untransformed.units.b), false, '每个形态整场只能使用一次，即使护盾提前破裂');
+
+  untransformed.resources.blue.fire = 3;
+  const aoePolicy = definition.policy(makeContext(untransformed), 'b');
+  assert.equal(aoePolicy.skillId, chuanYuanIds.attackAll);
+  const aoe = executeAction(untransformed, aoePolicy, registry, () => 0, { dispatcher, resolveStatus });
+  assert.equal(aoe.state.resources.blue.fire, 0, '群攻形态消耗3火');
+  assert.equal(aoe.events.filter(event => event.type === 'damage' && event.source.id === chuanYuanIds.attackAll).length, 2);
+  assert.ok(aoe.state.units.r.statuses.some(status => status.statusId === chuanYuanIds.hundredFlowers)
+    && aoe.state.units.r2.statuses.some(status => status.statusId === chuanYuanIds.hundredFlowers),
+  '四级群攻后为所有敌方施加百花纸');
+  const flowerTick = definition.handlers['turn-end'].handle(makeContext(aoe.state), { eventId: 'monkey-flower-tick',
+    phase: 'turn-end', type: 'turn-ended', unitId: 'r', source: { kind: 'unit', id: 'r' } });
+  assert.ok(flowerTick.some(command => command.type === 'lose-life' && command.lifeLossKind === 'indirect'),
+    '百花纸在目标回合结束造成140%间接伤害');
+
+  aoe.state.resources.blue.fire = 3;
+  const shelterPolicy = definition.policy(makeContext(aoe.state), 'b');
+  assert.equal(shelterPolicy.skillId, chuanYuanIds.protectAll);
+  const shelter = executeAction(aoe.state, shelterPolicy, registry, () => 0, { dispatcher, resolveStatus });
+  assert.equal(shelter.state.resources.blue.fire, 0);
+  assert.equal(shelter.state.units.b2.statuses.find(status => status.statusId === chuanYuanIds.allyShield).values.shieldRemaining, 620,
+    '友方全体获得川猿攻击62%的双重伞护盾');
+  assert.equal(shelter.state.units.b2.hp, 5310, '五级快躲起来同时治疗友方攻击31%');
+  assert.equal(shelter.state.units.b.statuses.some(status => status.statusId === chuanYuanIds.papers), false,
+    '消耗完三张花纸后失去变身能力');
+  assert.equal(definition.policy(makeContext(shelter.state), 'b').skillId, chuanYuanIds.basic,
+    '三种形态用尽后回到普攻');
+  const basic = executeAction(shelter.state, definition.policy(makeContext(shelter.state), 'b'), registry, () => 0,
+    { dispatcher, resolveStatus });
+  const basicTarget = basic.events.find(event => event.type === 'damage').targetId;
+  assert.ok(basic.state.units[basicTarget].statuses.some(status => status.statusId === chuanYuanIds.resistanceDown
+    && status.modifiers[0].amount === -.4), '形态用尽后普攻降低40%效果抵抗');
+  assert.ok(basic.state.units[basicTarget].statuses.some(status => status.statusId === chuanYuanIds.vulnerability
+    && status.modifiers[0].amount === .4), '五级终局普攻附加40%易伤');
+});
+
+test('因幡辉夜姬先机幻境提供愿力，队友鬼火优先并以愿力补足，寂光映月触发愿佑邀战与愿力阈值', () => {
+  const registry = new ContentRegistry(); registerInabaKaguyaHime(registry);
+  const ids = inabaKaguyaHimeIds, resolveStatus = id => registry.getStatus(id);
+  const makeContext = battleState => createBattleContext(battleState, () => 0,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable);
+  const basic = { ...createBasicAttackSkill('90001', [1]), actionKind: 'basic' };
+  const paidSkill = { id: '90002', actionKind: 'skill', resourceCost: { resourceId: 'fire', amount: 3 },
+    target: 'single', targetRelation: 'enemy', levels: [{}], execute() { return []; } };
+  registry.registerHero({ id: 9000, skills: [basic, paidSkill] });
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: ids.hero, skillLevel: 5,
+    skillLevels: { [ids.basic]: 5, [ids.realm]: 5, [ids.ultimate]: 5 },
+    stats: { ...initial.units.b.stats, hp: 10000, attack: 1000, defense: 100, critDamage: 1.6 }, hp: 10000 };
+  initial.units.b2 = { ...unit('b2', 'blue'), heroId: 9000 };
+  initial.units.r2 = { ...unit('r2', 'red'), stats: { ...unit('r2', 'red').stats, hp: 9000 }, hp: 9000 };
+  initial.sides.blue.push('b2'); initial.sides.red.push('r2'); initial.resources.blue.fire = 1;
+  const definition = registry.getHero(ids.hero), dispatcher = new EventDispatcher();
+  for (const [phase, rule] of Object.entries(definition.handlers))
+    dispatcher.register({ id: `hero:${ids.hero}:${phase}`, phase, priority: rule.priority, handle: rule.handle });
+  const startCommands = definition.handlers['battle-start'].handle(makeContext(initial), {
+    eventId: 'inaba-start', phase: 'battle-start', type: 'battle-started', source });
+  initial = applyEffectCommands(initial, startCommands, 'battle-start', 'inaba-start', resolveStatus).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === ids.wish).stacks, 3, '五级先机施放愿满夜并获得3愿力');
+  assert.ok(initial.units.b.statuses.some(status => status.statusId === ids.realmStatus
+    && status.modifiers[0].amount === .8), '幻境持续并提升80%效果抵抗');
+  assert.equal(definition.policy(makeContext(initial), 'b').skillId, ids.ultimate,
+    '幻境剩余2回合时社区AI选择寂光映月');
+  assert.equal(definition.policy(makeContext(initial), 'b').targetIds[0], 'r2', '寂光映月选择生命上限较低敌人');
+
+  const converted = definition.handlers['resource-payment'].handle(makeContext(initial), {
+    eventId: 'inaba-soul-fire', phase: 'resource-payment', type: 'resource-changed', source: { kind: 'soul', id: 'soul:test', unitId: 'b2' },
+    side: 'blue', resourceId: 'fire', before: 0, after: 2,
+  });
+  initial = applyEffectCommands(initial, converted, 'resource-payment', 'inaba-soul-fire', resolveStatus).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === ids.wish).stacks, 5,
+    '二级愿满夜将幻境中的御魂鬼火转为等量愿力');
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === ids.wishAccess).stacks, 5);
+  initial.resources.blue.fire = 1;
+
+  const paid = executeAction(initial, { actorId: 'b2', skillId: '90002', targetIds: ['r'], shape: 'single', targetRelation: 'enemy' },
+    registry, () => 0, { dispatcher, resolveStatus });
+  assert.equal(paid.accepted, true);
+  assert.equal(paid.state.resources.blue.fire, 0, '先支付现有1点鬼火');
+  assert.equal(paid.state.units.b.statuses.find(status => status.statusId === ids.wish).stacks, 3, '不足的2火由愿力代付');
+  assert.equal(paid.state.units.b.statuses.find(status => status.statusId === ids.wishPower).stacks, 3,
+    '累计提供愿力计数记录实际替代的2点');
+  const blessing = paid.state.units.b2.statuses.find(status => status.statusId === ids.blessing);
+  assert.ok(blessing, '友方施放技能后获得愿佑');
+  assert.equal(blessing.modifiers.find(modifier => modifier.stat === 'critDamage').amount, .48);
+  assert.equal(blessing.modifiers.find(modifier => modifier.stat === 'defense').amount, 30);
+
+  const after = structuredClone(paid.state); after.resources.blue.fire = 3;
+  after.units.b.statuses = after.units.b.statuses.map(status => status.statusId === ids.wishPower ? { ...status, stacks: 13 } : status);
+  const ultimate = executeAction(after, { actorId: 'b', skillId: ids.ultimate, targetIds: ['r', 'r2'],
+    shape: 'all-enemies', targetRelation: 'enemy' }, registry, () => 0, { dispatcher, resolveStatus });
+  const ignored = ultimate.events.filter(event => event.type === 'damage' && event.source.id === ids.ultimate);
+  assert.equal(ignored.length, 2);
+  assert.ok(ignored.every(event => event.suppressTargetPassiveTriggers && event.suppressTargetSoulTriggers),
+    '提供12点愿力后寂光映月无视敌方被动与御魂');
+  assert.ok(ultimate.events.some(event => event.type === 'action-scheduled' && event.scheduling === 'assist'),
+    '愿佑友方被寂光映月邀战');
+  assert.ok(ultimate.state.units.b.statuses.some(status => status.statusId === ids.realmDiscount), '寂光映月令下次愿满夜减1火');
+
+  const maxWish = structuredClone(after);
+  maxWish.units.b.statuses = maxWish.units.b.statuses.map(status => status.statusId === ids.wishPower ? { ...status, stacks: 25 } : status);
+  maxWish.resources.blue.fire = 3;
+  const feast = executeAction(maxWish, { actorId: 'b', skillId: ids.ultimate, targetIds: ['r', 'r2'],
+    shape: 'all-enemies', targetRelation: 'enemy' }, registry, () => 0, { dispatcher, resolveStatus });
+  assert.equal(feast.events.filter(event => event.type === 'damage' && event.source.id === ids.moonFeast).length, 2,
+    '累计提供24点愿力后追加因幡兔全体153%攻击');
+  assert.ok(feast.events.filter(event => event.type === 'damage' && event.source.id === ids.moonFeast)
+    .every(event => event.suppressTargetPassiveTriggers && event.suppressTargetSoulTriggers));
+
+  const discounted = structuredClone(ultimate.state); discounted.resources.blue.fire = 3;
+  const realm = executeAction(discounted, { actorId: 'b', skillId: ids.realm, targetIds: ['b'], shape: 'self', targetRelation: 'ally' },
+    registry, () => 0, { dispatcher, resolveStatus });
+  assert.equal(realm.accepted, true);
+  assert.equal(realm.state.resources.blue.fire, 2, '下次愿满夜只消耗1点鬼火');
+  assert.ok(!realm.state.units.b.statuses.some(status => status.statusId === ids.realmDiscount));
+});
+
+test('夜刀神核对赤子倍率、共舞推条、七层夜幕/真实追击、黑夜庇护与七夜秘仪选择', () => {
+  const registry = new ContentRegistry(); registerYatoNoKami(registry);
+  const definition = registry.getHero(yatoNoKamiIds.hero);
+  const initial = state();
+  initial.units.b = { ...initial.units.b, heroId: yatoNoKamiIds.hero, skillLevel: 5,
+    skillLevels: { [yatoNoKamiIds.basic]: 5, [yatoNoKamiIds.passive]: 5, [yatoNoKamiIds.ultimate]: 5 } };
+  initial.units.r = { ...initial.units.r, hp: 5000, skillLevel: 1 };
+  const random = () => .1;
+  const basic = definition.skills.find(skill => skill.id === yatoNoKamiIds.basic);
+  const basicCommands = basic.execute(createBattleContext(initial, random),
+    { actorId: 'b', skillId: yatoNoKamiIds.basic, targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, { ratio: 1.25 });
+  assert.ok(Math.abs(basicCommands[0].amount - 6250) < 1e-8, '五级赤子造成125%攻击伤害');
+
+  const stacked = definition.handlers['action-end'].handle(createBattleContext(initial, random), {
+    type: 'action-ended', eventId: 'yato-basic-end', phase: 'action-end', source: { kind: 'skill', id: yatoNoKamiIds.basic, unitId: 'b' },
+    actionId: 1, skillId: yatoNoKamiIds.basic, actionKind: 'basic', soulTriggersAllowed: true,
+  });
+  assert.ok(stacked.some(command => command.type === 'change-action-gauge' && command.targetId === 'b' && command.amount === 20),
+    '五级普攻触发额外蝙蝠时，每层共舞推进10%行动条');
+  assert.equal(stacked.find(command => command.type === 'add-status' && command.instance.statusId === yatoNoKamiIds.dance).instance.stacks, 2);
+
+  const leech = definition.handlers.hit.handle(createBattleContext(initial, random), {
+    type: 'damage', eventId: 'yato-leech-hit', phase: 'hit', source: { kind: 'skill', id: 'other', unitId: 'b' },
+    actionId: 1, attackId: 1, hitIndex: 1, targetId: 'r', damageKind: 'normal', amount: 400, hpLost: 300,
+    mitigated: 100, isCritical: false,
+  });
+  assert.equal(leech[0].type, 'heal');
+  assert.equal(leech[0].amount, 45, '吸血按实际损失生命的15%恢复');
+
+  const protectedState = applyEffectCommands(initial, definition.handlers['battle-start'].handle(createBattleContext(initial, random), {
+    type: 'battle-started', eventId: 'yato-open', phase: 'battle-start', source: { kind: 'system', id: 'battle' }, actionId: 0,
+  }), 'battle-start', 'yato-open', id => registry.getStatus(id)).state;
+  const shelter = protectedState.units.b.statuses.find(status => status.statusId === yatoNoKamiIds.shelter);
+  assert.ok(shelter);
+  assert.ok(shelter.modifiers.some(modifier => modifier.stat === 'damageTaken' && modifier.amount === -.49));
+  assert.ok(shelter.modifiers.some(modifier => modifier.stat === 'resist' && modifier.amount === .7));
+
+  const ultimate = definition.skills.find(skill => skill.id === yatoNoKamiIds.ultimate);
+  assert.deepEqual(ultimate.resourceCostsByLevel.map(cost => cost.amount), [4, 4, 4, 4, 3]);
+  const ultimateCommands = ultimate.execute(createBattleContext(initial, random),
+    { actorId: 'b', skillId: yatoNoKamiIds.ultimate, targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, { ratio: 2.7 });
+  assert.ok(Math.abs(ultimateCommands.find(command => command.type === 'deal-damage').amount - 13500) < 1e-8,
+    '二级大招倍率为270%');
+  assert.equal(ultimateCommands.find(command => command.type === 'add-status').instance.statusId, yatoNoKamiIds.nightSigil);
+
+  const cappedFire = applyEffectCommands({ ...initial, resources: { ...initial.resources, red: { fire: 7 } } }, [
+    { type: 'change-resource-meter-cap', source: { kind: 'skill', id: yatoNoKamiIds.ultimate, unitId: 'b' },
+      side: 'red', resourceId: 'fire', amount: -2 },
+  ], 'effect-resolution', 'yato-fire-cap').state;
+  assert.equal(cappedFire.resourceMeters.red.fire.resourceCap, 6);
+  assert.equal(cappedFire.resources.red.fire, 6, '永久降低鬼火上限时将当前鬼火限制在新上限');
+
+  const summon = { ...unit('r-summon', 'red'), unitKind: 'summon', summonedByUnitId: 'r' };
+  const danceState = { ...initial, units: { ...initial.units,
+    b: { ...initial.units.b, statuses: [{ instanceId: 'dance-full', statusId: yatoNoKamiIds.dance,
+      source: { kind: 'skill', id: yatoNoKamiIds.passive, unitId: 'b' }, stacks: 6, duration: { kind: 'permanent' } }] },
+    'r-summon': summon }, sides: { blue: ['b'], red: ['r', 'r-summon'] } };
+  const danceCommands = definition.handlers['action-end'].handle(createBattleContext(danceState, random), {
+    type: 'action-ended', eventId: 'yato-ultimate-end', phase: 'action-end', source: { kind: 'skill', id: yatoNoKamiIds.ultimate, unitId: 'b' },
+    actionId: 2, skillId: yatoNoKamiIds.ultimate, actionKind: 'skill', soulTriggersAllowed: true,
+  });
+  assert.ok(danceCommands.some(command => command.type === 'remove-status-instances'
+    && command.instanceIds.includes('dance-full')), '达到七层后消耗共舞');
+  assert.ok(danceCommands.some(command => command.type === 'add-status' && command.targetId === 'r-summon'
+    && command.instance.statusId === yatoNoKamiIds.nightCurtain && command.instance.values.banished === true),
+  '敌方召唤物位存在召唤物时施加夜幕');
+  const curtain = danceCommands.find(command => command.type === 'add-status' && command.instance.statusId === yatoNoKamiIds.nightCurtain);
+  const curtainState = applyEffectCommands(danceState, [curtain, { type: 'add-status', source: curtain.source, targetId: 'r-summon',
+    instance: { instanceId: 'blocked-mark', statusId: yatoNoKamiIds.nightSigil, source: curtain.source, stacks: 1,
+      duration: { kind: 'permanent' } } }], 'effect-resolution', 'yato-curtain-test', id => registry.getStatus(id)).state;
+  assert.ok(!curtainState.units['r-summon'].statuses.some(status => status.statusId === yatoNoKamiIds.nightSigil),
+    '夜幕期间召唤物不能再获得新印记');
+
+  const mark = { instanceId: 'night-sigil', statusId: yatoNoKamiIds.nightSigil,
+    source: { kind: 'skill', id: yatoNoKamiIds.ultimate, unitId: 'b' }, stacks: 1,
+    duration: { kind: 'permanent' }, values: { usedMask: 0 } };
+  const markedState = { ...initial, units: { ...initial.units, r: { ...initial.units.r, statuses: [mark] } } };
+  const picked = definition.handlers['turn-start'].handle(createBattleContext(markedState, random), {
+    type: 'turn-started', eventId: 'yato-mark-turn', phase: 'turn-start', source: { kind: 'unit', id: '2', unitId: 'r' },
+    actionId: 3, unitId: 'r',
+  });
+  const updatedMark = picked.find(command => command.type === 'add-status' && command.instance.statusId === yatoNoKamiIds.nightSigil);
+  assert.ok(updatedMark);
+  assert.notEqual(updatedMark.instance.values.usedMask, 0, '每次被施加者回合开始从尚未触发的楔中随机选择');
+});
+
+test('影鳄核对三技能火费分支、幕影盖地多段伤害、影食穿盾触发和满级恢复', () => {
+  const registry = new ContentRegistry(); registerShadowCroc(registry);
+  const definition = registry.getHero(shadowCrocIds.hero);
+  const initial = state();
+  initial.units.b = { ...initial.units.b, heroId: shadowCrocIds.hero, skillLevel: 5,
+    skillLevels: { [shadowCrocIds.basic]: 5, [shadowCrocIds.passive]: 5, [shadowCrocIds.ultimate]: 5 } };
+  initial.units.r = { ...initial.units.r, resist: 0, hp: 9000 };
+  initial.units.r2 = { ...unit('r2', 'red'), resist: 0 };
+  initial.sides.red = ['r', 'r2'];
+  const context = createBattleContext(initial, () => 0, id => registry.getStatus(id)?.category,
+    id => registry.getStatus(id)?.dispellable === true);
+  assert.equal(definition.policy(context, 'b').skillId, shadowCrocIds.basic,
+    '不足3火时策略明确选择普攻');
+  initial.resources.blue.fire = 3;
+  assert.equal(definition.policy(createBattleContext(initial, () => 0, id => registry.getStatus(id)?.category), 'b').skillId,
+    shadowCrocIds.ultimate, '足3火时策略选择三技能');
+  initial.resources.blue.fire = 0;
+
+  const ultimate = definition.skills.find(skill => skill.id === shadowCrocIds.ultimate);
+  const commands = ultimate.execute(context, { actorId: 'b', skillId: shadowCrocIds.ultimate,
+    targetIds: ['r', 'r2'], selectedTargetId: 'r', shape: 'all-enemies', targetRelation: 'enemy' }, { ratio: .3 });
+  assert.equal(commands.filter(command => command.type === 'deal-damage').length, 5,
+    '三技能对全体攻击两次，并对选中目标追加一次');
+  assert.equal(commands.filter(command => command.type === 'apply-control' && command.instance.statusId === shadowCrocIds.shadowbind).length, 1,
+    '终段对选中目标判定影缚');
+
+  const hitEvent = (eventId, index) => ({ type: 'damage', eventId, phase: 'hit',
+    source: { kind: 'skill', id: shadowCrocIds.basic, unitId: 'b' }, actionId: 1, attackId: 1, hitIndex: index,
+    targetId: 'r', damageKind: 'normal', amount: 100, hpLost: 100, mitigated: 0, isCritical: false });
+  const first = definition.handlers.hit.handle(context, hitEvent('shadowprey-first', 1));
+  assert.equal(first[0].type, 'add-status');
+  let afterFirst = applyEffectCommands(initial, first, 'effect-resolution', 'shadowprey-first', id => registry.getStatus(id)).state;
+  assert.equal(afterFirst.units.r.statuses.find(status => status.statusId === shadowCrocIds.shadowprey).stacks, 1);
+
+  const secondContext = createBattleContext(afterFirst, () => 0, id => registry.getStatus(id)?.category,
+    id => registry.getStatus(id)?.dispellable === true);
+  const second = definition.handlers.hit.handle(secondContext, hitEvent('shadowprey-second', 2));
+  assert.ok(second.some(command => command.type === 'remove-status-instances'), '第二次成功触发时消耗影食');
+  assert.ok(second.some(command => command.type === 'deal-damage' && command.ignoreShield === true), '影食伤害无视护盾');
+  assert.ok(second.some(command => command.type === 'heal' && command.targetId === 'b' && command.amount === 300),
+    '满级被动消耗影食时恢复最大生命3%');
+  afterFirst = applyEffectCommands(afterFirst, second, 'effect-resolution', 'shadowprey-second', id => registry.getStatus(id)).state;
+  assert.ok(!afterFirst.units.r.statuses.some(status => status.statusId === shadowCrocIds.shadowprey), '影食消耗后移除');
+});
+
+test('梦寻山兔核对自然行动条越过中线、地雷引爆、兔忍舞/梦忍法与AI火费分支', () => {
+  const registry = new ContentRegistry(); registerDreamYamausagi(registry);
+  const definition = registry.getHero(dreamYamausagiIds.hero);
+  let initial = state();
+  initial.units.b = { ...initial.units.b, heroId: dreamYamausagiIds.hero, skillLevel: 5,
+    skillLevels: { [dreamYamausagiIds.basic]: 5, [dreamYamausagiIds.formation]: 5,
+      [dreamYamausagiIds.ultimate]: 5, [dreamYamausagiIds.dance]: 3 } };
+  initial.units.r = { ...initial.units.r, resist: 0, turnPos: 55, actionGauge: 45.8333333333 };
+  initial.units.b.turnPos = 115; initial.units.b.actionGauge = 95.8333333333;
+  const context = createBattleContext(initial, () => 0, id => registry.getStatus(id)?.category,
+    id => registry.getStatus(id)?.dispellable === true);
+  assert.equal(definition.policy(context, 'b').skillId, dreamYamausagiIds.basic, '无火时选普攻');
+  initial.resources.blue.fire = 2;
+  const twoFireContext = createBattleContext(initial, () => 0, id => registry.getStatus(id)?.category,
+    id => registry.getStatus(id)?.dispellable === true);
+  assert.equal(definition.policy(twoFireContext, 'b').skillId, dreamYamausagiIds.formation, '梦忍法未满9篇且有2火时选布雷');
+  const formation = definition.skills.find(skill => skill.id === dreamYamausagiIds.formation);
+  const placed = formation.execute(twoFireContext, { actorId: 'b', skillId: dreamYamausagiIds.formation,
+    targetIds: ['r'], shape: 'all-enemies', targetRelation: 'enemy' });
+  initial = applyEffectCommands(initial, placed, 'effect-resolution', 'dream-yamausagi-place', id => registry.getStatus(id)).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === dreamYamausagiIds.mines).stacks, 3);
+
+  const scheduled = scheduleNextActor(initial, () => 0);
+  assert.equal(scheduled.actorId, 'b');
+  assert.ok(scheduled.gaugeChanges.some(change => change.unitId === 'r' && change.before < 50 && change.after >= 50),
+    '自然行动条推进生成越过50%的事件');
+  const crossed = scheduled.gaugeChanges.find(change => change.unitId === 'r');
+  const mineEvent = { type: 'action-gauge-changed', eventId: 'dream-mine-crossing', phase: 'effect-resolution',
+    source: { kind: 'system', id: 'turn-motion' }, unitId: 'r', before: crossed.before, after: crossed.after };
+  const detonation = definition.handlers['effect-resolution'].handle(createBattleContext(initial, () => 0,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable === true), mineEvent);
+  assert.ok(detonation.some(command => command.type === 'deal-damage' && command.targetId === 'r'), '中线越过时引爆地雷');
+  assert.ok(detonation.some(command => command.type === 'change-status-stacks' && command.amount === -1), '引爆消耗一颗地雷');
+  assert.ok(detonation.some(command => command.type === 'change-action-gauge' && command.targetId === 'b' && command.amount === 10),
+    '兔忍舞为全队增加10%行动条');
+  assert.ok(detonation.some(command => command.type === 'add-status' && command.instance.statusId === dreamYamausagiIds.ninjaLaw),
+    '可行动时获得1篇梦忍法');
+
+  const ultimate = definition.skills.find(skill => skill.id === dreamYamausagiIds.ultimate);
+  const nineLaws = { ...initial, units: { ...initial.units,
+    b: { ...initial.units.b, statuses: [...initial.units.b.statuses, { instanceId: 'nine-laws',
+      statusId: dreamYamausagiIds.ninjaLaw, source: { kind: 'skill', id: dreamYamausagiIds.dance, unitId: 'b' },
+      stacks: 9, duration: { kind: 'permanent' } }] } }, resources: { ...initial.resources, blue: { fire: 3 }, red: { fire: 0 } } };
+  const ultCommands = ultimate.execute(createBattleContext(nineLaws, () => 0, id => registry.getStatus(id)?.category),
+    { actorId: 'b', skillId: dreamYamausagiIds.ultimate, targetIds: ['r'], selectedTargetId: 'r',
+      shape: 'all-enemies', targetRelation: 'enemy' });
+  assert.ok(ultCommands.some(command => command.type === 'apply-control' && command.instance.statusId === dreamYamausagiIds.transform),
+    '五级终结技按30%基础概率变形选中目标');
+  assert.ok(ultCommands.some(command => command.type === 'remove-status-instances' && command.instanceIds.includes('nine-laws')),
+    '终结技施放后消耗全部梦忍法');
+});
+
+test('迦楼罗核对惜羽反击/消耗治疗、三技能施加与五次未触发免费施放', () => {
+  const registry = new ContentRegistry(); registerGaruda(registry);
+  const definition = registry.getHero(garudaIds.hero);
+  const makeContext = (battleState, random = () => 0) => createBattleContext(battleState, random,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable === true);
+  let initial = state();
+  initial.sides.blue.push('b2');
+  initial.units.b = { ...initial.units.b, heroId: garudaIds.hero, skillLevel: 5,
+    skillLevels: { [garudaIds.basic]: 5, [garudaIds.passive]: 5, [garudaIds.ultimate]: 5 }, awakeFilter: 1 };
+  initial.units.b2 = { ...unit('b2', 'blue'), hp: 2000 };
+  initial.units.r.stats = { ...initial.units.r.stats, resist: 0 };
+  initial.resources.blue.fire = 3;
+  const context = makeContext(initial);
+  assert.equal(definition.policy(context, 'b').skillId, garudaIds.ultimate, '有3火时按AI施放三技能');
+  const ultimate = definition.skills.find(skill => skill.id === garudaIds.ultimate);
+  const cast = ultimate.execute(context, { actorId: 'b', skillId: garudaIds.ultimate, targetIds: ['r'],
+    selectedTargetId: 'r', shape: 'all-enemies', targetRelation: 'enemy' });
+  assert.ok(cast.some(command => command.type === 'deal-damage' && command.shieldDmgAddRate === .2), '被动给技能攻击增加20%护盾伤害');
+  assert.ok(cast.some(command => command.type === 'add-status' && command.instance.statusId === garudaIds.xiyu), '五级三技能尝试施加惜羽');
+  initial = applyEffectCommands(initial, cast, 'effect-resolution', 'garuda-ultimate', id => registry.getStatus(id)).state;
+  const marked = initial.units.r.statuses.find(status => status.statusId === garudaIds.xiyu);
+  assert.ok(marked, '目标获得惜羽');
+
+  const gaugeEvent = { type: 'action-gauge-changed', eventId: 'garuda-gauge', phase: 'effect-resolution',
+    source: { kind: 'system', id: 'turn-motion' }, unitId: 'r', before: 10, after: 20 };
+  const counterCommands = registry.getStatus(garudaIds.xiyu).handlers['effect-resolution'].handle(makeContext(initial), gaugeEvent);
+  assert.ok(counterCommands.some(command => command.type === 'schedule-action' && command.intent.kind === 'passive'
+    && command.intent.skillId === garudaIds.basic), '惜羽目标获得行动条时排入免费反击普攻');
+
+  const basic = definition.skills.find(skill => skill.id === garudaIds.basic);
+  const direct = basic.execute(makeContext(initial), { actorId: 'b', skillId: garudaIds.basic, targetIds: ['r'],
+    shape: 'single', targetRelation: 'enemy' }, { ratio: 1.25 });
+  assert.ok(direct.some(command => command.type === 'remove-status-instances'), '迦楼罗直接攻击惜羽目标后消耗惜羽');
+  assert.ok(direct.some(command => command.type === 'heal' && command.targetId === 'b2' && command.amount === 1000),
+    '觉醒消耗惜羽治疗生命比例最低的友方，数值为最大生命10%');
+
+  initial = { ...initial, units: { ...initial.units, b: { ...initial.units.b, statuses: [{ instanceId: 'four-fails',
+    statusId: garudaIds.triggerFailures, source: { kind: 'skill', id: garudaIds.passive, unitId: 'b' }, stacks: 1,
+    duration: { kind: 'permanent' }, values: { count: 4 } }] } } };
+  const turnEnd = definition.handlers['turn-end'].handle(makeContext(initial, () => .99), { type: 'turn-ended',
+    eventId: 'garuda-fifth-fail', phase: 'turn-end', unitId: 'r' });
+  assert.ok(turnEnd.some(command => command.type === 'schedule-action' && command.freeCast === true
+    && command.intent.skillId === garudaIds.ultimate), '五级被动连续5次未触发后排入免费三技能');
+});
+
+test('不见岳核对先机结界、友方结界增益、云山印记消耗和施放优先级', () => {
+  const registry = new ContentRegistry(); registerFujiMountain(registry);
+  registry.registerStatus({ id: 'fuji-test-control', category: 'control', dispellable: true, sealable: true,
+    durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true });
+  registry.registerStatus({ id: 'fuji-test-debuff', category: 'debuff', dispellable: true, sealable: true,
+    durationOwner: 'target-turn', refreshPolicy: 'replace' });
+  const definition = registry.getHero(fujiMountainIds.hero);
+  const makeContext = (battleState, random = () => 0) => createBattleContext(battleState, random,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable === true);
+  let initial = state();
+  initial.sides.blue.push('b2'); initial.sides.red.push('r2');
+  initial.units.b = { ...initial.units.b, heroId: fujiMountainIds.hero, skillLevel: 5,
+    skillLevels: { [fujiMountainIds.basic]: 5, [fujiMountainIds.passive]: 5, [fujiMountainIds.fieldSkill]: 5 },
+    stats: { ...initial.units.b.stats, defense: 700 } };
+  initial.units.b2 = { ...unit('b2', 'blue'), hp: 1000, stats: { ...unit('b2', 'blue').stats, attack: 1000 } };
+  initial.units.r2 = unit('r2', 'red'); initial.units.r2.hp = 1000;
+  const initContext = makeContext(initial);
+  const initialization = definition.initialize(initContext, 'b');
+  initial = applyEffectCommands(initial, initialization, 'battle-start', 'fuji-init', id => registry.getStatus(id)).state;
+  assert.ok(initial.units.b.statuses.some(status => status.statusId === fujiMountainIds.field), '五级水宿山行先机开启结界');
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === fujiMountainIds.cloudMark).stacks, 1, '四级被动先机获得云印');
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === fujiMountainIds.mountainMark).stacks, 1, '四级被动先机获得山印');
+  assert.equal(definition.skills.find(skill => skill.id === fujiMountainIds.fieldSkill).resourceCost.amount, 3, '水宿山行消耗3火');
+  assert.ok(initial.units.b2.statuses.some(status => status.statusId === fujiMountainIds.fieldAttack && status.values.fieldAttack === true),
+    '四级结界给全体友方附加防御换算攻击');
+  assert.equal(definition.policy(makeContext(initial), 'b').skillId, fujiMountainIds.twinStrike, '云山印记都有时选对应普攻变体');
+  const fieldExpired = { ...initial, units: { ...initial.units, b: { ...initial.units.b,
+    statuses: initial.units.b.statuses.filter(status => status.statusId !== fujiMountainIds.field) } }, resources: {
+    ...initial.resources, blue: { fire: 3 }, red: initial.resources.red } };
+  assert.equal(definition.policy(makeContext(fieldExpired), 'b').skillId, fujiMountainIds.fieldSkill,
+    '社区AI优先在没有结界时使用三技能');
+  assert.equal(definition.handlers['turn-start'].handle(makeContext(initial), { type: 'turn-started', eventId: 'fuji-random-mark',
+    phase: 'turn-start', source: { kind: 'unit', id: '379', unitId: 'b' }, unitId: 'b' })[0].amount, 1,
+  '二级被动自身回合开始额外获得一层随机印记');
+
+  const declared = { type: 'action-declared', eventId: 'fuji-first-ally-action', phase: 'action-selection',
+    source: { kind: 'skill', id: 'ally-skill', unitId: 'b2' }, intent: { actorId: 'b2', skillId: 'ally-skill',
+      targetIds: ['r'], shape: 'single', targetRelation: 'enemy' } };
+  const firstBuffs = definition.handlers['action-selection'].handle(makeContext(initial), declared);
+  assert.ok(firstBuffs.some(command => command.type === 'add-status' && command.instance.statusId === fujiMountainIds.cloudClothing),
+    '队友首次行动获得云衣');
+  initial = applyEffectCommands(initial, firstBuffs, 'effect-resolution', declared.eventId, id => registry.getStatus(id)).state;
+  assert.equal(initial.units.b.statuses.find(status => status.statusId === fujiMountainIds.cloudMark).stacks, 2,
+    '友方获得云衣时不见岳增加一层云印');
+  assert.ok(initial.units.b2.statuses.some(status => status.statusId === fujiMountainIds.cloudClothing
+    && status.modifiers[0].amount === 400), '云衣按防御200%加攻并受目标初始攻击40%封顶');
+  const changedSkill = { ...declared, eventId: 'fuji-different-skill', intent: { ...declared.intent, skillId: 'ally-skill-2' } };
+  const secondBuffs = definition.handlers['action-selection'].handle(makeContext(initial), changedSkill);
+  assert.ok(!secondBuffs.some(command => command.type === 'add-status' && command.instance.statusId === fujiMountainIds.cloudClothing),
+    '队友改用不同技能不会再获得云衣');
+  initial = applyEffectCommands(initial, secondBuffs, 'effect-resolution', changedSkill.eventId, id => registry.getStatus(id)).state;
+  const allyTurnEnd = definition.handlers['turn-end'].handle(makeContext(initial), { type: 'turn-ended', eventId: 'fuji-ally-end',
+    phase: 'turn-end', source: { kind: 'unit', id: '1', unitId: 'b2' }, unitId: 'b2' });
+  assert.ok(allyTurnEnd.some(command => command.type === 'add-status' && command.instance.statusId === fujiMountainIds.mountainColor),
+    '不同技能后在回合结束发放山色护盾');
+  assert.ok(allyTurnEnd.some(command => command.type === 'change-status-stacks' && command.targetId === 'b'
+    && command.amount === 1), '队友获得山色时被动增加一层山印');
+
+  const protectedContext = makeContext(initial);
+  const protectedDamage = definition.interceptIncomingDamage(initial, initial.units.r, initial.units.b2, 100, 'normal', {
+    source: { kind: 'skill', id: 'enemy-skill', unitId: 'r' }, isCritical: true, attackId: 1, hitIndex: 0,
+    targetIds: ['b2'], battle: protectedContext, isUnitUnableToAct: () => false });
+  assert.equal(protectedDamage.amount, 75, '二级结界为全体友方降低25%暴击伤害');
+
+  const basic = definition.skills.find(skill => skill.id === fujiMountainIds.twinStrike);
+  const commands = basic.execute(makeContext(initial), { actorId: 'b', skillId: fujiMountainIds.twinStrike,
+    targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, { ratio: 1.25 });
+  assert.ok(commands.some(command => command.type === 'change-status-stacks' && command.amount === -2), '雙印普攻消耗对应云印');
+  assert.ok(commands.some(command => command.type === 'heal'), '消耗山印为全体友方治疗');
+  assert.ok(commands.some(command => command.type === 'add-status' && command.instance.statusId === fujiMountainIds.noncritBuff
+    && command.instance.modifiers[0].amount === .06), '消耗两层云印叠加6%非暴击伤害');
+  const controlState = { ...initial, units: { ...initial.units, b2: { ...initial.units.b2, statuses: [
+    { instanceId: 'fuji-control', statusId: 'fuji-test-control', source: { kind: 'skill', id: 'test', unitId: 'r' },
+      stacks: 1, duration: { kind: 'permanent' } },
+    { instanceId: 'fuji-debuff', statusId: 'fuji-test-debuff', source: { kind: 'skill', id: 'test', unitId: 'r' },
+      stacks: 1, duration: { kind: 'permanent' } },
+  ] } } };
+  const mountainStrike = definition.skills.find(skill => skill.id === fujiMountainIds.mountainStrike);
+  const cleanse = mountainStrike.execute(makeContext(controlState), { actorId: 'b', skillId: fujiMountainIds.mountainStrike,
+    targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, { ratio: 1.25 });
+  assert.ok(cleanse.some(command => command.type === 'dispel-statuses' && command.maxCount === 1
+    && command.filter === 'debuff-or-control' && command.preferCategories[0] === 'control' && command.targetId === 'b2'),
+  '三级被动每消耗一层山印，优先驱散带控制的随机友方目标');
+  const attackStart = definition.handlers['attack-start'].handle(makeContext({ ...initial, units: { ...initial.units,
+    r: { ...initial.units.r, stats: { ...initial.units.r.stats, critDamage: 5 } } } }), {
+    type: 'attack-start', eventId: 'fuji-crit-debuff', phase: 'attack-start',
+    source: { kind: 'skill', id: 'enemy-skill', unitId: 'r' }, targetIds: ['b2'] });
+  assert.ok(attackStart.some(command => command.type === 'add-status' && command.instance.statusId === fujiMountainIds.critSuppression),
+    '结界二级对暴伤超过不见岳三倍的攻击者降低50%暴击');
+});
+
+test('灵海蝶核对海灵先机/回合附着、同敌回合多段去重、三次反制与治疗AI', () => {
+  const registry = new ContentRegistry(); registerLinghaiButterfly(registry);
+  const definition = registry.getHero(linghaiButterflyIds.hero);
+  const makeContext = (battleState, random = () => 0) => createBattleContext(battleState, random,
+    id => registry.getStatus(id)?.category, id => registry.getStatus(id)?.dispellable === true);
+  let initial = state();
+  initial.sides.blue.push('b2', 'b3');
+  initial.units.b = { ...initial.units.b, heroId: linghaiButterflyIds.hero, skillLevel: 5, awakeFilter: 1,
+    skillLevels: { [linghaiButterflyIds.basic]: 5, [linghaiButterflyIds.passive]: 5, [linghaiButterflyIds.heal]: 5 } };
+  initial.units.b2 = { ...unit('b2', 'blue'), hp: 1000 };
+  initial.units.b3 = { ...unit('b3', 'blue'), hp: 2000 };
+  initial.units.r.stats = { ...initial.units.r.stats, resist: 0 };
+  initial.resources.blue.fire = 2;
+  let context = makeContext(initial);
+  initial = applyEffectCommands(initial, definition.initialize(context, 'b'), 'battle-start', 'linghai-init',
+    id => registry.getStatus(id)).state;
+  assert.ok(initial.units.b.statuses.some(status => status.statusId === linghaiButterflyIds.seaSpirit), '五级被动先机给自身海灵');
+  const attach = definition.handlers['turn-end'].handle(makeContext(initial), { type: 'turn-ended', eventId: 'linghai-turn-end',
+    phase: 'turn-end', source: { kind: 'unit', id: '382', unitId: 'b' }, unitId: 'b' });
+  assert.equal(attach.filter(command => command.type === 'add-status' && command.instance.statusId === linghaiButterflyIds.seaSpirit).length,
+    3, '觉醒五级回合末给自身和随机两名非召唤友方附着海灵');
+  initial = applyEffectCommands(initial, attach, 'effect-resolution', 'linghai-attach', id => registry.getStatus(id)).state;
+  assert.equal(definition.policy(makeContext(initial), 'b').skillId, linghaiButterflyIds.heal, '有友方低于75%且有2火时选择治疗');
+  const heal = definition.skills.find(skill => skill.id === linghaiButterflyIds.heal);
+  const healing = heal.execute(makeContext(initial), { actorId: 'b', skillId: linghaiButterflyIds.heal,
+    targetIds: ['b2', 'b3'], selectedTargetId: 'b2', shape: 'multi', targetRelation: 'ally' },
+    { ratio: .16, selfHealRatio: .16 });
+  assert.ok(healing.some(command => command.type === 'heal' && command.targetId === 'b2' && command.amount === 2080),
+    '3个海灵使治疗按16%最大生命再增加30%');
+  assert.ok(healing.some(command => command.type === 'heal' && command.targetId === 'b' && command.amount === 1600),
+    '三级起额外治疗自身16%最大生命');
+  assert.ok(healing.some(command => command.type === 'add-status' && command.instance.statusId === linghaiButterflyIds.defenseBuff),
+    '五级治疗目标获得20%防御增益');
+
+  const mark = initial.units.b2.statuses.find(status => status.statusId === linghaiButterflyIds.seaSpirit);
+  initial.units.b2.statuses = [{ ...mark, values: { ...mark.values, 'turn:r': 10 } }];
+  const makeHit = (eventId, actionId) => ({ type: 'damage', eventId, actionId, phase: 'hit',
+    source: { kind: 'skill', id: 'enemy-basic', unitId: 'r' }, targetId: 'b2', damageKind: 'normal', actionKind: 'basic',
+    amount: 100, hpLost: 100, mitigated: 0, isCritical: false });
+  let hit = definition.handlers.hit.handle(makeContext(initial), makeHit('linghai-hit-1', 11));
+  assert.ok(hit.some(command => command.type === 'add-status' && command.instance.statusId === linghaiButterflyIds.attackDown),
+    '海灵按80%基础概率反制并施加随机攻击下降');
+  initial = applyEffectCommands(initial, hit, 'effect-resolution', 'linghai-hit-1', id => registry.getStatus(id)).state;
+  assert.equal(initial.units.b2.statuses.find(status => status.statusId === linghaiButterflyIds.seaSpirit).values.triggerCount, 1);
+  assert.equal(definition.handlers.hit.handle(makeContext(initial), makeHit('linghai-hit-2-same-turn', 12)), undefined,
+    '同一敌方回合对同一海灵目标多段攻击只触发一次');
+  const nextTurn = definition.handlers['turn-start'].handle(makeContext(initial), { type: 'turn-started', eventId: 'enemy-next-turn',
+    actionId: 20, phase: 'turn-start', source: { kind: 'unit', id: '2', unitId: 'r' }, unitId: 'r' });
+  initial = applyEffectCommands(initial, nextTurn, 'effect-resolution', 'enemy-next-turn', id => registry.getStatus(id)).state;
+  hit = definition.handlers.hit.handle(makeContext(initial), makeHit('linghai-hit-3', 21));
+  initial = applyEffectCommands(initial, hit, 'effect-resolution', 'linghai-hit-3', id => registry.getStatus(id)).state;
+  const thirdTurn = definition.handlers['turn-start'].handle(makeContext(initial), { type: 'turn-started', eventId: 'enemy-third-turn',
+    actionId: 30, phase: 'turn-start', source: { kind: 'unit', id: '2', unitId: 'r' }, unitId: 'r' });
+  initial = applyEffectCommands(initial, thirdTurn, 'effect-resolution', 'enemy-third-turn', id => registry.getStatus(id)).state;
+  hit = definition.handlers.hit.handle(makeContext(initial), makeHit('linghai-hit-4', 31));
+  assert.ok(hit.some(command => command.type === 'remove-status-instances'), '海灵累计三次反制后移除');
+  const sequence = (...values) => { let index = 0; return () => values[index++] ?? 0; };
+  const rankTwo = { ...initial, units: { ...initial.units, b: { ...initial.units.b,
+    skillLevels: { ...initial.units.b.skillLevels, [linghaiButterflyIds.passive]: 2 } } } };
+  const seal = definition.handlers.hit.handle(makeContext(rankTwo, sequence(0, .75, 0)), makeHit('linghai-seal-unlock', 40));
+  assert.ok(seal.some(command => command.type === 'add-status' && command.instance.statusId === 'core.soul-suppression'),
+    '二级被动把御魂封印加入海灵随机效果');
+  const rankThree = { ...rankTwo, units: { ...rankTwo.units, b: { ...rankTwo.units.b,
+    skillLevels: { ...rankTwo.units.b.skillLevels, [linghaiButterflyIds.passive]: 3 } } } };
+  const freeze = definition.handlers.hit.handle(makeContext(rankThree, sequence(0, .99, 0)), makeHit('linghai-freeze-unlock', 41));
+  assert.ok(freeze.some(command => command.type === 'apply-control' && command.instance.statusId === linghaiButterflyIds.freeze),
+    '三级被动把冰冻加入海灵随机控制效果');
+  const lethalState = { ...initial, units: { ...initial.units, b: { ...initial.units.b, hp: 0 } } };
+  const lethalHit = { ...makeHit('linghai-lethal-hit', 50), targetId: 'b' };
+  assert.ok(definition.handlers.hit.handle(makeContext(lethalState), lethalHit)?.length,
+    '致命一击也结算受击方已有海灵的本次反制');
 });

@@ -24,6 +24,10 @@ extensions/vscode-owf/node_modules/
 # Desktop application build output
 # desktop/out/ holds local duel fidelity reports and captured datasets; see desktop/docs/DUEL_GAME_FIDELITY_IMPLEMENTATION.md.
 desktop/out/
+# Local duel frame-audit captures (video frames + contact sheets) and ad-hoc screenshots; kept on disk only.
+/frame-audit/
+/community-same-row.png
+/tab-strip-fix.png
 desktop/node_modules/
 desktop/dist/
 desktop/dist-electron/

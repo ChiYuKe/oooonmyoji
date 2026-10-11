@@ -9,8 +9,17 @@ export function registerPvpRules(dispatcher: EventDispatcher, resolveStatus?: (i
       if (event.type !== 'turn-ended') return;
       const actor = context.getUnit(event.unitId);
       if (!actor || actor.statuses.some(status => resolveStatus?.(status.statusId)?.blocksResourceMeterAdvance)) return;
+      // 客户端 `AttrCalc._guiHuoRecover`：每回合的资源推进量 = 基准（阴阳师 `YYS_BOUT_ADD_GUIHUO` = 3 / 其它 = 1）
+      // **加上状态修正**（沉默/禁言/不可见类 buff 为 -1 ⇒ 该单位这一回合少补 1；见 §49 A3）。
+      const base = actor.unitKind === 'onmyoji' ? 3 : 1;
+      const bonus = actor.statuses.reduce((sum, status) => {
+        const modifier = resolveStatus?.(status.statusId)?.resourceRecoveryBonus;
+        return modifier && modifier.resourceId === 'fire' ? sum + modifier.amount : sum;
+      }, 0);
+      const steps = Math.max(0, base + bonus);
+      if (steps <= 0) return;
       return [{ type: 'advance-resource-meter', source: { kind: 'system', id: 'resource-meter' },
-        side: actor.side, resourceId: 'fire', steps: actor.unitKind === 'onmyoji' ? 3 : 1, parentEventId: event.eventId }];
+        side: actor.side, resourceId: 'fire', steps, parentEventId: event.eventId }];
     } });
   dispatcher.register({ id: 'system:pvp-defeat-fire', phase: 'unit-defeated', priority: 0,
     handle(context, event: BattleEvent) {

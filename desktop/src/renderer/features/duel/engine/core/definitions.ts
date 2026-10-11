@@ -138,6 +138,14 @@ export interface StatusDefinition {
   preventsAssist?: boolean;
   /** Prevents the unit's normal post-action resource-meter advance. */
   blocksResourceMeterAdvance?: boolean;
+  /**
+   * 持有者「每回合资源推进量」的修正 —— 对应客户端 `AttrCalc._guiHuoRecover`
+   * （`BattleEntity.start` 用 `YYS_BOUT_ADD_GUIHUO` / `addGuihuoPerBout` 设定，
+   *  `TurnMgrComp.enterLockState` 每回合按它 `addGuihuoBout`）。
+   * 沉默/禁言/不可见类 buff 的数据行是 `guiHuoRecover = -1` ⇒ 该单位这一回合少补 1
+   * （阴阳师 3→2、式神 1→0）。见 §49 A3。
+   */
+  resourceRecoveryBonus?: { resourceId: string; amount: number };
   /** Prevents direct single-target enemy skills from selecting this unit while the status is present. */
   protectsFromDirectTargeting?: boolean;
   /** Prevents other effects from intercepting or sharing damage away from this unit. */

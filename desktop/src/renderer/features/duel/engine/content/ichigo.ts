@@ -27,7 +27,7 @@ export function registerIchigo(registry: ContentRegistry): void {
     { id: ichigoIds.finalReady, mechanicsCoverage: 'partial', category: 'buff', dispellable: false, sealable: false,
       durationOwner: 'permanent', refreshPolicy: 'keep', maxStacks: 1 },
     { id: ichigoIds.noRevive, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false, sealable: false,
-      durationOwner: 'permanent', refreshPolicy: 'keep', preventsRevive: true },
+      durationOwner: 'permanent', refreshPolicy: 'keep', preventsRevive: true, keepOnDie: true }, // DATA_BUFF 3375
     { id: ichigoIds.countered, mechanicsCoverage: 'partial', category: 'buff', dispellable: false, sealable: false,
       durationOwner: 'round', refreshPolicy: 'replace' },
   ];

@@ -30,7 +30,8 @@ export function registerKawaArakawa(registry: ContentRegistry): void {
   registry.registerStatus({ id: kawaArakawaIds.unflinching, mechanicsCoverage: 'partial', category: 'buff',
     dispellable: false, sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace' });
   registry.registerStatus({ id: kawaArakawaIds.spirit, mechanicsCoverage: 'partial', category: 'other',
-    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', preventsRevive: true });
+    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', preventsRevive: true,
+    keepOnDie: true }); // DATA_BUFF 3341
   registry.registerStatus({ id: kawaArakawaIds.turnTrigger, mechanicsCoverage: 'partial', category: 'other',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
   registry.registerHero(createDefinition());

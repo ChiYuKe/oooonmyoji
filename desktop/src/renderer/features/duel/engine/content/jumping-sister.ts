@@ -30,11 +30,13 @@ export function registerJumpingSister(registry: ContentRegistry): void {
   registry.registerStatus({ id: jumpingSisterIds.tomato, mechanicsCoverage: 'partial', category: 'mark',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
   registry.registerStatus({ id: jumpingSisterIds.growUp, mechanicsCoverage: 'partial', category: 'buff',
-    dispellable: true, sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace', maxStacks: 5 });
+    dispellable: true, sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace', maxStacks: 5,
+    keepOnDie: true }); // DATA_BUFF 2266
   registry.registerStatus({ id: jumpingSisterIds.reviveCount, mechanicsCoverage: 'partial', category: 'other',
-    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
+    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace',
+    keepOnDie: true }); // Internal counter for the increasing cooldown across revivals.
   registry.registerStatus({ id: jumpingSisterIds.reviveCooldown, mechanicsCoverage: 'partial', category: 'other',
-    dispellable: false, sealable: false, durationOwner: 'source-turn', refreshPolicy: 'replace' });
+    dispellable: false, sealable: false, durationOwner: 'source-turn', refreshPolicy: 'replace', keepOnDie: true }); // DATA_BUFF 2265
   registry.registerStatus({ id: jumpingSisterIds.occupiedEnemySlot, mechanicsCoverage: 'partial', category: 'mark',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', preventsRevive: true });
 

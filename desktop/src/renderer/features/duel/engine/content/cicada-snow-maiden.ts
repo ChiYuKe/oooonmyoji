@@ -22,11 +22,12 @@ export function registerCicadaSnowMaiden(registry: ContentRegistry): void {
     preventsActionGaugeChange: true };
   registry.registerStatus(freeze);
   registry.registerStatus({ id: cicadaSnowMaidenIds.defenseAura, mechanicsCoverage: 'partial', category: 'buff',
-    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep' });
+    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep', keepOnDie: true }); // DATA_BUFF 3620
   registry.registerStatus({ id: cicadaSnowMaidenIds.cicadaWing, mechanicsCoverage: 'partial', category: 'shield',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
   registry.registerStatus({ id: cicadaSnowMaidenIds.crystallized, mechanicsCoverage: 'partial', category: 'other',
-    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep', preventsRevive: true });
+    dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep', preventsRevive: true,
+    keepOnDie: true }); // DATA_BUFF 3624
   registry.registerStatus({ id: cicadaSnowMaidenIds.crystallizedSpeed, mechanicsCoverage: 'partial', category: 'buff',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
   registry.registerStatus({ id: cicadaSnowMaidenIds.iceFlower, mechanicsCoverage: 'partial', category: 'other',

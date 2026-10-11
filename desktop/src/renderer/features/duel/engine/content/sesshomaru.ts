@@ -28,7 +28,7 @@ export function registerSesshomaru(registry: ContentRegistry): void {
     { id: sesshomaruIds.defenseDown, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
       durationOwner: 'target-turn', refreshPolicy: 'replace' },
     { id: sesshomaruIds.wound, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
-      durationOwner: 'target-turn', refreshPolicy: 'refresh-duration', preventsRevive: true },
+      durationOwner: 'target-turn', refreshPolicy: 'refresh-duration', preventsRevive: true, keepOnDie: true }, // DATA_BUFF 3143
     { id: sesshomaruIds.fatalGuard, mechanicsCoverage: 'partial', category: 'buff', dispellable: false, sealable: false,
       durationOwner: 'permanent', refreshPolicy: 'replace', preventsLethalDamage: true, requiresPassiveEnabled: true },
     { id: sesshomaruIds.fatalRound, mechanicsCoverage: 'partial', category: 'other', dispellable: false, sealable: false,

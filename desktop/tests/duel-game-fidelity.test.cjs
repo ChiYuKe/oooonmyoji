@@ -3750,6 +3750,24 @@ test('P3: turn-end supply works for extra turns and honors meter-blocking defini
   assert.equal(settleEvents(initial, [event], dispatcher, () => .5).state.resources.blue.fire, 0);
 });
 
+test('P3/A3: 沉默类状态按客户端 AttrCalc._guiHuoRecover 扣减每回合鬼火推进', () => {
+  const initial = state();
+  const event = { eventId: 'end-recover', phase: 'turn-end', source, type: 'turn-ended', unitId: 'b' };
+  const resolver = id => (id === 'test.silence' ? { resourceRecoveryBonus: { resourceId: 'fire', amount: -1 } } : undefined);
+  const dispatcher = new EventDispatcher(); registerPvpRules(dispatcher, resolver);
+  // 式神基准 1 格，被沉默（guiHuoRecover -1）⇒ 0 格，不再推进行动条
+  initial.units.b.statuses = [{ statusId: 'test.silence' }];
+  const silenced = settleEvents(initial, [event], dispatcher, () => .5);
+  assert.equal(silenced.state.resourceMeters.blue.fire.progress, 0);
+  assert.equal(silenced.events.some(item => item.type === 'resource-meter-advanced'), false,
+    '推进量为 0 时不产生行动条事件');
+  // 阴阳师基准 3 格（YYS_BOUT_ADD_GUIHUO）⇒ 被沉默后 2 格
+  const onmyoji = { ...initial, units: { ...initial.units,
+    b: { ...initial.units.b, unitKind: 'onmyoji', statuses: [{ statusId: 'test.silence' }] } } };
+  const advanced = settleEvents(onmyoji, [event], dispatcher, () => .5);
+  assert.equal(advanced.state.resourceMeters.blue.fire.progress, 2);
+});
+
 test('P3: repeated casts recompute entity-specific cost reductions against current state', () => {
   const initial = state(), registry = new ContentRegistry(); initial.resources.blue.fire = 6;
   const status = { instanceId: 'discount', statusId: 'discount', source, stacks: 1, duration: { kind: 'permanent' } };
@@ -3897,6 +3915,13 @@ test('络新妇蛛印追击耗火技能，噬心毒液按速度差结算回合�
   const venom = noStun.find(command => command.type === 'add-status' && command.instance.statusId === luoxinfufuIds.venom);
   assert.equal(venom.instance.values.indirectDamageRatio, 1.36);
   const venomState = applyEffectCommands(initial, [venom], 'effect-resolution', 'spider-venom', id => registry.getStatus(id)).state;
+  // A1（§49）：客户端 `[2703, 1]`「噬心毒液」的 `indirectDmgType = 1` ⇒ 它必须给携带者记 1 层间接伤害层数，
+  // 否则 `indirectDamageCalc:656-744` 的「层数×10 无视防御」对络新妇永远不会生效。
+  const appliedVenom = venomState.units.r.statuses.find(status => status.statusId === luoxinfufuIds.venom);
+  assert.equal(appliedVenom.values.indirectDamageLevel, 1,
+    '定义层的 indirectDamageLevel 必须被抄进实例 values（core/effects.ts 的 add-status 分支）');
+  const { indirectBuffLv } = require(path + 'mechanics/indirect-damage.js');
+  assert.equal(indirectBuffLv(venomState.units.r), 1, '噬心毒液自身计入携带者的间接伤害层数');
   const tick = registry.getStatus(luoxinfufuIds.venom).handlers['turn-end'].handle(createBattleContext(venomState, () => .5),
     { eventId: 'spider-venom-turn-end', phase: 'turn-end', source, type: 'turn-ended', unitId: 'r' });
   assert.ok(tick.some(command => command.type === 'lose-life' && command.lifeLossKind === 'indirect'));

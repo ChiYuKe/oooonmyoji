@@ -50,6 +50,8 @@ export interface StatusInstance {
   readonly statusId: StatusId;
   readonly source: SourceRef;
   readonly appliedByEventId?: string;
+  /** Distinguishes a refresh from the application captured at a turn/death boundary. */
+  readonly applicationId?: string;
   readonly stacks: number;
   readonly duration: StatusDuration;
   readonly modifiers?: readonly StatModifier[];
@@ -97,6 +99,10 @@ export interface UnitState {
   readonly side: SideId;
   readonly stats: UnitStats;
   readonly hp: number;
+  /** Cleared after defeat callbacks (or before resurrection), so callbacks can read dying-state buffs. */
+  readonly deathCleanupPending?: boolean;
+  /** Captured before defeat callbacks, so synchronous revivals preserve newly created effects. */
+  readonly deathCleanupSnapshot?: readonly StatusInstance[];
   readonly shield: number;
   readonly actionGauge: number;
   /** Native motion-slot position (0–120); actionGauge remains the percentage API for content. */
@@ -213,7 +219,7 @@ export type BattleEvent =
   | (EventEnvelope & { type: 'status-resisted'; targetId: UnitId; statusId: StatusId })
   | (EventEnvelope & { type: 'status-added'; targetId: UnitId; instance: StatusInstance })
   | (EventEnvelope & { type: 'status-stacks-changed'; targetId: UnitId; instanceId: string; statusId: StatusId; before: number; after: number })
-  | (EventEnvelope & { type: 'status-removed'; targetId: UnitId; instanceId: string; statusId?: StatusId; statusCategory?: StatusCategory; removedValues?: StatusInstance['values']; removedSource?: SourceRef; reason: 'expired' | 'dispelled' | 'consumed' | 'replaced' })
+  | (EventEnvelope & { type: 'status-removed'; targetId: UnitId; instanceId: string; statusId?: StatusId; statusCategory?: StatusCategory; removedValues?: StatusInstance['values']; removedSource?: SourceRef; reason: 'expired' | 'dispelled' | 'consumed' | 'replaced' | 'died' })
   | (EventEnvelope & { type: 'status-application-blocked'; targetId: UnitId; attemptedStatusId: StatusId; protectionStatusId?: StatusId; blockReason?: 'protection' | 'immunity' })
   | (EventEnvelope & { type: 'healing-converted'; targetId: UnitId; requestedAmount: number; shieldAmount: number; shieldStatusId: StatusId })
   | (EventEnvelope & { type: 'action-scheduled'; intent: ActionIntent; scheduling: ActionScheduling; freeCast?: boolean; preResolved?: boolean })

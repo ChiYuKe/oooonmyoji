@@ -124,6 +124,8 @@ export interface StatusDefinition {
   sealable: boolean;
   durationOwner: 'source-turn' | 'target-turn' | 'round' | 'event' | 'permanent';
   refreshPolicy: 'replace' | 'refresh-duration' | 'add-stack' | 'keep';
+  /** Client buff.keepOnDie: only explicitly retained statuses survive the holder's death. */
+  keepOnDie?: boolean;
   maxStacks?: number;
   /** Whether this status is a harmful effect for cleanses that target negative states. */
   negativeEffect?: boolean;

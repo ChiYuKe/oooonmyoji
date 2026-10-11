@@ -8,6 +8,7 @@ import { applyHurtReduction, calcExtHpAbsorb } from '../mechanics/game-damage';
 import type { DamageCalculationHooks } from './definitions';
 import { passivesEnabled } from './passive-eligibility';
 import { soulsEnabled } from './soul-eligibility';
+import { removeStatusesOnDeath } from './status-lifecycle';
 
 export interface EffectResolution {
   state: BattleState;
@@ -244,6 +245,7 @@ export function applyEffectCommands(
       updateUnit(target.unitId, current => ({
         ...current,
         hp: Math.max(0, current.hp - hpDamage),
+        ...(current.hp > 0 && hpDamage >= current.hp ? { deathCleanupPending: true } : {}),
         shield: current.shield - unitShieldAbsorbed,
         statuses: consumeShieldStatuses(current.statuses, shieldStatusAbsorbed).flatMap(status => {
           if (status.instanceId === fatalProtection?.instanceId) return status.stacks > 1 ? [{ ...status, stacks: status.stacks - 1 }] : [];
@@ -312,7 +314,8 @@ export function applyEffectCommands(
       const requestedAmount = Math.max(0, Number.isFinite(command.amount) ? command.amount : 0);
       const amount = command.lifeLossKind === 'indirect' ? requestedAmount * effectiveIndirectDamageTakenMultiplier(target) : requestedAmount;
       const hpLost = Math.min(Math.max(0, target.hp), amount);
-      updateUnit(target.unitId, current => ({ ...current, hp: current.hp - hpLost }));
+      updateUnit(target.unitId, current => ({ ...current, hp: current.hp - hpLost,
+        ...(current.hp > 0 && hpLost >= current.hp ? { deathCleanupPending: true } : {}) }));
       const lifeLostEvent: BattleEvent = { ...envelope(command.source, command.parentEventId), phase: 'effect-resolution', type: 'life-lost',
         targetId: target.unitId, amount, hpLost, ...(command.lifeLossKind ? { lifeLossKind: command.lifeLossKind } : {}),
         ...(command.suppressTargetPassiveTriggers ? { suppressTargetPassiveTriggers: true } : {}) };
@@ -322,7 +325,7 @@ export function applyEffectCommands(
       continue;
     }
     if (command.type === 'revive') {
-      const target = state.units[command.targetId];
+      let target = state.units[command.targetId];
       if (!target || target.hp > 0) continue;
       const reviveBlocker = target.statuses.find(status => resolveStatus?.(status.statusId)?.preventsRevive);
       if (reviveBlocker) {
@@ -330,8 +333,16 @@ export function applyEffectCommands(
           unitId: target.unitId, protectionStatusId: reviveBlocker.statusId });
         continue;
       }
+      // Defeat passives may resurrect synchronously. Clear dying buffs before restoring life,
+      // after checking revive blockers and after the passive has read/consumed its dying state.
+      const cleanup = removeStatusesOnDeath(state, target.unitId, resolveStatus,
+        `${eventPrefix}-revive-cleanup-${++sequence}`, command.parentEventId);
+      state = cleanup.state;
+      events.push(...cleanup.events);
+      target = state.units[target.unitId]!;
       const hp = Math.min(Math.max(1, target.stats.hp), Math.max(1, Number.isFinite(command.hp) ? command.hp : 1));
-      const removedControls = target.statuses.filter(status => resolveStatus?.(status.statusId)?.category === 'control');
+      const removedControls = target.statuses.filter(status => resolveStatus?.(status.statusId)?.category === 'control'
+        && resolveStatus?.(status.statusId)?.keepOnDie !== true);
       updateUnit(target.unitId, current => ({ ...current, hp,
         statuses: current.statuses.filter(status => !removedControls.some(control => control.instanceId === status.instanceId)) }));
       events.push({ ...envelope(command.source, command.parentEventId), phase: 'effect-resolution', type: 'unit-revived', unitId: target.unitId, hp });
@@ -717,7 +728,8 @@ export function applyEffectCommands(
           blockReason: 'immunity' });
         continue;
       }
-      const baseInstance = { ...command.instance, appliedByEventId: command.instance.appliedByEventId ?? command.parentEventId };
+      const baseInstance = { ...command.instance, appliedByEventId: command.instance.appliedByEventId ?? command.parentEventId,
+        applicationId: `${eventPrefix}-status-application-${++sequence}` };
       const statusDefinition = resolveStatus?.(baseInstance.statusId);
       // 间接伤害层数：定义里声明 `indirectDamageLevel` 时抄进实例 values，
       // 供 mechanics/indirect-damage.ts 的 indirectBuffLv 求和（= 客户端 getIndirectBuffLv()，
@@ -736,7 +748,8 @@ export function applyEffectCommands(
       if (policy === 'keep' && matching.length > 0) continue;
       if (policy === 'refresh-duration' && matching.length > 0) {
         const previous = matching[0]!;
-        const refreshed = { ...previous, source: instance.source, appliedByEventId: instance.appliedByEventId, duration: instance.duration };
+        const refreshed = { ...previous, source: instance.source, appliedByEventId: instance.appliedByEventId,
+          applicationId: instance.applicationId, duration: instance.duration };
         const matchingIds = new Set(matching.map(status => status.instanceId));
         updateUnit(target.unitId, current => ({ ...current, statuses: [...current.statuses.filter(status => !matchingIds.has(status.instanceId)), refreshed] }));
         events.push({ ...envelope(command.source, command.parentEventId), phase: 'effect-resolution', type: 'status-added', targetId: target.unitId,
@@ -761,6 +774,7 @@ export function applyEffectCommands(
               + (typeof incomingCriticalAbsorb === 'number' ? incomingCriticalAbsorb : 0) } : {}),
         } : { ...previous.values, ...instance.values };
         const refreshed = { ...previous, source: instance.source, appliedByEventId: instance.appliedByEventId,
+          applicationId: instance.applicationId,
           stacks: Math.min(maximumStacks ?? Number.POSITIVE_INFINITY, previous.stacks + instance.stacks), duration: instance.duration, values };
         const matchingIds = new Set(matching.map(status => status.instanceId));
         updateUnit(target.unitId, current => ({ ...current, statuses: [...current.statuses.filter(status => !matchingIds.has(status.instanceId)), refreshed] }));

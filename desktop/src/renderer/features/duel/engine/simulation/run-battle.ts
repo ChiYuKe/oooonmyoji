@@ -1,7 +1,7 @@
 import type { ContentRegistry } from '../content/registry';
 import { diagnoseContentCoverage, rosterRefsFromState } from '../content/coverage';
 import type { DamageInterceptionContext, HeroDefinition, SoulDefinition } from '../core/definitions';
-import { advanceStatusDurations, captureStatusExpirySnapshot } from '../core/status-lifecycle';
+import { advanceStatusDurations, captureStatusExpirySnapshot, captureTurnStatusExpirySnapshot } from '../core/status-lifecycle';
 import { executeAction } from '../core/action-runner';
 import { createBattleContext } from '../core/context';
 import { checkBattleEnd, createBattleEndEvent, scheduleNextActor, type BattleEnd } from '../core/action-scheduler';
@@ -161,7 +161,7 @@ export function runBattle(initialState: BattleState, registry: ContentRegistry, 
       const actor = state.units[scheduledAction.intent.actorId];
       if (!actor || (actor.hp <= 0 && !isUnitFightingSpirit(actor))) continue;
       const expirySnapshot = scheduledAction.scheduling === 'extra-turn'
-        ? captureStatusExpirySnapshot(state, { owner: 'target-turn', unitId: actor.unitId }) : undefined;
+        ? captureTurnStatusExpirySnapshot(state, actor.unitId) : undefined;
       if (expirySnapshot) settle({ eventId: `scheduled-turn-${state.counters.action + 1}-start-${scheduledAction.eventId}`,
         phase: 'turn-start', source: scheduledAction.source, parentEventId: scheduledAction.eventId,
         actionId: state.counters.action + 1, type: 'turn-started', unitId: actor.unitId, scheduling: 'extra-turn' });
@@ -187,7 +187,8 @@ export function runBattle(initialState: BattleState, registry: ContentRegistry, 
         phase: 'turn-end', source: scheduledAction.source, parentEventId: lastEventId,
         actionId: state.counters.action, type: 'turn-ended', unitId: actor.unitId, scheduling: 'extra-turn' });
       if (triggerBudget) break;
-      const expired = advanceStatusDurations(state, expirySnapshot, `scheduled-status-expiry-${state.counters.action}-${scheduledAction.eventId}`);
+      const expired = advanceStatusDurations(state, expirySnapshot, `scheduled-status-expiry-${state.counters.action}-${scheduledAction.eventId}`,
+        id => registry.getStatus(id));
       state = expired.state;
       for (const event of expired.events) settle(event);
     }
@@ -237,7 +238,7 @@ export function runBattle(initialState: BattleState, registry: ContentRegistry, 
     const extraTurn = extraTurnQueue?.shift();
     if (extraTurnQueue?.length === 0) pendingExtraTurns.delete(actor.unitId);
     const nextActionId = state.counters.action + 1;
-    const expirySnapshot = captureStatusExpirySnapshot(state, { owner: 'target-turn', unitId: actor.unitId });
+    const expirySnapshot = captureTurnStatusExpirySnapshot(state, actor.unitId);
     settle({ eventId: `turn-${nextActionId}-start`, phase: 'turn-start', source: { kind: 'unit', id: String(actor.heroId), unitId: actor.unitId },
       ...(extraTurn ? { parentEventId: extraTurn.eventId } : {}), actionId: nextActionId, type: 'turn-started', unitId: actor.unitId,
       ...(extraTurn ? { scheduling: 'extra-turn' as const } : {}) });
@@ -375,7 +376,8 @@ export function runBattle(initialState: BattleState, registry: ContentRegistry, 
     if (triggerBudget) break;
     resolveScheduledActions();
     if (triggerBudget) break;
-    const expired = advanceStatusDurations(state, expirySnapshot, `status-expiry-${state.counters.round}-${actionId}`);
+    const expired = advanceStatusDurations(state, expirySnapshot, `status-expiry-${state.counters.round}-${actionId}`,
+      id => registry.getStatus(id));
     state = expired.state;
     for (const event of expired.events) settle(event);
     if (triggerBudget) break;
@@ -383,6 +385,12 @@ export function runBattle(initialState: BattleState, registry: ContentRegistry, 
     if ((state.units[actor.unitId]?.hp ?? 0) > 0 || isUnitFightingSpirit(state.units[actor.unitId])) actedThisRound.add(actor.unitId);
     const livingIds = Object.values(state.units).filter(unit => unit.hp > 0 || isUnitFightingSpirit(unit)).map(unit => unit.unitId);
     if (livingIds.length > 0 && livingIds.every(unitId => actedThisRound.has(unitId))) {
+      // A round marker created during this round must also expire at this round's boundary.
+      const roundExpired = advanceStatusDurations(state, captureStatusExpirySnapshot(state, { owner: 'round' }),
+        `round-status-expiry-${state.counters.round}-${actionId}`, id => registry.getStatus(id));
+      state = roundExpired.state;
+      for (const event of roundExpired.events) settle(event);
+      if (triggerBudget) break;
       state = { ...state, counters: { ...state.counters, round: state.counters.round + 1 } };
       actedThisRound = new Set<string>();
     }

@@ -4,6 +4,7 @@ import type { EventDispatcher } from './event-dispatcher';
 import type { BattleEvent, BattleState, EffectCommand } from './types';
 import type { StatusDefinition } from './definitions';
 import { TriggerBudget, type TriggerBudgetDiagnostic } from './trigger-budget';
+import { removeStatusesOnDeath } from './status-lifecycle';
 
 export interface SettlementResult {
   state: BattleState;
@@ -30,6 +31,14 @@ export function settleEvents(
   while (queueIndex < queue.length) {
     const event = queue[queueIndex++];
     if (!event) continue;
+    // Damage callbacks have already run. Keep this snapshot for death passives that need
+    // stacks/seals, and do not erase statuses newly created by a defeat callback.
+    const dyingStatuses = event.type === 'unit-defeated' ? state.units[event.unitId]?.statuses : undefined;
+    if (event.type === 'unit-defeated' && state.units[event.unitId]?.deathCleanupPending) {
+      const unit = state.units[event.unitId]!;
+      state = { ...state, units: { ...state.units,
+        [event.unitId]: { ...unit, deathCleanupSnapshot: dyingStatuses } } };
+    }
     events.push(event);
     for (const handler of dispatcher.handlersFor(event.phase)) {
       if (event.type === 'damage' && event.suppressSoulTriggers && handler.id.startsWith('soul:')) continue;
@@ -69,6 +78,15 @@ export function settleEvents(
       queue.push(...resolution.events.map(child => ({ ...child,
         ...(event.actionId !== undefined && child.actionId === undefined ? { actionId: event.actionId } : {}),
         ...(event.attackId !== undefined && child.attackId === undefined ? { attackId: event.attackId } : {}),
+      })));
+    }
+    if (event.type === 'unit-defeated') {
+      const cleanup = removeStatusesOnDeath(state, event.unitId, resolveStatus,
+        `${event.eventId}-death-cleanup`, event.eventId, dyingStatuses);
+      state = cleanup.state;
+      queue.push(...cleanup.events.map(child => ({ ...child,
+        ...(event.actionId !== undefined ? { actionId: event.actionId } : {}),
+        ...(event.attackId !== undefined ? { attackId: event.attackId } : {}),
       })));
     }
   }

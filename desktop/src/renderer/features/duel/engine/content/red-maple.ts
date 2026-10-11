@@ -28,7 +28,10 @@ const rank = (unit: Readonly<UnitState>, skillId: string): number => Math.max(1,
 /** 鬼女红叶 content migration. The level-5 fire surcharge remains partial. */
 export function registerRedMaple(registry: ContentRegistry): void {
   registry.registerStatus({ id: redMapleIds.doll, mechanicsCoverage: 'partial', category: 'mark', dispellable: true, negativeEffect: true,
-    sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace' });
+    sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2312, 1]`「红枫娃娃」（buff 名，见本文件 2312 被动的逐级文本引用 `[buff_2312_1]`）：
+    // `indirectDmgType = 1` ⇒ 计入携带者的间接伤害层数（getIndirectBuffLv）。只有 lv1 + replace ⇒ 每实例 1 层。
+    indirectDamageLevel: 1 });
   registry.registerHero(createRedMapleDefinition());
 }
 

@@ -16,7 +16,9 @@ const fallenPaperCaps = [1, 2, 2, 3, 3] as const;
 export function registerPaperDancer(registry: ContentRegistry): void {
   const statuses: StatusDefinition[] = [
     { id: paperDancerIds.paper, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
-      durationOwner: 'target-turn', refreshPolicy: 'replace' },
+      durationOwner: 'target-turn', refreshPolicy: 'replace',
+      // 客户端 `[3403, 1]`「纸刃」：`indirectDmgType = 1` ⇒ 计入携带者的间接伤害层数（getIndirectBuffLv）。只有 lv1。
+      indirectDamageLevel: 1 },
     { id: paperDancerIds.fallenPaper, mechanicsCoverage: 'partial', category: 'buff', dispellable: true, sealable: true,
       durationOwner: 'target-turn', refreshPolicy: 'replace', maxStacks: 3 },
     { id: paperDancerIds.silence, mechanicsCoverage: 'partial', category: 'control', dispellable: true, sealable: true,

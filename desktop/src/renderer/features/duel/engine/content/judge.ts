@@ -23,6 +23,9 @@ const revivedTargetBonuses = [.1, .2, .3, .4, .4] as const;
 export function registerJudge(registry: ContentRegistry): void {
   registry.registerStatus({ id: judgeIds.deathSentence, mechanicsCoverage: 'partial', category: 'debuff',
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', healingAbsorption: true,
+    // 客户端 `[2514, 1]`「死亡裁决」`indirectDmgType = 1`（= 依『死亡宣告』伤害吸疗的那一层；同族的
+    // `[2513, 1]`「死亡判定」是 type=0，不计层）⇒ 本状态合并了两者，计 1 层。
+    indirectDamageLevel: 1,
     handlers: {
       'turn-start': { priority: 80, handle(context, event) { return tickDeathSentence(context, event); } },
       'unit-defeated': { priority: 80, handle(context, event) { return clearDeathSentence(context, event); } },

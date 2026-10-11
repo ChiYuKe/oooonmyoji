@@ -197,8 +197,12 @@ function refreshSpeedOnPoisonChange(context: BattleContext, event: BattleEvent):
 
 function makePoison(owner: Readonly<UnitState>, target: Readonly<UnitState>, level: number, duration: number, seed: string, skillId: string): StatusInstance {
   const source = yujuwormSource(skillId, owner.unitId);
+  // 客户端 `[3183, 1]`「虫怨」`indirectDmgType = 1`，层数贡献 = 该 buff 的**等级**；本文件把等级存在
+  // `poisonLevel`（每个实例 stacks 恒为 1）⇒ 逐实例把 `indirectDamageLevel` 也设成同一个等级，
+  // 这样 `indirectBuffLv` 求和才等于客户端 getIndirectBuffLv()。
   return { instanceId: `${yujuwormIds.poison}:${owner.unitId}:${target.unitId}:${seed}:${level}`, statusId: yujuwormIds.poison, source,
-    stacks: 1, duration: { kind: 'count', remaining: duration, owner: 'target-turn' }, values: { poisonLevel: level },
+    stacks: 1, duration: { kind: 'count', remaining: duration, owner: 'target-turn' },
+    values: { poisonLevel: level, indirectDamageLevel: level },
     modifiers: [{ stat: 'speed', operation: 'percent', amount: -.1 },
       { stat: 'defense', operation: 'flat', amount: -10 * level }] };
 }

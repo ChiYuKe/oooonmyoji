@@ -148,6 +148,9 @@ function reduceDefenseOnPoison(context: BattleContext, event: BattleEvent): Effe
 function createBurningFireStatus(): StatusDefinition {
   return { id: kiyohimeIds.burningFire, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
     durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2603, 1]`「焚火」（家族 id 即技能 id）`indirectDmgType = 1` ⇒ 计入携带者的间接伤害层数；
+    // 注意这与 DOT 结算口径是两件事：`[2601]` 家族的 type=0 不计层（见 tickBurningFire 注释）。
+    indirectDamageLevel: 1,
     handlers: { 'turn-end': { priority: 82, handle(context, event) { return tickBurningFire(context, event); } } } };
 }
 

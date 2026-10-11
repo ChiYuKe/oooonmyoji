@@ -29,7 +29,10 @@ export function registerGhostServantWhite(registry: ContentRegistry): void {
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'add-stack',
     stackScope: 'source-unit', maxStacks: 20 });
   registry.registerStatus({ id: ghostServantWhiteIds.deathMark, mechanicsCoverage: 'partial', category: 'debuff',
-    dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
+    dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2104, 1]`（另有 `[102103, 1]` 同族）「夺命」：`indirectDmgType = 1`，家族行写
+    // 「回合后造成[tips_5]」⇒ 与本状态的 turn-end 间接伤害一致，并计入携带者的间接伤害层数。只有 lv1。
+    indirectDamageLevel: 1 });
   registry.registerStatus({ id: ghostServantWhiteIds.blockedRevive, mechanicsCoverage: 'partial', category: 'other',
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', preventsRevive: true });
   registry.registerHero(createGhostServantWhiteDefinition());

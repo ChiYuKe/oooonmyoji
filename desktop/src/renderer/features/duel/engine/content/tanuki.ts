@@ -37,7 +37,10 @@ export function registerTanuki(registry: ContentRegistry): void {
   registry.registerStatus({ id: tanukiIds.drunk, mechanicsCoverage: 'partial', category: 'other', dispellable: false,
     sealable: false, durationOwner: 'event', refreshPolicy: 'replace' });
   registry.registerStatus({ id: tanukiIds.sakeFire, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
-    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', maxStacks: 5 });
+    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', maxStacks: 5,
+    // 客户端 `[2083, 1]`「酒火」：`indirectDmgType = 1`，家族行写「每层降低防御，在回合后造成[tips_5]」
+    // ⇒ 层数贡献 = stacks。
+    indirectDamageLevel: 1 });
 
   const basic: SkillDefinition = {
     id: tanukiIds.basic, actionKind: 'basic', target: 'single', targetRelation: 'enemy',

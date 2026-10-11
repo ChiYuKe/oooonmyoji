@@ -35,7 +35,10 @@ export function registerBoneBoundPrincess(registry: ContentRegistry): void {
     durationOwner: 'target-turn', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 3,
     blocksNextHealing: true, blocksNextActionAdvance: true });
   status(boneBoundPrincessIds.serpentDamage, { category: 'debuff', dispellable: true, sealable: true,
-    durationOwner: 'target-turn', refreshPolicy: 'refresh-duration' });
+    durationOwner: 'target-turn', refreshPolicy: 'refresh-duration',
+    // 客户端 `[3526, 1]`「怨火」（另有 `[35261, 1]` 同族）`indirectDmgType = 1`，家族行写
+    // 「回合开始前受到施加者攻击99%间接伤害」= 本状态的 turn-start 结算 ⇒ 计入携带者的间接伤害层数。
+    indirectDamageLevel: 1 });
   status(boneBoundPrincessIds.serpentGuard, { category: 'buff', dispellable: false, sealable: false,
     durationOwner: 'permanent', refreshPolicy: 'replace' });
   status(boneBoundPrincessIds.summonedThisRound, { category: 'other', dispellable: false, sealable: false,

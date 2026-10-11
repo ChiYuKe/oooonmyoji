@@ -22,6 +22,9 @@ export function registerSakuraFairy(registry: ContentRegistry): void {
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
   registry.registerStatus({ id: sakuraFairyIds.cherryBlossom, mechanicsCoverage: 'partial', category: 'debuff',
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2674, 1]`「落樱」：`indirectDmgType = 1`（回合后的落樱伤害属间接伤害）⇒ 计入携带者的
+    // 间接伤害层数（getIndirectBuffLv）。只有 lv1 + replace ⇒ 每实例 1 层。
+    indirectDamageLevel: 1,
     handlers: { 'turn-end': { priority: 70, handle(context, event) { return tickCherryBlossom(context, event); } } } });
   registry.registerHero(createSakuraFairyDefinition());
 }

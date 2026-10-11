@@ -16,7 +16,10 @@ export function registerMountainWind(registry: ContentRegistry): void {
   registry.registerStatus({ id: mountainWindIds.fierce, mechanicsCoverage: 'partial', category: 'buff', dispellable: true,
     sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace' } satisfies StatusDefinition);
   registry.registerStatus({ id: mountainWindIds.bleed, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
-    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', handlers: {
+    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2963, 1]`「撕裂」：`indirectDmgType = 1`（见 mechanicsCoverageNotes：撕裂结算另列无视 600 防御）
+    // ⇒ 计入携带者的间接伤害层数。只有 lv1 + replace ⇒ 每实例 1 层。
+    indirectDamageLevel: 1, handlers: {
       'status-expiration': { priority: 47, handle(context, event) { return resolveBleed(context, event); } },
     } } satisfies StatusDefinition);
   registry.registerStatus({ id: mountainWindIds.healBan, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,

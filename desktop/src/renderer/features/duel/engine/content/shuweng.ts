@@ -16,7 +16,10 @@ export function registerShuweng(registry: ContentRegistry): void {
   registry.registerStatus({ id: shuwengIds.cap, mechanicsCoverage: 'partial', category: 'buff', dispellable: true,
     sealable: false, durationOwner: 'target-turn', refreshPolicy: 'replace' } satisfies StatusDefinition);
   registry.registerStatus({ id: shuwengIds.record, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
-    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
+    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2911, 1]`「天书·攻心」：`indirectDmgType = 1`，且 `param1 = 0.5`（= 本状态结算默认的 bookRatio）、
+    // `param3 = 12.0`（= 上限 owner.hp × 12）⇒ 就是这条记录减益，计入携带者的间接伤害层数。
+    indirectDamageLevel: 1 });
 
   const basic: SkillDefinition = { id: shuwengIds.basic, actionKind: 'basic', target: 'single', targetRelation: 'enemy',
     useClientDamageData: true, levels: basicRatios.map(ratio => ({ ratio })),

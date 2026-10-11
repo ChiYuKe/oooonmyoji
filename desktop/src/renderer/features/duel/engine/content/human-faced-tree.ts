@@ -14,7 +14,10 @@ const ultimateRatios = [2.16, 2.27, 2.38, 2.48, 2.48, 2.48] as const;
 export function registerHumanFacedTree(registry: ContentRegistry): void {
   const statuses: StatusDefinition[] = [
     { id: humanFacedTreeIds.flower, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
-      durationOwner: 'target-turn', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 3 },
+      durationOwner: 'target-turn', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 3,
+      // 客户端 `[3172, 1]`「灾厄花」：`indirectDmgType = 1` ⇒ 计入携带者的间接伤害层数。只有 lv1 + 本状态 add-stack
+      // ⇒ 层数贡献 = stacks。
+      indirectDamageLevel: 1 },
     { id: humanFacedTreeIds.resist, mechanicsCoverage: 'partial', category: 'buff', dispellable: true, sealable: false,
       durationOwner: 'target-turn', refreshPolicy: 'replace' },
     { id: humanFacedTreeIds.defenseAwaken, mechanicsCoverage: 'partial', category: 'buff', dispellable: true, sealable: false,

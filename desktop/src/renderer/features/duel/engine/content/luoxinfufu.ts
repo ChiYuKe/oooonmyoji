@@ -158,6 +158,9 @@ function triggerMarkOnFireSkill(context: BattleContext, event: BattleEvent): Eff
 function createVenomStatus(): StatusDefinition {
   return { id: luoxinfufuIds.venom, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2703, 1]`「噬心毒液」的 `indirectDmgType = 1`、`param1 = 1.36`（= 本文件的 indirectDamageRatio）
+    // ⇒ 它计入携带者的间接伤害层数（getIndirectBuffLv）。该 buff 只有 lv1，且这里 replace ⇒ 每个实例 1 层。
+    indirectDamageLevel: 1,
     handlers: { 'turn-end': { priority: 82, handle(context, event) {
       if (event.type !== 'turn-ended') return;
       const target = context.getUnit(event.unitId);

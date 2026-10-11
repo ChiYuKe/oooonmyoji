@@ -29,9 +29,14 @@ export function registerJinkougyou(registry: ContentRegistry): void {
   registry.registerStatus({ id: jinkougyouIds.heartFragrance, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5 });
   registry.registerStatus({ id: jinkougyouIds.soulBinder, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
-    sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 3 });
+    sealable: true, durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 3,
+    // 客户端 `[3913, 1]`（另有 `[3915, 1]`/`[3917, 1]` 同族）「缚魂香」：`indirectDmgType = 1`，
+    // 家族行写「每次获得时…可叠加5层，累计3层时转化为失神」⇒ 层数贡献 = stacks（本状态上限 3）。
+    indirectDamageLevel: 1 });
   registry.registerStatus({ id: jinkougyouIds.trance, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
-    sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace', preventsAction: true });
+    sealable: true, durationOwner: 'permanent', refreshPolicy: 'replace', preventsAction: true,
+    // 客户端 `[3914, 1]`「失神」：`indirectDmgType = 1` ⇒ 同样计入携带者的间接伤害层数。只有 lv1 + replace。
+    indirectDamageLevel: 1 });
   registry.registerStatus({ id: jinkougyouIds.defenseRuin, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep' });
   registry.registerHero(createJinkougyouDefinition());

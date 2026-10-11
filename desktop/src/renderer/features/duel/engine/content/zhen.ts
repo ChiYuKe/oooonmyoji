@@ -21,7 +21,10 @@ const bloomRatios = [.01, .03, .06, .1, .15] as const;
 /** 鸩规则迁移。毒羽、基础技能与自动选技已接入；毒伤等级修正和五级递归施法仍需校准。 */
 export function registerZhen(registry: ContentRegistry): void {
   registry.registerStatus({ id: zhenIds.poisonFeather, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
-    sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5 });
+    sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5,
+    // 客户端 `[2852, 1]`「毒羽」：`indirectDmgType = 1`，家族行写「附加毒羽层数等级的中毒效果…上限5层」
+    // ⇒ 层数贡献 = 毒羽层数 = 本状态的 stacks（getIndirectBuffLv 按 buff 等级求和）。
+    indirectDamageLevel: 1 });
   registry.registerHero(createZhenDefinition());
 }
 

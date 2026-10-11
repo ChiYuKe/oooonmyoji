@@ -17,7 +17,10 @@ const summonCooldowns = [3, 3, 3, 3, 2] as const;
 export function registerEmbalmer(registry: ContentRegistry): void {
   const statuses: StatusDefinition[] = [
     { id: embalmerIds.seam, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true, sealable: true,
-      durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 5 },
+      durationOwner: 'permanent', refreshPolicy: 'add-stack', stackScope: 'source-unit', maxStacks: 5,
+      // 客户端 `[3214, 1]`「魂隙」：`indirectDmgType = 1`（本状态就是魂隙，见 mechanicsCoverageNotes：
+      // 目标回合结束按生命上限造成间接生命损失、最多 5 层）⇒ 层数贡献 = stacks。
+      indirectDamageLevel: 1 },
     { id: embalmerIds.coffin, mechanicsCoverage: 'partial', category: 'buff', dispellable: true, sealable: true,
       durationOwner: 'source-turn', refreshPolicy: 'replace' },
     { id: embalmerIds.cooldown, mechanicsCoverage: 'partial', category: 'other', dispellable: false, sealable: false,

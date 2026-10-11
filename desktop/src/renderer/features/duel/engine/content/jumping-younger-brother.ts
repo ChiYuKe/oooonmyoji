@@ -28,6 +28,8 @@ export function registerJumpingYoungerBrother(registry: ContentRegistry): void {
     dispellable: false, sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace' });
   registry.registerStatus({ id: jumpingYoungerBrotherIds.corpsePoison, mechanicsCoverage: 'partial', category: 'debuff',
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace',
+    // 客户端 `[2253, 1]`「跳跳尸毒」：`indirectDmgType = 1` ⇒ 计入携带者的间接伤害层数。只有 lv1 + replace。
+    indirectDamageLevel: 1,
     handlers: { 'turn-start': { priority: 72, handle(context, event) { return poisonTick(context, event); } } } });
   registry.registerStatus({ id: jumpingYoungerBrotherIds.corrosion, mechanicsCoverage: 'partial', category: 'debuff',
     dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });

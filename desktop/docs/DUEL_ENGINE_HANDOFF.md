@@ -547,7 +547,7 @@ npm run test:duel
 |---|---|
 | 📝 DOT 走官方口径 | 把中毒/灼烧类 tick handler 改用 `continueHurtCommand()`，参数取客户端 buff 表 `continueHurt`（按目标当前生命，29 条非零）/`continueAttackHurt`（按攻击，27 条非零） |
 | 📝 重伤溢伤回流 | 玄血类在结算溢伤时调 `seriousInjuryOverflowValue(overflow, record)` |
-| 📝 间接伤害层数 | 在对应 `registerStatus` 里加 `indirectDamageLevel: 1`（对应 buff 表 `indirectDmgType != 0` 那 48 条） |
+| 📝 间接伤害层数 | ~~在对应 `registerStatus` 里加 `indirectDamageLevel: 1`（对应 buff 表 `indirectDmgType != 0` 那 48 条）~~ ✅ **已完成（§50，2026-10-10）：19 个 content 文件已打标，48 条家族里剩下的没有对应引擎状态** |
 | 📝 护盾实体 | 给护盾类单位加 `shieldEntity: true`（已给千姬海原贝戟加过） |
 | 📝 两条免疫 | 免疫类状态加 `continueHurtImmune` / `indirectDamageImmune` |
 | 📝 其余 227 个式神 | 目前走 `generic-fallback`（普攻 + 打最低血量） |
@@ -1794,3 +1794,173 @@ git 基线与编译产物**都不含**它们（两者跑出的失败相同），
   并用 `Compare-Object` 与该备份对比产出「本轮全部改动」清单逐一核对（**11 个文件、无越界改动**）；
 * 全程没有用 PowerShell 的 `-replace`/`Set-Content` 碰 content；批量插入由 Python 脚本 + 临时副本 dry-run 完成；
 * `chuan-yuan.ts` 仍是 `@ts-nocheck`（编译产物还原版），**类型注解仍需原作者补回**。
+
+---
+
+## 49. 第 46 轮：**全量对照审计**（客户端反汇编 ↔ 引擎）—— 找出 6 处真缺口 + 1 处短路
+
+**方法（可复现）**：
+1. `E:\Project\临时工作区\yys-lineup\out\disasm\com_utils_formula\`（**101 个函数**）与
+   `out\disasm\AttrCalc_classes\`（**159 个类方法**）逐个取函数头的 `locals/consts/names`
+   （导出脚本见 §49.4），得到客户端 API 面；
+2. `out\table_CONST.json`（952 条）与 `out\table_DATA_BUFF.json`（7458 行 / **81 个字段**）做字段与取值普查；
+3. 对每个客户端概念在引擎里 grep 同名/同义实现，命中为 0 的再读反汇编确认语义，最后判定
+   「真缺口 / 已等价 / 仅命名不同」。
+
+> 未做的部分（避免过度声明）：`calcAttackDmg`/`directDamageCalc` 这类大函数的**算术细节**没有重推，
+> 那些已在 §16 A / §43 逐条对过；本轮只查**机制与数据面**的漏项。
+
+### 49.1 确认缺口（有硬证据，按影响排序）
+
+| # | 缺口 | 客户端证据 | 引擎现状 | 影响 |
+|---|---|---|---|---|
+| **A1** | **间接伤害层数的"数据侧"只喂了 2/48** | `table_DATA_BUFF` 有 **48** 个家族 `indirectDmgType != 0`（`getIndirectBuffLv` 的层数来源）；专用威力 buff = `const.INDIRECT_BUFF_ID = 99` / `INDIRECT_POWER_LIMIT = 100`，由 `addIndirectPowerBuff` 用 `buffPowerLv/appendPowerLv` 累加（`addIndirectPowerBuff.txt:4-6`） | content 里**只有** `three-tail-fox.ts`（`[2024]`）与 `scorpion-girl.ts`（`[3503]`）设了 `indirectDamageLevel` | §48 刚接的 16/16 `layers` 调用点，**除这两个式神外 `layers` 恒为 0**；「层数×10 无视防御」对绝大多数内容不生效 |
+| **A2** | **阵亡不清状态** | `force_to_die.txt:64-68`：hp/extHp/changeModelShield 清零后调 `BuffMgrComp.removeBuffsOnDie()`；`keepOnDie=True` **974 行**、`buffRemoveType` 974 行 | `core/effects.ts:293` 的 `unit-defeated` 只发事件、不删状态；复活只删 `category==='control'`（`:334`）；`grep "reason: 'died'"` = 0 | 复活后仍带死前印记/减益/护盾；尸体上的印记仍被 handler 读到；`keepOnDie` 语义无法表达 |
+| **A3** | **火条回复不吃 `guiHuoRecover`（沉默会少给火）** | AttrCalc 有 `guiHuoRecover`（`AttrCalc_classes/guiHuoRecover.txt` + `__init__` 的 `_guiHuoRecover`）；`table_DATA_BUFF` **17 行 `guiHuoRecover=-1`，全部是沉默/禁言/不可见**（`[3046] [78852] [68035] [68171] [70018] [3998] [7] [2143] [601] …`） | `mechanics/pvp-rules.ts:12-13` 每回合固定 `steps: onmyoji?3:1`；全库 `guiHuoRecover` = 0 | 被沉默单位的队伍**不会少回火** ⇒ 鬼火节奏偏快（本项目最关心的口径） |
+| **A4** | **多护盾吸收顺序没排序** | `doDamangeShieldOrCage.txt:53-60`：护盾 buff 列表先 `sort(key=<lambda 0x74d0fe3abb70>, reverse=True)` 再逐层吸收；`table_DATA_BUFF.shieldPrority` **28 行**（-999…999，如 `[3622]` 蝉翼 = -10、`[411608]` = 999） | `core/effects.ts:906 consumeShieldStatuses` 按 `statuses` **数组顺序**（= 施加顺序）消耗，无排序 | 同时存在 ≥2 个护盾时（蝉翼 + 地藏像 + 队友盾 + 御魂盾）先吃哪个盾不同 ⇒ 破盾/溢伤时机不同 |
+| **A5** | **御魂触发率没有可被事件改写的入口** | `whenCalcYuHunRate.txt:4-6`：构造 `CalcYunHunRateResult(_raw_rate/rate_type/without_trigger)`，`rate_type == YuHunRateType.PassiveAttr` 时从 `AttrComp.cardAttrCounter[PassiveAttrName]` 取技能，再 `triggerUniversalEvent(EventType.WhenGetYuHunRate, entity, skill, result)` | `whenCalcYuHunRate`/`YunHunRate`/`WhenGetYuHunRate` grep **全 0**；御魂触发率是内容里写死的常数 | 「御魂触发率 +N%」类效果无处挂；御魂封印本身有 `soulsEnabled`，但"改率"不行 |
+| **A6** | **免疫是二值：缺"概率免疫 + 锁定等级 + 无视锁定值"** | `rateImmunityDebuff.txt:4-6`：`lockValue = buffData['skLock']`、`ignImmunityLockValue = buffData['ignImmunityLockValue']`；`lockValue > BuffSkLockType.NOT_LOCK and ignImmunityLockValue >= lockValue` ⇒ **直接跳过免疫**；否则 `random() < immunityProbability` 概率免疫并记 `rateImmuneAllDebuff`。`immunityLockBuff.txt` 同族；AttrComp 另有 `immunityAddDebuffRate`/`addImmunityDebuffResult`/`getImmunityDebuffResult` 账本 | `attemptDebuff/attemptControl` = 命中×(1+命中)/(1+抵抗) 三段掷点 + 目标状态免疫标记（`statusImmunity`/`controlImmunityTypes`/`controlProtection`/`damageImmune`…）；无概率/锁定/无视三元组、无账本 | 数据面：`skLock` 非默认 **53 行**（=1 的 50 行 = 沉默/嘲讽/混乱/变形/禁锢泡泡等"只能普攻"；**=5 的 3 行 = 无法普攻 + 御魂失效**）、`ignImmunityLockValue=1` 15 行、`lockBuffIgnoreResist=True` 1 行（`[3333]` 放逐）、`immuSelect` 33 行。引擎里 `skLock=5` 只能靠内容手工叠加 `preventsAction` + 封印御魂近似 |
+
+### 49.2 潜在 / 当前 roster 触发不到（机制缺位，值得记）
+
+| # | 项 | 客户端证据 | 引擎现状 |
+|---|---|---|---|
+| B1 | **玄血 `xuanHp` 完全没建；`seriousInjury` 被改成手工开关** | `check_serious_injury.txt:20-30`：`serious_injury = (targetAttrComp.xuanHp > 0) and fromEntity != targetEntity`，再被 `can_transform_hp_to_xuan_hp` + `normalHp > 0` 两条否掉；`is_deadly_damage`/`doSkillCalc`/`doDamangeShieldOrCage` 里都有 `transfrom_xuan_hp`/`consume_xuan_hp`/`targetDmgBeforeTransXuanHp`；AttrCalc 有 `xuanHp`/`normalHp`/`reduce_xuan_hp`/`setXuanHpMaxHpChange`/`updateXuanHpBarVisible` | `xuanHp`/`normalHp` grep **0**；`seriousInjury` 来自 `damageAttributes.seriousInjury` / `damageOptions.seriousInjury`（`core/context.ts:59`、`core/effects.ts:211,261`），**不是**由"目标有玄血"推导。⚠️ 引擎注释把玄血当成 `extHp` 的同义词（`mechanics/game-damage.ts:19`、`continue-hurt.ts:16`），而客户端 `_extHp` 与 `_xuanHp` 是**两个字段**。引起玄血的式神是 `longjue`（龙珏，事件名 `longjue_check_transform_xuan_hp`），**不在引擎 roster** |
+| B2 | 单次伤害上限 / 每技能伤害次数上限 | `get_dmg_limit.txt`（`MAX_DAMAGE_LIMIT = 2000000` + `waring_dmg_dict` 按 battle_mode）、`get_dmg_count_limit.txt`（`waring_dmg_count_dict`）、`bout_dmg_count_statistics.txt`（`bout_dmg_count_dict` + `count_limit`）；`doSkillCalc` locals 有 `fe_dmg_limit/te_dmg_limit/max_count/dmg_counter_dict` | `get_dmg_limit`/`MAX_DAMAGE_LIMIT`/`max_count` grep **0**（§16 B 已记；两张 dict 现在为空 ⇒ 只差 2M 兜底，影响≈0） |
+| B3 | 加 buff 前没有 `BeforeAddBuff` 钩子 | `skillAddBuff.txt` names 有 `EventType.BeforeAddBuff` + `BuffAddParam`；`calcSkillAddBuff` 有 `defSuccRate`/`replaceDefSuccRate`/`is_ignore_prop`/`calc_prop_with_friend` | `BeforeAddBuff` grep **0**；只有即时投骰 + 事后 `status-added` 事件 |
+| B4 | `resolveDeferredParams`（攻击值/上限的"命中时求值"） | `resolveDeferredParams.txt:4-6`：`attackReplaceDeferred(from,target)` → `calcDmgParam.attackReplace`；`maxHurtDeferred` → `maxHurt` | `attackReplace` 2 处、`maxHurt` 4 处都是**静态值**；内容都是先算好再传 ⇒ 数值等价，但客户端那条"先声明函数、命中时求值"的语义没建模 |
+| B5 | 两个小入口没建：`randResult`（按权重分布取）与 `isDamageSkill`(`DAMAGE_SKILL_EFFECT`) | `randResult.txt:3-5`（`prob_dist`/`random_obj`）；`isDamageSkill.txt`（`DAMAGE_SKILL_EFFECT`）、`isDamageSkillByData.txt` | 加权取只在 AI 侧（`policies/weighted-policy.ts`）；伤害/御魂侧是 `random()<p` 或**等概率**抽样（共潜按你确认的等概率口径）。`isDamageSkill` grep 0 ⇒ 没有统一的"这是伤害技能"判据 |
+
+### 49.3 已核对、确认**不用改**（避免重复劳动）
+
+| 项 | 对照结果 |
+|---|---|
+| 火条阶梯 | `GUIHUO_ICON_ADD_VALUES=[3,4,5,5,5,5]` + `GUIHUO_POOL_CAPACITY=5` ↔ `core/effects.ts:842-870`（`nextSupply` 3 起、每次 +1、上限 5、`threshold: 5`）⇒ 前 6 次满格补火一致 |
+| 每回合推进 + 阵亡补火 | `YYS_BOUT_ADD_GUIHUO=3`、`PVPConfig.addGuihuoOnYYSDie=2 / SSDie=1` ↔ `mechanics/pvp-rules.ts:12`（阴阳师 3 格 / 式神 1 格）、`:20`（阴阳师 +2 / 式神 +1） |
+| 暴击保证 | `setCriticalTrueAgain` = `not getattr(entity,'hero_no_crit',False)` ↔ 引擎 `hero_no_crit`/`noCrit`（6/11 处） |
+| 闪避/免伤 | `checkDamageAvoided`（`PSSkill_AvoidDamage` + `check_avoid` + `Immunity.DAMAGE`）↔ 引擎 `dodge`/`avoided`/`damageImmune` |
+| 其余 | `doFixedReduction`、`calcExtHpAbsorb`、`doCureAbsord`、重伤溢伤回流、DOT(`buffCalc`)、间接降防与无条件暴击 ⇒ §16 A / §43 已逐条对上，本轮复核未发现回退 |
+
+### 49.4 复现命令
+
+```powershell
+# 客户端 API 面（函数头 locals/names，输出见 E:\Project\临时工作区\formula-surface.txt）
+python - <<'PY'   # 逐文件读 out/disasm/com_utils_formula/*.txt 前 8 行
+PY
+# 引擎侧概念命中数
+Select-String -Path (Get-ChildItem -Recurse -Filter *.ts).FullName -SimpleMatch '<概念名>' | Measure-Object
+# 数据面字段普查（需要 yys-lineup 的 python + out/table_*.json）
+```
+
+**下一步建议（优先级）**：A1（纯内容打标，逐家族核对，能立刻让刚接的 `layers` 生效）→ A3（先取一帧确认"沉默少 1 火"）
+→ A4（需要 sort lambda 的 code object `0x74d0fe3abb70` 或一帧实测确认排序方向）→ A2（动用例多，单独一轮）
+→ A6 / A5（新机制，工作量较大）。
+
+---
+
+## 50. 第 47 轮：**A1 落地 —— 间接伤害层数打标（2 → 19 个文件）** ✅
+
+§49 的 A1 说的是：`layers` 调用点已 16/16，但**层数的数据源**只有 2 个状态。
+本轮把「客户端 `indirectDmgType = 1` 的家族」逐条映射到引擎状态并打上 `indirectDamageLevel`。
+
+### 50.1 方法（可复现、可复核）
+
+1. **映射靠 buff 名**：`out/table_DATA_BUFF.json` 的 `name` 字段（此前几轮只用 `buffDesc`，描述全是
+   `回合后造成[tips_5]` 这类模板，无法辨认）⇒ 用「家族 id + 名称 + 数值字段」三方交叉：
+   - 名称与引擎状态名一致（`噬心毒液`/`红枫娃娃`/`跳跳尸毒`/`酒火`/`灾厄花`/`魂隙`/`纸刃`/`撕裂`/`缚魂香`/`失神`/`夺命`/`落樱`/`毒羽`/`怨火`/`天书·攻心`…）；
+   - 数值字段与引擎常数一致（`[2703].param1 = 1.36` = `indirectDamageRatio` 默认值；`[2911].param1 = 0.5`
+     + `param3 = 12.0` = 记录结算比例与「生命上限 12 倍」上限；`[3526]` 99% 回合开始、`[2963]` 无视 600 防御）；
+   - **「家族 id 即技能 id」惯例**（引擎自己在 `kiyohime.ts:21` 写了这条）：`[2603]`=清姬大招、`[3183]`=虫师大招、
+     `[2253]`=跳跳弟弟大招、`[2312]`=红叶被动、`[2911]`=书翁普攻。
+2. **层数语义逐条判定**（这是本轮最容易搞错的地方）：
+   - 客户端 = `getIndirectBuffLv()` 求和各 buff 的**等级**；
+   - 引擎 = `indirectBuffLv()` 求和 `values.indirectDamageLevel × stacks`；
+   - 所以「家族只有 lv1 + 引擎 `replace`」⇒ 静态 `indirectDamageLevel: 1`（每实例 1 层）；
+   - 「层数 = stacks」的家族（毒羽/魂隙/缚魂香/酒火/灾厄花/蝎毒）⇒ 同样写 1，靠 stacks 体现；
+   - **「每个实例等级不同」的家族**（虫怨 `[3183]`：引擎把等级存在 `values.poisonLevel`、stacks 恒为 1）
+     ⇒ 必须**逐实例**把 `indirectDamageLevel` 设成同一个等级，否则层数会算成 1 而不是 3。
+
+### 50.2 本轮打标清单（17 个文件）
+
+| 客户端家族 | buff 名 | 引擎状态（文件 : id 片段） | 层数写法 |
+|---|---|---|---|
+| `[2703]`/`[2707]` | 噬心毒液 | `luoxinfufu.ts` : `venom` | 1（replace） |
+| `[2312]`/`[102312]` | 红枫娃娃 | `red-maple.ts` : `doll` | 1（replace） |
+| `[2674]`/`[102673]` | 落樱 | `sakura-fairy.ts` : `cherryBlossom` | 1（replace） |
+| `[2852]` | 毒羽 | `zhen.ts` : `poisonFeather` | 1（= stacks） |
+| `[2104]`/`[102103]` | 夺命 | `ghost-servant-white.ts` : `deathMark` | 1（replace） |
+| `[3403]` | 纸刃 | `paper-dancer.ts` : `paper` | 1（replace） |
+| `[3172]` | 灾厄花 | `human-faced-tree.ts` : `flower` | 1（= stacks） |
+| `[3214]` | 魂隙 | `embalmer.ts` : `seam` | 1（= stacks，≤5） |
+| `[2963]` | 撕裂 | `mountain-wind.ts` : `bleed` | 1（replace） |
+| `[3913]`/`[3915]`/`[3917]` | 缚魂香 | `jinkougyou.ts` : `soulBinder` | 1（= stacks，≤3） |
+| `[3914]` | 失神 | `jinkougyou.ts` : `trance` | 1（replace） |
+| `[3183]` | 虫怨 | `yujuworm.ts` : `poison` | **逐实例** `= poisonLevel` |
+| `[2253]` | 跳跳尸毒 | `jumping-younger-brother.ts` : `corpsePoison` | 1（replace） |
+| `[2514]`/`[102514]` | 死亡裁决 | `judge.ts` : `deathSentence` | 1（状态合并了 `[2513]` 死亡判定，后者 type=0 不计层） |
+| `[2603]`/`[60110]`/`[102603]` | 焚火 | `kiyohime.ts` : `burningFire` | 1（replace；与 DOT 结算口径是两件事） |
+| `[2083]` | 酒火 | `tanuki.ts` : `sakeFire` | 1（= stacks） |
+| `[3526]`/`[35261]` | 怨火 | `bone-bound-princess.ts` : `serpentDamage` | 1（replace） |
+| `[2911]` | 天书·攻心 | `shuweng.ts` : `record` | 1（replace） |
+| （§44/45 已打）`[2024]` / `[3503]`+`[61016]`+`[61522]` | 狐袭印记 / 蝎毒 | `three-tail-fox.ts` : `foxMark` / `scorpion-girl.ts` : `poison` | 1 |
+
+### 50.3 剩下没有对应引擎状态（不是漏做，是**没有这些式神/状态**）
+
+`[2226]`/`[102223]` 亡魂附身、`[2584]` 风怒状态、`[2585]` 风袭状态、`[23314]` 大蛇之毒（魂11 大蛇，非决斗 roster）、
+`[24010]` 印·风切、`[25331]` 失血、`[3843]` 粉妆、`[31601]` 粉妆·极、`[64629]`–`[64633]` 红枫娃娃·急行/异火/破甲/生机/抑制
+（红枫娃娃的模式变体）。已用「按 buff 名 grep 全内容 = 0 命中」确认。**将来这些人进 roster 时，按 50.1 的方法补标即可。**
+
+### 50.4 验证
+
+* `calculateIndirectDamage` 调用 **16 处、缺 `layers` 的 0 处**（复核脚本按括号配平逐个实参对象检查）；
+* 带 `indirectDamageLevel` 的 content 文件 **2 → 19 个**；
+* 新增 1 条回归断言（`duel-game-fidelity.test.cjs` 络新妇用例）：实例 `values.indirectDamageLevel === 1`
+  且 `indirectBuffLv(携带者) === 1` —— 锁住「定义 → 实例 values」这条抄写链；
+* `npx tsc -p tsconfig.renderer.json --noEmit` **exit 0**；`npm run test:duel` = **684 / 683 pass / 1 fail**
+  （唯一红仍是事故前既有的初翎山风，与 §48.3 同因）。
+
+> 本轮所有改动都只加属性 + 注释，**没有改任何伤害公式**；因此数值只在「目标身上带这些状态、又被间接攻击命中」时
+> 才会变化 —— 现有用例恰好没有断言这类金额，所以失败数不变（这也说明改动的风险面很小）。
+
+---
+
+## 51. 第 48 轮：**A3 落地 —— 鬼火恢复修正（客户端 `_guiHuoRecover`）** ✅
+
+### 51.1 证据链（本轮新挖到的，比 §49 时完整）
+
+之前只知道「17 行 `guiHuoRecover = -1`，消费者不在已导出的 101 个函数里」。本轮用
+`tools/query_surface/query_surface.py`（覆盖 **67024 个函数**，远大于那 101 个反汇编）补齐：
+
+| 环节 | 证据 |
+|---|---|
+| 属性本体 | `AttrCalc.guiHuoRecover.fget = self._guiHuoRecover`（`AttrCalc.py:451`） |
+| 鬼火是**阵营池** | `AttrCalc.totalGuiHuo = campdata.guiHuo + campdata.yuanliGuiHuo + campdata.curseGuiHuo`（`AttrCalc.py:460`，另有愿力/咒火两个附加池） |
+| 每单位恢复量怎么定 | `BattleEntity.start` 的 names 里 `initTurnPos / YYS_INIT_TURNPOS_PER / guiHuoRecover / YYS_BOUT_ADD_GUIHUO / addGuihuoPerBout` ⇒ 阴阳师取 `YYS_BOUT_ADD_GUIHUO(=3)`、其它取 1，并按单位登记 |
+| 什么时候结算 | `BattleEntity.OnEnterCombat`：`noGuiHuoGainNextBout` / `isAnyJumpQueue` / `SLAVE` / `DEAD` 四条门禁后 `AttrComp.addGuiHuo(guiHuoRecover)`；`TurnMgrComp.enterLockState` 每回合 `addGuihuoBout` + `GUIHUO_POOL_CAPACITY`（并有 `isYYSEntity/isSSEntity/isMonsterEntity` 分支） |
+| 数据面规则 | 17 行 `-1` = **11×沉默(buffType=2) + 2×禁言 + 3×不可见/吞噬 + 1×恶戏状态**；而 混乱/变形/嘲讽/挑衅/眩晕/封印 **全部是 0**（不扣火） |
+
+### 51.2 实现
+
+* `core/definitions.ts`：`StatusDefinition.resourceRecoveryBonus?: { resourceId: string; amount: number }`
+  （带注释说明对应 `AttrCalc._guiHuoRecover` 与 `addGuihuoPerBout`）。
+* `mechanics/pvp-rules.ts`：每回合推进量 = 基准（阴阳师 3 / 其它 1）**+ Σ 状态修正**，下限 0；
+  为 0 时**不发** `advance-resource-meter` 事件。
+* 已打标（有直接 buff id 证据的两处）：
+  - `gulonghuo.ts` 的 `evilPrank`（`[102743, 1]` 恶戏状态 `-1`）；
+  - `eater.ts` 的 `swallowed`（`[2143, 1]` / `[102143, 1]` 吞噬「目标不可见，不可选」`-1`）。
+* 新增回归用例：`duel-game-fidelity.test.cjs` 「P3/A3: 沉默类状态按客户端 AttrCalc._guiHuoRecover 扣减每回合鬼火推进」
+  （式神 1→0 且不发事件；阴阳师 3→2）。
+
+### 51.3 仍待办 / 待确认
+
+1. **通用沉默/禁言行还没打标**：`[3046] [68035] [70018] [3998] [7] [78851] [99722] [100007]`（沉默）、
+   `[78852] [78954]`（禁言）、`[601]`（隐身）。⚠️ 「沉默」在表里共 19 行，其中 **4 行 `guiHuoRecover = 0`**
+   ⇒ **不能按语义批量打**，必须逐条把 buff id 对到引擎状态（方法与 §50.1 相同：按 buff 名 + 数值 + 「家族 id 即技能 id」）。
+2. **幅度口径待实机一帧**：客户端这份恢复量是算进「火条推进（`addGuihuoBout`）」还是「直接入阵营池
+   （`addGuiHuo`）」—— 两种读法**方向一致**（沉默 ⇒ 该单位这一回合少补），但幅度不同：
+   若按引擎现在的「推进格」口径，式神 1→0 格、阴阳师 3→2 格。建议打一局观察「沉默单位回合是否少补」再定死。
+
+### 51.4 验证
+
+`npx tsc -p tsconfig.renderer.json --noEmit` **exit 0**；`npm run test:duel` = **685 tests / 684 pass / 1 fail**
+（唯一红仍是事故前既有的初翎山风；新增的 A3 用例通过）。

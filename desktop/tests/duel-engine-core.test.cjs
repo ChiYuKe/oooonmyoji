@@ -2780,8 +2780,10 @@ test('截图十名式神与七类御魂在完整五对五中通过新引擎完�
   const actedHeroes = new Set(result.events.filter(event => event.type === 'action-declared')
     .map(event => result.state.units[event.intent.actorId]?.heroId));
   assert.deepEqual([...actedHeroes].sort((a, b) => a - b), [247, 306, 331, 356, 362, 391, 392, 395, 396, 600]);
-  assert.ok(Object.values(result.state.units).some(unit => unit.heroId === chihimeIds.hero && unit.side === 'blue'
-    && unit.statuses.some(status => status.statusId === chihimeIds.enemySkillGaugeTriggered)),
+  assert.ok(result.events.some(event => event.type === 'status-added'
+    && event.instance.statusId === chihimeIds.enemySkillGaugeTriggered
+    && result.state.units[event.targetId]?.heroId === chihimeIds.hero
+    && result.state.units[event.targetId]?.side === 'blue'),
   '完整截图阵容的实际新引擎流程应结算千姬持戟后的敌方首次妖术触发');
 });
 
@@ -10951,7 +10953,9 @@ test('於菊虫普攻在完整行动结算中触发被动爆毒事件', () => {
     source: { kind: 'skill', id: yujuwormIds.basic, unitId: worm.unitId }, stacks: 1,
     duration: { kind: 'count', remaining: 2, owner: 'target-turn' }, values: { poisonLevel: 1 } };
   initial.units[worm.unitId] = worm;
-  initial.units['red-1'] = { ...initial.units['red-1'], statuses: [poison] };
+  // Keep the target alive to inspect poison upgrade/reapplication; death clears these debuffs.
+  initial.units['red-1'] = { ...initial.units['red-1'], hp: 10000,
+    stats: { ...initial.units['red-1'].stats, hp: 10000 }, statuses: [poison] };
   const dispatcher = new EventDispatcher();
   dispatcher.register({ id: `hero:${yujuwormIds.hero}:hit`, phase: 'hit', priority: 55,
     handle: registry.getHero(yujuwormIds.hero).handlers.hit.handle });

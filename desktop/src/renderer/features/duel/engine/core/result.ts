@@ -33,6 +33,7 @@ export interface BattleResult {
   drawRate: number;
   seed: number;
   sampleLog: string[];
+  sampleLogEntries?: readonly BattleLogEntry[];
   engine: 'modular';
   diagnostics: readonly CoverageDiagnostic[];
   sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget';
@@ -40,4 +41,12 @@ export interface BattleResult {
   /** Runs excluded from aggregate results because their trigger budget was exceeded. */
   invalidRuns?: number;
   sampleResult?: BattleRunResult;
+}
+
+/** Presentation metadata survives worker messages and sample switching. */
+export interface BattleLogEntry {
+  text: string;
+  event: BattleEvent;
+  stage: 'opening' | 'turn-start' | 'action' | 'turn-end' | 'ending';
+  origin: { kind: 'skill' | 'passive' | 'soul' | 'status' | 'system' | 'unit'; label: string; direct: boolean };
 }

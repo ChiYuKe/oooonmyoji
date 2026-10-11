@@ -1,4 +1,5 @@
 import type { BattleEvent, SideId } from '../core/types';
+import type { BattleLogEntry } from '../core/result';
 import { soulCatalog } from '../../../../../shared/soul-catalog-data';
 import { heroSkillsCatalog } from '../../../../../shared/hero-skills-data';
 
@@ -8,8 +9,8 @@ export function presentBattleEvent(event: BattleEvent, label: (id: string) => st
     case 'battle-started': return '战斗开始。';
     case 'turn-started': return `${label(event.unitId)}的回合开始。`;
     case 'turn-ended': return `${label(event.unitId)}的回合结束。`;
-    case 'damage': return `${label(event.targetId)}受到${Math.round(event.amount)}点${event.damageKind === 'true' ? '真实' : ''}伤害${event.fatalProtectionStatusId ? '（免疫致命伤害）' : (event.criticalAbsorbed ?? 0) > 0 ? `（共鸣之墙吸收${Math.round(event.criticalAbsorbed!)}点暴击伤害）` : ''}。`;
-    case 'life-lost': return `${label(event.targetId)}损失${Math.round(event.hpLost)}点生命。`;
+    case 'damage': return `${label(event.targetId)}受到${Math.round(event.amount)}点${event.damageKind === 'true' ? '真实' : event.damageKind === 'indirect' ? '间接' : ''}伤害${event.fatalProtectionStatusId ? '（免疫致命伤害）' : (event.criticalAbsorbed ?? 0) > 0 ? `（共鸣之墙吸收${Math.round(event.criticalAbsorbed!)}点暴击伤害）` : ''}。`;
+    case 'life-lost': return `${label(event.targetId)}${event.lifeLossKind === 'indirect' ? '受到间接伤害，' : ''}损失${Math.round(event.hpLost)}点生命。`;
     case 'unit-defeated': return `${label(event.unitId)}被击败。`;
     case 'unit-revived': return `${label(event.unitId)}复活并恢复至${Math.round(event.hp)}点生命。`;
     case 'revive-blocked': return `${label(event.unitId)}因${statusLabel(event.protectionStatusId)}无法复活。`;
@@ -30,13 +31,13 @@ export function presentBattleEvent(event: BattleEvent, label: (id: string) => st
     case 'status-resisted': return `${label(event.targetId)}抵抗了状态：${statusLabel(event.statusId)}。`;
     case 'resource-changed': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}：${event.before}→${event.after}。`;
     case 'resource-overflow': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}溢出${event.amount}。`;
-    case 'resource-meter-set': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}行动条设为${event.progressAfter}格。`;
+    case 'resource-meter-set': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}回火进度设为${event.progressAfter}格。`;
     case 'resource-cap-changed': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}上限：${event.before}→${event.after}。`;
-    case 'resource-meter-advanced': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}行动条：${event.progressBefore}→${event.progressAfter}格${event.supplied > 0 ? `，补充${event.supplied}` : ''}。`;
+    case 'resource-meter-advanced': return `${sideLabel(event.side)}${resourceLabel(event.resourceId)}回火进度：${event.progressBefore}→${event.progressAfter}格${event.supplied > 0 ? `，补充${event.supplied}鬼火` : ''}。`;
     case 'action-gauge-changed': return `${label(event.unitId)}行动条：${Math.round(event.before)}→${Math.round(event.after)}。`;
     case 'status-added': return `${label(event.targetId)}获得${statusLabel(event.instance.statusId)}。`;
     case 'status-stacks-changed': return `${label(event.targetId)}的${statusLabel(event.statusId)}层数：${event.before}→${event.after}。`;
-    case 'status-removed': return `${label(event.targetId)}失去${statusLabel(event.instanceId.split(':')[0] ?? event.instanceId)}。`;
+    case 'status-removed': return `${label(event.targetId)}失去${statusLabel(event.statusId ?? event.instanceId.split(':')[0] ?? event.instanceId)}${event.reason === 'died' ? '（死亡清除）' : event.reason === 'expired' ? '（到期）' : ''}。`;
     case 'status-application-blocked': return event.blockReason === 'immunity'
       ? `${label(event.targetId)}免疫了${statusLabel(event.attemptedStatusId)}。`
       : `${label(event.targetId)}施加的${statusLabel(event.attemptedStatusId)}被${statusLabel(event.protectionStatusId ?? '状态保护')}抵挡。`;
@@ -56,15 +57,31 @@ export function presentBattleEvent(event: BattleEvent, label: (id: string) => st
 }
 
 export function presentBattleEvents(events: readonly BattleEvent[], label?: (id: string) => string): string[] {
+  return presentBattleLogEntries(events, label).map(entry => entry.text);
+}
+
+export type SkillOriginResolver = (unitId: string | undefined, skillId: string) => { name?: string; passive?: boolean } | undefined;
+
+export function presentBattleLogEntries(events: readonly BattleEvent[], label: (id: string) => string = id => id,
+  resolveSkill?: SkillOriginResolver): BattleLogEntry[] {
   const visible = events.filter(event => event.type !== 'action-ended');
   const paidActionEvents = new Set<string>();
-  const lines: string[] = [];
+  const entries: BattleLogEntry[] = [];
+  let stage: BattleLogEntry['stage'] = 'opening';
+  let action: Extract<BattleEvent, { type: 'action-declared' }> | undefined;
+  const append = (event: BattleEvent, text: string): void => {
+    entries.push({ text, event, stage, origin: eventOrigin(event, stage === 'action' ? action : undefined, label, resolveSkill) });
+  };
   for (let index = 0; index < visible.length; index++) {
     const event = visible[index]!;
+    if (event.type === 'turn-started') { stage = 'turn-start'; action = undefined; }
+    else if (event.type === 'turn-ended') stage = 'turn-end';
+    else if (event.type === 'action-declared') { stage = 'action'; action = event; }
+    else if (event.type === 'battle-ended') stage = 'ending';
     if ((event.type === 'healing' || event.type === 'health-restored') && event.hpGained <= 0) continue;
     if (event.type === 'resource-changed' && event.phase === 'resource-payment' && paidActionEvents.has(event.eventId)) continue;
     if (event.type !== 'action-declared') {
-      lines.push(presentBattleEvent(event, label));
+      append(event, presentBattleEvent(event, label));
       continue;
     }
     const payment = visible.slice(index + 1).find((candidate): candidate is Extract<BattleEvent, { type: 'resource-changed' }> =>
@@ -72,9 +89,37 @@ export function presentBattleEvents(events: readonly BattleEvent[], label?: (id:
       && candidate.actionId === event.actionId && candidate.source.unitId === event.intent.actorId);
     if (payment) paidActionEvents.add(payment.eventId);
     const actionLine = presentBattleEvent(event, label);
-    lines.push(payment ? `${actionLine}（${resourceLabel(payment.resourceId)} ${payment.before}→${payment.after}）` : actionLine);
+    append(event, payment ? `${actionLine}（${resourceLabel(payment.resourceId)} ${payment.before}→${payment.after}）` : actionLine);
   }
-  return lines;
+  return entries;
+}
+
+function eventOrigin(event: BattleEvent, action: Extract<BattleEvent, { type: 'action-declared' }> | undefined,
+  label: (id: string) => string, resolveSkill?: SkillOriginResolver): BattleLogEntry['origin'] {
+  const source = event.source;
+  const actor = source.unitId ? label(source.unitId) : '';
+  const direct = source.kind === 'skill' && source.id === action?.intent.skillId
+    && source.unitId === action.intent.actorId;
+  if (source.kind === 'skill') {
+    const resolved = resolveSkill?.(source.unitId, source.id);
+    const heroName = actor.split('·').at(-1);
+    const hero = soulCatalog.heroes.find(profile => profile.name === heroName);
+    const skills = hero ? heroSkillsCatalog.heroes[hero.id]?.skills ?? [] : [];
+    const skill = [...skills, ...skills.flatMap(item => item.extraSkills)].find(item => String(item.id) === source.id);
+    const name = resolved?.name ?? skill?.name;
+    return { kind: resolved?.passive ? 'passive' : 'skill', direct,
+      label: [actor, name ? `「${name}」` : ''].filter(Boolean).join(' ') };
+  }
+  if (source.kind === 'soul') {
+    const soulId = /^(?:soul:)?(\d+)(?:[.:]|$)/.exec(source.id)?.[1];
+    const soul = soulCatalog.suits.find(profile => String(profile.id) === soulId);
+    return { kind: 'soul', direct: false, label: [actor, soul?.name ?? '御魂效果'].filter(Boolean).join(' ') };
+  }
+  if (source.kind === 'status') {
+    const name = knownStatusLabels[source.id];
+    return { kind: 'status', direct: false, label: [actor, name ?? '状态效果'].filter(Boolean).join(' ') };
+  }
+  return { kind: source.kind, direct: false, label: source.kind === 'system' ? '战斗规则' : actor };
 }
 
 function sideLabel(side: SideId): string {
@@ -93,6 +138,8 @@ const knownStatusLabels: Record<string, string> = {
   'status.hero.238.blessing-seed': '祝福种子',
   'status.hero.238.photosynthesis': '光合作用',
   'status.hero.585.blood-flower': '血花',
+  'status.hero.585.ping-iron-wall': '磐之铁壁',
+  'status.hero.585.max-hp-growth': '生命成长',
   'status.hero.295.protection': '庇护',
 };
 

@@ -1,9 +1,10 @@
 /** Compatibility facade; every battle runs in the modular engine and reports content coverage. */
 import { soulCatalog } from '../../../../shared/soul-catalog-data';
+import { heroSkillsCatalog } from '../../../../shared/hero-skills-data';
 import { diagnoseContentCoverage, rosterRefsFromState } from './content/coverage';
 import { createMigratedContentRegistry } from './content/register-migrated-content';
-import type { BattleResult, BattleRunResult } from './core/result';
-import { presentBattleEvents } from './presentation/events';
+import type { BattleResult, BattleRunResult, BattleLogEntry } from './core/result';
+import { presentBattleLogEntries } from './presentation/events';
 import { createBattleState } from './simulation/input-adapter';
 import { runBattle } from './simulation/run-battle';
 import type { DuelState } from './types';
@@ -37,7 +38,7 @@ export function simulateBattle(state: DuelState, runs = 256, sampleIndex = 0): B
   }
   const denominator = Math.max(1, validRuns);
   return { blueRate: blueWins / denominator, redRate: redWins / denominator, drawRate: draws / denominator, seed,
-    sampleLog: sampleResult ? presentBattleEvents(sampleResult.events, createUnitLabeler(sampleResult.state)) : [],
+    ...presentSample(sampleResult),
     engine: 'modular', diagnostics: sampleResult?.diagnostics ?? selection.diagnostics,
     sampleReason: sampleResult?.reason,
     terminationCounts,
@@ -89,7 +90,7 @@ export async function simulateBattleProgressive(
   if (isCancelled()) return undefined;
   const denominator = Math.max(1, validRuns);
   return { blueRate: blueWins / denominator, redRate: redWins / denominator, drawRate: draws / denominator, seed,
-    sampleLog: sampleResult ? presentBattleEvents(sampleResult.events, createUnitLabeler(sampleResult.state)) : [],
+    ...presentSample(sampleResult),
     engine: 'modular', diagnostics: sampleResult?.diagnostics ?? selection.diagnostics,
     sampleReason: sampleResult?.reason,
     terminationCounts,
@@ -99,6 +100,7 @@ export async function simulateBattleProgressive(
 
 export function simulateBattleSampleDetails(state: DuelState, sampleIndex: number): {
   sampleLog: string[];
+  sampleLogEntries?: readonly BattleLogEntry[];
   sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget';
 } {
   const selection = inspectInput(state);
@@ -106,7 +108,19 @@ export function simulateBattleSampleDetails(state: DuelState, sampleIndex: numbe
   const index = Math.max(0, Math.floor(sampleIndex));
   const result = runBattle(modularState, migratedRegistry, { seed: compatibleBaseSeed(state), sampleIndex: index,
     ruleVersion: modularRuleVersion, captureEvents: true });
-  return { sampleLog: presentBattleEvents(result.events, createUnitLabeler(result.state)), sampleReason: result.reason };
+  return { ...presentSample(result), sampleReason: result.reason };
+}
+
+function presentSample(result: BattleRunResult | undefined): { sampleLog: string[]; sampleLogEntries: BattleLogEntry[] } {
+  const sampleLogEntries = result ? presentBattleLogEntries(result.events, createUnitLabeler(result.state), (unitId, skillId) => {
+    const heroId = unitId ? result.state.units[unitId]?.heroId : undefined;
+    if (heroId === undefined) return undefined;
+    const definition = migratedRegistry.getHero(heroId)?.skills.find(skill => skill.id === skillId);
+    const skills = heroSkillsCatalog.heroes[heroId]?.skills ?? [];
+    const skill = [...skills, ...skills.flatMap(item => item.extraSkills)].find(item => String(item.id) === skillId);
+    return { name: skill?.name, passive: definition?.actionKind === 'passive' || skill?.type === 4 };
+  }) : [];
+  return { sampleLog: sampleLogEntries.map(entry => entry.text), sampleLogEntries };
 }
 
 export function simulateBattleSample(state: DuelState, sampleIndex: number): string[] {

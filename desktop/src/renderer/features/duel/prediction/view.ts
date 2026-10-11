@@ -14,6 +14,7 @@ import { createElement, ChevronLeft, ChevronRight } from 'lucide';
 type SideId = 'blue' | 'red';
 type FighterInput = BattleFighterInput;
 type DuelState = DuelBattleInput;
+type SampleLog = Pick<ReturnType<typeof simulateBattle>, 'sampleLog' | 'sampleLogEntries' | 'sampleReason'>;
 
 const STORAGE_KEY = 'onmyoji-studio.duel-prediction.v1';
 const TEAM_SIZE = 5;
@@ -164,9 +165,9 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   let simulationWorker: Worker | undefined;
   let simulationGeneration = 0;
   let currentSimulation: { outcome: ReturnType<typeof simulateBattle>; runs: number; state: DuelState } | undefined;
-  const sampleCache = new Map<number, { sampleLog: string[]; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget' }>();
+  const sampleCache = new Map<number, SampleLog>();
   const pendingSamples = new Set<number>();
-  const cacheSample = (index: number, sample: { sampleLog: string[]; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget' }): void => {
+  const cacheSample = (index: number, sample: SampleLog): void => {
     sampleCache.delete(index);
     sampleCache.set(index, sample);
     while (sampleCache.size > 20) sampleCache.delete(sampleCache.keys().next().value!);
@@ -531,7 +532,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     });
     matchNav.append(previous, position, next);
     log.append(matchNav);
-    const entries = renderBattleLog(doc, outcome.sampleLog);
+    const entries = renderBattleLog(doc, outcome.sampleLog, outcome.sampleLogEntries);
     const filters = make(doc, 'div', 'duel-log-filters');
     filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', '筛选行动方');
     for (const [side, label] of [['all', '全部'], ['blue', '蓝方行动'], ['red', '红方行动']] as const) {
@@ -574,7 +575,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
     if (!current) return;
     const cached = sampleCache.get(index);
     if (cached) {
-      renderResult({ ...current.outcome, sampleLog: cached.sampleLog, sampleReason: cached.sampleReason, sampleResult: undefined }, current.runs, index, current.state);
+      renderResult({ ...current.outcome, ...cached, sampleResult: undefined }, current.runs, index, current.state);
       return;
     }
     if (!simulationWorker || pendingSamples.has(index)) return;
@@ -584,7 +585,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
   };
   const attachWorkerMessages = (worker: Worker, taskId: number, runs: number, stateSnapshot: DuelState): void => {
     worker.onmessage = (event: MessageEvent<{ type: string; taskId: number; completed: number; total: number; engine: string;
-      result: ReturnType<typeof simulateBattle>; index: number; sampleLog: string[]; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget'; message: string }>) => {
+      result: ReturnType<typeof simulateBattle>; index: number; sampleLog: string[]; sampleLogEntries?: SampleLog['sampleLogEntries']; sampleReason?: 'elimination' | 'action-limit' | 'trigger-budget'; message: string }>) => {
       const data = event.data;
       if (data.taskId !== simulationGeneration || taskId !== simulationGeneration) return;
       if (data.type === 'progress') {
@@ -592,7 +593,7 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
           ? `正在模拟 · ${data.completed.toLocaleString()} / ${data.total.toLocaleString()} 场`
           : data.completed === 0 ? '正在模拟兼容规则…' : '';
       } else if (data.type === 'result') {
-        cacheSample(0, { sampleLog: data.result.sampleLog, sampleReason: data.result.sampleReason });
+        cacheSample(0, { sampleLog: data.result.sampleLog, sampleLogEntries: data.result.sampleLogEntries, sampleReason: data.result.sampleReason });
         pendingSamples.delete(0);
         currentSimulation = { outcome: data.result, runs, state: stateSnapshot };
         simulationStatus.textContent = '';
@@ -600,10 +601,11 @@ export function installDuelPredictionPanel(root: HTMLElement): () => void {
         renderResult(data.result, runs, 0, stateSnapshot);
       } else if (data.type === 'sample') {
         pendingSamples.delete(data.index);
-        cacheSample(data.index, { sampleLog: data.sampleLog, sampleReason: data.sampleReason });
+        cacheSample(data.index, { sampleLog: data.sampleLog, sampleLogEntries: data.sampleLogEntries, sampleReason: data.sampleReason });
         simulationStatus.textContent = '';
         const current = currentSimulation;
-        if (current) renderResult({ ...current.outcome, sampleLog: data.sampleLog, sampleReason: data.sampleReason, sampleResult: undefined }, current.runs, data.index, current.state);
+        if (current) renderResult({ ...current.outcome, sampleLog: data.sampleLog, sampleLogEntries: data.sampleLogEntries,
+          sampleReason: data.sampleReason, sampleResult: undefined }, current.runs, data.index, current.state);
       } else if (data.type === 'error') {
         pendingSamples.clear();
         run.disabled = false; cancelRun.hidden = true;

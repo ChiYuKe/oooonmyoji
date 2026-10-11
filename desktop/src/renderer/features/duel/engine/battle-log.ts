@@ -2,6 +2,8 @@ import { createElement, Swords, Skull, HeartPulse, Shield, Ban, Gauge, Flame, Sp
 import { soulCatalog } from '../../../../shared/soul-catalog-data';
 import { heroSkillsCatalog } from '../../../../shared/hero-skills-data';
 import { appendPickerPortrait } from '../../souls/optimizer/picker';
+import type { BattleLogEntry } from './core/result';
+import { describeBattleLogEntry, battleLogOriginLabel } from './presentation/log-entry';
 
 type LogSide = 'blue' | 'red' | 'neutral';
 export type BattleLogGroup = {
@@ -56,12 +58,13 @@ export function groupBattleLog(lines: string[]): BattleLogGroup[] {
 
 function eventKind(line: string): { kind: string; label: string; detail: boolean } {
   if (/被击败|剩余生命\s*0(?:[；。，]|$)/.test(line)) return { kind: 'defeat', label: '击败', detail: false };
-  if (/点生命伤害|点(?:真实)?伤害|损失\d+点生命|反击|反伤/.test(line)) return { kind: 'damage', label: '伤害', detail: false };
+  if (/点生命伤害|点(?:真实|间接)?伤害|损失\d+点生命|反击|反伤/.test(line)) return { kind: 'damage', label: /间接伤害/.test(line) ? '间接伤害' : /真实伤害/.test(line) ? '真实伤害' : '伤害', detail: false };
   if (/复活/.test(line)) return { kind: 'heal', label: '复活', detail: false };
   if (/治疗|吸血|恢复.*点生命/.test(line)) return { kind: 'heal', label: '治疗', detail: false };
   if (/控制生效|驱散|受到控制|抵抗了|免疫了|控制效果被/.test(line)) return { kind: 'control', label: line.startsWith('驱散') ? '驱散' : '控制', detail: false };
   if (/回合开始|回合结束|开始攻击|攻击结束|行动结算结束/.test(line)) return { kind: 'state', label: '结算', detail: true };
   if (/行动条到达顺序/.test(line)) return { kind: 'state', label: '行动条', detail: true };
+  if (/回火进度/.test(line)) return { kind: 'resource', label: '回火进度', detail: false };
   if (/行动条|额外行动/.test(line)) return { kind: 'gauge', label: '行动条', detail: false };
   if (/鬼火|自然回火/.test(line)) return { kind: 'resource', label: '鬼火', detail: true };
   if (/尚未建模|尚未迁移/.test(line)) return { kind: 'state', label: '说明', detail: true };
@@ -113,8 +116,15 @@ function appendHighlighted(node: HTMLElement, text: string): void {
   node.append(text.slice(offset));
 }
 
-export function renderBattleLog(doc: Document, lines: string[]): HTMLOListElement {
+export function renderBattleLog(doc: Document, lines: string[], logEntries?: readonly BattleLogEntry[]): HTMLOListElement {
   const entries = element(doc, 'ol', 'duel-action-list');
+  // Queues keep identical text from separate hits distinct, including across action cards.
+  const metadata = new Map<string, BattleLogEntry[]>();
+  for (const entry of logEntries ?? []) {
+    if (entry.event.type === 'action-declared') continue;
+    const sameText = metadata.get(entry.text) ?? [];
+    sameText.push(entry); metadata.set(entry.text, sameText);
+  }
   for (const group of groupBattleLog(lines)) {
     const card = element(doc, 'li', `duel-log-group duel-log-group-${group.side}`);
     card.dataset.logSide = group.side;
@@ -145,9 +155,16 @@ export function renderBattleLog(doc: Document, lines: string[]): HTMLOListElemen
     const details = element(doc, 'details', 'duel-action-details');
     const extra = element(doc, 'div', 'duel-action-extra');
     let detailCount = 0;
+    let visibleStage: BattleLogEntry['stage'] | undefined;
     for (const line of group.lines) {
-      const event = eventKind(line);
+      const entry = metadata.get(line)?.shift();
+      const event = entry ? describeBattleLogEntry(entry) : eventKind(line);
       const row = element(doc, 'div', `duel-log-event duel-event-${event.kind}`);
+      if (entry) {
+        row.dataset.eventId = entry.event.eventId;
+        row.dataset.originKind = entry.origin.kind;
+        row.dataset.directEffect = String(entry.origin.direct);
+      }
       if (group.phase === 'action') {
         const badge = element(doc, 'span', 'duel-event-kind');
         appendIcon(badge, event.label === '复活' ? RotateCcw : event.label === '驱散' ? Sparkles : eventIcons[event.kind]);
@@ -160,9 +177,24 @@ export function renderBattleLog(doc: Document, lines: string[]): HTMLOListElemen
       // Long status inventories are still available under the action's details.
       const [main, status] = line.split('；状态：');
       appendHighlighted(content, main);
-      row.append(content);
+      const body = element(doc, 'div', 'duel-event-body');
+      body.append(content);
+      if (entry && !event.detail && group.phase === 'action') {
+        const origin = element(doc, 'small', 'duel-event-origin');
+        appendHighlighted(origin, battleLogOriginLabel(entry));
+        body.append(origin);
+      }
+      row.append(body);
       if (event.detail || group.phase === 'opening') { extra.append(row); detailCount++; }
-      else card.append(row);
+      else {
+        if (entry && group.phase === 'action' && entry.stage !== visibleStage) {
+          const title = entry.stage === 'turn-start' ? '回合开始效果' : entry.stage === 'turn-end' ? '回合结束效果'
+            : '技能结算与触发';
+          card.append(element(doc, 'div', 'duel-log-stage', title));
+          visibleStage = entry.stage;
+        }
+        card.append(row);
+      }
       if (status) {
         const state = element(doc, 'p', 'duel-event-state');
         appendHighlighted(state, `${main.split('：')[0]} · 状态：${status}`);

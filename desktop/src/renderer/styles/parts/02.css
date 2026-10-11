@@ -76,6 +76,10 @@
 .duel-event-control, .duel-event-resource { color: var(--hero-rarity-ssr, #d4b477); }
 .duel-event-shield, .duel-event-gauge { color: var(--duel-value); }
 .duel-event-text { min-width: 0; margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.duel-event-body { min-width: 0; flex: 1; }
+.duel-event-origin { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.duel-log-stage { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 10px; font-weight: 600; }
+.duel-log-event[data-direct-effect="false"] .duel-event-kind { background: transparent; outline: 1px solid color-mix(in srgb, currentColor 25%, transparent); outline-offset: -1px; }
 .duel-event-number { font-weight: 600; font-variant-numeric: tabular-nums; }
 .duel-event-damage .duel-event-number, .duel-event-defeat .duel-event-number { color: var(--red); }
 .duel-event-heal .duel-event-number { color: var(--green); }

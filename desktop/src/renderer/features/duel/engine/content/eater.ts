@@ -18,7 +18,10 @@ export function registerEater(registry: ContentRegistry): void {
   registry.registerStatus({ id: eaterIds.food, mechanicsCoverage: 'partial', category: 'buff', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 4 });
   registry.registerStatus({ id: eaterIds.swallowed, mechanicsCoverage: 'partial', category: 'control', dispellable: true,
-    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true });
+    sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace', preventsAction: true,
+    // 客户端 `[2143, 1]`（另有 `[102143, 1]` 同族）「吞噬/目标不可见，不可选」`guiHuoRecover = -1`
+    // ⇒ 被吞下的单位这一回合少补 1 点鬼火（§49 A3）。
+    resourceRecoveryBonus: { resourceId: 'fire', amount: -1 } });
   const basic = createEaterBasic();
   const ultimate = createEaterUltimate();
   const definition: HeroDefinition = {

@@ -18,7 +18,10 @@ const damageBonusByLevel = [.1, .15, .2, .25, .3] as const;
 
 export function registerGulonghuo(registry: ContentRegistry): void {
   const evilPrank: StatusDefinition = { id: gulonghuoIds.evilPrank, mechanicsCoverage: 'partial', category: 'control',
-    dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'refresh-duration', preventsSkill: true };
+    dispellable: true, sealable: true, durationOwner: 'target-turn', refreshPolicy: 'refresh-duration', preventsSkill: true,
+    // 客户端 `[102743, 1]`「恶戏状态」（= 本状态的沉默+增伤那一层）`guiHuoRecover = -1`
+    // ⇒ 被恶戏的单位这一回合少补 1 点鬼火（§49 A3）。
+    resourceRecoveryBonus: { resourceId: 'fire', amount: -1 } };
   registry.registerStatus(evilPrank);
 
   const ultimate: SkillDefinition = {

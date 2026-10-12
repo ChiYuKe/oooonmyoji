@@ -55,7 +55,7 @@ export function createTenjukkaDefinition(): HeroDefinition {
     skills: [basic, awaken],
     aiCoverage: 'verified',
     mechanicsCoverage: 'verified',
-    mechanicsCoverageNotes: ['客户端技能行对应的抵抗光环、封印/解封、五级治疗、清醒效果及欢愉消耗均有独立回归；每层欢愉只在持有者自身或其他非召唤友方回合结束时供1火，三级起为对应行动者推进25%行动条，驱散后的空状态不会误供火。'],
+    mechanicsCoverageNotes: ['客户端3233状态写明其他友方回合结束才消耗欢愉，10点场连续帧确认自身施放回合不供火或拉条；其余非召唤友方每层供1火，三级起推进对应行动者25%行动条；欢愉存在时保持清醒，最后一层消耗后清除增益。抵抗光环、封印/解封、五级治疗及欢愉消耗有独立回归。'],
     initialize(context, unitId) {
       const owner = context.getUnit(unitId);
       if (!owner || owner.heroId !== tenjukkaIds.hero || !passivesEnabled(owner)) return [];
@@ -156,6 +156,8 @@ function handleTenjukkaTurnEnd(context: BattleContext, event: BattleEvent): Effe
   const ending = context.getUnit(event.unitId);
   if (!ending) return;
   if (ending.heroId === tenjukkaIds.hero) {
+    // 自身施放回合不消耗欢愉；有欢愉时清醒效果持续到印记耗尽。
+    if (ending.statuses.some(status => status.statusId === tenjukkaIds.joy && status.stacks > 0)) return [];
     const source = tenjukkaSource(tenjukkaIds.awaken, ending.unitId);
     const commands: EffectCommand[] = [];
     for (const allyId of context.state.sides[ending.side]) {
@@ -166,15 +168,6 @@ function handleTenjukkaTurnEnd(context: BattleContext, event: BattleEvent): Effe
       if (ids.length) commands.push({ type: 'remove-status-instances', source, targetId: ally.unitId, instanceIds: ids,
         reason: 'consumed', parentEventId: event.eventId });
     }
-    const mark = ending.statuses.find(status => status.statusId === tenjukkaIds.joy && status.stacks > 0);
-    if (!mark || !passivesEnabled(ending)) return commands.length ? commands : undefined;
-    commands.push({ type: 'remove-status-instances', source, targetId: ending.unitId,
-      instanceIds: [mark.instanceId], reason: 'consumed', parentEventId: event.eventId });
-    if (mark.stacks > 1) commands.push({ type: 'add-status', source, targetId: ending.unitId,
-      instance: { ...mark, stacks: mark.stacks - 1, appliedByEventId: event.eventId } });
-    commands.push({ type: 'change-resource', source, side: ending.side, resourceId: 'fire', amount: 1, parentEventId: event.eventId });
-    if (skillLevel(ending, tenjukkaIds.awaken) >= 3) commands.push({ type: 'change-action-gauge', source,
-      targetId: ending.unitId, amount: 25, parentEventId: event.eventId });
     return commands;
   }
   if (ending.unitKind === 'summon' || ending.hp <= 0) return;
@@ -186,6 +179,12 @@ function handleTenjukkaTurnEnd(context: BattleContext, event: BattleEvent): Effe
     instanceIds: [mark.instanceId], reason: 'consumed', parentEventId: event.eventId }];
   if (mark.stacks > 1) commands.push({ type: 'add-status', source, targetId: owner.unitId,
     instance: { ...mark, stacks: mark.stacks - 1, appliedByEventId: event.eventId } });
+  else for (const allyId of context.state.sides[owner.side]) {
+    const ids = context.getUnit(allyId)?.statuses.filter(status => status.statusId === tenjukkaIds.awake
+      && status.source.unitId === owner.unitId).map(status => status.instanceId) ?? [];
+    if (ids.length) commands.push({ type: 'remove-status-instances', source, targetId: allyId, instanceIds: ids,
+      reason: 'consumed', parentEventId: event.eventId });
+  }
   commands.push({ type: 'change-resource', source, side: owner.side, resourceId: 'fire', amount: 1, parentEventId: event.eventId });
   if (skillLevel(owner, tenjukkaIds.awaken) >= 3) commands.push({ type: 'change-action-gauge', source, targetId: ending.unitId,
     amount: 25, parentEventId: event.eventId });

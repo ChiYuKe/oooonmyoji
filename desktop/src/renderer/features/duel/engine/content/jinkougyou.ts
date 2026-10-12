@@ -21,11 +21,9 @@ export function registerJinkougyou(registry: ContentRegistry): void {
   registry.registerStatus({ id: jinkougyouIds.unique, mechanicsCoverage: 'partial', category: 'other', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'keep' });
   registry.registerStatus({ id: jinkougyouIds.fragranceField, mechanicsCoverage: 'partial', category: 'other', dispellable: false,
-    sealable: false, durationOwner: 'source-turn', refreshPolicy: 'replace', modifyResourceCost(_state, actor, skill, cost) {
-      const field = fieldStatus(actor);
-      return actor.heroId === jinkougyouIds.hero && field && fieldLevel(actor, field) >= 3 && skill.id !== jinkougyouIds.basic
-        ? Math.max(0, cost.amount - 1) : cost.amount;
-    } });
+    // 3912四级减耗已体现在该技能consumeVal=2中；不能再给3913的3火费用减1。
+    // 14点场五级菩提愿+海月火玉实机消耗4火。
+    sealable: false, durationOwner: 'source-turn', refreshPolicy: 'replace' });
   registry.registerStatus({ id: jinkougyouIds.heartFragrance, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'add-stack', maxStacks: 5 });
   registry.registerStatus({ id: jinkougyouIds.soulBinder, mechanicsCoverage: 'partial', category: 'debuff', dispellable: false,
@@ -85,7 +83,7 @@ export function createJinkougyouDefinition(): HeroDefinition {
   return { id: jinkougyouIds.hero, skills: [basic, field, wish], aiCoverage: 'verified',
     aiCoverageNotes: ['已按社区式神AI条目实现并用回归验证：未开启明香境时优先2技能，场地存在且鬼火足够时使用3技能；普攻优先选择生命比例低于20%或带有失神的敌人，否则按客户端自动目标函数从可选敌人中随机选择。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['技能等级按各技能独立读取；二级明香境基础持续4回合，二级菩提愿额外延长1回合；三级明香境起技能鬼火减耗1点；缚魂香跨技能合层，三级明香境起每层降防由5%提升为10%，三层转化为失神和永久降低35%防御；明香境内菩提愿对怪物必中缚魂香；封印时已存在明香境仍控制AI选招且可减耗，攻击被动挂香停止，主动施加的第三层缚魂香仍触发状态转换；特殊目标及客户端封印结算窗口仍待实机核验'],
+    mechanicsCoverageNotes: ['技能等级按各技能独立读取；二级明香境基础持续4回合，二级菩提愿额外延长1回合；3912四/五级技能自身费用为2火，3913菩提愿仍为3火；不把明香境旧等级描述作为全局减耗；缚魂香跨技能合层，三级明香境起每层降防由5%提升为10%，三层转化为失神和永久降低35%防御；明香境内菩提愿对怪物必中缚魂香；封印时已存在明香境仍控制AI选招，攻击被动挂香停止，主动施加的第三层缚魂香仍触发状态转换；特殊目标及客户端封印结算窗口仍待实机核验'],
     initialize(context, unitId) {
       const actor = context.getUnit(unitId); if (!actor) return [];
       const sameSide = context.state.sides[actor.side].map(id => context.getUnit(id)).filter(unit => unit?.heroId === jinkougyouIds.hero);
@@ -111,8 +109,7 @@ export function createJinkougyouDefinition(): HeroDefinition {
       const activeField = hasUnique(actor) && Boolean(fieldStatus(actor));
       if (hasUnique(actor) && !activeField && fire >= (fieldRank >= 4 ? 2 : 3))
         return intent(unitId, jinkougyouIds.fieldSkill, [unitId], 'self', 'ally');
-      const activeFieldState = fieldStatus(actor);
-      const wishCost = activeFieldState && fieldLevel(actor, activeFieldState) >= 3 ? 2 : 3;
+      const wishCost = 3;
       if (activeField && fire >= wishCost) return intent(unitId, jinkougyouIds.wishSkill, enemies.map(enemy => enemy.unitId), 'all-enemies', 'enemy');
       const preferred = enemies.filter(enemy => enemy.hp / Math.max(1, enemy.stats.hp) < .2
         || enemy.statuses.some(status => status.statusId === jinkougyouIds.trance));

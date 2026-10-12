@@ -27,15 +27,9 @@ export function registerResentmentHannya(registry: ContentRegistry): void {
   registry.registerStatus({ id: resentmentHannyaIds.sealBarrier, mechanicsCoverage: 'partial', category: 'other', dispellable: false,
     sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', maxStacks: 9 });
   registry.registerStatus({ id: resentmentHannyaIds.sealMask, mechanicsCoverage: 'partial', category: 'mark', dispellable: false,
-    sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', grantedSkills: [maskBreak],
-    selectAction(context, actor, instance) {
-      const ownerId = instance.source.unitId;
-      const owner = ownerId ? context.getUnit(ownerId) : undefined;
-      const hasBarrier = owner?.hp && owner.hp > 0 && owner.side !== actor.side
-        && owner.statuses.some(status => status.statusId === resentmentHannyaIds.sealBarrier);
-      if (!hasBarrier || (context.state.resources[actor.side]?.fire ?? 0) < 1) return undefined;
-      return { actorId: actor.unitId, skillId: resentmentHannyaIds.maskBreak, targetIds: [actor.unitId], shape: 'self', targetRelation: 'ally' };
-    } });
+    // 客户端3316是可主动选择的破阵技能，不强制替换正常技能。
+    // 14点场千姬在封印结界内仍施放汐梦；自动策略继续由式神决定。
+    sealable: false, durationOwner: 'permanent', refreshPolicy: 'replace', grantedSkills: [maskBreak] });
   registry.registerStatus({ id: resentmentHannyaIds.hateSpread, mechanicsCoverage: 'partial', category: 'debuff', dispellable: true,
     sealable: true, durationOwner: 'target-turn', refreshPolicy: 'replace' });
   registry.registerHero(createResentmentHannyaDefinition());
@@ -137,7 +131,7 @@ function createResentmentHannyaDefinition(): HeroDefinition {
     } };
   return { id: resentmentHannyaIds.hero, skills: [basic, barrierSkill, ultimate], aiCoverage: 'verified', mechanicsCoverage: 'partial',
     aiCoverageNotes: ['已按社区式神AI逐分支实现并回归：二技能可用时优先启阵；否则鬼火足够用三技能，社区AI未列出其目标偏好，按客户端无优先条件时从合法目标中随机选择；否则普攻只在存在低于20%生命的敌人时优先其中最低者，否则随机选择合法目标。'],
-    mechanicsCoverageNotes: ['仇恨印记上限9层，每层+10个百分点效果抵抗/+5%减伤，满层解除控制并推45%行动条；五级先机6层，敌方暴击回印记40%/40%/40%/80%/100%，每行动最多一次；二级起友方式神阵亡+3层、攻击带仇恨蔓延的敌人每次攻击每目标最多+1层；封印期间普攻两段倍率80%/80%/88%/92%/100%并吸血15%；启阵耗3火（三级起免费），开9面并封印非怪物敌方式神被动与御魂，禁止继续得印；破阵技能耗1火破2面，非召唤物敌方回合结束破1面，结界全破时尝试给敌方附1回合仇恨蔓延；二级起大招在结界内多打一轮全体并获得3层印记，五级按每个低于50%生命的非召唤友方对随机敌方造成80%伤害。额外回合的客户端回调边界已由 TurnMgrComp 队列行动→Lock→callBoutEndCb 调用链和 runBattle 专项回归核验；仇恨蔓延抵抗公式及御魂具体触发交互仍待核对。御怨般若不在10点场阵容中，没有直接触发帧。'],
+    mechanicsCoverageNotes: ['仇恨印记上限9层，每层+10个百分点效果抵抗/+0.05 hurtReductionRate，伤害按1/(1+总属性)计算，满层解除控制并推45%行动条；五级先机6层，敌方暴击回印记40%/40%/40%/80%/100%，每行动最多一次；二级起友方式神阵亡+3层、攻击带仇恨蔓延的敌人每次攻击每目标最多+1层；封印期间普攻两段倍率80%/80%/88%/92%/100%并吸血15%；启阵耗3火（三级起免费），开9面并封印非怪物敌方式神被动与御魂，禁止继续得印；破阵技能耗1火破2面，非召唤物敌方回合结束破1面，结界全破时尝试给敌方附1回合仇恨蔓延；二级起大招在结界内多打一轮全体并获得3层印记，五级按每个低于50%生命的非召唤友方对随机敌方造成80%伤害。额外回合的客户端回调边界已由 TurnMgrComp 队列行动→Lock→callBoutEndCb 调用链和 runBattle 专项回归核验；仇恨蔓延抵抗公式及御魂具体触发交互仍待核对。御怨般若不在10点场阵容中，没有直接触发帧。'],
     initialize(context, unitId) {
       const actor = context.getUnit(unitId);
       return skillLevel(actor, resentmentHannyaIds.passive) >= 5
@@ -274,7 +268,7 @@ function gainHateMarks(context: BattleContext, unitId: string, source: import('.
     instanceId: `${resentmentHannyaIds.hateMark}:${unitId}`, statusId: resentmentHannyaIds.hateMark,
     source: markSource, stacks: gained, duration: { kind: 'permanent' },
     modifiers: [{ stat: 'resist', operation: 'flat', amount: .1, perStack: true },
-      { stat: 'damageTaken', operation: 'percent', amount: -.05, perStack: true }],
+      { stat: 'hurtReductionRate', operation: 'flat', amount: .05, perStack: true }],
   } }];
   if (current < 9 && current + gained >= 9) {
     const controls = unit.statuses.filter(status => context.getStatusCategory(status.statusId) === 'control');

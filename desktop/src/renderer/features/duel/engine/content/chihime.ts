@@ -104,7 +104,7 @@ function createChihimeDefinition(): HeroDefinition {
   return { id: chihimeIds.hero, skills: [basic, dream, summon, release], aiCoverage: 'partial',
     aiCoverageNotes: ['技能选择分支有模拟回归；但当前社区AI页称2技能优先选攻击最高友方，而客户端技能行3562及技能定义将汐梦建模为敌方单体伤害，二者冲突。现保留合法敌方随机回退，不据此宣称汐梦目标AI已验证；普攻低血优先与召戟/收戟分支仍按现有依据处理。'],
     mechanicsCoverage: 'partial',
-    mechanicsCoverageNotes: ['已按客户端行接入千汐等级倍率/五级普攻叠潮声、汐梦2火伤害与敌方非召唤回合末推千姬10%行动条/扣敌方3火/五级敌方行动后鬼火为0时深度冰冻及速度-20、海潮入梦召戟/5.5倍攻击生命/继承防御/二级起千姬与海原贝戟各30%减伤/三级起耗火必叠潮声/四级持戟免控放逐/五级召唤初始3层、海原贝戟免疫控制和减益、友方受击恢复30%而千姬自身50%、敌方施术每场首次推条30%、七层潮声返3火并永久给全队15%增伤至5层、永生之汐2火并按120%基础倍率、每层悲歌增加100%（1至5层为220%至620%）造成伤害及收戟。被动封印已抑制被动触发，召唤与收戟技能状态互斥。回归已锁定海原贝戟致命命中后不再作为在场治疗源、阵亡事件清理持戟并恢复免控；此为模拟事件链验证，客户端的致命伤害/恢复精确时序仍无清晰录像证据。汐梦控制命中时窗、AI选择与御魂插入顺序、完整放逐移出与返回流程尚待帧核或引擎建模。'],
+    mechanicsCoverageNotes: ['已按客户端行接入千汐等级倍率/五级普攻叠潮声、汐梦2火伤害与敌方非召唤回合末推千姬10%行动条/扣敌方3火/五级敌方行动后鬼火为0时深度冰冻及速度-20、海潮入梦召戟/5.5倍攻击生命/继承防御/二级起千姬与海原贝戟各30%减伤/三级起耗火必叠潮声/四级持戟免控放逐/五级召唤初始3层、海原贝戟免疫控制和减益、友方受击恢复30%而千姬自身50%、敌方施术每场首次推条30%、七层潮声返3火并永久给全队15%增伤至5层、永生之汐2火并按120%基础倍率、每层悲歌增加100%（1至5层为220%至620%）造成伤害及收戟。汐梦附带10%拉条属于主动技能效果，不受被动封印影响；14点场1909–2023帧队列及行动顺序提供实机依据，其余被动封印判断仍保留。召唤与收戟技能状态互斥。回归已锁定海原贝戟致命命中后不再作为在场治疗源、阵亡事件清理持戟并恢复免控；此为模拟事件链验证，客户端的致命伤害/恢复精确时序仍无清晰录像证据。汐梦控制命中时窗、AI选择与御魂插入顺序、完整放逐移出与返回流程尚待帧核或引擎建模。'],
     handlers: {
       'action-end': { priority: 85, handle(context, event) {
         if (event.type !== 'action-ended' || event.actionKind !== 'skill' || !event.source.unitId) return;
@@ -176,7 +176,9 @@ function createChihimeDefinition(): HeroDefinition {
         const commands: EffectCommand[] = [];
         if (target.unitKind !== 'summon') {
           const chihimes = context.getLivingUnits(target.side === 'blue' ? 'red' : 'blue')
-            .filter(unit => unit.heroId === chihimeIds.hero && unit.unitKind !== 'summon' && passivesEnabled(unit));
+            // 3562 is an active skill (skillKind=2). Its turn-end gauge effect survives passive seals.
+            // 14点场1909→2023：封印结界中千姬仍领先季并先于雪女行动。
+            .filter(unit => unit.heroId === chihimeIds.hero && unit.unitKind !== 'summon');
           for (const chihime of chihimes) commands.push({ type: 'change-action-gauge',
             source: { kind: 'skill', id: chihimeIds.dream, unitId: chihime.unitId },
             targetId: chihime.unitId, amount: 10, parentEventId: event.eventId });

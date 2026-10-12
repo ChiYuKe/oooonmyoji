@@ -111,8 +111,8 @@ export function createFirstHaneMountainWindDefinition(): HeroDefinition {
       if (!owner || owner.heroId !== firstHaneMountainWindIds.hero || !passivesEnabled(owner)
         || skillLevel(owner, firstHaneMountainWindIds.passive) < 5) return [];
       return [{ type: 'add-status', source: windSource(firstHaneMountainWindIds.passive, unitId), targetId: unitId,
-        instance: windStatus(owner, 20) },
-      { type: 'change-action-gauge', source: windSource(firstHaneMountainWindIds.passive, unitId), targetId: unitId, amount: 20 }];
+        // 先机只设置迅风行动值；战斗开始后新获得的点数才拉条。
+        instance: windStatus(owner, 20) }];
     },
     policy(context, unitId): ActionIntent | undefined {
       const actor = context.getUnit(unitId);

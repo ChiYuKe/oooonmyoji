@@ -119,7 +119,9 @@ export function createSkullGeneralDefinition(): HeroDefinition {
             } });
           }
         }
-        if (target.heroId === skullGeneralIds.hero && isUniqueSkull(context.state, target.unitId)) {
+        // “失去生命不会阵亡”仅保护生命流失；不能把普通/真实攻击击杀也变成无限复活。
+        if (target.heroId === skullGeneralIds.hero && event.defeatCause === 'life-loss'
+          && isUniqueSkull(context.state, target.unitId)) {
           const lost = Number(target.statuses.find(status => status.statusId === skullGeneralIds.ironWall)?.values?.totalLost ?? 0);
           const shield = Math.min(ironWallCap(target), Number(target.statuses.find(status => status.statusId === skullGeneralIds.ironWall)?.values?.shieldRemaining ?? 0)
             + Math.max(0, target.hp));

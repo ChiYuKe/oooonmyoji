@@ -129,7 +129,7 @@ function createShikagamiCityDefinition(): HeroDefinition {
       return commands;
     } };
   return { id: shikagamiCityIds.hero, skills: [basic, stance, ultimate], aiCoverage: 'partial',
-    aiCoverageNotes: ['社区《式神AI》页的当前搜索索引将“我方目标未存在buff时→2技能，否则→3技能”明确列在“市加美”卡片下，确认规则归属；但页面正文请求仍返回403，客户端技能行6002:2:0的useAI字段为空，服务端权威对战快照也未加载SKILL_AI_DATA，尚不能确认目标集合和具体buff ID。模型暂用自身垂悯速度状态代理固定样本的先爱见舍离后寂灭现前分支；队友已有或失去其他增益时的泛化行为仍未核实。普攻只在存在生命比例低于20%的敌人时优先选择其中最低者，否则按客户端自动目标函数从可选敌人中随机选择。'],
+    aiCoverageNotes: ['社区《式神AI》页的当前搜索索引将“我方目标未存在buff时→2技能，否则→3技能”明确列在“市加美”卡片下，确认规则归属；但页面正文请求仍返回403，客户端技能行6002:2:0的useAI字段为空，服务端权威对战快照也未加载SKILL_AI_DATA，尚不能确认目标集合和具体buff ID。14点场000675帧确认先机垂悯状态存在时首次直接施放寂灭现前，模型将垂悯状态与速度状态都作为当前选招代理，避免额外施放爱见舍离造成虚假的100点速度；队友已有或失去其他增益时的泛化行为仍未核实。普攻只在存在生命比例低于20%的敌人时优先选择其中最低者，否则按客户端自动目标函数从可选敌人中随机选择。'],
     mechanicsCoverage: 'partial',
     mechanicsCoverageNotes: ['普攻、垂悯之刃与断罪之刃分别读取对应技能等级；幻花最多5层，达到5层解锁断罪之刃，回合结束、施放技能及花祓触发均正确累计；大招三级对虚妄迷障目标增伤30%。五级对迷障目标无视防御按客户端技能字段 param6=100 建模，param6、levDes 与当前社区技能页一致，combatDesc 单独写150；新增回归直接构造150点对照，并确认完整行动伤害事件在伤害浮动后仍更接近100点方案，未据此宣称客户端实战数值冲突已消解。垂悯形态低血治疗按当前生命值选择3名友方，独立的效果抵抗 buff 6007 按客户端 addBuffEntityTypes=[1,3] 排除召唤物；断罪技能目标按“指定目标+最低的2个目标”合并去重，不额外补足重合名额；邪执触发后普攻不进入虚妄迷障、迷障按目标回合持续2回合；按正式调整实现迷障携带者造成的伤害降低85%、技能耗火+3且不封被动/御魂，并以战斗伤害与事件回归验证。客户端 6002 的 buffId7=6005、addBuffRate7=99；外部客户端反汇编 `easy_add_buffN → skillAddBuff → calcSkillAddBuff` 显示标准编号效果附加将该成功率传入 `defSuccRate`，且 `defSuccRate + additionSuccrate >= 99` 时将失败概率和抵挡概率置0；跳转目标已用重算器复核。因此迷障绕过效果抵抗，模拟高抵抗附加成功、减益免疫阻止落地均有回归。客户端 buff 6005 的 immuneDispele=1 已用于确认迷障不可驱散并有完整行动回归；封印交互和相同当前生命值的实机排序仍未完整核实，指定目标与低血目标重合时客户端是否补足仍待实战核对'],
     initialize(context, unitId) {
@@ -161,7 +161,9 @@ function createShikagamiCityDefinition(): HeroDefinition {
           [enemies[Math.min(enemies.length - 1, Math.floor(context.random() * enemies.length))]!.unitId], 'single')
           : lineupIntent(unitId, shikagamiCityIds.basic, [lowHealthPriorityTarget(context, enemies, .2)!.unitId], 'single');
       }
-      if (actor.statuses.some(status => status.statusId === shikagamiCityIds.speed))
+      // 14点场首次行动已有先机垂悯状态，实机选择6003，不能仅用6008速度判断增益。
+      if (actor.statuses.some(status => status.statusId === shikagamiCityIds.speed
+        || status.statusId === shikagamiCityIds.mercy))
         return availableFire >= (skillRank(actor, shikagamiCityIds.ultimate) >= 2 ? 2 : 3)
           ? { actorId: unitId, skillId: shikagamiCityIds.ultimate, targetIds: [unitId], shape: 'single', targetRelation: 'ally' }
           : lineupIntent(unitId, shikagamiCityIds.basic, [lowHealthPriorityTarget(context, enemies, .2)!.unitId], 'single');

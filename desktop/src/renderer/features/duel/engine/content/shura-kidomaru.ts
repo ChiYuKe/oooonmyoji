@@ -233,7 +233,8 @@ function netCommand(actor: NonNullable<ReturnType<BattleContext['getUnit']>>, so
 function netDamageModifier(actor: NonNullable<ReturnType<BattleContext['getUnit']>>, stacks: number): StatusInstance['modifiers'] {
   const trapRank = skillRank(actor, shuraKidomaruIds.trapSkill);
   const rate = trapRank >= 4 ? .3 : trapRank >= 2 ? .2 : 0;
-  return rate ? [{ stat: 'damageTaken', operation: 'percent', amount: -rate * stacks }] : undefined;
+  // Client buff3961 adds hurtReductionRate: three .3 layers divide damage by 1.9.
+  return rate ? [{ stat: 'hurtReductionRate', operation: 'flat', amount: rate * stacks }] : undefined;
 }
 function skillRank(unit: { skillLevel: number; skillLevels?: Readonly<Record<string, number>> }, skillId: string): number {
   const rank = unit.skillLevels?.[skillId];

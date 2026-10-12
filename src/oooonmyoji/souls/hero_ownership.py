@@ -97,7 +97,25 @@ def count_heroes(records):
 
 
 def acquire_heroes(adb, package, instance_id, output, progress):
-    with temporary_root(adb, progress):
+    destination = Path(output)
+    partial_destination = destination.with_name("heroes.partial.json")
+    records = []
+    completed = total = 0
+
+    def save_partial():
+        if not completed:
+            return
+        counts = count_heroes(records)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(partial_destination, {
+            "instanceId": instance_id,
+            "fetchedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "total": sum(counts.values()), "counts": counts, "source": "memory",
+            "complete": False, "scanned": completed, "expected": total,
+        })
+
+    try:
+      with temporary_root(adb, progress):
         progress("正在检查式神录与当前角色")
         report = process_report(adb, package)
         r = Reader(report, adb.executable, adb.serial, adb.check)
@@ -116,7 +134,7 @@ def acquire_heroes(adb, package, instance_id, output, progress):
         if "heroes" not in fields or "heroes_bag" not in fields:
             raise ValueError("式神仓库尚未加载，请先切到式神录")
         version_fields = {name: o.value(fields[name]) for name in ("heroes_version", "hero_fold_ver") if name in fields}
-        containers, records, layouts = [], [], {}
+        containers, layouts = [], {}
         total = 0
         for name in ("heroes", "heroes_bag"):
             address = fields[name]
@@ -147,6 +165,8 @@ def acquire_heroes(adb, package, instance_id, output, progress):
                 else:
                     raise ValueError("当前式神仓库结构不受支持，未覆盖上次检测结果")
                 records.append((uid, row)); completed += 1
+                if completed % 25 == 0:
+                    save_partial()
                 if completed % 100 == 0 or completed == total:
                     progress("正在读取式神仓库", completed, total)
         counts = count_heroes(records)
@@ -181,12 +201,21 @@ def acquire_heroes(adb, package, instance_id, output, progress):
         if int(adb.command("exec-out", "pidof", package).decode().split()[0]) != report["pid"]:
             raise ValueError("检测期间游戏已重启，请重新检测")
         result = {"instanceId": instance_id, "fetchedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                  "total": sum(counts.values()), "counts": counts, "source": "memory", "heroes": heroes, "equippedSouls": souls}
-    # Only publish a complete scan after the original connection privileges return.
-    adb.check()
-    destination = Path(output); destination.parent.mkdir(parents=True, exist_ok=True)
-    _write_json(destination, result)
-    return result
+                  "total": sum(counts.values()), "counts": counts, "source": "memory", "complete": True,
+                  "heroes": heroes, "equippedSouls": souls}
+      # Only publish a complete scan after the original connection privileges return.
+      adb.check()
+      destination.parent.mkdir(parents=True, exist_ok=True)
+      _write_json(destination, result)
+      partial_destination.unlink(missing_ok=True)
+      return result
+    except Exception:
+      # Keep the last successfully read rows when a later row or validation step fails.
+      try:
+          save_partial()
+      except Exception:
+          pass
+      raise
 
 
 def ensure_hero_screen(objects, globals_fields):

@@ -15,10 +15,15 @@ export class HeroOwnershipService extends EventEmitter<{ progress: [HeroOwnershi
   snapshotPath(instanceId: string): string {
     return path.join(this.projectRoot, 'artifacts', 'souls', createHash('sha256').update(instanceId).digest('hex').slice(0, 16), 'heroes.json');
   }
+  private partialSnapshotPath(instanceId: string): string { return path.join(path.dirname(this.snapshotPath(instanceId)), 'heroes.partial.json'); }
   async load(instanceId: string): Promise<HeroOwnershipSnapshot | null> {
     if (!instanceId || instanceId.length > 160) throw new Error('请选择有效的模拟器实例');
-    try { return readHeroOwnership(JSON.parse(await fs.readFile(this.snapshotPath(instanceId), 'utf8')), instanceId); }
-    catch { return null; }
+    const read = async (file: string): Promise<HeroOwnershipSnapshot | null> => {
+      try { return readHeroOwnership(JSON.parse(await fs.readFile(file, 'utf8')), instanceId); }
+      catch { return null; }
+    };
+    const [complete, partial] = await Promise.all([read(this.snapshotPath(instanceId)), read(this.partialSnapshotPath(instanceId))]);
+    return partial && (!complete || Date.parse(partial.fetchedAt) > Date.parse(complete.fetchedAt)) ? partial : complete;
   }
   async listInstances(instances: SoulInstance[]): Promise<SoulInstance[]> {
     const merged = new Map(instances.map(item => [item.id, item]));
@@ -27,7 +32,15 @@ export class HeroOwnershipService extends EventEmitter<{ progress: [HeroOwnershi
       if (!entry.isDirectory() || !/^[a-f0-9]{16}$/.test(entry.name)) continue;
       try {
         const file = path.join(directory, entry.name, 'heroes.json');
-        const data = JSON.parse(await fs.readFile(file, 'utf8'));
+        const partial = path.join(directory, entry.name, 'heroes.partial.json');
+        let data: Record<string, unknown> | null = null;
+        for (const candidatePath of [partial, file]) {
+          try {
+            const candidate = JSON.parse(await fs.readFile(candidatePath, 'utf8'));
+            if (candidate && typeof candidate.instanceId === 'string' && readHeroOwnership(candidate, candidate.instanceId)) { data = candidate; break; }
+          } catch { /* Try the other cache file. */ }
+        }
+        if (!data) continue;
         if (typeof data.instanceId !== 'string' || !data.instanceId || data.instanceId.length > 160
           || this.snapshotPath(data.instanceId) !== file || !readHeroOwnership(data, data.instanceId) || merged.has(data.instanceId)) continue;
         let name = data.instanceId.replace(/^mumu-(\d+)$/, 'MuMu $1');

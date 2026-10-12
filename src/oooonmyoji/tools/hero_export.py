@@ -3,4 +3,4 @@ from .soul_export import main
 from ..souls.hero_ownership import acquire_heroes
 
 if __name__ == "__main__":
-    raise SystemExit(main(acquire_heroes, "式神仓库"))
+    raise SystemExit(main(acquire_heroes, "式神仓库", timeout_seconds=300))

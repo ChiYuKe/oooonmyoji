@@ -15,14 +15,14 @@ def emit(event):
     print(json.dumps(event, ensure_ascii=True, allow_nan=False), flush=True)
 
 
-def main(acquirer=acquire, label="御魂"):
+def main(acquirer=acquire, label="御魂", timeout_seconds=180):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--instance", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     cancelled = threading.Event()
-    deadline = time.monotonic() + 180
+    deadline = time.monotonic() + timeout_seconds
 
     def listen():
         for line in sys.stdin:

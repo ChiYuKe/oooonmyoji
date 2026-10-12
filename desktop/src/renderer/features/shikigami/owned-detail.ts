@@ -44,6 +44,11 @@ export function installShikigamiOwnedDetail(root: HTMLElement, loadBase?: (reque
       const count = snapshot?.counts[hero.id] ?? 0;
       if (!snapshot) {
         el('status').textContent = '拥有情况尚未检测。请在游戏中打开式神录，点击「仓库检测」同步等级、技能和御魂装配。';
+      } else if (snapshot.complete === false) {
+        el('status').textContent = `${instanceName || snapshot.instanceId} · 部分扫描 ${snapshot.scanned}/${snapshot.expected} 项 · 当前已扫描到 ${count} 只${count ? '' : '；完整扫描后才能判断是否拥有'}`;
+        add(el('groups'), 'p', count
+          ? '这是部分扫描中已确认的数量；本次中断前未保存详细配置，重新完成检测后可查看等级、技能和御魂。'
+          : '当前只保存了部分扫描统计，不能据此判断未拥有。重新完成检测后即可确认。', 'shikigami-owned-empty');
       } else {
         const groups = groupOwnedHeroes(snapshot, hero.id);
         el('status').textContent = `${instanceName || snapshot.instanceId} · ${new Date(snapshot.fetchedAt).toLocaleString()} · 已拥有 ${count} 只${snapshot.heroes ? ` · ${groups.length} 种配置` : ''}`;

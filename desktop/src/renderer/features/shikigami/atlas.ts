@@ -34,7 +34,9 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
   const instance = el<HTMLSelectElement>('instance'), detect = el<HTMLButtonElement>('detect'), refresh = el<HTMLButtonElement>('refresh');
   let instances: SoulInstance[] = [], snapshot: HeroOwnershipSnapshot | null = null, busy = false, refreshing = false, disposed = false, loadVersion = 0;
   let ownershipFilter = 'all';
-  const ownershipLabel = (id: number): string => !snapshot ? '未检测' : snapshot.counts[id] ? `已拥有 × ${snapshot.counts[id]}` : '未拥有';
+  const ownershipLabel = (id: number): string => !snapshot ? '未检测'
+    : snapshot.counts[id] ? `${snapshot.complete === false ? '已扫描到' : '已拥有'} × ${snapshot.counts[id]}`
+      : snapshot.complete === false ? '未扫描' : '未拥有';
   const updateControls = (): void => {
     const online = instances.find(item => item.id === instance.value)?.online;
     instance.disabled = busy || refreshing; refresh.disabled = busy || refreshing;
@@ -45,7 +47,9 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
   const showCacheStatus = (): void => {
     const offline = instances.find(item => item.id === instance.value)?.online === false;
     el('ownership-status').textContent = snapshot
-      ? `已同步 ${Object.keys(snapshot.counts).length} 种、${snapshot.total.toLocaleString()} 只式神 · ${new Date(snapshot.fetchedAt).toLocaleString()}${offline ? ' · 历史数据（离线）' : ' · 本地保存'}`
+      ? snapshot.complete === false
+        ? `检测中断，已保存部分统计 ${snapshot.scanned}/${snapshot.expected} 项；当前扫描到 ${snapshot.total.toLocaleString()} 只式神，未扫描项仍未知 · ${new Date(snapshot.fetchedAt).toLocaleString()}`
+        : `已同步 ${Object.keys(snapshot.counts).length} 种、${snapshot.total.toLocaleString()} 只式神 · ${new Date(snapshot.fetchedAt).toLocaleString()}${offline ? ' · 历史数据（离线）' : ' · 本地保存'}`
       : instance.value ? '此实例尚未检测仓库，拥有情况未知。' : '请选择实例检测仓库。';
     el('ownership-status').classList.remove('is-error');
   };
@@ -205,7 +209,7 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
     closeContextMenu();
     const term = search.value.trim().toLowerCase();
     const matches = heroes.filter(hero => (!rarity || hero.rarity === rarity) && (!term || hero.name.includes(term) || hero.pinyin.toLowerCase().includes(term))
-      && (ownershipFilter === 'all' || Boolean(snapshot && (ownershipFilter === 'owned' ? snapshot.counts[hero.id] : !snapshot.counts[hero.id]))));
+      && (ownershipFilter === 'all' || Boolean(snapshot && (ownershipFilter === 'owned' ? snapshot.counts[hero.id] : snapshot.complete !== false && !snapshot.counts[hero.id]))));
     el('cards').replaceChildren(); el('list').scrollTop = 0;
     for (const hero of matches) {
       const card = doc.createElement('button'); card.type = 'button'; card.className = 'shikigami-atlas-card'; card.dataset.heroId = String(hero.id);
@@ -237,13 +241,18 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
   ownedFilter.disabled = true; el('rarities').append(ownedFilter);
   ownedFilter.addEventListener('change', () => { ownershipFilter = ownedFilter.value; renderCards(); });
   const error = (value: unknown): void => {
-    el('ownership-status').textContent = `${value instanceof Error ? value.message : String(value)}${snapshot ? '；保留上次检测结果。' : '；拥有情况仍为未知。'}`;
+    const retained = snapshot?.complete === false
+      ? `；已保留部分进度 ${snapshot.scanned}/${snapshot.expected}，未扫描项仍未知。`
+      : snapshot ? '；保留上次检测结果。' : '；拥有情况仍为未知。';
+    el('ownership-status').textContent = `${value instanceof Error ? value.message : String(value)}${retained}`;
     el('ownership-status').classList.add('is-error');
   };
   const applySnapshot = (value: HeroOwnershipSnapshot | null): void => {
     ownedDetail.close();
     shareView.close();
     snapshot = value; ownedFilter.disabled = !snapshot;
+    ownedFilter.options[2].disabled = snapshot?.complete === false;
+    if (snapshot?.complete === false && ownershipFilter === 'missing') { ownershipFilter = 'all'; ownedFilter.value = 'all'; }
     if (!snapshot) { ownershipFilter = 'all'; ownedFilter.value = 'all'; }
     renderCards(); renderDetail(); showCacheStatus();
   };
@@ -284,8 +293,20 @@ export function installShikigamiAtlas(root: HTMLElement, api?: OwnershipApi): ()
       const result = await api.detectHeroOwnership(id); if (disposed) return;
       if (result && !readHeroOwnership(result, id)) throw new Error('返回的仓库数据不完整或与所选实例不一致');
       if (result) applySnapshot(result);
-      else { showCacheStatus(); el('ownership-status').textContent += ' · 已取消检测'; }
-    } catch (value) { if (!disposed) error(value); }
+      else {
+        const latest = await api.loadHeroOwnership(id);
+        if (latest?.complete === false) applySnapshot(latest); else showCacheStatus();
+        el('ownership-status').textContent += ' · 已取消检测';
+      }
+    } catch (value) {
+      if (!disposed) {
+        try {
+          const latest = await api.loadHeroOwnership(id);
+          if (latest?.complete === false) applySnapshot(latest);
+        } catch { /* Keep the last in-memory snapshot if the partial cache cannot be reloaded. */ }
+        error(value);
+      }
+    }
     finally { busy = false; if (!disposed) { updateControls(); el<HTMLButtonElement>('cancel').disabled = false; } }
   });
   el('cancel').addEventListener('click', () => {

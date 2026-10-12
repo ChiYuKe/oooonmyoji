@@ -110,7 +110,10 @@ export function installShikigamiShare(root: HTMLElement, heroes: HeroProfile[], 
       ctx.font = `14px ${theme.font}`; ctx.fillText(name || '式神收藏', pad, 76);
       ctx.fillStyle = theme.muted; ctx.font = `12px ${theme.font}`;
       const ownedCount = heroes.filter(hero => Boolean(snapshot?.counts[hero.id])).length;
-      const meta = snapshot ? `已拥有 ${ownedCount} / ${heroes.length} 位 · 仓库共 ${snapshot.total.toLocaleString()} 只 · 同步于 ${new Date(snapshot.fetchedAt).toLocaleString()}` : '尚未检测仓库 · 拥有情况未知';
+      const meta = snapshot ? snapshot.complete === false
+        ? `部分扫描 ${snapshot.scanned}/${snapshot.expected} 项 · 当前扫描到 ${snapshot.total.toLocaleString()} 只 · ${new Date(snapshot.fetchedAt).toLocaleString()}`
+        : `已拥有 ${ownedCount} / ${heroes.length} 位 · 仓库共 ${snapshot.total.toLocaleString()} 只 · 同步于 ${new Date(snapshot.fetchedAt).toLocaleString()}`
+        : '尚未检测仓库 · 拥有情况未知';
       ctx.fillText(meta, pad, 100);
       ctx.fillText(`${scope.value === 'owned' ? '已拥有式神' : '全部式神'} · ${selected.length} 张卡片`, pad, 126);
       const rounded = (x: number, y: number, w: number, h: number, radius = 4): void => { ctx.beginPath(); ctx.roundRect(x, y, w, h, radius); ctx.fill(); };
@@ -119,7 +122,7 @@ export function installShikigamiShare(root: HTMLElement, heroes: HeroProfile[], 
         ctx.fillStyle = theme.card; ctx.shadowColor = '#0002'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;
         rounded(x, y, cardWidth, cardHeight); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
         const owned = snapshot?.counts[hero.id] ?? 0;
-        const label = snapshot ? owned ? `已拥有 × ${owned}` : '未拥有' : '未检测';
+        const label = !snapshot ? '未检测' : owned ? `${snapshot.complete === false ? '已读到' : '已拥有'} × ${owned}` : snapshot.complete === false ? '未扫描' : '未拥有';
         ctx.font = `9px ${theme.font}`; ctx.fillStyle = theme.badge; rounded(x + 7, y + 7, Math.min(75, ctx.measureText(label).width + 6), 14, 2);
         ctx.fillStyle = owned ? theme.owned : theme.muted; ctx.textAlign = 'left'; ctx.fillText(label, x + 10, y + 17, 69);
         ctx.fillStyle = theme.badge; rounded(x + 82, y + 7, 24, 19, 2);

@@ -19,6 +19,10 @@ export interface HeroOwnershipSnapshot {
   total: number;
   counts: Record<string, number>;
   source: 'memory';
+  /** False means counts cover only the rows scanned so far; absent means complete for older caches. */
+  complete?: boolean;
+  scanned?: number;
+  expected?: number;
   /** Absent in older count-only caches. */
   heroes?: OwnedHero[];
   equippedSouls?: SoulRecord[];
@@ -36,13 +40,20 @@ export function readHeroOwnership(value: unknown, instanceId: string): HeroOwner
   if (!data || data.instanceId !== instanceId || data.source !== 'memory'
     || typeof data.fetchedAt !== 'string' || !Number.isFinite(Date.parse(data.fetchedAt))
     || !Number.isSafeInteger(data.total) || data.total < 0
-    || !data.counts || typeof data.counts !== 'object' || Array.isArray(data.counts)) return null;
+    || !data.counts || typeof data.counts !== 'object' || Array.isArray(data.counts)
+    || (data.complete !== undefined && typeof data.complete !== 'boolean')) return null;
   let total = 0;
   for (const [id, count] of Object.entries(data.counts)) {
     if (!/^[1-9]\d{0,8}$/.test(id) || !Number.isSafeInteger(count) || count <= 0) return null;
     total += count;
   }
   if (total !== data.total) return null;
+  if (data.complete === false) {
+    if (!Number.isSafeInteger(data.scanned) || (data.scanned as number) <= 0
+      || !Number.isSafeInteger(data.expected) || (data.expected as number) < (data.scanned as number)
+      || data.total > (data.scanned as number) || data.heroes !== undefined || data.equippedSouls !== undefined) return null;
+    return data;
+  }
   if (data.heroes === undefined && data.equippedSouls === undefined) return data;
   if (!Array.isArray(data.heroes) || data.heroes.length !== total || !Array.isArray(data.equippedSouls)) return null;
   const ids = new Set<string>(), counts: Record<string, number> = {}, souls = new Map<string, SoulRecord>();

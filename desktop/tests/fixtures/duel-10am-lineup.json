@@ -1,0 +1,156 @@
+{
+  "red": [
+    {
+      "heroId": 552,
+      "fourSuit": "300090",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 3413,
+        "hp": 23984,
+        "defense": 899,
+        "speed": 212,
+        "crit": 0.3,
+        "critDamage": 1.5,
+        "hit": 0,
+        "resist": 1.25
+      }
+    },
+    {
+      "heroId": 585,
+      "fourSuit": "300021",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 3001,
+        "hp": 28171,
+        "defense": 545,
+        "speed": 208,
+        "crit": 0.03,
+        "critDamage": 1.5,
+        "hit": 0,
+        "resist": 0.56
+      }
+    },
+    {
+      "heroId": 295,
+      "fourSuit": "300021",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 2791,
+        "hp": 26935,
+        "defense": 743,
+        "speed": 181,
+        "crit": 0.05,
+        "critDamage": 1.5,
+        "hit": 0,
+        "resist": 0.64
+      }
+    },
+    {
+      "heroId": 304,
+      "fourSuit": "300030",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 4928,
+        "hp": 15964,
+        "defense": 648,
+        "speed": 137,
+        "crit": 1.05,
+        "critDamage": 2.2,
+        "hit": 0.6,
+        "resist": 0.56
+      }
+    },
+    {
+      "heroId": 330,
+      "fourSuit": "300034",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 4773,
+        "hp": 12666,
+        "defense": 529,
+        "speed": 135,
+        "crit": 0.25,
+        "critDamage": 1.85,
+        "hit": 0.15,
+        "resist": 0.48
+      }
+    }
+  ],
+  "blue": [
+    {
+      "heroId": 323,
+      "fourSuit": "300007",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 2737,
+        "hp": 23586,
+        "defense": 799,
+        "speed": 181,
+        "crit": 0.2,
+        "critDamage": 1.5,
+        "hit": 0,
+        "resist": 0.64
+      }
+    },
+    {
+      "heroId": 357,
+      "fourSuit": "300022",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 5661,
+        "hp": 13446,
+        "defense": 519,
+        "speed": 152,
+        "crit": 0.67,
+        "critDamage": 1.78,
+        "hit": 0,
+        "resist": 0
+      }
+    },
+    {
+      "heroId": 313,
+      "fourSuit": "300036",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 5067,
+        "hp": 16864,
+        "defense": 744,
+        "speed": 132,
+        "crit": 0.95,
+        "critDamage": 1.85,
+        "hit": 0,
+        "resist": 1.44
+      }
+    },
+    {
+      "heroId": 324,
+      "fourSuit": "300033",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 4520,
+        "hp": 18145,
+        "defense": 686,
+        "speed": 129,
+        "crit": 0.25,
+        "critDamage": 2.27,
+        "hit": 0,
+        "resist": 0.63
+      }
+    },
+    {
+      "heroId": 238,
+      "fourSuit": "300080",
+      "skillLevel": 5,
+      "panel": {
+        "attack": 5256,
+        "hp": 14585,
+        "defense": 668,
+        "speed": 115,
+        "crit": 0.8,
+        "critDamage": 2.55,
+        "hit": 0,
+        "resist": 0.55
+      }
+    }
+  ]
+}

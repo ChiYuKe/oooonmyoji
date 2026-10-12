@@ -1021,12 +1021,12 @@ test('天井下的抵抗光环、回合治疗、清醒增益和欢愉供火推�
   const cleared = applyEffectCommands(turnEnd.state, definition.handlers['turn-end'].handle(ownerEndContext,
     { eventId: 'tenjukka-turn-end', phase: 'turn-end', source, type: 'turn-ended', unitId: 'b' }),
   'effect-resolution', 'tenjukka-awake-end', resolveStatus);
-  assert.equal(effectiveDamageMultiplier(cleared.state.units.a), 1);
-  assert.equal(effectiveStats(cleared.state.units.b).resist, 1.49);
-  assert.equal(cleared.state.units.b.statuses.find(status => status.statusId === tenjukkaIds.joy).stacks, 1,
-    '欢愉持有者本人回合结束也消耗一层');
-  assert.equal(cleared.state.resources.blue.fire, 2, '天井下自身消耗欢愉同样获得鬼火');
-  assert.equal(cleared.state.units.b.actionGauge, 25, '三级再会之音也为天井下本人推进25%行动条');
+  assert.equal(effectiveDamageMultiplier(cleared.state.units.a), 1.15, '欢愉存在时保持清醒');
+  assert.equal(effectiveStats(cleared.state.units.b).resist, 2.24);
+  assert.equal(cleared.state.units.b.statuses.find(status => status.statusId === tenjukkaIds.joy).stacks, 2,
+    '客户端3233写明其他友方消耗；自身回合结束不消耗');
+  assert.equal(cleared.state.resources.blue.fire, 1, '自身回合结束不供火');
+  assert.equal(cleared.state.units.b.actionGauge, 0, '自身回合结束不拉条');
 });
 
 test('天井下欢愉的供火和推条会在正式战斗的友方回合结束后执行', () => {
@@ -1769,7 +1769,7 @@ test('初翎山风迅风初始行动值、双段伤害、生命差增伤与控�
   const initialized = applyEffectCommands(initial, definition.initialize(createBattleContext(initial), 'b'),
     'effect-resolution', 'shanfeng-initialize', id => registry.getStatus(id)).state;
   assert.equal(initialized.units.b.statuses.find(status => status.statusId === firstHaneMountainWindIds.swiftWind).stacks, 20);
-  assert.equal(initialized.units.b.actionGauge, 20);
+  assert.equal(initialized.units.b.actionGauge, 0, '先机行动值不触发战斗开始后的拉条');
   assert.equal(definition.modifyOutgoingDamage(initialized.units.b, initialized.units.r, 1000, 'normal', initialized), 1250);
 
   const basic = executeAction(initialized, { actorId: 'b', skillId: firstHaneMountainWindIds.basic, targetIds: ['r'],
@@ -1782,7 +1782,7 @@ test('初翎山风迅风初始行动值、双段伤害、生命差增伤与控�
     units: { ...initialized.units, b: { ...initialized.units.b, stats: { ...initialized.units.b.stats, attack: 1000 } },
       r: { ...initialized.units.r, hp: 10000 } } };
   const ultimate = executeAction(ultimateState, { actorId: 'b', skillId: firstHaneMountainWindIds.ultimate,
-    targetIds: ['r'], shape: 'all-enemies', targetRelation: 'enemy' }, registry, () => .5);
+    targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }, registry, () => .5);
   assert.equal(ultimate.events.filter(event => event.type === 'damage' && event.source.id === firstHaneMountainWindIds.ultimate).length, 4);
   assert.equal(ultimate.state.resources.blue.fire, 3);
 
@@ -3740,19 +3740,167 @@ test('P3: defeat supplies +2 for onmyoji and +1 for each shikigami, with normal 
   assert.deepEqual(result.events.filter(event => event.type === 'resource-changed').map(event => event.after - event.before), [2, 1, 1]);
 });
 
-test('P3: turn-end supply works for extra turns and honors meter-blocking definitions', () => {
+test('千姬汐梦附带拉条在被动封印期间继续触发，只计非召唤物敌方回合', () => {
+  const registry = new ContentRegistry();
+  registerChihime(registry);
+  const initial = state();
+  initial.units.b = { ...initial.units.b, heroId: chihimeIds.hero, actionGauge: 15, statuses: [{
+    instanceId: 'passive-seal', statusId: 'core.passive-suppression', source: { kind: 'skill', id: '3312', unitId: 'r' },
+    stacks: 1, duration: { kind: 'permanent' },
+  }] };
+  const handle = registry.getHero(chihimeIds.hero).handlers['turn-end'].handle;
+  const event = { type: 'turn-ended', eventId: 'enemy-turn-ended', phase: 'turn-end', actionId: 2,
+    source: { kind: 'unit', id: 'r', unitId: 'r' }, unitId: 'r' };
+  const commands = handle(createBattleContext(initial, () => .5), event);
+  assert.ok(commands.some(command => command.type === 'change-action-gauge' && command.targetId === 'b' && command.amount === 10));
+  const applied = applyEffectCommands(initial, commands, 'turn-end', event.eventId, id => registry.getStatus(id));
+  assert.equal(applied.state.units.b.actionGauge, 25);
+  assert.ok(!handle(createBattleContext(initial, () => .5), { ...event, unitId: 'b' })
+    .some(command => command.type === 'change-action-gauge'), '自身回合不拉条');
+  initial.units.r = { ...initial.units.r, unitKind: 'summon' };
+  assert.ok(!handle(createBattleContext(initial, () => .5), event).some(command => command.type === 'change-action-gauge'),
+    '敌方召唤物回合不拉条');
+});
+
+test('14点场：寻香行菩提愿叠加海月耗四火，市加美先机已有垂悯时首次施放寂灭现前', () => {
+  const { createBattleState } = require(path + 'simulation/input-adapter.js');
+  const { createMigratedContentRegistry } = require(path + 'content/register-migrated-content.js');
+  const initial = createBattleState(require('./fixtures/duel-14pm-lineup.json'));
+  const result = runBattle(initial, createMigratedContentRegistry(), { seed: 1, actionLimit: 5 });
+  assert.deepEqual(result.events.filter(event => event.type === 'turn-started')
+    .map(event => initial.units[event.unitId].heroId), [391, 247, 306, 396, 600]);
+  assert.equal(result.state.resources.blue.fire, 0, '000425帧4→0，前五次行动仍为0火');
+  assert.ok(result.events.some(event => event.type === 'action-declared' && event.intent.skillId === '6003'),
+    '000675帧明确显示寂灭现前');
+  assert.ok(!result.state.units['red:3:600'].statuses.some(status => status.statusId === 'status.hero.600.speed'),
+    '不能凭空获得爱见舍离的100点速度');
+});
+
+test('客户端减伤属性：魂网与仇恨印记使用除法，叠加面板属性并保留重伤记录', () => {
+  const initial = state();
+  const attacker = initial.units.b, target = initial.units.r;
+  const input = { attack: 1000, defense: 0, ratio: 1, critChance: 0, critDamage: 1 };
+  const baseline = createBattleContext(initial, () => .99).calculateDamage(input, attacker, target).amount;
+  for (const [rate, stacks] of [[.3, 3], [.3, 2], [.05, 9]]) {
+    const reduced = { ...target, damageAttributes: { hurtReductionRate: .1 }, statuses: [{
+      instanceId: 'native-reduction', statusId: 'test.native-reduction', source: { kind: 'skill', id: 'test' },
+      stacks, duration: { kind: 'permanent' }, modifiers: [
+        { stat: 'hurtReductionRate', operation: 'flat', amount: rate, perStack: true },
+      ],
+    }] };
+    const context = createBattleContext({ ...initial, units: { ...initial.units, r: reduced } }, () => .99);
+    const hit = context.calculateDamage(input, attacker, reduced);
+    assert.ok(Math.abs(hit.amount - baseline / (1 + .1 + rate * stacks)) < 1e-8);
+    const serious = context.calculateDamage({ ...input, seriousInjury: true }, attacker, reduced);
+    assert.equal(serious.amount, baseline, '重伤时正减伤暂不扣除');
+    assert.ok(Math.abs(serious.damageOptions.recordHurtReductionRate - (.1 + rate * stacks)) < 1e-8);
+  }
+});
+
+test('10点场：截图阵容开局不把迅风先机点数当作拉条，天井下自身不供火', () => {
+  const { createBattleState } = require(path + 'simulation/input-adapter.js');
+  const { createMigratedContentRegistry } = require(path + 'content/register-migrated-content.js');
+  const initial = createBattleState(require('./fixtures/duel-10am-lineup.json'));
+  const result = runBattle(initial, createMigratedContentRegistry(), { seed: 1, actionLimit: 4 });
+  const starts = result.events.filter(event => event.type === 'turn-started');
+  assert.deepEqual(starts.map(event => initial.units[event.unitId].heroId), [552, 585, 295, 323]);
+  assert.equal(result.state.resources.blue.fire, 4, '实机000500–000600：再会之音结束仍为4火');
+  const owner = result.state.units['blue:1:323'];
+  assert.equal(owner.statuses.find(status => status.statusId === tenjukkaIds.joy).stacks, 3);
+  assert.equal(owner.actionGauge, 0);
+});
+
+test('10点场：黄泉战旗真实伤害不叠加符咒与星火增伤', () => {
+  const { createBattleState } = require(path + 'simulation/input-adapter.js');
+  const { createMigratedContentRegistry } = require(path + 'content/register-migrated-content.js');
+  const initial = createBattleState(require('./fixtures/duel-10am-lineup.json'));
+  const result = runBattle(initial, createMigratedContentRegistry(), { seed: 1, actionLimit: 2 });
+  const lost = result.events.find(event => event.type === 'life-lost' && event.source.id === '5853');
+  const hits = result.events.filter(event => event.type === 'damage' && event.source.id === '5853');
+  assert.equal(Math.trunc(lost.hpLost), 20452, '实机000401帧自损20452');
+  assert.deepEqual(hits.map(event => Math.trunc(event.amount)), [1636, 6135],
+    '实机000401/000421帧两段伤害不被普通状态增伤放大26%');
+  assert.ok(Math.abs(hits[0].amount - lost.hpLost * .08) < 1e-8);
+  assert.ok(Math.abs(hits[1].amount - lost.hpLost * .3) < 1e-8);
+});
+
+test('10点场：完整战斗荒骷髅被攻击击杀后不复活，种子1蓝方获胜', () => {
+  const { createBattleState } = require(path + 'simulation/input-adapter.js');
+  const { createMigratedContentRegistry } = require(path + 'content/register-migrated-content.js');
+  const initial = createBattleState(require('./fixtures/duel-10am-lineup.json'));
+  const result = runBattle(initial, createMigratedContentRegistry(), { seed: 1, actionLimit: 600 });
+  const deaths = result.events.filter(event => event.type === 'unit-defeated' && event.unitId === 'red:2:585');
+  assert.equal(deaths.length, 1, '旧规则会被攻击击杀后反复复活22次');
+  assert.equal(deaths[0].defeatCause, 'damage');
+  assert.equal(result.events.some(event => event.type === 'unit-revived' && event.unitId === 'red:2:585'), false);
+  assert.equal(result.winner, 'blue');
+});
+
+test('10点场：第五次回合入场满条不提前解锁付费技能，离场才供火', () => {
+  const initial = state(); initial.resourceMeters.blue.fire.progress = 4; initial.resources.blue.fire = 2;
+  initial.units.b.stats = { ...initial.units.b.stats, speed: 200 };
+  const registry = new ContentRegistry();
+  registry.registerHero({ id: 1, skills: [createBasicAttackSkill('fire-basic', [1]),
+    { id: 'fire-paid', target: 'single', targetRelation: 'enemy', resourceCost: { resourceId: 'fire', amount: 3 },
+      levels: [{}], execute: () => [] }],
+    policy(context, actorId) { return { actorId,
+      skillId: context.state.resources.blue.fire >= 3 ? 'fire-paid' : 'fire-basic',
+      targetIds: ['r'], shape: 'single', targetRelation: 'enemy' }; } });
+  const result = runBattle(initial, registry, { seed: 1, actionLimit: 1 });
+  assert.equal(result.events.find(event => event.type === 'action-declared').intent.skillId, 'fire-basic');
+  assert.equal(result.state.resources.blue.fire, 5);
+  assert.equal(result.state.resourceMeters.blue.fire.progress, 0);
+  const advance = result.events.find(event => event.type === 'resource-meter-advanced' && event.progressAfter === 5);
+  assert.equal(advance.supplied, 0);
+  const supply = result.events.find(event => event.type === 'resource-meter-advanced' && event.supplied === 3);
+  assert.equal(supply.parentEventId, result.events.find(event => event.type === 'turn-ended').eventId);
+});
+
+test('10点场：等待离场的满条遇到额外推进，保留额外进度并遵守鬼火上限', () => {
+  const initial = state(); initial.resourceMeters.blue.fire.progress = 5; initial.resources.blue.fire = 7;
+  const result = applyEffectCommands(initial, [{ type: 'advance-resource-meter', source, side: 'blue',
+    resourceId: 'fire', steps: 1 }], 'effect-resolution', 'pending-extra-step');
+  assert.equal(result.state.resources.blue.fire, 8);
+  assert.equal(result.state.resourceMeters.blue.fire.progress, 1);
+  assert.equal(result.state.resourceMeters.blue.fire.nextSupply, 4);
+  assert.equal(result.events.find(event => event.type === 'resource-overflow').amount, 2);
+});
+
+test('10点场：其他友方耗尽最后一层欢愉后才结束清醒', () => {
+  const initial = state(); initial.units.b.heroId = 323;
+  initial.units.a = unit('a', 'blue'); initial.sides.blue.push('a');
+  const registry = new ContentRegistry(); registerTenjukka(registry);
+  const hero = registry.getHero(323); const resolve = id => registry.getStatus(id);
+  const begin = { eventId: 'joy-start', phase: 'turn-start', source, type: 'turn-started', unitId: 'b' };
+  let current = applyEffectCommands(initial, hero.handlers['turn-start'].handle(createBattleContext(initial), begin),
+    'effect-resolution', 'joy-awake', resolve).state;
+  current = applyEffectCommands(current, hero.skills.find(skill => skill.id === tenjukkaIds.awaken)
+    .execute(createBattleContext(current), { actorId: 'b' }, { stacks: 1 }), 'effect-resolution', 'joy-cast', resolve).state;
+  const ended = { eventId: 'ally-joy-end', phase: 'turn-end', source, type: 'turn-ended', unitId: 'a' };
+  current = applyEffectCommands(current, hero.handlers['turn-end'].handle(createBattleContext(current), ended),
+    'effect-resolution', 'joy-empty', resolve).state;
+  assert.equal(current.resources.blue.fire, 1);
+  assert.equal(effectiveDamageMultiplier(current.units.a), 1);
+  assert.equal(current.units.b.statuses.some(status => status.statusId === tenjukkaIds.joy), false);
+});
+
+test('P3: 入场推进、离场供火支持额外回合并遵守推进禁止状态', () => {
   const initial = state(); initial.resourceMeters.blue.fire.progress = 4;
   const event = { eventId: 'end', phase: 'turn-end', source, type: 'turn-ended', unitId: 'b', scheduling: 'extra-turn' };
   const dispatcher = new EventDispatcher(); registerPvpRules(dispatcher, () => ({ blocksResourceMeterAdvance: true }));
-  const result = settleEvents(initial, [event], dispatcher, () => .5);
+  const begin = { ...event, eventId: 'begin', phase: 'turn-start', type: 'turn-started' };
+  const entered = settleEvents(initial, [begin], dispatcher, () => .5);
+  assert.equal(entered.state.resourceMeters.blue.fire.progress, 5);
+  assert.equal(entered.state.resources.blue.fire, 0, '入场满条不立即供火');
+  const result = settleEvents(entered.state, [event], dispatcher, () => .5);
   assert.equal(result.state.resources.blue.fire, 3);
   initial.units.b.statuses = [{ statusId: 'block' }];
-  assert.equal(settleEvents(initial, [event], dispatcher, () => .5).state.resources.blue.fire, 0);
+  assert.equal(settleEvents(initial, [begin, event], dispatcher, () => .5).state.resources.blue.fire, 0);
 });
 
 test('P3/A3: 沉默类状态按客户端 AttrCalc._guiHuoRecover 扣减每回合鬼火推进', () => {
   const initial = state();
-  const event = { eventId: 'end-recover', phase: 'turn-end', source, type: 'turn-ended', unitId: 'b' };
+  const event = { eventId: 'begin-recover', phase: 'turn-start', source, type: 'turn-started', unitId: 'b' };
   const resolver = id => (id === 'test.silence' ? { resourceRecoveryBonus: { resourceId: 'fire', amount: -1 } } : undefined);
   const dispatcher = new EventDispatcher(); registerPvpRules(dispatcher, resolver);
   // 式神基准 1 格，被沉默（guiHuoRecover -1）⇒ 0 格，不再推进行动条

@@ -19,7 +19,7 @@ const { createBattleState } = require('../dist-test-renderer/renderer/features/d
 const { registerPvpRules } = require('../dist-test-renderer/renderer/features/duel/engine/mechanics/pvp-rules.js');
 const { runBattle } = require('../dist-test-renderer/renderer/features/duel/engine/simulation/run-battle.js');
 const { calculateDamage, resolveDamage } = require('../dist-test-renderer/renderer/features/duel/engine/mechanics/damage.js');
-const { effectiveCritResist, effectiveDamageMultiplier, effectiveDamageTakenMultiplier, effectiveStats } = require('../dist-test-renderer/renderer/features/duel/engine/mechanics/stats.js');
+const { effectiveCritResist, effectiveHurtReductionRate, effectiveDamageMultiplier, effectiveDamageTakenMultiplier, effectiveStats } = require('../dist-test-renderer/renderer/features/duel/engine/mechanics/stats.js');
 const { resolveHealing } = require('../dist-test-renderer/renderer/features/duel/engine/mechanics/healing.js');
 const { presentBattleEvents } = require('../dist-test-renderer/renderer/features/duel/engine/presentation/events.js');
 const { registerBaselineSouls, baselineSoulIds, shieldStatusId, guardAttackStatusId } = require('../dist-test-renderer/renderer/features/duel/engine/content/baseline-souls.js');
@@ -3579,7 +3579,8 @@ test('轮入道额外回合优先入队，并重新运行式神策略', () => {
   assert.equal(wearerSelectedNext.state.resources.blue.fire, 2, '额外行动重新校验并支付技能鬼火费用');
   assert.ok(wearerSelectedNext.events.some(event => event.type === 'status-removed' && event.statusId === durationStatusId
     && event.reason === 'expired'), '额外回合按一次友方目标回合扣减持续时间');
-  const extraMeter = wearerSelectedNext.events.find(event => event.type === 'resource-meter-advanced' && event.actionId === 2);
+  const extraMeter = wearerSelectedNext.events.find(event => event.type === 'resource-meter-advanced'
+    && event.parentEventId === extraStart.eventId);
   assert.ok(extraMeter, '额外回合重新进入主行动循环并按常规规则推进鬼火条');
   assert.equal(extraMeter.progressBefore, 1);
   assert.equal(extraMeter.progressAfter, 2);
@@ -5213,11 +5214,11 @@ test('修罗鬼童丸魂网减伤、四级追猎加层和五级追猎追加攻�
       targetIds: ['red-1'], shape: 'single', targetRelation: 'enemy' }, registry, () => 0,
     { resolveStatus: id => registry.getStatus(id) });
     assert.equal(result.accepted, true);
-    return effectiveDamageTakenMultiplier(result.state.units['blue-1']);
+    return 1 / (1 + effectiveHurtReductionRate(result.state.units['blue-1']));
   };
   assert.equal(statusMultiplierFor(1), 1);
-  assert.equal(statusMultiplierFor(2), .6);
-  assert.equal(statusMultiplierFor(4), .4);
+  assert.equal(statusMultiplierFor(2), 1 / 1.4);
+  assert.equal(statusMultiplierFor(4), 1 / 1.6);
 
   const initial = state();
   initial.units['blue-1'] = { ...initial.units['blue-1'], heroId: shuraKidomaruIds.hero, skillLevel: 1,
@@ -5587,7 +5588,7 @@ test('寻香行缚魂香跨技能叠层，三级场地升级每层降防提高�
     'rank two retains the 5% per-stack reduction');
 });
 
-test('寻香行三级以上明香境使付费技能鬼火消耗减少一点', () => {
+test('寻香行明香境不重复减菩提愿费用，二火不足、三火才可施放', () => {
   const registry = new ContentRegistry();
   registerJinkougyou(registry);
   const withField = (skillLevel) => {
@@ -5604,13 +5605,14 @@ test('寻香行三级以上明香境使付费技能鬼火消耗减少一点', ()
   const cast = initial => executeAction(initial, { actorId: 'blue-1', skillId: jinkougyouIds.wishSkill,
     targetIds: ['red-1'], shape: 'all-enemies', targetRelation: 'enemy' }, registry, () => .5,
   { resolveStatus: id => registry.getStatus(id) });
-  const discounted = cast(withField(3));
+  const affordable = withField(5); affordable.resources.blue.fire = 3;
+  const discounted = cast(affordable);
   assert.equal(discounted.accepted, true);
   assert.equal(discounted.state.resources.blue.fire, 0);
-  assert.ok(discounted.events.some(event => event.type === 'resource-changed' && event.before === 2 && event.after === 0));
-  assert.equal(cast(withField(2)).failure, 'insufficient-resource');
+  assert.ok(discounted.events.some(event => event.type === 'resource-changed' && event.before === 3 && event.after === 0));
+  for (const rank of [2, 3, 4, 5]) assert.equal(cast(withField(rank)).failure, 'insufficient-resource');
 
-  const policyState = withField(3);
+  const policyState = withField(5); policyState.resources.blue.fire = 3;
   const hero = registry.getHero(jinkougyouIds.hero);
   const policyContext = { state: policyState, getUnit: id => policyState.units[id],
     getLivingUnits: side => Object.values(policyState.units).filter(unit => unit.side === side && unit.hp > 0) };
@@ -5678,14 +5680,14 @@ test('寻香行封印时明香境仍决定AI与主动技能效果，但停止被
     }] };
   initial.units['red-2'] = { ...initial.units['red-1'], unitId: 'red-2', statuses: [], hp: 5000 };
   initial.sides.red = ['red-1', 'red-2'];
-  initial.resources.blue.fire = 2;
+  initial.resources.blue.fire = 3;
 
   const intent = hero.policy(createBattleContext(initial, () => 0), 'blue-1');
   assert.equal(intent.skillId, jinkougyouIds.wishSkill,
     '社区AI按明香境是否存在选3技能，封印不等于场地已关闭');
   const wish = executeAction(initial, intent, registry, () => 0,
     { dispatcher, resolveStatus: id => registry.getStatus(id) });
-  assert.equal(wish.accepted, true, '已开启的五级明香境仍提供技能耗火减免');
+  assert.equal(wish.accepted, true, '封印不关闭已开启明香境中的主动技能，仍按3火付费');
   assert.ok(wish.state.units['red-1'].statuses.some(status => status.statusId === jinkougyouIds.trance),
     '主动技能给出的第三层缚魂香触发状态自身的失神转换，即使寻香行被封印');
   assert.equal(wish.state.units['red-1'].statuses.some(status => status.statusId === jinkougyouIds.soulBinder), false);
@@ -5722,13 +5724,13 @@ test('寻香行明香境中的菩提愿必定给怪物缚魂香，式神目标�
   assert.equal(result.state.units['red-2'].statuses.some(status => status.statusId === jinkougyouIds.soulBinder), false);
 });
 
-test('寻香行初始化、鬼火减耗和明香境延长读取各自技能等级', () => {
+test('寻香行初始化、缚梦明香费用和明香境延长读取各自技能等级', () => {
   const registry = new ContentRegistry();
   registerJinkougyou(registry);
   const initial = state();
   initial.units['blue-1'] = { ...initial.units['blue-1'], heroId: jinkougyouIds.hero, skillLevel: 1,
     skillLevels: { [jinkougyouIds.fieldSkill]: 5, [jinkougyouIds.wishSkill]: 2 } };
-  initial.resources.blue.fire = 2;
+  initial.resources.blue.fire = 3;
   const definition = registry.getHero(jinkougyouIds.hero);
   const initializedCommands = definition.initialize(createBattleContext(initial, () => .5), 'blue-1');
   const initialized = applyEffectCommands(initial, initializedCommands, 'battle-start', 'jinkou-ranks-init',
@@ -5742,7 +5744,7 @@ test('寻香行初始化、鬼火减耗和明香境延长读取各自技能等�
   const result = executeAction(initialized.state, { actorId: 'blue-1', skillId: jinkougyouIds.wishSkill,
     targetIds: ['red-1'], shape: 'all-enemies', targetRelation: 'enemy' }, registry, () => .5,
   { resolveStatus: id => registry.getStatus(id) });
-  assert.equal(result.accepted, true, 'rank-five field reduces this paid skill cost to the available two fire');
+  assert.equal(result.accepted, true, 'Wish retains its native three-fire cost despite the rank-five field');
   assert.equal(result.state.resources.blue.fire, 0);
   assert.equal(result.state.units['blue-1'].statuses.find(status => status.statusId === jinkougyouIds.fragranceField)
     .duration.remaining, 4, 'rank-two Wish extends the opening three-turn field once');
@@ -6320,6 +6322,23 @@ test('荒骷髅生命流失触发后保留1点生命并累计平氏铁壁', () =
   const revived = settleEvents(lost.state, lost.events, dispatcher, () => 0.5, undefined, id => registry.getStatus(id));
   assert.equal(revived.state.units['blue-1'].hp, 1);
   assert.equal(revived.state.units['blue-1'].statuses.find(status => status.statusId === skullGeneralIds.ironWall).values.totalLost, 10);
+});
+
+test('荒骷髅被普通或真实攻击击杀后不会被生命流失被动无限复活', () => {
+  for (const damageKind of ['normal', 'true']) {
+    const registry = new ContentRegistry(); registerSkullGeneral(registry);
+    const initial = state();
+    initial.units['blue-1'] = { ...initial.units['blue-1'], heroId: skullGeneralIds.hero, hp: 10 };
+    const dispatcher = new EventDispatcher();
+    for (const [phase, rule] of Object.entries(registry.getHero(skullGeneralIds.hero).handlers))
+      dispatcher.register({ id: `hero:${skullGeneralIds.hero}:${phase}`, phase, priority: rule.priority, handle: rule.handle });
+    const hit = applyEffectCommands(initial, [{ type: 'deal-damage', source: { kind: 'skill', id: 'test-hit', unitId: 'red-1' },
+      targetId: 'blue-1', amount: 20, damageKind }], 'hit', 'skull-attack-death');
+    const result = settleEvents(hit.state, hit.events, dispatcher, () => .5, undefined, id => registry.getStatus(id));
+    assert.equal(result.state.units['blue-1'].hp, 0, damageKind);
+    assert.equal(result.events.some(event => event.type === 'unit-revived'), false, damageKind);
+    assert.equal(result.events.find(event => event.type === 'unit-defeated').defeatCause, 'damage');
+  }
 });
 
 test('携花友方回合结束时荒骷髅通过额外回合队列施放黄泉战旗', () => {
@@ -8333,6 +8352,7 @@ test('市加美回合结束获得1层幻花，达到5层才切换为断罪之刃
   assert.equal(unlockedOwner.statuses.some(status => status.statusId === shikagamiCityIds.mercy), false);
 
   const battleState = state();
+  battleState.resources.blue.fire = 0; // 普攻不增加幻花，独立验证回合结束的第五层。
   battleState.units['blue-1'] = { ...battleState.units['blue-1'], heroId: shikagamiCityIds.hero,
     stats: { ...battleState.units['blue-1'].stats, speed: 200 }, statuses: [
       status(shikagamiCityIds.unique), status(shikagamiCityIds.mercy), status(shikagamiCityIds.illusionFlower, 4),
@@ -8927,7 +8947,7 @@ test('御怨般若仇恨印记逐层增加抵抗与减伤，达到9层时清除�
         source: { kind: 'skill', id: resentmentHannyaIds.passive, unitId: actor.unitId }, stacks: 8,
         duration: { kind: 'permanent' }, modifiers: [
           { stat: 'resist', operation: 'flat', amount: .1, perStack: true },
-          { stat: 'damageTaken', operation: 'percent', amount: -.05, perStack: true },
+          { stat: 'hurtReductionRate', operation: 'flat', amount: .05, perStack: true },
         ] },
     ] };
   const hero = registry.getHero(resentmentHannyaIds.hero);
@@ -8940,7 +8960,7 @@ test('御怨般若仇恨印记逐层增加抵抗与减伤，达到9层时清除�
   assert.equal(result.statuses.some(status => status.statusId === controlId), false);
   assert.equal(result.actionGauge, 55);
   assert.equal(effectiveStats(result).resist, actor.stats.resist + .9);
-  assert.equal(effectiveDamageTakenMultiplier(result), .55);
+  assert.equal(effectiveHurtReductionRate(result), .45);
 });
 
 test('御怨般若二级被动在非召唤友方式神阵亡时获得3层印记', () => {
@@ -9057,7 +9077,7 @@ test('御怨般若开启结界封印敌方并压制14点阵容的七种御魂', 
       source: { kind: 'skill', id: resentmentHannyaIds.passive, unitId: actor.unitId }, stacks: 9,
       duration: { kind: 'permanent' }, modifiers: [
         { stat: 'resist', operation: 'flat', amount: .1, perStack: true },
-        { stat: 'damageTaken', operation: 'percent', amount: -.05, perStack: true },
+        { stat: 'hurtReductionRate', operation: 'flat', amount: .05, perStack: true },
       ] }] };
   initial.resources.blue.fire = 0;
   const lowLevelState = { ...initial, units: { ...initial.units,
@@ -9227,6 +9247,9 @@ test('御怨般若结界通过真实对局事件在鬼使黑击杀后的额外�
 
 test('御怨般若封印结界开放敌方破阵技能，破碎2面并在最后一面破碎后结界关闭', () => {
   const registry = createMigratedContentRegistry();
+  // Explicitly select the optional granted skill; the seal itself must not force it.
+  registry.getHero(200).policy = (_context, unitId) => ({ actorId: unitId,
+    skillId: resentmentHannyaIds.maskBreak, targetIds: [unitId], shape: 'self', targetRelation: 'ally' });
   const simulateBreaker = (remainingMasks, actionLimit = 1, seed = 13) => {
     const initial = state();
     initial.counters = { round: 1, action: 0, attack: 0, hit: 0 };
@@ -9280,6 +9303,29 @@ test('御怨般若封印结界开放敌方破阵技能，破碎2面并在最后�
     && event.source.id === fortuneCatIds.soul && event.source.unitId === 'red-1');
   assert.ok(closedAt >= 0 && restoredSoulTurn > closedAt && restoredFortuneCat > restoredSoulTurn,
     '结界破碎清除御魂封印后，敌方式神下一回合开始应恢复招财猫触发');
+});
+
+test('封印结界中有鬼火仍按式神策略出招，不强制花火跳过行动', () => {
+  const registry = createMigratedContentRegistry();
+  const initial = state();
+  initial.counters = { round: 1, action: 0, attack: 0, hit: 0 };
+  const owner = initial.units['blue-1'];
+  const actor = initial.units['red-1'];
+  const source = { kind: 'skill', id: resentmentHannyaIds.passive, unitId: owner.unitId };
+  initial.units[owner.unitId] = { ...owner, heroId: resentmentHannyaIds.hero,
+    stats: { ...owner.stats, speed: 1 }, statuses: [{ instanceId: 'optional-barrier',
+      statusId: resentmentHannyaIds.sealBarrier, source, stacks: 9, duration: { kind: 'permanent' } }] };
+  initial.units[actor.unitId] = { ...actor, heroId: 200, stats: { ...actor.stats, speed: 1000 },
+    statuses: [{ instanceId: 'optional-mask', statusId: resentmentHannyaIds.sealMask, source,
+      stacks: 1, duration: { kind: 'permanent' } }] };
+  initial.resources.red.fire = 1;
+  const result = runBattle(initial, registry, { seed: 13, actionLimit: 1 });
+  const action = result.events.find(event => event.type === 'action-declared');
+  assert.ok(action);
+  assert.notEqual(action.intent.skillId, resentmentHannyaIds.maskBreak);
+  assert.equal(result.state.resources.red.fire, 1, '鬼面状态不能擅自消耗1火');
+  assert.equal(result.state.units[owner.unitId].statuses.find(status =>
+    status.statusId === resentmentHannyaIds.sealBarrier).stacks, 8, '只结算正常回合结束的一面');
 });
 
 test('御怨般若结界全破后的仇恨蔓延通过效果抵抗结算', () => {

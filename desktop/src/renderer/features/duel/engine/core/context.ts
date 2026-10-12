@@ -1,5 +1,5 @@
 import { isUnitBanished, type BattleContext, type BattleState, type EffectCommand, type SideId, type UnitId, type UnitState } from './types';
-import { effectiveCritResist, effectiveStats } from '../mechanics/stats';
+import { effectiveCritResist, effectiveHurtReductionRate, effectiveStats } from '../mechanics/stats';
 import { calculateDamage } from '../mechanics/damage';
 import { checkDodge } from '../mechanics/game-damage';
 import { indirectDefenseReduction } from '../mechanics/indirect-damage';
@@ -55,7 +55,7 @@ export function createBattleContext(state: BattleState, random: () => number,
       const result = avoided ? { amount: 0, isCritical: false } : calculateDamage({ ...configured,
         isRangeSkill, isShieldEntity, ...(defenseReduction ? { defenseReduction } : {}),
         critResist: effectiveCritResist(target, configured.critResist ?? target.damageAttributes?.critResist ?? 0),
-        targetHurtReductionRate: configured.targetHurtReductionRate ?? target.damageAttributes?.hurtReductionRate,
+        targetHurtReductionRate: effectiveHurtReductionRate(target, configured.targetHurtReductionRate ?? target.damageAttributes?.hurtReductionRate ?? 0),
         seriousInjury: configured.seriousInjury ?? target.damageAttributes?.seriousInjury,
         hurtReductionRate: 0, fixedHurtReductionVal: 0 }, random);
       const damageOptions = Object.fromEntries(Object.entries({ ...result.damageOptions, hurtReductionRate: configured.hurtReductionRate,

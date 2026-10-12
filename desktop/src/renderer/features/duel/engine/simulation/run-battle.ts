@@ -463,8 +463,13 @@ function modifyContentDamage(
   if (attacker) modified = registry.getHero(target.heroId)?.modifyIncomingDamage?.(attacker, target, modified, kind, source) ?? modified;
   if (attacker) modified = registry.getHero(attacker.heroId)?.modifyOutgoingDamage?.(attacker, target, modified, kind, state) ?? modified;
   if (attacker.soulId) modified = registry.getSoul(attacker.soulId)?.modifyOutgoingDamage?.(attacker, target, modified, kind, state, random) ?? modified;
-  modified *= effectiveDamageMultiplier(attacker, state.resources[attacker.side], actionKind);
-  modified *= effectiveDamageTakenMultiplier(target, state.resources[target.side], actionKind);
+  // directDamageCalc uses the supplied damage, without calcRawAttackDmg's
+  // ordinary hurt-addition/reduction attributes. Keep explicit content hooks,
+  // sharing and shields, but do not amplify true damage through status stats.
+  if (kind !== 'true') {
+    modified *= effectiveDamageMultiplier(attacker, state.resources[attacker.side], actionKind);
+    modified *= effectiveDamageTakenMultiplier(target, state.resources[target.side], actionKind);
+  }
   if (target.soulId) modified = registry.getSoul(target.soulId)?.modifyIncomingDamage?.(attacker, target, modified, kind) ?? modified;
   return Number.isFinite(modified) ? Math.max(0, modified) : 0;
 }

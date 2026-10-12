@@ -47,6 +47,19 @@ export function effectiveCritResist(unit: UnitState, base = unit.damageAttribute
   return base * (1 + percent) + flat;
 }
 
+/** Client hurtReductionRate is an additive attribute, applied by the damage formula as a divisor. */
+export function effectiveHurtReductionRate(unit: UnitState, base = unit.damageAttributes?.hurtReductionRate ?? 0): number {
+  let flat = 0, percent = 0;
+  for (const status of unit.statuses) for (const modifier of status.modifiers ?? []) {
+    if (modifier.stat !== 'hurtReductionRate' || !Number.isFinite(modifier.amount)
+      || !conditionApplies(unit, modifier.condition)) continue;
+    const amount = modifier.amount * (modifier.perStack ? status.stacks : 1);
+    if (modifier.operation === 'flat') flat += amount;
+    else percent += amount;
+  }
+  return base * (1 + percent) + flat;
+}
+
 /** Resolves additive outgoing damage modifiers stored on typed statuses. */
 export function effectiveDamageMultiplier(unit: UnitState, resources?: Readonly<Record<string, number>>, actionKind?: import('../core/types').ActionKind): number {
   let flat = 0;

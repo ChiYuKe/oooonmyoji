@@ -4,9 +4,9 @@ import type { StatusDefinition } from '../core/definitions';
 
 /** Rules shared by PvP battles; content-specific defeat effects remain in content modules. */
 export function registerPvpRules(dispatcher: EventDispatcher, resolveStatus?: (id: string) => StatusDefinition | undefined): void {
-  dispatcher.register({ id: 'system:pvp-turn-fire-meter', phase: 'turn-end', priority: 0,
+  dispatcher.register({ id: 'system:pvp-turn-fire-meter', phase: 'turn-start', priority: 0,
     handle(context, event) {
-      if (event.type !== 'turn-ended') return;
+      if (event.type !== 'turn-started') return;
       const actor = context.getUnit(event.unitId);
       if (!actor || actor.statuses.some(status => resolveStatus?.(status.statusId)?.blocksResourceMeterAdvance)) return;
       // 客户端 `AttrCalc._guiHuoRecover`：每回合的资源推进量 = 基准（阴阳师 `YYS_BOUT_ADD_GUIHUO` = 3 / 其它 = 1）
@@ -19,7 +19,17 @@ export function registerPvpRules(dispatcher: EventDispatcher, resolveStatus?: (i
       const steps = Math.max(0, base + bonus);
       if (steps <= 0) return;
       return [{ type: 'advance-resource-meter', source: { kind: 'system', id: 'resource-meter' },
-        side: actor.side, resourceId: 'fire', steps, parentEventId: event.eventId }];
+        side: actor.side, resourceId: 'fire', steps, deferSupply: true, parentEventId: event.eventId }];
+    } });
+  // TurnMgrComp.enterLockState 推进 addGuihuoBout；leaveLockState 才补火。
+  dispatcher.register({ id: 'system:pvp-turn-fire-supply', phase: 'turn-end', priority: 1000,
+    handle(context, event) {
+      if (event.type !== 'turn-ended') return;
+      const actor = context.getUnit(event.unitId);
+      const meter = actor && context.state.resourceMeters[actor.side]?.fire;
+      if (!actor || !meter || meter.progress < Math.max(1, meter.threshold)) return;
+      return [{ type: 'advance-resource-meter', source: { kind: 'system', id: 'resource-meter' },
+        side: actor.side, resourceId: 'fire', steps: 0, settlePending: true, parentEventId: event.eventId }];
     } });
   dispatcher.register({ id: 'system:pvp-defeat-fire', phase: 'unit-defeated', priority: 0,
     handle(context, event: BattleEvent) {

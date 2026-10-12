@@ -60,7 +60,7 @@ export interface StatusInstance {
 
 export type CombatStatId = Exclude<keyof UnitStats, 'hp'>;
 export interface StatModifier {
-  readonly stat: CombatStatId | 'critResist' | 'critDamageTaken' | 'damage' | 'damageTaken' | 'defenseIgnore' | 'healingTaken' | 'indirectDamageTaken';
+  readonly stat: CombatStatId | 'critResist' | 'critDamageTaken' | 'damage' | 'damageTaken' | 'hurtReductionRate' | 'defenseIgnore' | 'healingTaken' | 'indirectDamageTaken';
   readonly operation: 'flat' | 'percent';
   /** Percent modifiers are expressed as a fraction, for example 0.2 means +20%. */
   readonly amount: number;
@@ -205,7 +205,8 @@ export type BattleEvent =
       hurtBeforeAbsorb?: number; shieldConsumed?: number; extHpConsumed?: number; reboundDamage?: number; leechDamage?: number;
       seriousInjury?: boolean; recordDefense?: number; recordHurtReductionRate?: number; recordIndirectHurtReductionRate?: number })
   | (EventEnvelope & { type: 'life-lost'; targetId: UnitId; amount: number; hpLost: number; lifeLossKind?: 'direct' | 'indirect'; suppressTargetPassiveTriggers?: boolean })
-  | (EventEnvelope & { type: 'unit-defeated'; unitId: UnitId; defeatedBy?: SourceRef })
+  | (EventEnvelope & { type: 'unit-defeated'; unitId: UnitId; defeatedBy?: SourceRef;
+      defeatCause?: 'damage' | 'life-loss' })
   | (EventEnvelope & { type: 'unit-revived'; unitId: UnitId; hp: number })
   | (EventEnvelope & { type: 'revive-blocked'; unitId: UnitId; protectionStatusId: StatusId })
   | (EventEnvelope & { type: 'unit-summoned'; unitId: UnitId; ownerUnitId: UnitId; heroId: number })
@@ -268,7 +269,9 @@ export type EffectCommand =
   | { type: 'remove-status-instances'; source: SourceRef; targetId: UnitId; instanceIds: readonly string[]; reason?: 'expired' | 'consumed' | 'replaced'; parentEventId?: string }
   | { type: 'change-action-gauge'; source: SourceRef; targetId: UnitId; amount: number; parentEventId?: string;
       checkImmunity?: boolean }
-  | { type: 'advance-resource-meter'; source: SourceRef; side: SideId; resourceId: string; steps: number; parentEventId?: string }
+  | { type: 'advance-resource-meter'; source: SourceRef; side: SideId; resourceId: string; steps: number;
+      /** 普通回合入场只推进，离场才结算满条供火。技能/御魂默认立即结算。 */
+      deferSupply?: boolean; settlePending?: boolean; parentEventId?: string }
   | { type: 'set-resource-meter-progress'; source: SourceRef; side: SideId; resourceId: string; progress: number; parentEventId?: string }
   | { type: 'change-resource-meter-cap'; source: SourceRef; side: SideId; resourceId: string; amount: number; parentEventId?: string }
   | { type: 'add-status'; source: SourceRef; targetId: UnitId; instance: StatusInstance; parentEventId?: string }

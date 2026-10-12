@@ -293,7 +293,7 @@ export function applyEffectCommands(
           instanceId: status.instanceId, statusId: status.statusId, statusCategory: resolveStatus?.(status.statusId)?.category, reason: 'consumed' });
       }
       if (currentTarget.hp > 0 && hpDamage >= currentTarget.hp) events.push({ ...envelope(command.source, damageEvent.eventId), phase: 'unit-defeated',
-        type: 'unit-defeated', unitId: target.unitId, defeatedBy: command.source });
+        type: 'unit-defeated', unitId: target.unitId, defeatedBy: command.source, defeatCause: 'damage' });
       if (activeAttacker && (reboundDamage > 0 || leechDamage > 0)) {
         const reactions: EffectCommand[] = [];
         if (reboundDamage > 0) reactions.push({ type: 'deal-damage', source: { kind: 'system', id: 'damage.rebound', unitId: target.unitId },
@@ -321,7 +321,7 @@ export function applyEffectCommands(
         ...(command.suppressTargetPassiveTriggers ? { suppressTargetPassiveTriggers: true } : {}) };
       events.push(lifeLostEvent);
       if (target.hp > 0 && target.hp - hpLost <= 0) events.push({ ...envelope(command.source, lifeLostEvent.eventId),
-        phase: 'unit-defeated', type: 'unit-defeated', unitId: target.unitId, defeatedBy: command.source });
+        phase: 'unit-defeated', type: 'unit-defeated', unitId: target.unitId, defeatedBy: command.source, defeatCause: 'life-loss' });
       continue;
     }
     if (command.type === 'revive') {
@@ -863,16 +863,32 @@ export function applyEffectCommands(
       let resource = state.resources[command.side]?.[command.resourceId] ?? 0;
       const beforeResource = resource;
       let overflow = 0;
+      // 满条等待离场期间，额外推进应先结算已有满条，再保留新增进度。
+      if (!command.deferSupply && steps > 0 && progress >= Math.max(1, meter.threshold)) {
+        progress = 0;
+        const attempted = resource + Math.min(meter.maxSupply, nextSupply);
+        resource = Math.min(Math.max(0, meter.resourceCap), attempted);
+        overflow += Math.max(0, attempted - resource);
+        nextSupply = Math.min(meter.maxSupply, nextSupply + 1);
+      }
       for (let step = 0; step < Math.abs(steps); step++) {
         if (steps < 0) {
           progress = Math.max(0, progress - 1);
           continue;
         }
         progress += 1;
+        if (command.deferSupply) { progress = Math.min(progress, Math.max(1, meter.threshold)); continue; }
         if (progress < Math.max(1, meter.threshold)) continue;
         progress = 0;
         const supply = Math.min(meter.maxSupply, nextSupply);
         const attempted = resource + supply;
+        resource = Math.min(Math.max(0, meter.resourceCap), attempted);
+        overflow += Math.max(0, attempted - resource);
+        nextSupply = Math.min(meter.maxSupply, nextSupply + 1);
+      }
+      if (command.settlePending && progress >= Math.max(1, meter.threshold)) {
+        progress = 0;
+        const attempted = resource + Math.min(meter.maxSupply, nextSupply);
         resource = Math.min(Math.max(0, meter.resourceCap), attempted);
         overflow += Math.max(0, attempted - resource);
         nextSupply = Math.min(meter.maxSupply, nextSupply + 1);

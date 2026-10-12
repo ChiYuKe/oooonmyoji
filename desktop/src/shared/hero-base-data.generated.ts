@@ -9,8 +9,8 @@ export const HERO_BASE_SCHEMA_VERSION = 1;
 export const HERO_BASE_META = {
   level: 40,
   star: 6,
-  generatedFrom: "2026-10-03",
-  heroCount: 280,
+  generatedFrom: "2026-10-12",
+  heroCount: 281,
 } as const;
 
 export interface HeroBasePanel {
@@ -5090,6 +5090,24 @@ export const heroBaseById: Readonly<Record<number, HeroBaseEntry>> = {
       "hit": 0,
       "resist": 0
     }
+  },
+  "609": {
+    "name": "咲耶",
+    "rarity": 4,
+    "pinyin": "xiaoye",
+    "awake": true,
+    "awakeStatus": "awake1",
+    "kind": "shikigami",
+    "base": {
+      "hp": 11962.6,
+      "attack": 2948,
+      "defense": 485.1,
+      "speed": 120,
+      "crit": 0.1,
+      "critDamage": 1.5,
+      "hit": 0,
+      "resist": 0
+    }
   }
 };
 
@@ -5130,7 +5148,7 @@ export const heroBaseAliasStrict: Readonly<Record<number, number>> = {
   583: 583, 584: 584, 585: 585, 586: 586, 587: 587, 588: 588, 590: 590, 591: 591,
   592: 592, 593: 593, 594: 594, 595: 595, 596: 596, 597: 597, 598: 598, 599: 599,
   600: 600, 601: 601, 602: 602, 603: 603, 604: 604, 605: 605, 606: 606, 607: 607,
-  608: 608, 1250: 250, 1259: 209, 1305: 257, 1306: 220, 1354: 569, 1356: 577, 1437: 201,
+  608: 608, 609: 609, 1250: 250, 1259: 209, 1305: 257, 1306: 220, 1354: 569, 1356: 577, 1437: 201,
   1559: 307, 1590: 259, 1591: 280, 1593: 296, 1595: 347, 1597: 370, 1600: 200, 1601: 247,
   1602: 297, 1603: 307, 1604: 295, 1605: 290, 1606: 350, 1607: 205, 1608: 207, 1609: 232,
   1610: 237, 1611: 241, 1612: 323, 1613: 361, 1712: 287, 1792: 295, 1830: 296, 1833: 368,

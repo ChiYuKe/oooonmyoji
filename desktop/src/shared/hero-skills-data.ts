@@ -1,7 +1,7 @@
 // Generated from the official NetEase Shikigami directory.
 import type { HeroSkillsCatalog } from './hero-skills';
 export const heroSkillsCatalog: HeroSkillsCatalog = {
-  "updated": "2026-10-03",
+  "updated": "2026-10-12",
   "source": "https://yys.163.com/shishen/",
   "heroes": {
     "200": {
@@ -14538,6 +14538,56 @@ export const heroSkillsCatalog: HeroSkillsCatalog = {
             "Lv.3对其他敌方造成伤害提升至238%",
             "Lv.4对指定敌方造成伤害提升至598%",
             "Lv.5对其他敌方造成伤害提升至268%"
+          ],
+          "extraSkills": []
+        }
+      ],
+      "awakening": "觉醒技能增强"
+    },
+    "609": {
+      "skills": [
+        {
+          "id": 6091,
+          "name": "瞬影",
+          "icon": "6091",
+          "description": "不顾一切地向前冲刺，攻击敌方目标2次，每次造成攻击50%伤害。",
+          "cost": 0,
+          "type": 3,
+          "upgrades": [
+            "Lv.2伤害增加至52%",
+            "Lv.3伤害增加至54%",
+            "Lv.4伤害增加至56%",
+            "Lv.5伤害增加至62%"
+          ],
+          "extraSkills": []
+        },
+        {
+          "id": 6092,
+          "name": "刹那之花",
+          "icon": "6092",
+          "description": "咲耶抵达了过去的一瞬间，使友方目标进入1个刹那；若对阵亡友方施放，目标以最后一瞬进入刹那。",
+          "cost": 3,
+          "type": 3,
+          "upgrades": [
+            "Lv.2消耗鬼火减少1点",
+            "Lv.3刹那中，普攻伤害提升系数增至1.5%",
+            "Lv.4刹那中，普攻伤害提升系数增至2%",
+            "Lv.5刹那中，额外普攻1次"
+          ],
+          "extraSkills": []
+        },
+        {
+          "id": 6093,
+          "name": "凝结之珀",
+          "icon": "6093",
+          "description": "对指定敌方目标施加易碎，持续1回合，并为友方全体增加10%行动条。对怪物施放时，易碎额外降低100点防御。",
+          "cost": 3,
+          "type": 3,
+          "upgrades": [
+            "Lv.2易碎持续时间增至2回合",
+            "Lv.3行动条增加提升至15%",
+            "Lv.4对怪物施放的易碎持续至战斗结束",
+            "Lv.5行动条增加提升至20%"
           ],
           "extraSkills": []
         }

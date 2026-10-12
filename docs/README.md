@@ -9,6 +9,7 @@
 - [工作流文本格式 v6（`.owf`）](./workflow-dsl-v6.md)：磁盘上唯一的工作流格式——
   缩进块 + 中缀表达式 + 顶层 `edges` 连线表，及其规范化规则与往返保证。
 - [桌面端说明](../desktop/README.md)：独立桌面工作台的使用与开发。
+- [阴阳师式神数据更新](./shikigami-data-update.md)：从网易公开数据源同步式神面板、头像和技能。
 - [桌面端设计规则](../desktop/DESIGN_RULES.md)：桌面端代码与交互约定。
 - [桌面端 UI 组件库](../desktop/public/legacy/UI_LIBRARY.md)：遗留画布页面使用的组件。
 - [MCP 客户端配置示例](./mcp-client-config.example.json)：将 MCP 模板工厂接入 AI 客户端。

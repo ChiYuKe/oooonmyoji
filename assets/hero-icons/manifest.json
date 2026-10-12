@@ -2238,5 +2238,13 @@
     "file": "608.png",
     "bytes": 1791958,
     "sha256": "da5279ad98a3aa6037ab7c57a5858bc95285e7f0971a8dfb95a9e6c0dde112d5"
+  },
+  {
+    "id": 609,
+    "name": "咲耶",
+    "url": "https://yys.res.netease.com/pc/zt/20161108171335/data/shishen/609.png?v6",
+    "file": "609.png",
+    "bytes": 33598,
+    "sha256": "d3085861d98366e4cf75302950c8d990071dd4cc40b0e711474347940c48faae"
   }
 ]

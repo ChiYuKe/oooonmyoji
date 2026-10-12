@@ -16,7 +16,8 @@ ICON = "https://yys.res.netease.com/pc/zt/20161108171335/data/skill/{icon}.png?v
 
 
 def plain(value: str) -> str:
-    return html.unescape(re.sub(r"</?[a-zA-Z][^>]*>", "", re.sub(r"<br\s*/?>", "\n", value, flags=re.I))).strip()
+    text = html.unescape(re.sub(r"</?[a-zA-Z][^>]*>", "", re.sub(r"<br\s*/?>", "\n", value, flags=re.I)))
+    return re.sub(r"[\u200b\ufeff]", "", text).strip()
 
 
 def normalize(skill_id: int, raw: dict) -> dict:

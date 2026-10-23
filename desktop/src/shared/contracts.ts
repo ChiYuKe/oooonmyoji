@@ -419,7 +419,7 @@ export interface ReferenceNode {
 }
 
 /** 一次具体引用发生的位置 / 方式。 */
-export type ReferenceContextKind = 'workflow.run' | 'instance_parallel' | 'template' | 'template-binding' | 'asset-default' | 'catalog-entry';
+export type ReferenceContextKind = 'workflow.run' | 'workflow.select' | 'workflow.sequence' | 'instance_parallel' | 'template' | 'template-binding' | 'asset-default' | 'catalog-entry';
 
 export interface ReferenceContext {
   kind: ReferenceContextKind;

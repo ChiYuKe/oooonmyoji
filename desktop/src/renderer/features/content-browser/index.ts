@@ -14,6 +14,7 @@ import type {
   WorkflowDescriptor,
 } from '../../../shared/contracts';
 import type { DockingController } from '../../shell/docking/index';
+import type { ImpactConfirmRequest } from '../../ui/impact-confirm';
 import {
   contentBrowserRecursiveItems,
   contentFolderRelocations,
@@ -28,6 +29,7 @@ import { showContentRewriteResult } from './rewrite-dialog';
 import { bindContentMarquee } from './marquee';
 import { runContentBatch } from './batch';
 import { contentSelectionGesture } from './selection';
+import { contentDeleteConfirmRequest } from './delete-confirm';
 
 interface WorkflowDocumentTab {
   uri: string;
@@ -152,6 +154,7 @@ let createIconsRef!: typeof createIcons;
 let desktopIconsRef!: IconSet;
 let createElementRef!: typeof createElement;
 let showToast!: (message: string, error?: boolean) => void;
+let showImpactConfirm!: (request: ImpactConfirmRequest) => Promise<boolean>;
 let errorMessage!: (error: unknown) => string;
 let getBootstrap!: () => BootstrapData | undefined;
 let setBootstrap!: (value: BootstrapData) => void;
@@ -1180,6 +1183,12 @@ async function performContentRename(item: ContentBrowserItem, newName: string): 
   reportContentRewrite(result, '重命名', skipped);
 }
 
+async function confirmContentDelete(items: readonly ContentBrowserItem[]): Promise<boolean> {
+  const graphs = await Promise.all(items.filter((item) => item.kind !== 'folder')
+    .map((item) => api.getReferenceGraph(item.path)));
+  return showImpactConfirm(contentDeleteConfirmRequest(items, graphs));
+}
+
 async function performContentBatch(operation: 'move' | 'copy' | 'delete', requested: readonly ContentBrowserItem[], targetFolder?: string): Promise<void> {
   if (contentBatchBusy || requested.length === 0) return;
   const items = [...new Map(requested.map((item) => [item.path, item])).values()];
@@ -1188,9 +1197,9 @@ async function performContentBatch(operation: 'move' | 'copy' | 'delete', reques
     showToast(`请先保存打开的工作流，再${label}内容`, true);
     return;
   }
-  if (operation === 'delete' && !window.confirm(`确定删除选中的 ${items.length} 项吗？\n${items.map((item) => item.path).join('\n')}`)) return;
   contentBatchBusy = true;
   try {
+    if (operation === 'delete' && !await confirmContentDelete(items)) return;
     const result = await runContentBatch(items, async (item) => {
       if (operation === 'delete') { await deleteContentItem(item, true); return ''; }
       if (item.kind === 'folder') throw new Error(`暂不支持${label}文件夹，请选择文件`);
@@ -1215,7 +1224,13 @@ async function performContentBatch(operation: 'move' | 'copy' | 'delete', reques
       }, '移动');
     }
     showToast(`${label}完成：成功 ${result.completed.length} 项${result.failed.length ? `，失败 ${result.failed.length} 项` : ''}`, result.failed.length > 0);
-    if (result.failed.length) window.alert(`${label}失败的项目：\n${result.failed.map(({ item, error }) => `${item.path}：${errorMessage(error)}`).join('\n')}`);
+    if (result.failed.length) await showImpactConfirm({
+      title: `${label}失败的项目`,
+      summary: `成功 ${result.completed.length} 项，失败 ${result.failed.length} 项`,
+      items: result.failed.map(({ item, error }) => ({ label: item.path, detail: errorMessage(error) })),
+      confirmLabel: '知道了',
+      cancelLabel: '关闭',
+    });
   } catch (error) {
     showToast(`${label}失败：${errorMessage(error)}`, true);
   } finally {
@@ -1229,7 +1244,7 @@ async function deleteContentItem(item: ContentBrowserItem, batch = false): Promi
     return;
   }
   if (contentRenameDraft) contentRenameDraft = undefined;
-  if (!batch && !window.confirm(`确定删除“${item.name}”吗？`)) return;
+  if (!batch && !await confirmContentDelete([item])) return;
   const sourceWorkflow = item.kind === 'workflow' ? workflowDescriptorForPath(item.path) : undefined;
   const sourceWorkflowTab = sourceWorkflow
     ? getWorkflowTabs().find((tab) => tab.uri === sourceWorkflow.uri)
@@ -1479,6 +1494,7 @@ export interface ContentBrowserDeps {
   desktopIcons: IconSet;
   createElement: typeof createElement;
   showToast: (message: string, error?: boolean) => void;
+  showImpactConfirm: (request: ImpactConfirmRequest) => Promise<boolean>;
   errorMessage: (error: unknown) => string;
   getBootstrap: () => BootstrapData | undefined;
   setBootstrap: (value: BootstrapData) => void;
@@ -1532,6 +1548,7 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
   desktopIconsRef = deps.desktopIcons;
   createElementRef = deps.createElement;
   showToast = deps.showToast;
+  showImpactConfirm = deps.showImpactConfirm;
   errorMessage = deps.errorMessage;
   getBootstrap = deps.getBootstrap;
   setBootstrap = deps.setBootstrap;

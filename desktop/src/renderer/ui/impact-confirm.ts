@@ -14,6 +14,12 @@ export interface ImpactConfirmItem {
   detail?: string;
 }
 
+export interface ImpactConfirmSection {
+  title: string;
+  items: ImpactConfirmItem[];
+  emptyText?: string;
+}
+
 /** 第三个选择（例如外部文件变化的「对比」）。 */
 export interface ImpactConfirmExtra {
   label: string;
@@ -28,6 +34,8 @@ export interface ImpactConfirmRequest {
   summary: string;
   /** 影响清单；为空时只显示摘要。 */
   items?: ImpactConfirmItem[];
+  /** 分组明细，例如删除内容时的传出与传入引用。 */
+  sections?: ImpactConfirmSection[];
   /** 确认按钮文案，默认「确认」。 */
   confirmLabel?: string;
   /** 取消按钮文案，默认「取消」；「保存被拦下」这类场景用「返回修改」更准确。 */
@@ -129,8 +137,8 @@ export function createImpactConfirm(
       extraValue = extra?.value || 'extra';
     }
     bodyEl.replaceChildren();
-    const items = Array.isArray(request.items) ? request.items : [];
-    if (items.length) {
+    const appendItems = (parent: HTMLElement, items: ImpactConfirmItem[]): void => {
+      if (!items.length) return;
       const list = document.createElement('ul');
       list.className = 'impact-confirm-list';
       for (const item of items) {
@@ -146,7 +154,23 @@ export function createImpactConfirm(
         }
         list.appendChild(row);
       }
-      bodyEl.appendChild(list);
+      parent.appendChild(list);
+    };
+    appendItems(bodyEl, Array.isArray(request.items) ? request.items : []);
+    for (const group of request.sections ?? []) {
+      const section = document.createElement('section');
+      section.className = 'impact-confirm-section';
+      const heading = document.createElement('h3');
+      heading.textContent = group.title;
+      section.appendChild(heading);
+      appendItems(section, group.items);
+      if (!group.items.length && group.emptyText) {
+        const empty = document.createElement('p');
+        empty.className = 'impact-confirm-empty';
+        empty.textContent = group.emptyText;
+        section.appendChild(empty);
+      }
+      bodyEl.appendChild(section);
     }
     if (request.preview) {
       const pre = document.createElement('pre');

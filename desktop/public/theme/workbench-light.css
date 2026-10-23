@@ -1050,6 +1050,12 @@
     background: #e1e1e1;
     color: #232323
 }
+:root[data-theme="light"] .impact-confirm-section h3 {
+    color: #2a2a2a
+}
+:root[data-theme="light"] .impact-confirm-empty {
+    color: #696969
+}
 :root[data-theme="light"] .impact-confirm-item {
     border: 1px solid #dddddd;
     background: #f0f0f0

@@ -360,6 +360,7 @@ contentBrowser = createContentBrowser({
   desktopIcons,
   createElement,
   showToast,
+  showImpactConfirm: async (request) => (await impactConfirm.open(request)) === true,
   errorMessage,
   getBootstrap: () => bootstrap,
   setBootstrap: (value) => { bootstrap = value; },

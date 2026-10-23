@@ -118,12 +118,48 @@ function collectOutgoingRefs(doc: WorkflowDoc): OutgoingRef[] {
       if (typeof reference === 'string' && reference.trim()) {
         out.push({ kind: 'workflow.run', reference: reference.trim(), nodeId: node.id, nodeName });
       }
+    } else if (node.type === 'task' && (node.action === 'workflow.select' || node.action === 'workflow.sequence')) {
+      for (const reference of Array.isArray(node.params.workflows) ? node.params.workflows : []) {
+        if (typeof reference === 'string' && reference.trim()) {
+          out.push({ kind: node.action, reference: reference.trim(), nodeId: node.id, nodeName });
+        }
+      }
     } else if (node.type === 'instance_parallel') {
       for (const run of node.runs) {
         const reference = run.workflow;
         if (typeof reference === 'string' && reference.trim()) {
           out.push({ kind: 'instance_parallel', reference: reference.trim(), nodeId: node.id, nodeName });
         }
+      }
+    }
+    if (node.type === 'task') {
+      // 模板列表与嵌套状态（如 wait_any / wait_all）也可能包含图片依赖。
+      const assetBindings = new Set<string>();
+      const collectAssetValues = (value: unknown, binding?: string): void => {
+        if (typeof value === 'string') {
+          const rel = normalizeTemplatePath(value);
+          if (rel.startsWith('assets/') && IMAGE_EXTENSIONS.has(path.extname(rel).toLowerCase())) {
+            out.push({ kind: binding ? 'template-binding' : 'template', reference: binding || value,
+              nodeId: node.id, nodeName, assetRel: rel });
+          }
+        } else if (Array.isArray(value)) {
+          value.forEach((item) => collectAssetValues(item, binding));
+        } else if (value && typeof value === 'object') {
+          const ref = (value as { ref?: unknown }).ref;
+          if (typeof ref === 'string') {
+            if (assetBindings.has(ref)) return;
+            assetBindings.add(ref);
+            const [scope, name] = ref.split('.');
+            const definitions = scope === 'inputs' ? doc.info.inputs : scope === 'variables' ? doc.info.variables : undefined;
+            if (definitions) collectAssetValues(definitions[name]?.default, ref);
+          } else {
+            Object.values(value).forEach((item) => collectAssetValues(item, binding));
+          }
+        }
+      };
+      for (const [key, value] of Object.entries(node.params)) {
+        // 单模板参数沿用下方的兼容解析，其余参数递归收集图片路径。
+        if (key !== 'template' || !TEMPLATE_ACTIONS.has(node.action || '')) collectAssetValues(value);
       }
     }
     if (node.type !== 'task' || !node.action || !TEMPLATE_ACTIONS.has(node.action)) continue;
@@ -156,7 +192,7 @@ function collectOutgoingRefs(doc: WorkflowDoc): OutgoingRef[] {
     }
   }
   // inputs asset 变量默认值
-  for (const [variable, definition] of Object.entries(doc.info.inputs)) {
+  for (const [variable, definition] of [...Object.entries(doc.info.inputs), ...Object.entries(doc.info.variables)]) {
     if (definition.type === 'asset' && typeof definition.default === 'string' && definition.default.trim()) {
       out.push({
         kind: 'asset-default',
@@ -167,6 +203,11 @@ function collectOutgoingRefs(doc: WorkflowDoc): OutgoingRef[] {
     }
   }
   return out;
+}
+
+function isWorkflowReference(ref: OutgoingRef): boolean {
+  return ref.kind === 'workflow.run' || ref.kind === 'workflow.select'
+    || ref.kind === 'workflow.sequence' || ref.kind === 'instance_parallel';
 }
 
 /** 收集 rewards 目录条目：返回每条条目的完整项目相对路径 + 展示名。 */
@@ -293,7 +334,7 @@ export async function buildReferenceGraph(projectRoot: string, rawTarget: string
       if (normalizeRel(doc.rel) === targetRel) continue;
       const contexts: ReferenceContext[] = [];
       for (const ref of collectOutgoingRefs(doc)) {
-        if ((ref.kind === 'workflow.run' || ref.kind === 'instance_parallel') && workflowMatchesReference(ref.reference, targetDoc ?? { rel: targetRel, name: basenameOf(targetRel) })) {
+        if (isWorkflowReference(ref) && workflowMatchesReference(ref.reference, targetDoc ?? { rel: targetRel, name: basenameOf(targetRel) })) {
           contexts.push({
             kind: ref.kind,
             label: ref.nodeName || ref.nodeId || ref.reference,
@@ -315,7 +356,7 @@ export async function buildReferenceGraph(projectRoot: string, rawTarget: string
     // 我引用了谁：目标的子工作流 + 模板资产。
     if (targetDoc) {
       const grouped = groupContexts(collectOutgoingRefs(targetDoc)
-        .filter((ref) => ref.kind === 'workflow.run' || ref.kind === 'instance_parallel')
+        .filter(isWorkflowReference)
         .map((ref) => {
           const matched = docs.find((doc) => normalizeRel(doc.rel) !== targetRel && workflowMatchesReference(ref.reference, doc));
           const rel = matched?.rel ?? normalizeRel(ref.reference).replace(/^workflows\//i, 'workflows/');
@@ -337,7 +378,7 @@ export async function buildReferenceGraph(projectRoot: string, rawTarget: string
       references.push(...grouped);
       // 模板资产引用
       const assetItems = groupContexts(collectOutgoingRefs(targetDoc)
-        .filter((ref) => ref.assetRel && ref.kind !== 'workflow.run' && ref.kind !== 'instance_parallel')
+        .filter((ref) => ref.assetRel && !isWorkflowReference(ref))
         .map((ref) => ({
           rel: ref.assetRel!,
           contexts: [{

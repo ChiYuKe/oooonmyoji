@@ -115,6 +115,11 @@
 .impact-confirm-header svg { width: 15px; height: 15px; }
 .impact-confirm-body { max-height: min(340px, 48vh); overflow: auto; padding: 10px 14px; }
 .impact-confirm-list { display: grid; gap: 4px; }
+.impact-confirm-section { margin-top: 14px; }
+.impact-confirm-section h3 { margin: 0 0 6px; color: #d7dade; font-size: 11px; font-weight: 600; }
+.impact-confirm-section .impact-confirm-list { margin: 0; padding: 0; list-style: none; }
+.impact-confirm-empty { margin: 0; color: #8f979e; font-size: 11px; }
+.impact-confirm-section .impact-confirm-item code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .impact-confirm-item { display: flex; flex-direction: column; gap: 2px; padding: 6px 9px; border: 1px solid #34373b; border-radius: 4px; background: #1c1e21; }
 .impact-confirm-item strong { overflow: hidden; color: #d7dade; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .impact-confirm-item code { overflow: hidden; color: #7fb2d0; font: 9px/1.4 Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }

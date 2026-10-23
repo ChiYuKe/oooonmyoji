@@ -420,12 +420,9 @@ function desktopControl(command: string, value?: unknown): void {
 }
 
 async function createNewWorkflow(): Promise<void> {
-  const uri = await api.createWorkflow();
-  if (!uri) return;
-  if (bootstrap) bootstrap.workflows = (await api.bootstrap()).workflows;
-  overview.reconcileSelection();
-  overview.render();
-  await lifecycle.openWorkflowTab(uri);
+  if (sharedPanelDockBridge) sharedPanelDockBridge.show('contentBrowser');
+  else docking?.showPanel('contentBrowser');
+  await contentBrowser.createWorkflow();
 }
 
 function matchesShortcut(event: KeyboardEvent, id: string): boolean {

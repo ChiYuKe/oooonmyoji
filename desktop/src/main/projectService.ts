@@ -259,20 +259,23 @@ export class ProjectService {
     return (await this.history.read(this.workflowPath(uri), id)).text;
   }
 
-  async createWorkflow(owner: BrowserWindow): Promise<string | undefined> {
-    await fs.promises.mkdir(path.join(this.workflowRoot, 'entrypoints'), { recursive: true });
-    const result = await dialog.showSaveDialog(owner, {
-      title: '新建工作流',
-      defaultPath: path.join(this.workflowRoot, 'entrypoints', `new_workflow${WORKFLOW_SUFFIX}`),
-      buttonLabel: '创建',
-      filters: [{ name: '工作流 .owf', extensions: [WORKFLOW_SUFFIX.slice(1)] }],
-      properties: ['createDirectory', 'showOverwriteConfirmation'],
-    });
-    if (result.canceled || !result.filePath) return undefined;
-    const file = this.workflowPath(result.filePath);
-    const id = path.basename(file, path.extname(file)).replace(/[^A-Za-z0-9_-]+/g, '_') || 'new_workflow';
-    await fs.promises.writeFile(file, emitDocument(workflowTemplate(id)), { encoding: 'utf8', flag: 'wx' });
-    return pathToFileURL(file).toString();
+  async createWorkflow(parentPath = 'workflows/entrypoints'): Promise<string> {
+    if (typeof parentPath !== 'string') throw new Error('工作流目录无效');
+    const location = this.resolveContentLocation(parentPath);
+    if (location.kind !== 'workflow') throw new Error('工作流必须位于项目 workflows 目录内');
+    const directory = location.absolute;
+    await fs.promises.mkdir(directory, { recursive: true });
+    // 直接创建；独占写入保证连续点击或并发创建时也不会覆盖已有文件。
+    for (let index = 1; ; index += 1) {
+      const id = index === 1 ? 'new_workflow' : `new_workflow_${index}`;
+      const file = this.workflowPath(path.join(directory, `${id}${WORKFLOW_SUFFIX}`));
+      try {
+        await fs.promises.writeFile(file, emitDocument(workflowTemplate(id)), { encoding: 'utf8', flag: 'wx' });
+        return pathToFileURL(file).toString();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    }
   }
 
   async createReusableFunction(name: string, text: string): Promise<string> {

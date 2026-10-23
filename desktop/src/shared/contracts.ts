@@ -512,7 +512,7 @@ export interface OnmyojiDesktopApi {
   saveWorkflow(uri: string, text: string): Promise<void>;
   listWorkflowHistory(uri: string): Promise<WorkflowHistoryEntry[]>;
   readWorkflowHistory(uri: string, id: string): Promise<string>;
-  createWorkflow(): Promise<string | undefined>;
+  createWorkflow(parentPath?: string): Promise<string>;
   createReusableFunction(name: string, text: string): Promise<string>;
   openWorkflowFile(uri: string): Promise<void>;
   openContentItem(path: string): Promise<void>;

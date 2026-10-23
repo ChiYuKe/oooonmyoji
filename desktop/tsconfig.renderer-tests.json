@@ -34,6 +34,7 @@
     "src/renderer/features/workflow/recovery-store.ts",
     "src/renderer/features/workflow/history.ts",
     "src/renderer/features/content-browser/items.ts",
+    "src/renderer/features/content-browser/index.ts",
     "src/renderer/features/content-browser/marquee.ts",
     "src/renderer/features/content-browser/batch.ts",
     "src/renderer/features/content-browser/selection.ts",

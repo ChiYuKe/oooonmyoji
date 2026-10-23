@@ -4,7 +4,7 @@
  * 纯条目工具（目录归属、递归类型过滤）已抽到 content-browser/items.ts。
  * 条目顺序与编辑态由纯函数生成，DOM 渲染只消费计划，不再依赖源码切片测试。
  */
-import { Box, Copy, FileJson2, FolderOpen, FolderPlus, Image, Network, Pencil, RefreshCw, Trash2 } from 'lucide';
+import { Box, Copy, FileJson2, FilePlus2, FolderOpen, FolderPlus, Image, Network, Pencil, RefreshCw, Trash2 } from 'lucide';
 import type { createElement, createIcons } from 'lucide';
 import type {
   AssetImage,
@@ -138,6 +138,7 @@ let selectedContentPath = '';
 let selectedContentPaths = new Set<string>();
 let cancelContentMarquee = (): void => {};
 let contentBatchBusy = false;
+let contentWorkflowCreating = false;
 let contentSelectionAnchor = '';
 let contentNameDialogState: ContentNameDialogState | undefined;
 
@@ -996,6 +997,29 @@ function relocateFolderDocuments(oldFolder: string, newFolder: string): string[]
   return relocations.map(({ newUri }) => newUri);
 }
 
+async function createContentWorkflowAt(parentPath: string): Promise<void> {
+  if (contentWorkflowCreating || contentBatchBusy || contentRenameDraft || contentFolderDraft) return;
+  contentWorkflowCreating = true;
+  try {
+    const folder = isUnderContentFolder(parentPath, 'workflows') ? parentPath : 'workflows/entrypoints';
+    const uri = await api.createWorkflow(folder);
+    await refreshContentBrowser();
+    const item = contentBrowserWorkflowItems().find((entry) => entry.workflow?.uri === uri);
+    if (item) {
+      contentBrowserFilter = 'all';
+      navigateContentBrowser(contentParent(item.path));
+      setContentSelection(new Set([item.path]));
+      // 新文件原地命名，不切换当前画布；已有画布的未保存修改也不影响新文件命名。
+      contentRenameDraft = { item, name: item.name, busy: false };
+      renderContentBrowser();
+    }
+  } catch (error) {
+    showToast(errorMessage(error), true);
+  } finally {
+    contentWorkflowCreating = false;
+  }
+}
+
 async function createContentFolderAt(parentPath: string): Promise<void> {
   if (contentFolderDraft) return;
   contentRenameDraft = undefined;
@@ -1305,6 +1329,7 @@ function showContentContextMenu(event: MouseEvent, item: ContentBrowserItem, but
     addEntry('复制所有路径', Copy, () => void copyContentPath(selection.map((entry) => entry.path).join('\n')));
   } else if (item.kind === 'folder') {
     if (item.path) addEntry('打开文件夹', FolderOpen, () => navigateContentBrowser(item.path));
+    addEntry('新建工作流', FilePlus2, () => void createContentWorkflowAt(item.path));
     if (item.path === '') {
       addEntry('在 assets 中新建文件夹', FolderPlus, () => void createContentFolderAt('assets'));
       addEntry('在 workflows 中新建文件夹', FolderPlus, () => void createContentFolderAt('workflows'));
@@ -1483,6 +1508,7 @@ export interface ContentBrowser {
   bind(): void;
   render(): void;
   refresh(): Promise<void>;
+  createWorkflow(): Promise<void>;
   setCatalog(assets: AssetImage[], folders: string[]): void;
   focusSearch(): void;
   getView(): 'grid' | 'list';
@@ -1533,6 +1559,7 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
     bind: bindContentBrowserUi,
     render: renderContentBrowser,
     refresh: refreshContentBrowser,
+    createWorkflow: () => createContentWorkflowAt(contentBrowserFolder),
     setCatalog: (assets, folders) => { contentAssets = assets; contentFolderPaths = folders; },
     focusSearch: () => contentBrowserSearch.focus(),
     getView: () => contentBrowserView,

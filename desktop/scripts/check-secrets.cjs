@@ -6,7 +6,10 @@ const { findSecrets } = require('./secret-guard.cjs');
 const root = path.resolve(__dirname, '../..');
 function git(args, options = {}) {
   const result = spawnSync('git', args, { cwd: root, maxBuffer: 128 * 1024 * 1024, ...options });
-  if (result.error || result.status !== 0) throw new Error('无法读取 Git 内容，已停止凭据检查');
+  if (result.error || result.status !== 0) {
+    const detail = [result.error?.code, result.signal].filter(Boolean).join(' ');
+    throw new Error(`无法读取 Git 内容，已停止凭据检查${detail ? `（${detail}）` : ''}`);
+  }
   return result.stdout;
 }
 // History scanning reads whole blobs, so a single call would exceed the buffer cap on large
@@ -39,7 +42,9 @@ function stagedObjects() {
   }).filter(item => item.mode !== '160000');
 }
 function historyObjects() {
-  const entries = git(['rev-list', '--objects', '--all']).toString('utf8').trim().split('\n').filter(Boolean);
+  // Scan branch/tag history, not every ref: editor or agent checkpoint refs keep transient
+  // snapshots (captured datasets, frames) whose blobs can make the batch scan exceed its cap.
+  const entries = git(['rev-list', '--objects', '--branches', '--tags']).toString('utf8').trim().split('\n').filter(Boolean);
   const checked = git(['cat-file', '--batch-check'], { input: entries.map(entry => entry.split(' ')[0]).join('\n') + '\n' }).toString('ascii').trim().split('\n');
   return entries.flatMap((entry, index) => {
     const separator = entry.indexOf(' ');

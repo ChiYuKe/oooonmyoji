@@ -29,12 +29,23 @@ def read_ts_json(path: pathlib.Path, marker: str | None = None) -> tuple[str, di
     return text, json.loads(text[start:end])
 
 
-def add_new_base_panels(heroes: list[dict]) -> list[int]:
-    text = BASE_PATH.read_text(encoding="utf-8")
+def hero_base_object_bounds(text: str) -> tuple[int, int]:
+    """Return the half-open span of the ``heroBaseById`` object literal.
+
+    The literal is multi-line ``json.dumps`` output between the opening ``{`` and the
+    closing ``\n};`` line. The span ends before that newline and always covers the whole
+    object, so callers can both parse ``text[start:end]`` and splice a replacement in.
+    """
     declaration = "export const heroBaseById: Readonly<Record<number, HeroBaseEntry>> = "
     object_start = text.index("{", text.index(declaration))
-    object_end = text.index("\n};\n\n/** 客户端 heroId", object_start)
-    records = json.loads(text[object_start:object_end + 1])
+    object_end = text.index("\n};", object_start) + 2
+    return object_start, object_end
+
+
+def add_new_base_panels(heroes: list[dict]) -> list[int]:
+    text = BASE_PATH.read_text(encoding="utf-8")
+    object_start, object_end = hero_base_object_bounds(text)
+    records = json.loads(text[object_start:object_end])
 
     added: list[dict] = []
     for hero in heroes:
@@ -76,7 +87,7 @@ def add_new_base_panels(heroes: list[dict]) -> list[int]:
         "base": hero["base"],
     } for hero in added})
     rendered_records = json.dumps(records, ensure_ascii=False, indent=2)
-    text = text[:object_start] + rendered_records + text[object_end + 2:]
+    text = text[:object_start] + rendered_records + text[object_end:]
 
     strict_start = text.index("export const heroBaseAliasStrict:")
     strict_match = re.search(r"(export const heroBaseAliasStrict:[^{]+\{\n)(.*?)(\n\};)", text[strict_start:], re.S)

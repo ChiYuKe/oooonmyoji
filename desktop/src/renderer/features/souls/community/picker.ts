@@ -46,7 +46,8 @@ export function installCommunityPicker(root: HTMLElement, options: PickerOptions
     el('clear').textContent = options.clearLabel ?? (mode === 'hero' ? '清除式神' : '不限套装');
     const categories: [string, string][] = mode === 'hero'
       ? [['', '全部式神'], ...[6, 5, 4, 3, 2, 1].map(r => [String(r), HERO_RARITIES[r]] as [string, string])]
-      : [['', '全部套装'], ...Object.entries(SUIT_ATTRIBUTES), ...(eligibleSuits.some(suit => suit.boss) ? [['boss', '首领御魂'] as [string, string]] : [])];
+      : [['', '全部套装'], ...Object.entries(SUIT_ATTRIBUTES), ...(eligibleSuits.some(suit => suit.boss) ? [['boss', '首领御魂'] as [string, string]] : []),
+        ...(eligibleSuits.some(suit => !suit.boss && !suit.bonus) ? [['other', '加成待公布'] as [string, string]] : [])];
     for (const [value, label] of categories) {
       const node = button(el('categories'), label, category === value, () => {
         category = value; render(); el('cards').parentElement!.scrollTop = 0;
@@ -67,8 +68,11 @@ export function installCommunityPicker(root: HTMLElement, options: PickerOptions
     } else {
       const kind = mode;
       for (const suit of [...eligibleSuits].sort((a, b) => Number(String(b.id) === options.suit(kind)) - Number(String(a.id) === options.suit(kind)) || a.name.localeCompare(b.name, 'zh-CN'))) {
-        if (category && (category === 'boss' ? !suit.boss : suit.bonus?.name !== category)) continue;
-        const bonus = suit.bonus ? `${SUIT_ATTRIBUTES[suit.bonus.name] ?? suit.bonus.name} +${Math.round(suit.bonus.value * 100)}%` : '首领御魂';
+        // 官方配置还没写加成的新套装，归到「加成待公布」，不因缺少两件套文本而从列表里消失。
+        const bonusKey = suit.bonus?.name ?? 'other';
+        if (category && (category === 'boss' ? !suit.boss : bonusKey !== category)) continue;
+        const bonus = suit.bonus ? `${SUIT_ATTRIBUTES[suit.bonus.name] ?? suit.bonus.name} +${Math.round(suit.bonus.value * 100)}%`
+          : suit.boss ? '首领御魂' : '加成待公布';
         const description = options.showSuitEffect ? suit.four : bonus;
         if (term && !`${suit.name} ${bonus} ${description}`.toLowerCase().includes(term)) continue;
         count++;

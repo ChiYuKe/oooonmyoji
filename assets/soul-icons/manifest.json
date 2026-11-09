@@ -628,5 +628,77 @@
   "url": "https://cbg-yys.res.netease.com/game_res/suit/300099.png",
   "bytes": 5355,
   "sha256": "6cf13c06ea5938af7c1893c038812956def4efddec294380a3baf6656feec767"
+ },
+ {
+  "suitId": 300100,
+  "name": "村正",
+  "icon": null,
+  "file": "300100.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300100.png",
+  "bytes": 17556,
+  "sha256": "886171822de1e0f1d07b07a8283e4ea85d995753d92244158197266d9c8125dc"
+ },
+ {
+  "suitId": 300101,
+  "name": "要石",
+  "icon": null,
+  "file": "300101.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300101.png",
+  "bytes": 17860,
+  "sha256": "b363660a386e60c7a700f41dd89456b8226fd971c63d8ae25fa32ecb0ce6fe13"
+ },
+ {
+  "suitId": 300102,
+  "name": "御神木",
+  "icon": null,
+  "file": "300102.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300102.png",
+  "bytes": 17070,
+  "sha256": "524d77c812202587d1a2d3c9197ab81343e702764d0fcd156f04d998b181acc8"
+ },
+ {
+  "suitId": 300103,
+  "name": "见切斩",
+  "icon": null,
+  "file": "300103.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300103.png",
+  "bytes": 17521,
+  "sha256": "7e9c833ca0ca2ea6612cb33c00b2e7bb58664a61b611994e1734fe5b6c5dddf2"
+ },
+ {
+  "suitId": 300104,
+  "name": "罗刹",
+  "icon": null,
+  "file": "300104.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300104.png",
+  "bytes": 17157,
+  "sha256": "f229f360c774ba40989b2a9fd609c893a85c68cdbeb8e075d60aa85d853e0688"
+ },
+ {
+  "suitId": 300105,
+  "name": "神足",
+  "icon": null,
+  "file": "300105.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300105.png",
+  "bytes": 17471,
+  "sha256": "cdab23812480ac71e0b7515d42a7fb179cd3ec6a6ad24728ab84e6c0eb15529f"
+ },
+ {
+  "suitId": 300106,
+  "name": "见谛道",
+  "icon": null,
+  "file": "300106.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300106.png",
+  "bytes": 16625,
+  "sha256": "87e9d829dccb13f2b0450370c41fe9a3e84d83fa7b0860e00e9eecf0e54fbfa8"
+ },
+ {
+  "suitId": 300107,
+  "name": "空蝉",
+  "icon": null,
+  "file": "300107.png",
+  "url": "https://cbg-yys.res.netease.com/game_res/suit/300107.png",
+  "bytes": 16531,
+  "sha256": "d1e6797a2ad991ec55d15c7408cdb241eea3502dfdd0768f64456dd26935b66d"
  }
 ]

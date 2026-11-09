@@ -57,7 +57,7 @@ export function installOptimizerPicker(root: HTMLElement, options: PickerOptions
     search.placeholder = mode === 'hero' ? '搜索式神名称或拼音' : '搜索御魂名称或加成属性';
     search.setAttribute('aria-label', mode === 'hero' ? '搜索式神名称或拼音' : '搜索御魂名称或加成属性');
     el('clear').hidden = mode === 'hero';
-    const categories: Array<[string, string]> = mode === 'hero' ? [['', '全部式神'], ...[6, 5, 4, 3, 2, 1].map(rarity => [String(rarity), HERO_RARITIES[rarity]] as [string, string])] : [['', '全部'], ...Object.entries(SUIT_ATTRIBUTES), ['boss', '单件属性']];
+    const categories: Array<[string, string]> = mode === 'hero' ? [['', '全部式神'], ...[6, 5, 4, 3, 2, 1].map(rarity => [String(rarity), HERO_RARITIES[rarity]] as [string, string])] : [['', '全部'], ...Object.entries(SUIT_ATTRIBUTES), ['boss', '单件属性'], ...(options.suits.some(suit => !suit.boss && !suit.bonus) ? [['other', '加成待公布'] as [string, string]] : [])];
     for (const [value, label] of categories) {
       const item = button(el('categories'), label, category === value, () => { category = value; render(); el('cards').parentElement!.scrollTop = 0; });
       if (mode === 'hero' && value) { item.replaceChildren(); appendHeroRarity(item, Number(value)); }
@@ -97,8 +97,11 @@ export function installOptimizerPicker(root: HTMLElement, options: PickerOptions
       const counts = new Map<number, number>(); for (const soul of options.snapshot()?.souls ?? []) if (soul.suitId !== null) counts.set(soul.suitId, (counts.get(soul.suitId) ?? 0) + 1);
       for (const suit of [...options.suits].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) {
         if (mode === 'four' ? suit.boss : !suit.boss) continue;
-        if (category && (category === 'boss' ? !suit.boss : suit.bonus?.name !== category)) continue;
-        const bonus = suit.bonus ? `${SUIT_ATTRIBUTES[suit.bonus.name] ?? suit.bonus.name} +${Math.round(suit.bonus.value * 100)}%` : '首领御魂 · 固有属性';
+        // 官方配置还没写加成的新套装，归到「其他」分类，不因缺少两件套文本而从选择器里消失。
+        const bonusKey = suit.bonus?.name ?? 'other';
+        if (category && (category === 'boss' ? !suit.boss : bonusKey !== category)) continue;
+        const bonus = suit.bonus ? `${SUIT_ATTRIBUTES[suit.bonus.name] ?? suit.bonus.name} +${Math.round(suit.bonus.value * 100)}%`
+          : suit.boss ? '首领御魂 · 固有属性' : '加成待公布';
         if (term && !suit.name.includes(term) && !bonus.includes(term)) continue;
         addCard(String(suit.id), suit.name, `${bonus} · 背包 ${counts.get(suit.id) ?? 0} 件`, suit.id, suit.four);
       }

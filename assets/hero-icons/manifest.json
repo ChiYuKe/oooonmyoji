@@ -2246,5 +2246,13 @@
     "file": "609.png",
     "bytes": 33598,
     "sha256": "d3085861d98366e4cf75302950c8d990071dd4cc40b0e711474347940c48faae"
+  },
+  {
+    "id": 611,
+    "name": "大天狗·高天铁羽",
+    "url": "https://yys.res.netease.com/pc/zt/20161108171335/data/shishen/611.png?v6",
+    "file": "611.png",
+    "bytes": 21600,
+    "sha256": "92b84f192867908e0ff3dcce413206b369255edce5355b850e340f3e6effaaf3"
   }
 ]

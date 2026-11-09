@@ -5,8 +5,8 @@ const {optimizeSouls}=require('../dist-test-renderer/shared/soul-optimizer');
 const attr=(name,value=.03)=>({name,value,label:name,rolls:1,percent:true});
 const soul=(name='针女',position=1,subAttributes=[])=>({id:String(position),name,position,suitId:soulCatalog.suits.find(s=>s.name===name).id,subAttributes});
 const status=(name,context={},s=soul())=>assess(s,attr(name),context).status;
-test('all 70 catalog suits have a default usage, independent of the two-piece bonus',()=>{
- assert.equal(Object.keys(SUIT_DEFAULT_USAGES).length,70);for(const s of soulCatalog.suits)assert.ok(SUIT_DEFAULT_USAGES[s.id],s.name);
+test('all 78 catalog suits have a default usage, independent of the two-piece bonus',()=>{
+ assert.equal(Object.keys(SUIT_DEFAULT_USAGES).length,78);for(const s of soulCatalog.suits)assert.ok(SUIT_DEFAULT_USAGES[s.id],s.name);
  assert.equal(status('debuffEnhance',{},soul('蚌精')),'invalid');assert.equal(status('critRateAdditionVal',{},soul('蚌精')),'core');
  assert.equal(status('debuffEnhance',{},soul('火灵')),'pending');assert.equal(status('defenseAdditionRate',{},soul('钓瓶火')),'core');
  assert.equal(status('debuffEnhance',{},soul('日女巳时')),'invalid');assert.equal(status('debuffEnhance',{},soul('雪幽魂')),'core');

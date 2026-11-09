@@ -1,7 +1,7 @@
 // Generated from the official NetEase Shikigami directory.
 import type { HeroSkillsCatalog } from './hero-skills';
 export const heroSkillsCatalog: HeroSkillsCatalog = {
-  "updated": "2026-10-12",
+  "updated": "2026-11-06",
   "source": "https://yys.163.com/shishen/",
   "heroes": {
     "200": {
@@ -14593,6 +14593,56 @@ export const heroSkillsCatalog: HeroSkillsCatalog = {
         }
       ],
       "awakening": "觉醒技能增强"
+    },
+    "611": {
+      "skills": [
+        {
+          "id": 6111,
+          "name": "劲羽",
+          "icon": "6111",
+          "description": "用钢铁般的羽翼突破所有障碍，造成攻击100%的伤害。",
+          "cost": 0,
+          "type": 3,
+          "upgrades": [
+            "Lv.2伤害增加至105%",
+            "Lv.3伤害增加至110%",
+            "Lv.4伤害增加至115%",
+            "Lv.5伤害增加至125%"
+          ],
+          "extraSkills": []
+        },
+        {
+          "id": 6112,
+          "name": "心羽之佑",
+          "icon": "6112",
+          "description": "唯一效果，飞驰于赛道之上，自身行动条无法被锁定。行动条每提升或被击退30%，获得1层心羽。受到行动条击退效果时，速度提升50%，持续2回合。\n【施放】自身行动条提升30%，获得50%减伤1回合，并恢复30%已损失生命。",
+          "cost": 0,
+          "type": 3,
+          "upgrades": [
+            "Lv.2每获得1层心羽，提升10点速度（至多提升100点）",
+            "Lv.3每获得1层心羽，提升10%攻击（至多提升100%）",
+            "Lv.4受到控制效果时，获得2层心羽（自身回合开始前限1次）",
+            "Lv.5敌方行动条提升时，获得1层心羽（自身回合开始前限1次）"
+          ],
+          "extraSkills": []
+        },
+        {
+          "id": 6113,
+          "name": "万风钧落",
+          "icon": "6113",
+          "description": "以钢铁羽翼面对狂风呼啸，对敌方全体造成攻击220%伤害；随后攻击指定目标4次，每次造成攻击40%伤害。对怪物造成伤害提高20%。",
+          "cost": 3,
+          "type": 3,
+          "upgrades": [
+            "Lv.2对指定目标伤害增至50%",
+            "Lv.3施放后提升自身15%行动条",
+            "Lv.4若击败目标，指定血量最少的敌方继续攻击",
+            "Lv.5每获得5层心羽，获得2层袭掠"
+          ],
+          "extraSkills": []
+        }
+      ],
+      "awakening": ""
     }
   }
 };

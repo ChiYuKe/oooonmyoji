@@ -28,6 +28,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import type {
+  LiveViewFrame,
   LiveViewPollResult,
   McpApprovalDecision,
   McpApprovalRequest,
@@ -55,6 +56,7 @@ import { ProjectService } from './projectService';
 import { RuntimeService } from './runtimeService';
 import { RuntimeResourceManager } from './runtimeResources';
 import { VisionStream } from './visionStream';
+import { YoloLiveWorker } from './yoloLiveWorker';
 import { WorkflowTestService } from './workflowTestService';
 import type { WorkflowTestInit, WorkflowTestRequest, TestCommand, TestNodeDraft, TestNodeAdded } from '../shared/workflow-testing';
 import { validateTestNode } from '../shared/node-test';
@@ -101,6 +103,17 @@ let liveViewRequest: LiveViewRequest | undefined;
 let liveViewWatching = false;
 let liveViewSeq = -1;
 let liveViewIntervalMs = LIVE_VIEW_DEFAULT_INTERVAL_MS;
+let liveViewYoloMode = false;
+let liveViewYoloModelPath = '';
+let liveViewYoloWorker: YoloLiveWorker | undefined;
+let liveViewYoloLastFailure: { model: string; error: string; at: number } | undefined;
+let liveViewYoloStream: VisionStream | undefined;
+let liveViewYoloStreamInstance = '';
+let liveViewYoloStreamSeq = 0;
+let liveViewYoloRawFrame: {
+  seq: number; image: string; width: number; height: number; origWidth: number; origHeight: number;
+} | undefined;
+let liveViewYoloStreamError = '';
 let isQuitting = false;
 /** MCP 审批通道：轮询 Python 写下的请求，并把用户的选择写回。 */
 let mcpApprovalBridge: McpApprovalBridge | undefined;
@@ -111,6 +124,7 @@ let runtimeInitialized = false;
 const LAYOUT_STORE_FILENAME = 'onmyoji-layouts.json';
 const THEME_STORE_KEY = 'onmyoji-studio.appearance';
 const LIVE_VIEW_INTERVAL_STORE_KEY = 'onmyoji-studio.live-view.interval-ms';
+const LIVE_VIEW_YOLO_MODEL_STORE_KEY = 'onmyoji-studio.live-view.yolo-model';
 /** 主窗口几何（位置/尺寸/最大化）与停靠布局同库存放：都是「用户布局」。 */
 const WINDOW_STATE_STORE_KEY = 'onmyoji-studio.window-state.v1';
 const DEFAULT_WINDOW_WIDTH = 1560;
@@ -336,18 +350,99 @@ function readLiveViewPoll(): LiveViewPollResult {
   return readLiveViewFrame(request.directory, liveViewInstanceId, liveViewSeq);
 }
 
-function openLiveViewWindow(instanceId: string): void {
+function stopYoloMonitorStream(): void {
+  const stream = liveViewYoloStream;
+  liveViewYoloStream = undefined;
+  liveViewYoloStreamInstance = '';
+  liveViewYoloRawFrame = undefined;
+  liveViewYoloStreamError = '';
+  if (stream) void stream.stop();
+}
+
+function startYoloMonitorStream(instanceId: string): void {
+  if (liveViewYoloStream && liveViewYoloStreamInstance === instanceId) return;
+  stopYoloMonitorStream();
+  liveViewYoloStreamInstance = instanceId;
+  liveViewYoloStreamSeq = 0;
+  liveViewYoloStreamError = '';
+  const stream = new VisionStream(project.projectRoot, instanceId);
+  liveViewYoloStream = stream;
+  stream.on('event', (event) => {
+    if (liveViewYoloStream !== stream) return;
+    if (event.type === 'ready') {
+      stream.sendCommand({ type: 'interval', ms: liveViewIntervalMs });
+      return;
+    }
+    if (event.type !== 'frame') return;
+    const data = event.data;
+    const width = Number(event.width);
+    const height = Number(event.height);
+    const origWidth = Number(event.orig_width);
+    const origHeight = Number(event.orig_height);
+    if (typeof data !== 'string' || !Number.isFinite(width) || !Number.isFinite(height)
+        || !Number.isFinite(origWidth) || !Number.isFinite(origHeight)) return;
+    liveViewYoloRawFrame = {
+      seq: ++liveViewYoloStreamSeq,
+      image: data,
+      width,
+      height,
+      origWidth,
+      origHeight,
+    };
+  });
+  stream.on('exit', ({ fatal }) => {
+    if (liveViewYoloStream !== stream) return;
+    liveViewYoloStreamError = fatal || '模拟器实时画面采集已停止。';
+    liveViewYoloStream = undefined;
+  });
+  void stream.start().catch((error) => {
+    if (liveViewYoloStream !== stream) return;
+    liveViewYoloStreamError = error instanceof Error ? error.message : String(error);
+    liveViewYoloStream = undefined;
+  });
+}
+
+function createYoloMonitorFrame(raw: NonNullable<typeof liveViewYoloRawFrame>): LiveViewFrame {
+  return {
+    seq: raw.seq,
+    ts: Date.now() / 1000,
+    instance_id: liveViewYoloStreamInstance,
+    step: { name: 'YOLO 实时检测', action: 'vision.yolo_live', status: 'running' },
+    overlay: { rois: [], matches: [], ocr: [], clicks: [], states: [] },
+    frame_width: raw.width,
+    frame_height: raw.height,
+    reference_width: raw.origWidth,
+    reference_height: raw.origHeight,
+    image: raw.image,
+    image_mime: 'image/png',
+  };
+}
+
+function openLiveViewWindow(instanceId: string, yoloMode = false): void {
   const target = instanceId || '';
+  const modeChanged = yoloMode !== liveViewYoloMode;
+  liveViewYoloMode = yoloMode;
+  if (modeChanged && yoloMode) liveViewYoloLastFailure = undefined;
+  if (yoloMode && !liveViewYoloModelPath) {
+    const storedModel = readLayoutStore()[LIVE_VIEW_YOLO_MODEL_STORE_KEY];
+    liveViewYoloModelPath = typeof storedModel === 'string' && storedModel.trim()
+      ? storedModel
+      : path.join(project.projectRoot, 'artifacts', 'hyakki-training', 'hyakki-experimental', 'weights', 'best.pt');
+  }
   // 刷新率是观看偏好：沿用上次的选择，并让运行时的预览通道按它起步。
   liveViewIntervalMs = clampLiveViewInterval(readLayoutStore()[LIVE_VIEW_INTERVAL_STORE_KEY] ?? LIVE_VIEW_DEFAULT_INTERVAL_MS);
   liveViewRequest?.setInterval(liveViewIntervalMs);
   runtime.liveViewIntervalMs = liveViewIntervalMs;
+  if (yoloMode) startYoloMonitorStream(target);
+  else stopYoloMonitorStream();
   if (liveViewWindow && !liveViewWindow.isDestroyed()) {
+    liveViewWindow.setTitle(yoloMode ? 'YOLO 实时检测' : '实时视觉监视');
     // 换个实例看时同一个窗口直接切过去，避免开出第二个观看窗口互相抢帧。
-    if (target && target !== liveViewInstanceId) {
+    if ((target && target !== liveViewInstanceId) || modeChanged) {
       liveViewInstanceId = target;
       liveViewSeq = -1;
-      void liveViewWindow.loadURL(`${rendererBaseUrl}/live-view.html?instance=${encodeURIComponent(target)}`);
+      const mode = yoloMode ? '&yolo=1' : '';
+      void liveViewWindow.loadURL(`${rendererBaseUrl}/live-view.html?instance=${encodeURIComponent(target)}${mode}`);
     }
     liveViewWindow.focus();
     return;
@@ -362,7 +457,7 @@ function openLiveViewWindow(instanceId: string): void {
     show: false,
     frame: false,
     icon: appIconPath,
-    title: '实时视觉监视',
+    title: yoloMode ? 'YOLO 实时检测' : '实时视觉监视',
     backgroundColor: themeBackground(readTheme()),
     autoHideMenuBar: true,
     webPreferences: {
@@ -374,11 +469,15 @@ function openLiveViewWindow(instanceId: string): void {
     },
   });
   liveViewWindow = window;
-  void window.loadURL(`${rendererBaseUrl}/live-view.html?instance=${encodeURIComponent(target)}`);
+  const mode = yoloMode ? '&yolo=1' : '';
+  void window.loadURL(`${rendererBaseUrl}/live-view.html?instance=${encodeURIComponent(target)}${mode}`);
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => {
     if (liveViewWindow === window) liveViewWindow = undefined;
     liveViewWatching = false;
+    liveViewYoloMode = false;
+    void liveViewYoloWorker?.stop();
+    stopYoloMonitorStream();
   });
 }
 
@@ -500,8 +599,6 @@ function registerIpc(): void {
   ipcMain.handle('runtime:run-workflow', (_event, request: RunWorkflowRequest) => {
     if (souls?.running || heroOwnership?.running) throw new Error('正在读取游戏数据，请等待完成或取消后再运行工作流');
     if (workflowTestService?.usingDevice) throw new Error('脚本测试正在运行，请先停止测试');
-    // 每次用户重新启动工作流时，先清掉日志面板中上次运行的记录。
-    _event.sender.send('runtime:log-clear');
     // 先把观看请求登记下去，再 spawn 运行时：否则运行时启动初期的帧会被门控丢掉。
     liveViewRequest?.begin(request.instanceId);
     return runtime.runWorkflow(request);
@@ -572,14 +669,19 @@ function registerIpc(): void {
     if (workflowTestService?.usingDevice) throw new Error('请先停止脚本测试');
     openVisionTestWindow(typeof instanceId === 'string' ? instanceId : '');
   });
-  ipcMain.handle('tools:open-live-view', (_event, instanceId: string) => {
-    openLiveViewWindow(typeof instanceId === 'string' ? instanceId : '');
+  ipcMain.handle('tools:open-live-view', (_event, instanceId: string, yoloMode: unknown) => {
+    openLiveViewWindow(typeof instanceId === 'string' ? instanceId : '', yoloMode === true);
   });
   ipcMain.handle('live-view:watch', (event, watching: unknown) => {
     if (ownerWindow(event) !== liveViewWindow) return;
     liveViewWatching = watching === true;
     // 重新开始观看时先取一次最新帧，避免继续显示上次看过的旧序号。
-    if (liveViewWatching) liveViewSeq = -1;
+    if (liveViewWatching) {
+      liveViewSeq = -1;
+      if (liveViewYoloMode) startYoloMonitorStream(liveViewInstanceId);
+    } else if (liveViewYoloMode) {
+      stopYoloMonitorStream();
+    }
   });
   ipcMain.handle('live-view:set-interval', (event, intervalMs: unknown) => {
     if (ownerWindow(event) !== liveViewWindow) return liveViewIntervalMs;
@@ -588,18 +690,82 @@ function registerIpc(): void {
     runtime.liveViewIntervalMs = applied;
     // 记住选择：下次打开窗口时运行时按同一个刷新率起步。
     writeLayout(LIVE_VIEW_INTERVAL_STORE_KEY, String(applied));
+    if (liveViewYoloMode) liveViewYoloStream?.sendCommand({ type: 'interval', ms: applied });
     return applied;
   });
-  ipcMain.handle('live-view:poll', (event) => {
+  ipcMain.handle('live-view:poll', async (event, confidenceValue: unknown) => {
     if (ownerWindow(event) !== liveViewWindow) return { status: 'idle', message: '窗口已关闭。' } satisfies LiveViewPollResult;
     if (!liveViewWatching) return { status: 'idle', message: '未开始观看。' } satisfies LiveViewPollResult;
+    if (liveViewYoloMode) {
+      if (!liveViewYoloStream && !liveViewYoloStreamError) startYoloMonitorStream(liveViewInstanceId);
+      const raw = liveViewYoloRawFrame;
+      if (!raw) return { status: 'idle', message: liveViewYoloStreamError || '正在连接模拟器并读取实时画面…' } satisfies LiveViewPollResult;
+      if (raw.seq === liveViewSeq) return { status: 'unchanged', seq: raw.seq } satisfies LiveViewPollResult;
+      liveViewSeq = raw.seq;
+      const frame = createYoloMonitorFrame(raw);
+      const confidence = typeof confidenceValue === 'number' && Number.isFinite(confidenceValue)
+        ? Math.min(0.95, Math.max(0.05, confidenceValue))
+        : 0.25;
+      const modelPath = liveViewYoloModelPath || path.join(project.projectRoot, 'artifacts', 'hyakki-training', 'hyakki-experimental', 'weights', 'best.pt');
+      liveViewYoloModelPath = modelPath;
+      try {
+        if (liveViewYoloLastFailure?.model === modelPath && Date.now() - liveViewYoloLastFailure.at < 5_000) {
+          frame.yolo = { error: liveViewYoloLastFailure.error };
+        } else {
+          liveViewYoloWorker ??= new YoloLiveWorker(project.projectRoot);
+          frame.yolo = await liveViewYoloWorker.detect(modelPath, frame.image, confidence);
+          liveViewYoloLastFailure = undefined;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        liveViewYoloLastFailure = { model: modelPath, error: message, at: Date.now() };
+        frame.yolo = { error: message };
+      }
+      return { status: 'frame', frame } satisfies LiveViewPollResult;
+    }
     const result = readLiveViewPoll();
     if (result.status === 'frame') {
       liveViewSeq = result.frame.seq;
       // 确实取到了新帧，说明有运行在写：续一次观看心跳。
       liveViewRequest?.touch();
+      if (liveViewYoloMode) {
+        const confidence = typeof confidenceValue === 'number' && Number.isFinite(confidenceValue)
+          ? Math.min(0.95, Math.max(0.05, confidenceValue))
+          : 0.25;
+        const modelPath = liveViewYoloModelPath || path.join(project.projectRoot, 'artifacts', 'hyakki-training', 'hyakki-experimental', 'weights', 'best.pt');
+        liveViewYoloModelPath = modelPath;
+        try {
+          if (liveViewYoloLastFailure?.model === modelPath && Date.now() - liveViewYoloLastFailure.at < 5_000) {
+            result.frame.yolo = { error: liveViewYoloLastFailure.error };
+          } else {
+            liveViewYoloWorker ??= new YoloLiveWorker(project.projectRoot);
+            result.frame.yolo = await liveViewYoloWorker.detect(modelPath, result.frame.image, confidence);
+            liveViewYoloLastFailure = undefined;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          liveViewYoloLastFailure = { model: modelPath, error: message, at: Date.now() };
+          result.frame.yolo = { error: message };
+        }
+      }
     }
     return result;
+  });
+  ipcMain.handle('live-view:choose-yolo-model', async (event) => {
+    if (ownerWindow(event) !== liveViewWindow) return null;
+    const result = await dialog.showOpenDialog(liveViewWindow, {
+      title: '选择 YOLO 权重',
+      defaultPath: liveViewYoloModelPath || path.join(project.projectRoot, 'artifacts', 'hyakki-training'),
+      properties: ['openFile'],
+      filters: [{ name: 'YOLO 权重', extensions: ['pt'] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    liveViewYoloModelPath = result.filePaths[0];
+    writeLayout(LIVE_VIEW_YOLO_MODEL_STORE_KEY, liveViewYoloModelPath);
+    liveViewYoloLastFailure = undefined;
+    liveViewSeq = -1;
+    void liveViewYoloWorker?.stop();
+    return liveViewYoloModelPath;
   });
   ipcMain.handle('help:open-readme', async () => {
     const readmePath = path.join(project.projectRoot, 'README.md');
@@ -1038,6 +1204,8 @@ app.on('before-quit', (event) => {
       await heroOwnership?.dispose();
       await runtime?.dispose();
       await workflowTestService?.dispose();
+      await liveViewYoloWorker?.stop();
+      await liveViewYoloStream?.stop();
     } finally {
       stopVisionTestStream();
       liveViewRequest?.stop();

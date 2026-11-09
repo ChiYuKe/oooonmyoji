@@ -112,8 +112,8 @@ def test_restart_isolates_crashed_worker_runs_and_marks_interrupted(tmp_path) ->
     assert record["instance_id"] == "mumu-1"
     assert record["error"] == "instance worker exited unexpectedly"
     assert record["error_category"] == "internal"
-    assert str(tmp_path / "run-1" / "interrupted.json") in record["artifacts"]
-    assert (tmp_path / "run-1" / "interrupted.json").is_file()
+    assert str(tmp_path / "mumu-1" / "run-1" / "interrupted.json") in record["artifacts"]
+    assert (tmp_path / "mumu-1" / "run-1" / "interrupted.json").is_file()
 
     # 事件队列收到中断结果；健康实例的 run 不被触碰。
     assert queue.items[0]["type"] == "result"

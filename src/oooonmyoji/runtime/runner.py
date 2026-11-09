@@ -25,6 +25,7 @@ from ..vision.template import TemplateMatcher
 from ..workflows.engine import WorkflowEngine
 from ..workflows.loader import WorkflowLoader
 from .context import TaskContextImpl
+from .artifact_paths import run_artifact_dir
 from .debug import DebugStepRecorder
 from .live_view import sink_from_environment
 from .logging import EventLogger
@@ -292,6 +293,7 @@ class TaskRunner:
         events_file: Path | str | None = None,
     ) -> RunRecord:
         run_id = run_id or uuid.uuid4().hex
+        output_dir = run_artifact_dir(self.config.artifact_dir, instance.id, run_id)
         resolved_events_file = (
             Path(events_file)
             if events_file is not None
@@ -417,7 +419,7 @@ class TaskRunner:
                     mapper=mapper,
                     template_matcher=TemplateMatcher(mapper),
                     ocr_engine=ocr_engine,
-                    artifact_dir=self.config.artifact_dir / run_id,
+                    artifact_dir=output_dir,
                     template_root=self.config.root_dir,
                     logger=self.logger,
                     cancel_event=cancel_event,
@@ -555,7 +557,7 @@ class TaskRunner:
                         record.artifacts.append(str(context.save_frame(context.last_frame, "failure-last-frame.png")))
                     except Exception as artifact_error:
                         record.details["artifact_error"] = str(artifact_error)
-                failure_metadata = self.config.artifact_dir / run_id / "failure.json"
+                failure_metadata = output_dir / "failure.json"
                 failure_metadata.parent.mkdir(parents=True, exist_ok=True)
                 record.artifacts.append(str(failure_metadata))
                 failure_metadata.write_text(json.dumps(record.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

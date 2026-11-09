@@ -1006,7 +1006,12 @@ export function startCanvasEditor(bridge: CanvasBridge): CanvasEditorHandle {
     state, svgEl, nodeCards, displayNameOfDefinition, assetPreviewForPath, bindAssetPathPreview,
     disconnectVariableFromInstanceInput, startVariableConnectionFromInstanceInput, startVariableConnectionFromCard,
     openPortContextMenu, showMenu, instanceRunPinMenuItems, variableCardPortMenuItems, requestInspector,
-    requestOpenWorkflowReference, openWorkflowBrowser, render, contextMenuSuppressedByPan,
+    requestOpenWorkflowReference,
+    runInstanceWorkflow: (card) => vscode.postMessage({
+      type: 'runWorkflow', text: documentText(state), instanceId: card.run.instance,
+      instanceRunIndex: card.index,
+    }),
+    openWorkflowBrowser, render, contextMenuSuppressedByPan,
     removeInstanceRun, removeVariableCard, setVariableCardSelection, variableCardList, worldPoint, snapshot,
     variableInUse,
     runCardWidth: RUN_CARD_W, runCardBaseHeight: RUN_CARD_BASE_H, runVariableHeight: RUN_VARIABLE_H, portRadius: PORT_R,

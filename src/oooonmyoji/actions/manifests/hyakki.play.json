@@ -1,0 +1,264 @@
+{
+  "schema_version": 2,
+  "name": "hyakki.play",
+  "version": "1.0.0",
+  "entry": "builtin:HyakkiPlayAction",
+  "description": "百鬼夜行检测、跟踪、预判投豆；从已进入的活动画面运行，默认只观察。投豆上限为操作次数，不是 OCR 读取的剩余豆数。",
+  "parameters": {
+    "model": {
+      "type": "path",
+      "required": true,
+      "description": "项目目录内的本地 YOLO 检测权重（.pt/.onnx），不会自动下载"
+    },
+    "roi": {
+      "type": "rect",
+      "description": "参考分辨率识别区域 [x,y,w,h]",
+      "required": true
+    },
+    "confidence": {
+      "type": "number",
+      "description": "检测置信度",
+      "default": 0.5,
+      "min": 0,
+      "max": 1
+    },
+    "iou": {
+      "type": "number",
+      "description": "重叠框抑制阈值",
+      "default": 0.45,
+      "min": 0,
+      "max": 1
+    },
+    "image_size": {
+      "type": "integer",
+      "description": "推理输入尺寸",
+      "default": 640,
+      "min": 32,
+      "max": 4096
+    },
+    "device": {
+      "type": "string",
+      "default": "cpu",
+      "description": "推理设备：cpu 或 GPU 编号如 0"
+    },
+    "max_results": {
+      "type": "integer",
+      "description": "每帧最大检测数",
+      "default": 100,
+      "min": 1,
+      "max": 1000
+    },
+    "priorities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "min_items": 1,
+      "required": true,
+      "description": "模型类别名称，按优先级从高到低；仅投这些目标"
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": true,
+      "description": "只记录计划落点，不实际投豆"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "description": "单轮最长时长（秒）",
+      "default": 60,
+      "min": 0.1,
+      "max": 600
+    },
+    "max_throws": {
+      "type": "integer",
+      "description": "最多投豆操作次数",
+      "default": 100,
+      "min": 1,
+      "max": 10000
+    },
+    "idle_timeout_seconds": {
+      "type": "number",
+      "description": "连续无目标停止时间（秒）",
+      "default": 8,
+      "min": 0.1,
+      "max": 600
+    },
+    "frame_interval_seconds": {
+      "type": "number",
+      "description": "最短采样间隔（秒）",
+      "default": 0.05,
+      "min": 0.01,
+      "max": 5
+    },
+    "throw_interval_seconds": {
+      "type": "number",
+      "description": "全局投豆间隔（秒）",
+      "default": 0.15,
+      "min": 0,
+      "max": 60
+    },
+    "target_interval_seconds": {
+      "type": "number",
+      "description": "同目标投豆间隔（秒）",
+      "default": 0.3,
+      "min": 0,
+      "max": 60
+    },
+    "max_per_target": {
+      "type": "integer",
+      "description": "同一跟踪目标最多投豆次数",
+      "default": 5,
+      "min": 1,
+      "max": 1000
+    },
+    "min_hits": {
+      "type": "integer",
+      "description": "至少关联观测帧数",
+      "default": 2,
+      "min": 1,
+      "max": 100
+    },
+    "flight_seconds": {
+      "type": "number",
+      "description": "操作与豆子飞行延迟（秒）",
+      "default": 0.15,
+      "min": 0,
+      "max": 5
+    },
+    "max_frame_age_seconds": {
+      "type": "number",
+      "description": "最大画面年龄（秒），超时不投豆",
+      "default": 0.6,
+      "min": 0.01,
+      "max": 5
+    },
+    "aim_y": {
+      "type": "number",
+      "description": "目标框垂直落点比例",
+      "default": 0.55,
+      "min": 0,
+      "max": 1
+    },
+    "max_speed": {
+      "type": "number",
+      "description": "最大可信目标速度（参考像素/秒）",
+      "default": 2000,
+      "min": 1,
+      "max": 10000
+    },
+    "track_distance": {
+      "type": "number",
+      "description": "跟踪关联距离（参考像素）",
+      "default": 100,
+      "min": 1,
+      "max": 1000
+    },
+    "track_ttl_seconds": {
+      "type": "number",
+      "description": "遮挡保留时间（秒）",
+      "default": 0.5,
+      "min": 0.01,
+      "max": 5
+    },
+    "active_template": {
+      "type": "asset",
+      "description": "可选：活动进行中标志；未匹配立即结束"
+    },
+    "active_threshold": {
+      "type": "number",
+      "description": "活动标志阈值",
+      "default": 0.85,
+      "min": 0,
+      "max": 1
+    },
+    "end_template": {
+      "type": "asset",
+      "description": "可选：结算画面模板；匹配立即结束"
+    },
+    "end_threshold": {
+      "type": "number",
+      "description": "结算模板阈值",
+      "default": 0.85,
+      "min": 0,
+      "max": 1
+    }
+  },
+  "card": {
+    "rows": [
+      { "param": "model", "label": "模型" },
+      { "param": "roi", "label": "投豆区域", "control": "rect" },
+      { "param": "priorities", "label": "类别优先级", "control": "inspector" },
+      { "param": "dry_run", "label": "只观察", "on_label": "观察", "off_label": "投豆" },
+      { "param": "duration_seconds", "label": "最长时长（秒）" },
+      { "param": "max_throws", "label": "投豆上限" },
+      { "param": "confidence", "label": "置信度" },
+      { "param": "flight_seconds", "label": "飞行延迟（秒）" },
+      { "param": "idle_timeout_seconds", "label": "无目标超时（秒）" },
+      { "param": "min_hits", "label": "最少观测帧" },
+      { "param": "max_per_target", "label": "单目标上限" },
+      { "param": "throw_interval_seconds", "label": "投豆间隔（秒）" },
+      { "param": "target_interval_seconds", "label": "同目标间隔（秒）" },
+      { "param": "aim_y", "label": "落点高度" },
+      { "param": "max_speed", "label": "速度上限" },
+      { "param": "track_distance", "label": "关联距离" },
+      { "param": "track_ttl_seconds", "label": "遮挡保留（秒）" },
+      { "param": "max_frame_age_seconds", "label": "画面年龄上限（秒）" },
+      { "param": "frame_interval_seconds", "label": "采样间隔（秒）" },
+      { "param": "device", "label": "推理设备" },
+      { "param": "image_size", "label": "输入尺寸" },
+      { "param": "iou", "label": "重叠抑制" },
+      { "param": "max_results", "label": "检测上限" },
+      { "param": "active_template", "label": "活动标志", "control": "asset" },
+      { "param": "active_threshold", "label": "活动阈值" },
+      { "param": "end_template", "label": "结算模板", "control": "asset" },
+      { "param": "end_threshold", "label": "结算阈值" }
+    ]
+  },
+  "outputs": {
+    "type": "object",
+    "required": [
+      "reason",
+      "frames",
+      "throws",
+      "planned_throws",
+      "dry_run",
+      "elapsed_seconds",
+      "trace"
+    ],
+    "properties": {
+      "reason": {
+        "type": "string",
+        "enum": [
+          "duration",
+          "throw_budget",
+          "idle_timeout",
+          "end_template",
+          "inactive_screen"
+        ]
+      },
+      "frames": {
+        "type": "integer"
+      },
+      "throws": {
+        "type": "integer"
+      },
+      "planned_throws": {
+        "type": "integer"
+      },
+      "dry_run": {
+        "type": "boolean"
+      },
+      "elapsed_seconds": {
+        "type": "number"
+      },
+      "trace": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": false
+  },
+  "effects": {
+    "side_effect": true,
+    "retry": "unsafe"
+  }
+}

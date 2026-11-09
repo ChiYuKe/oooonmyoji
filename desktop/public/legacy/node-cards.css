@@ -60,6 +60,11 @@
 :root[data-theme] .studio-card .bool-judge-output-label { fill: var(--card-text, #e1e5e8); font-size: 11px; font-weight: 600; }
 :root[data-theme] .studio-card :is(.card-kicker, .card-meta) { fill: var(--card-muted); font-weight: 400; letter-spacing: 0; }
 :root[data-theme] .studio-card .card-kicker { font-size: 10px; }
+:root[data-theme] .instance-run-card-run-button { cursor: pointer; outline: none; }
+:root[data-theme] .instance-run-card-run-button circle { fill: transparent; stroke: var(--card-icon); stroke-opacity: .62; stroke-width: 1.2; }
+:root[data-theme] .instance-run-card-run-button path { fill: var(--card-icon); pointer-events: none; }
+:root[data-theme] .instance-run-card-run-button:hover circle,
+:root[data-theme] .instance-run-card-run-button:focus-visible circle { fill: color-mix(in srgb, var(--card-icon) 16%, transparent); stroke-opacity: 1; }
 /* 值卡片（布尔判断 / 拆分）的卡面身份：类型行、布尔符号与回读行都带一点分类色，
  * 一眼能看出这是「算出一个值」的卡片；卡身底色与描边一律不动（见 DESIGN_RULES）。 */
 :root[data-theme] .studio-card.value-card :is(.card-kicker, .bool-judge-operator, .bool-judge-output-label) {

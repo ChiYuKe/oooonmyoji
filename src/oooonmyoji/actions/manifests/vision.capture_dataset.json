@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "name": "vision.capture_dataset",
+  "version": "1.0.0",
+  "entry": "builtin:CaptureDatasetAction",
+  "description": "连续采集完整截图与帧元数据，供百鬼夜行标注训练；不会发送输入操作。",
+  "parameters": {
+    "count": {
+      "type": "integer",
+      "description": "采集帧数",
+      "default": 100,
+      "min": 1,
+      "max": 10000
+    },
+    "interval_seconds": {
+      "type": "number",
+      "description": "采集间隔（秒）",
+      "default": 0.2,
+      "min": 0.05,
+      "max": 60
+    }
+  },
+  "card": {
+    "rows": [
+      { "param": "count", "label": "采集帧数" },
+      { "param": "interval_seconds", "label": "采集间隔（秒）" }
+    ]
+  },
+  "outputs": {
+    "type": "object",
+    "required": [
+      "directory",
+      "count"
+    ],
+    "properties": {
+      "directory": {
+        "type": "string"
+      },
+      "count": {
+        "type": "integer"
+      }
+    },
+    "additionalProperties": false
+  },
+  "effects": {
+    "side_effect": false,
+    "retry": "safe"
+  }
+}

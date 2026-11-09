@@ -64,6 +64,7 @@ export interface CardsDeps {
   instanceRunPinMenuItems(card: CardsRunCard, variable: unknown, point: { x: number; y: number }): any[];
   variableCardPortMenuItems(card: CardsVariableCard, point: { x: number; y: number }): any[];
   requestInspector(selection: unknown): void;
+  runInstanceWorkflow(card: CardsRunCard): void;
   requestOpenWorkflowReference(reference: string): void;
   openWorkflowBrowser(nodeId: string, key: string, currentReference: string, applyValue?: (reference: string) => void): void;
   render(): void;
@@ -99,7 +100,7 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     state, svgEl, nodeCards, displayNameOfDefinition, assetPreviewForPath, bindAssetPathPreview,
     disconnectVariableFromInstanceInput, startVariableConnectionFromInstanceInput, startVariableConnectionFromCard,
     openPortContextMenu, showMenu, instanceRunPinMenuItems, variableCardPortMenuItems, requestInspector,
-    requestOpenWorkflowReference, openWorkflowBrowser, render, contextMenuSuppressedByPan, removeInstanceRun, removeVariableCard,
+    requestOpenWorkflowReference, openWorkflowBrowser, render, contextMenuSuppressedByPan, removeInstanceRun, removeVariableCard, runInstanceWorkflow,
     setVariableCardSelection, variableCardList, worldPoint, snapshot,
     variableInUse,
     runCardWidth, runCardBaseHeight, runVariableHeight, portRadius,
@@ -142,7 +143,25 @@ export function createCanvasCards(deps: CardsDeps): CanvasCards {
     svgEl('line', { class: 'instance-run-card-header-rule', x1: 1, y1: 33, x2: runCardWidth - 1, y2: 33 }, group);
     svgEl('rect', { class: 'instance-run-card-icon-plate', x: 10, y: 7, width: 20, height: 20, rx: 4 }, group);
     svgEl('text', { class: 'instance-run-card-icon', x: 20, y: 22, 'text-anchor': 'middle' }, group).textContent = '▣';
-    nodeCards.text(group, { className: 'instance-run-card-instance card-title', x: 39, y: 22, value: instanceLabel, width: runCardWidth - 51, size: 12 });
+    nodeCards.text(group, { className: 'instance-run-card-instance card-title', x: 39, y: 22, value: instanceLabel, width: runCardWidth - 76, size: 12 });
+    const runButton = svgEl('g', {
+      class: 'instance-run-card-run-button', role: 'button', tabindex: 0,
+      'aria-label': `单独运行 ${instanceLabel}`,
+    }, group);
+    svgEl('title', {}, runButton).textContent = `单独运行 ${instanceLabel}`;
+    svgEl('circle', { cx: runCardWidth - 18, cy: 17, r: 10 }, runButton);
+    svgEl('path', { d: `M ${runCardWidth - 20} 12 L ${runCardWidth - 13} 17 L ${runCardWidth - 20} 22 Z` }, runButton);
+    const runSelected = (event: any): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      runInstanceWorkflow(card);
+    };
+    runButton.addEventListener('pointerdown', (event: any) => { event.preventDefault(); event.stopPropagation(); });
+    runButton.addEventListener('mousedown', (event: any) => { event.preventDefault(); event.stopPropagation(); });
+    runButton.addEventListener('click', runSelected);
+    runButton.addEventListener('keydown', (event: any) => {
+      if (event.key === 'Enter' || event.key === ' ') runSelected(event);
+    });
     nodeCards.text(group, { className: 'instance-run-card-type card-kicker', x: 14, y: 47, value: '实例 · 子工作流', width: runCardWidth - 28, size: 10 });
     const workflowName = String(card.run.workflow || '未选择工作流').split(/[\\/]/).pop();
     nodeCards.text(group, { className: 'instance-run-card-workflow card-description', x: 14, y: 66, value: workflowName, width: runCardWidth - 28, size: 11 });

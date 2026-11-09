@@ -31,6 +31,7 @@ from .worker_lifecycle import WorkerLifecycle
 # Keep these names importable for existing callers and cancellation tests.
 from .worker import _activate_run_cancel as _activate_run_cancel
 from .worker import _apply_cancel_request as _apply_cancel_request
+from .artifact_cleanup import cleanup_artifacts
 
 
 class Supervisor:
@@ -49,6 +50,8 @@ class Supervisor:
         self._group_lock = threading.RLock()
         self._reward_stats: RewardStatsProcessor | None = None
         self._stopping = False
+        self._artifact_cleanup_stop = threading.Event()
+        self._artifact_cleanup_thread: threading.Thread | None = None
         # OCR 的池与线程池归 OcrDispatcher；self.ocr_pool 仍是它的只读/可写视图。
         self._ocr = OcrDispatcher(config, self.logger, is_stopping=lambda: self._stopping)
         # 工作进程的创建与崩溃重启归 WorkerLifecycle（与 self.workers 共用同一份字典）。
@@ -73,6 +76,8 @@ class Supervisor:
             cancel_group_runs=lambda group: self._cancel_group_runs(group),
             mark_group_timeout=lambda group: self._mark_group_timeout(group),
             finish_group=lambda group: self._finish_group(group),
+            retry_failed_run=lambda group, run_id, record: self._retry_failed_group_run(group, run_id, record),
+            record_terminal_run=lambda group, run_id, record: self.handle_event({"type": "result", "run_id": run_id, "record": record}),
             check_workers=lambda: self.check_workers(),
         )
 
@@ -92,6 +97,15 @@ class Supervisor:
                 return
             self._stopping = False
             self._reconcile_stale_run_records()
+            self._cleanup_artifacts()
+            self._artifact_cleanup_stop.clear()
+            if self._artifact_cleanup_thread is None or not self._artifact_cleanup_thread.is_alive():
+                self._artifact_cleanup_thread = threading.Thread(
+                    target=self._artifact_cleanup_loop,
+                    name="artifact-cleanup",
+                    daemon=True,
+                )
+                self._artifact_cleanup_thread.start()
             context = mp.get_context("spawn")
             self.event_queue = context.Queue()
             for instance in self.config.instances:
@@ -103,6 +117,18 @@ class Supervisor:
         """启动收敛：关闭归属进程已退出的非终态 run/group 记录。"""
 
         return reconcile_stale_run_records(self.config.artifact_dir, self.logger, stale_after_seconds=stale_after_seconds)
+
+    def _cleanup_artifacts(self) -> None:
+        try:
+            cleanup = cleanup_artifacts(self.config.artifact_dir)
+            if any(cleanup.values()):
+                self.logger.emit("artifacts.cleaned", **cleanup)
+        except Exception as exc:
+            self.logger.emit("artifacts.cleanup_failed", level=30, error=str(exc))
+
+    def _artifact_cleanup_loop(self) -> None:
+        while not self._artifact_cleanup_stop.wait(24 * 60 * 60):
+            self._cleanup_artifacts()
 
 
     def _start_worker(self, context: Any, instance: InstanceConfig) -> None:
@@ -232,6 +258,96 @@ class Supervisor:
         stamp = group_id.split("-", 2)[1] if group_id.startswith("group-") else group_id
         return str(self.config.artifact_dir / "runs" / f"events-group-{stamp}-{instance_id}.jsonl")
 
+    def _retry_failed_group_run(self, group: _Group, run_id: str, record: dict[str, Any]) -> bool:
+        """Retry only the failed instance run, retaining each prior attempt in the group record."""
+
+        if record.get("status") == RunStatus.INTERRUPTED.value:
+            self.check_workers()
+        with self._group_lock:
+            entry = next((item for item in group.entries if item.get("run_id") == run_id), None)
+            if entry is None or group.finished or group.cancel_requested:
+                return False
+            attempt = int(entry.get("attempt", 1))
+            max_attempts = int(entry.get("max_attempts", 1))
+            if attempt >= max_attempts:
+                return False
+            instance_id = str(entry["instance"])
+            workflow = str(entry["workflow"])
+            child_inputs = dict(entry.get("inputs") or {})
+            delay_seconds = float(entry.get("retry_delay_seconds", 0.0))
+            base_events_file = str(entry.get("base_events_file") or entry.get("events_file") or "")
+
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+        with self._group_lock:
+            if group.finished or group.cancel_requested or entry.get("run_id") != run_id:
+                return False
+            try:
+                worker = self.workers.get(instance_id)
+                if worker is None:
+                    return False
+                self.config.instance(instance_id)
+            except (StopIteration, KeyError):
+                return False
+            active_run_ids = [active_id for active_id, active_instance in self._runs.items() if active_instance == instance_id and active_id != run_id]
+            if active_run_ids:
+                self.logger.emit("group.retry.skipped", group_id=group.group_id, run_id=run_id, instance_id=instance_id, reason="instance_busy")
+                return False
+
+            next_attempt = attempt + 1
+            job_id = f"workflow-{uuid.uuid4().hex[:12]}"
+            job = JobConfig(
+                id=job_id,
+                workflow=workflow,
+                instance=instance_id,
+                inputs=child_inputs,
+                schedule={"type": "manual"},
+                enabled=True,
+                retry_enabled=False,
+            )
+            new_run_id = f"{job_id}-{uuid.uuid4().hex[:12]}"
+            if base_events_file:
+                event_path = Path(base_events_file)
+                events_file = str(event_path.with_name(f"{event_path.stem}-attempt-{next_attempt}{event_path.suffix}"))
+            else:
+                events_file = None
+            try:
+                worker.command_queue.put({"type": "run", "job_id": job_id, "job": job, "run_id": new_run_id, "events_file": events_file})
+            except (OSError, ValueError, EOFError, queue.Full) as exc:
+                self.logger.emit("group.retry.failed_to_queue", group_id=group.group_id, run_id=run_id, instance_id=instance_id, error=str(exc))
+                return False
+
+            history = entry.setdefault("attempt_history", [])
+            prior_attempt = {key: record.get(key) for key in (
+                "run_id", "status", "error", "error_category", "failed_node_id", "failed_node_breadcrumb",
+                "started_at", "finished_at", "duration_ms",
+            ) if key in record}
+            prior_attempt["attempt"] = attempt
+            history.append(prior_attempt)
+            group.records[run_id] = record
+            index = group.run_ids.index(run_id)
+            group.run_ids[index] = new_run_id
+            entry["run_id"] = new_run_id
+            entry["attempt"] = next_attempt
+            entry["status"] = RunStatus.QUEUED.value
+            entry["events_file"] = events_file
+            self._runs.pop(run_id, None)
+            self._run_groups.pop(run_id, None)
+            self._runs[new_run_id] = instance_id
+            self._run_groups[new_run_id] = group.group_id
+            self.logger.emit(
+                "group.retry.queued",
+                group_id=group.group_id,
+                previous_run_id=run_id,
+                run_id=new_run_id,
+                instance_id=instance_id,
+                attempt=next_attempt,
+                max_attempts=max_attempts,
+            )
+            self._persist_group(group)
+            return True
+
     def _group_store(self, group_id: str) -> AtomicJsonStore:
         return AtomicJsonStore(self.config.artifact_dir / "runs" / f"{group_id}.json")
 
@@ -326,6 +442,11 @@ class Supervisor:
                     "workflow": run.workflow,
                     "inputs": resolved_inputs,
                     "events_file": self._group_events_file(group_id, run.instance, events_file),
+                    "base_events_file": self._group_events_file(group_id, run.instance, events_file),
+                    "attempt": 1,
+                    "max_attempts": run.attempts,
+                    "retry_delay_seconds": run.delay_seconds,
+                    "attempt_history": [],
                     "status": RunStatus.QUEUED.value,
                 })
 
@@ -336,15 +457,7 @@ class Supervisor:
         self._persist_group(group)
         if wait:
             try:
-                if node.wait_for == "all":
-                    records = self.wait_for_all(
-                        child_ids,
-                        timeout_seconds=workflow.timeout_seconds,
-                        cancel_on_failure=node.cancel_on_failure,
-                    )
-                    group.records.update(records)
-                else:
-                    self._wait_group_poll(group, timeout_seconds=workflow.timeout_seconds)
+                self._wait_group_poll(group, timeout_seconds=workflow.timeout_seconds)
             except TimeoutError:
                 self._mark_group_timeout(group)
                 self._finish_group(group)
@@ -588,6 +701,9 @@ class Supervisor:
         self.logger.emit("run.cancel_requested", run_id=run_id, instance_id=instance_id)
 
     def stop(self, *, wait_seconds: float = 10.0) -> None:
+        self._artifact_cleanup_stop.set()
+        if self._artifact_cleanup_thread is not None:
+            self._artifact_cleanup_thread.join(timeout=1.0)
         with self._group_lock:
             for group in self._groups.values():
                 group.done.set()

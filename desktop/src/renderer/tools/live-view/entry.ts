@@ -6,8 +6,8 @@
  * 本窗口不采集、不发送任何点击，只显示**正在运行的工作流**每一步的实际判断，
  * 因此它可以解释“这一步为什么这么走”。
  *
- * 画面帧由 Python 运行时挂在 TaskContext.capture 上写出（artifacts/live/*.json
- * + *.jpg），主进程负责轮询与门控心跳，这里只负责绘制。
+ * 普通模式显示 TaskContext.capture 写出的工作流帧；YOLO 模式由主进程通过模拟器
+ * 实时推流采集并附加检测结果。两个模式共用画布与状态面板。
  */
 import { createIcons, ImageDown, Minus, Pause, Play, Square, X } from 'lucide';
 import type {
@@ -58,6 +58,15 @@ const saveButton = document.querySelector<HTMLButtonElement>('#live-save')!;
 const clearButton = document.querySelector<HTMLButtonElement>('#live-clear')!;
 const intervalSelect = document.querySelector<HTMLSelectElement>('#live-interval')!;
 const toastEl = document.querySelector<HTMLElement>('#live-toast')!;
+const yoloCard = document.querySelector<HTMLElement>('#live-yolo-card')!;
+const yoloCount = document.querySelector<HTMLElement>('#live-yolo-count')!;
+const yoloModel = document.querySelector<HTMLElement>('#live-yolo-model')!;
+const yoloChoose = document.querySelector<HTMLButtonElement>('#live-yolo-choose')!;
+const yoloConfidenceSelect = document.querySelector<HTMLSelectElement>('#live-yolo-confidence')!;
+const yoloStatus = document.querySelector<HTMLElement>('#live-yolo-status')!;
+const yoloList = document.querySelector<HTMLUListElement>('#live-yolo-list')!;
+const yoloEmpty = document.querySelector<HTMLElement>('#live-yolo-empty')!;
+const titleEl = document.querySelector<HTMLElement>('#live-title')!;
 
 /** 超过这个时间没有新帧就认为这一次运行已经结束。 */
 const STALE_FRAME_MS = 2500;
@@ -77,6 +86,7 @@ const COLORS = {
   ocr: '#5cc2ed',
   clickOrigin: '#00d7ff',
   clickActual: '#ff5c5c',
+  yolo: '#a987ff',
 };
 
 interface Box {
@@ -111,6 +121,8 @@ let selectedMatch: number | null = null;
 let frameRate = 0;
 let rateWindowStart = 0;
 let rateWindowFrames = 0;
+const yoloMode = new URL(window.location.href).searchParams.get('yolo') === '1';
+let yoloConfidence = 0.25;
 
 function instanceParam(): string {
   try {
@@ -251,6 +263,16 @@ function drawFrame(): void {
   frame.overlay.rois.forEach((roi: LiveViewRoi) => {
     const box = referenceRectToCanvas(roi.box);
     if (box) drawRect(box, COLORS.roi, `${roi.label} ${roi.box[2]}×${roi.box[3]}`, 1.5, true);
+  });
+
+  frame.yolo?.detections?.forEach((detection) => {
+    const [x1, y1, x2, y2] = detection.box;
+    drawRect({
+      x: fit.ox + x1 * fit.scale,
+      y: fit.oy + y1 * fit.scale,
+      w: Math.max(0, (x2 - x1) * fit.scale),
+      h: Math.max(0, (y2 - y1) * fit.scale),
+    }, COLORS.yolo, `${detection.label} ${(detection.confidence * 100).toFixed(1)}%`, 2.5);
   });
 
   frame.overlay.matches.forEach((match: LiveViewMatch, index: number) => {
@@ -523,12 +545,38 @@ function applyFrame(next: LiveViewFrame): void {
     setMask(null);
     renderStepBar();
     renderSidebar();
+    renderYoloSidebar(next);
     renderSummary();
     drawFrame();
   };
-  image.src = `data:image/jpeg;base64,${next.image}`;
+  image.src = `data:${next.image_mime || 'image/jpeg'};base64,${next.image}`;
   frameMeta.textContent = `${next.frame_width}×${next.frame_height}`
     + (frameRate > 0 ? `  ·  ${frameRate.toFixed(1)} fps` : '');
+}
+
+function renderYoloSidebar(next: LiveViewFrame): void {
+  if (!yoloMode) return;
+  const detections = next.yolo?.detections ?? [];
+  yoloCount.textContent = String(detections.length);
+  yoloList.replaceChildren();
+  yoloEmpty.classList.toggle('hidden', detections.length > 0 || Boolean(next.yolo?.error));
+  if (next.yolo?.error) {
+    yoloStatus.textContent = next.yolo.error;
+    yoloStatus.classList.add('error');
+    yoloEmpty.classList.add('hidden');
+    return;
+  }
+  yoloStatus.classList.remove('error');
+  if (next.yolo?.model) yoloModel.textContent = next.yolo.model.split(/[\\/]/).pop() || next.yolo.model;
+  yoloStatus.textContent = next.yolo
+    ? `${next.yolo.device || 'CUDA'} · ${next.yolo.inferenceMs?.toFixed(1) ?? '—'} ms · ${next.yolo.model?.split(/[\\/]/).pop() || 'YOLO'}`
+    : '正在加载模型…';
+  detections.forEach((detection) => {
+    const li = document.createElement('li');
+    const [x1, y1, x2, y2] = detection.box.map(Math.round);
+    li.textContent = `${detection.label}  ${(detection.confidence * 100).toFixed(1)}%  ${x1},${y1}–${x2},${y2}`;
+    yoloList.appendChild(li);
+  });
 }
 
 function markRunning(): void {
@@ -568,7 +616,7 @@ async function poll(): Promise<void> {
       setStatus('主进程未重启：这个窗口需要新的主进程才能读取运行时的预览帧。', true);
       return;
     }
-    const result: LiveViewPollResult = await api.liveViewPoll();
+    const result: LiveViewPollResult = await api.liveViewPoll(yoloMode ? yoloConfidence : undefined);
     if (result.status === 'frame') {
       const now = Date.now();
       if (rateWindowStart === 0) rateWindowStart = now;
@@ -626,6 +674,18 @@ function bindUi(): void {
     void applyInterval(Number(intervalSelect.value), true);
   });
 
+  yoloChoose.addEventListener('click', () => {
+    void api.liveViewChooseYoloModel().then((selected) => {
+      if (!selected) return;
+      yoloModel.textContent = selected.split(/[\\/]/).pop() || selected;
+      yoloStatus.textContent = '模型已切换，等待下一帧检测';
+      yoloStatus.classList.remove('error');
+    }).catch((error) => showToast(`选择 YOLO 模型失败：${errorMessage(error)}`, true));
+  });
+  yoloConfidenceSelect.addEventListener('change', () => {
+    yoloConfidence = Number(yoloConfidenceSelect.value) || 0.25;
+  });
+
   saveButton.addEventListener('click', () => {
     if (!frame) {
       showToast('当前还没有画面', true);
@@ -668,6 +728,14 @@ function bindUi(): void {
 
 async function start(): Promise<void> {
   bindUi();
+  if (yoloMode) {
+    document.title = 'YOLO 实时检测';
+    titleEl.textContent = 'YOLO 实时检测';
+    yoloCard.classList.remove('hidden');
+    document.querySelector('.live-legend-item.yolo')?.classList.remove('hidden');
+    yoloModel.textContent = '训练权重 best.pt';
+    yoloStatus.textContent = '等待工作流运行的实时画面';
+  }
   const instance = instanceParam();
   instanceLabel.textContent = instance ? `目标实例：${instance}` : '未选择实例';
   setConnection('connecting', '等待运行');

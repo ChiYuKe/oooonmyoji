@@ -11,6 +11,7 @@ import { paramColorSwatch, paramPointParts } from '../render/param-rows';
 import { isBindingValue } from '../../shared/workflow/bindings';
 import { parameterLiteralCache, parameterLiteralCacheKey } from '../state/literal-cache';
 import { commonParameterNames, nodeReferenceValidator, parameterValueAccepted, planActionParameters } from '../model/parameter-edits';
+import { migrateActionOutputReferences } from '../model/output-reference-migration';
 
 type UiNode = any;
 
@@ -73,11 +74,15 @@ export function createParameterControls(deps: ParameterControlsDeps) {
       })),
       onChange: (value: string) => {
         if (value === node.action) return;
-        const definitions = state.catalog.find((spec) => spec.name === value)?.parameters || {};
+        const oldSpec = state.catalog.find((spec) => spec.name === node.action);
+        const nextSpec = state.catalog.find((spec) => spec.name === value);
+        const definitions = nextSpec?.parameters || {};
         const catalog = { byName: (name: string) => state.catalog.find((spec) => spec.name === name), names: () => state.catalog.map((spec) => spec.name) };
         const plan = planActionParameters(node.params || {}, definitions, nodeReferenceValidator(state.raw, catalog, node.id));
         if (plan.removed.length && !(deps.confirmParameterRemoval?.(plan.removed) ?? window.confirm(`更换动作将移除以下不兼容参数：\n${plan.removed.map(fieldLabel).join('、')}\n其余参数会保留。是否继续？`))) return false;
+        let outputMigration = { migrated: 0, unresolved: 0 };
         mutate(() => {
+          outputMigration = migrateActionOutputReferences(state.raw, node.id, oldSpec?.outputSchema, nextSpec?.outputSchema);
           node.action = value;
           node.params = clone(plan.params);
           for (const name of plan.removed) {
@@ -88,7 +93,13 @@ export function createParameterControls(deps: ParameterControlsDeps) {
             if (state.raw?._inputParams?.[node.id]) delete state.raw._inputParams[node.id][name];
           }
         });
-        toast(`已更换动作，保留 ${Object.keys(plan.params).length} 个参数${plan.removed.length ? `，移除 ${plan.removed.length} 个不兼容参数` : ''}`);
+        const outputMessage = outputMigration.migrated
+          ? `，并更新 ${outputMigration.migrated} 条输出引用`
+          : '';
+        const unresolvedMessage = outputMigration.unresolved
+          ? `；另有 ${outputMigration.unresolved} 条输出引用无法安全迁移，请检查相关连线`
+          : '';
+        toast(`已更换动作，保留 ${Object.keys(plan.params).length} 个参数${plan.removed.length ? `，移除 ${plan.removed.length} 个不兼容参数` : ''}${outputMessage}${unresolvedMessage}`, outputMigration.unresolved > 0);
       },
       searchable: true,
       placeholder: '搜索动作…',

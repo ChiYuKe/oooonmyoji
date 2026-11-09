@@ -173,7 +173,8 @@ def test_reward_stats_duplicate_screenshot_is_idempotent(tmp_path: Path) -> None
     assert len(calls) == 1
 
 
-def test_reward_screenshots_retain_latest_ten_battles_per_instance_across_runs(tmp_path: Path) -> None:
+@pytest.mark.parametrize("layout", ["legacy", "instance", "mixed"])
+def test_reward_screenshots_retain_latest_ten_battles_per_instance_across_runs(tmp_path: Path, layout: str) -> None:
     fixture, _ = _write_reward_fixture(tmp_path)
     artifact_dir = tmp_path / "artifacts"
     state_dir = artifact_dir / "runs"
@@ -189,6 +190,9 @@ def test_reward_screenshots_retain_latest_ten_battles_per_instance_across_runs(t
 
     def write_screenshot(run_id: str, battle: int, modified_at: int) -> Path:
         reward_dir = artifact_dir / run_id / "rewards"
+        if layout == "instance" or (layout == "mixed" and run_id == "run-new"):
+            instance_id = "mumu-0" if run_id == "run-other" else "mumu-1"
+            reward_dir = artifact_dir / instance_id / run_id / "rewards"
         reward_dir.mkdir(parents=True, exist_ok=True)
         path = reward_dir / f"reward-{battle:04d}-layer-1-capture-{battle:04d}.png"
         path.write_bytes(image_bytes)
@@ -223,8 +227,8 @@ def test_reward_screenshots_retain_latest_ten_battles_per_instance_across_runs(t
     assert processor.close(wait_seconds=5)
 
     retained = {
-        path.relative_to(artifact_dir).as_posix()
-        for path in artifact_dir.glob("run-*/rewards/reward-*.png")
+        f"{path.parent.parent.name}/rewards/{path.name}"
+        for path in artifact_dir.rglob("reward-*.png")
         if "run-other" not in path.parts
     }
     assert retained == {

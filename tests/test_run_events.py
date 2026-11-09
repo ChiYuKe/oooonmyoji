@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -154,12 +155,34 @@ def test_debug_mode_saves_annotated_task_screenshot(tmp_path: Path, monkeypatch:
     record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-debug", events_file=events_path)
 
     assert record.status.value == "succeeded"
-    screenshots = list((tmp_path / "artifacts" / "run-debug" / "debug").glob("*.png"))
+    screenshots = list((tmp_path / "artifacts" / "fake" / "run-debug" / "debug").glob("*.png"))
     assert [path.name for path in screenshots] == ["000001-wf-cap-succeeded.png"]
     lines = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     done = [line for line in lines if line.get("step_id") == "cap" and line["step"]["status"] == "succeeded"][-1]
     assert done["debug_screenshot"] == str(screenshots[0])
     assert done["screenshot"] == str(screenshots[0])
+
+
+def test_screenshots_are_grouped_by_instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(_write_config(
+        tmp_path, save_screenshots=True, debug={"enabled": True, "annotate_screenshots": False},
+    ))
+    monkeypatch.setattr(runner_module, "connect_at_task_boundary", lambda *args, **kwargs: (StubDevice(), False))
+    for instance_id in ("mumu-0", "mumu-1"):
+        instance = replace(config.instance("fake"), id=instance_id)
+        job = JobConfig(
+            id="wf-run", workflow="wf", instance=instance_id, inputs={},
+            schedule={"type": "manual"}, enabled=True, retry_enabled=False,
+        )
+        run_id = f"run-{instance_id}"
+        record = TaskRunner(config).execute(job, instance, run_id=run_id)
+        output = tmp_path / "artifacts" / instance_id / run_id
+        assert record.status.value == "succeeded"
+        assert Path(record.details["last_frame"]) == output / "last-frame.png"
+        assert (output / "step-cap.png").is_file()
+        assert (output / "last-frame.png").is_file()
+        assert len(list((output / "debug").glob("*.png"))) == 1
+        assert not (tmp_path / "artifacts" / run_id).exists()
 
 
 def test_step_screenshots_only_cover_steps_that_touch_the_screen(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -351,7 +374,7 @@ def test_recovered_selector_branch_does_not_save_failure_frames(
     record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-recovered")
 
     assert record.status.value == "succeeded"
-    assert not list((tmp_path / "artifacts" / "run-recovered").glob("failure-*.png"))
+    assert not list((tmp_path / "artifacts" / "fake" / "run-recovered").glob("failure-*.png"))
 
 
 def test_failed_run_saves_one_final_failure_frame(
@@ -388,7 +411,7 @@ def test_failed_run_saves_one_final_failure_frame(
 
     record = TaskRunner(config).execute(job, config.instance("fake"), run_id="run-failed")
 
-    failure_frames = list((tmp_path / "artifacts" / "run-failed").glob("failure-*.png"))
+    failure_frames = list((tmp_path / "artifacts" / "fake" / "run-failed").glob("failure-*.png"))
     assert record.status.value == "failed"
     assert [path.name for path in failure_frames] == ["failure-last-frame.png"]
     assert str(failure_frames[0]) in record.artifacts

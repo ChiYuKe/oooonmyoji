@@ -93,6 +93,8 @@ WORKFLOW_SCHEMA: dict[str, Any] = {
                                 "instance": {"type": "string", "minLength": 1},
                                 "workflow": {"type": "string", "minLength": 1},
                                 "inputs": {"type": "object"},
+                                "attempts": {"type": "integer", "minimum": 1},
+                                "delay_seconds": {"type": "number", "minimum": 0},
                             },
                             "additionalProperties": False,
                         },

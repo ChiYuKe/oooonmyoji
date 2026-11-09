@@ -1,0 +1,132 @@
+{
+  "schema_version": 2,
+  "name": "vision.detect_objects",
+  "version": "1.0.0",
+  "entry": "builtin:DetectObjectsAction",
+  "description": "YOLO 目标检测；输出参考分辨率坐标，未检测到目标返回空数组并成功。",
+  "parameters": {
+    "model": {
+      "type": "path",
+      "required": true,
+      "description": "项目目录内的本地 YOLO 检测权重（.pt/.onnx），不会自动下载"
+    },
+    "roi": {
+      "type": "rect",
+      "description": "参考分辨率识别区域 [x,y,w,h]"
+    },
+    "confidence": {
+      "type": "number",
+      "description": "检测置信度",
+      "default": 0.5,
+      "min": 0,
+      "max": 1
+    },
+    "iou": {
+      "type": "number",
+      "description": "重叠框抑制阈值",
+      "default": 0.45,
+      "min": 0,
+      "max": 1
+    },
+    "image_size": {
+      "type": "integer",
+      "description": "推理输入尺寸",
+      "default": 640,
+      "min": 32,
+      "max": 4096
+    },
+    "device": {
+      "type": "string",
+      "default": "cpu",
+      "description": "推理设备：cpu 或 GPU 编号如 0"
+    },
+    "max_results": {
+      "type": "integer",
+      "description": "每帧最大检测数",
+      "default": 100,
+      "min": 1,
+      "max": 1000
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "类别名称过滤，空数组保留全部类别"
+    }
+  },
+  "card": {
+    "rows": [
+      { "param": "model", "label": "模型" },
+      { "param": "roi", "label": "识别区域", "control": "rect" },
+      { "param": "confidence", "label": "置信度" },
+      { "param": "labels", "label": "类别过滤", "control": "inspector" },
+      { "param": "device", "label": "推理设备" },
+      { "param": "image_size", "label": "输入尺寸" },
+      { "param": "iou", "label": "重叠抑制" },
+      { "param": "max_results", "label": "检测上限" }
+    ]
+  },
+  "outputs": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "required": [
+        "class_id",
+        "label",
+        "confidence",
+        "box",
+        "center",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "class_id": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "box": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "center": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "effects": {
+    "side_effect": false,
+    "retry": "safe"
+  }
+}

@@ -28,6 +28,7 @@ from ..devices.factory import connect_at_task_boundary
 from ..devices.lock import InstanceLock, InstanceLockError
 from ..exceptions import ConfigError
 from ..runtime.context import TaskContextImpl
+from .artifact_paths import run_artifact_dir
 from ..runtime.instances import ensure_runtime_instance, expand_runtime_instances
 from ..runtime.logging import EventLogger
 from ..vision.template import TemplateMatcher
@@ -118,7 +119,7 @@ def run_single_action(
         raise ConfigError("reference_resolution must be positive")
 
     run_id = uuid.uuid4().hex
-    artifact_dir = config.artifact_dir / f"one-shot-{run_id}"
+    artifact_dir = run_artifact_dir(config.artifact_dir, instance.id, f"one-shot-{run_id}")
     event_logger = logger or EventLogger(config.log_dir)
     device: Any | None = None
     lock = InstanceLock(config.artifact_dir / "locks", instance.id)

@@ -1,0 +1,5 @@
+# Optional detector backend; the base application does not import this at startup.
+# Use the PyTorch installation appropriate to your machine before GPU inference.
+ultralytics>=8.3,<9
+# CPU ONNX execution; .pt inference uses PyTorch supplied by Ultralytics.
+onnxruntime>=1.19,<2

@@ -325,7 +325,7 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
       ], (value) => mutate(() => { node.finish_mode = value; })));
     }
     if (node.type === 'instance_parallel') {
-      body.appendChild(el('div', 'description', 'Supervisor 会同时把每个运行项投递到对应实例。该节点不能连接普通子节点。'));
+      body.appendChild(el('div', 'description', 'Supervisor 会同时投递各运行项；失败或进程中断时只重试对应实例，取消不会重试。该节点不能连接普通子节点。'));
       const wait = field(body, '完成条件');
       wait.appendChild(selectInput(node.wait_for || 'all', [
         { value: 'all', label: '全部实例完成' },
@@ -353,6 +353,16 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
         instanceRow.appendChild(selectInput(run.instance || '', instanceOptions.length ? instanceOptions : [{ value: run.instance || '', label: run.instance || '未配置实例' }], (value) => mutate(() => { run.instance = value; })));
         const workflowRow = field(block, '工作流');
         workflowRow.appendChild(selectInput(run.workflow || '', workflowOptions.length ? [{ value: '', label: '选择工作流' }, ...workflowOptions] : [{ value: run.workflow || '', label: run.workflow || '输入路径' }], (value) => mutate(() => { run.workflow = value; run.inputs = {}; })));
+        const attemptsRow = field(block, '最多尝试次数');
+        attemptsRow.appendChild(textInput(run.attempts ?? 1, (value) => {
+          const parsed = Number(value);
+          if (Number.isInteger(parsed) && parsed >= 1) mutate(() => { run.attempts = parsed; });
+        }, { type: 'number', min: 1, step: 1 }));
+        const retryDelayRow = field(block, '失败重试间隔（秒）');
+        retryDelayRow.appendChild(textInput(run.delay_seconds ?? 0, (value) => {
+          const parsed = Number(value);
+          if (Number.isFinite(parsed) && parsed >= 0) mutate(() => { run.delay_seconds = parsed; });
+        }, { type: 'number', min: 0, step: 0.5 }));
         const edit = el('button', 'full-command', `编辑工作流输入（${workflowInputs(run.workflow).length}）`);
         edit.addEventListener('click', () => {
           state.selected.clear();
@@ -367,7 +377,7 @@ export function createCompositeInspector(deps: CompositeInspectorDeps): Composit
       addRun.addEventListener('click', () => {
         const index = node.runs.length;
         mutate(() => {
-          node.runs.push({ instance: state.instances?.[0]?.id || '', workflow: '', inputs: {} });
+          node.runs.push({ instance: state.instances?.[0]?.id || '', workflow: '', inputs: {}, attempts: 1, delay_seconds: 0 });
           state.selected.clear();
           state.selectedEdge = null;
           state.selectedRun = { nodeId: node.id ?? '', index };

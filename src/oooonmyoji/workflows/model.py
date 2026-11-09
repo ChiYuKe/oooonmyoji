@@ -101,6 +101,8 @@ class InstanceParallelRun:
     instance: str
     workflow: str
     inputs: dict[str, Any] = field(default_factory=dict)
+    attempts: int = 1
+    delay_seconds: float = 0.0
 
 
 @dataclass(frozen=True)

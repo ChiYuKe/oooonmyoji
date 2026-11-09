@@ -10,8 +10,12 @@ from .stateflow import TapMatchAction, DismissTemplateUntilTextAction, RecoverSt
 from .subworkflow import RunWorkflowAction, SelectWorkflowAction, SequenceWorkflowAction
 from .text_wait import WaitTextAction, WaitAnyTextAction
 from .signal import EmitSignalAction, WaitSignalAction
+from .hyakki import DetectObjectsAction, CaptureDatasetAction, HyakkiPlayAction
 
 __all__ = [
+    "DetectObjectsAction",
+    "CaptureDatasetAction",
+    "HyakkiPlayAction",
     "AssertAction",
     "CaptureAction",
     "DetectStateAction",

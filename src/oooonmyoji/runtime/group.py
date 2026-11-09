@@ -27,12 +27,12 @@ class _Group:
 def group_status(group: _Group) -> str:
     if group.terminal_status is not None:
         return group.terminal_status
-    if len(group.records) < len(group.run_ids):
+    if any(run_id not in group.records for run_id in group.run_ids):
         return RunStatus.QUEUED.value
-    statuses = []
-    for run_id in group.run_ids:
-        record = group.records.get(run_id)
-        statuses.append(record.get("status") if isinstance(record, dict) else RunStatus.FAILED.value)
+    statuses = [
+        group.records[run_id].get("status") if isinstance(group.records.get(run_id), dict) else RunStatus.FAILED.value
+        for run_id in group.run_ids
+    ]
     if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
         return RunStatus.SUCCEEDED.value
     if all(status == RunStatus.SUCCEEDED.value for status in statuses):

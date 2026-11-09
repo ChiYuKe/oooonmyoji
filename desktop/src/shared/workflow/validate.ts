@@ -269,7 +269,13 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
           if (typeof run.workflow !== 'string' || !run.workflow.trim()) issues.push(issue([...runPath, 'workflow'], 'workflow 必须是非空字符串', 'invalid-instance-run'));
           if (run.inputs !== undefined && !isObject(run.inputs)) issues.push(issue([...runPath, 'inputs'], 'inputs 必须是对象', 'invalid-instance-inputs'));
           if (run.inputs !== undefined) validateInstanceParallelInputs(run.inputs, [...runPath, 'inputs'], issues);
-          const allowed = new Set(['instance', 'workflow', 'inputs']);
+          if (run.attempts !== undefined && (!Number.isInteger(run.attempts) || (run.attempts as number) < 1)) {
+            issues.push(issue([...runPath, 'attempts'], 'attempts 必须是正整数', 'invalid-instance-run'));
+          }
+          if (run.delay_seconds !== undefined && (typeof run.delay_seconds !== 'number' || !Number.isFinite(run.delay_seconds) || run.delay_seconds < 0)) {
+            issues.push(issue([...runPath, 'delay_seconds'], 'delay_seconds 必须是非负数', 'invalid-instance-run'));
+          }
+          const allowed = new Set(['instance', 'workflow', 'inputs', 'attempts', 'delay_seconds']);
           for (const key of Object.keys(run)) if (!allowed.has(key)) issues.push(issue([...runPath, key], `运行项包含未知字段：${key}`, 'invalid-instance-run'));
         });
       }
@@ -485,7 +491,7 @@ export function buildWorkflowSchema(info: WorkflowInfo, catalog: ActionCatalogLi
               type: 'array', minItems: 1,
               items: {
                 type: 'object', required: ['instance', 'workflow'],
-                properties: { instance: { type: 'string', minLength: 1 }, workflow: { type: 'string', minLength: 1 }, inputs: { type: 'object' } },
+                properties: { instance: { type: 'string', minLength: 1 }, workflow: { type: 'string', minLength: 1 }, inputs: { type: 'object' }, attempts: { type: 'integer', minimum: 1 }, delay_seconds: { type: 'number', minimum: 0 } },
                 additionalProperties: false,
               },
             },

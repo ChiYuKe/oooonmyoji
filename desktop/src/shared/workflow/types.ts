@@ -73,6 +73,8 @@ export interface InstanceParallelRunInfo {
   instance: string;
   workflow: string;
   inputs: Record<string, unknown>;
+  attempts?: number;
+  delaySeconds?: number;
 }
 
 export interface WorkflowInfo {

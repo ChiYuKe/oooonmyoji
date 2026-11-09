@@ -58,6 +58,23 @@ OCR 引擎时会下载中文模型，并在 OCR 工作进程中共享一份模�
 实例 ID 和回退端口的显式覆盖；后续三开、四开不需要继续增加配置。运行
 下面的 `list-instances` 命令可查看当前解析结果。
 
+## 游戏资源数据更新（式神、御魂）
+
+图鉴、配装和斗技模拟用的式神面板、头像、技能、御魂套装目录与套装图标都内置在仓库里，来自网易公开资源；
+更新只需联网，不使用游戏账号或登录凭据：
+
+```powershell
+.\.venv\Scripts\python.exe -m src.oooonmyoji.tools.update_shikigami_data   # 式神目录、面板、头像、技能与技能图标
+.\.venv\Scripts\python.exe -m src.oooonmyoji.tools.fetch_soul_icons        # 御魂套装图标，新套装自动发现
+.\.venv\Scripts\python.exe -m src.oooonmyoji.tools.fetch_soul_catalog      # 御魂套装目录与式神面板 → desktop/src/shared/soul-catalog-data.ts
+```
+
+游戏上新御魂后先跑 `fetch_soul_icons`（它会读藏宝阁官方套装表，把新编号补进
+`assets/soul-icons/manifest.json` 再下载图标），再跑 `fetch_soul_catalog` 刷新套装目录和式神面板。
+`fetch_soul_icons` 支持 `--offline`（只刷新清单里已有编号）和 `--ids <编号>`（追加官方表还没有的编号）。
+式神数据的细节见 [docs/shikigami-data-update.md](docs/shikigami-data-update.md)，套装图标见
+[assets/soul-icons/README.md](assets/soul-icons/README.md)。
+
 ## 桌面端运行
 
 日常使用统一从独立的 **AutoFlow Studio** 桌面端（`desktop/`，Electron）操作。它直接读取项目
@@ -525,20 +542,20 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 步骤截图时可设置 `"save_screenshots": true` —— 它只给**任务节点**存（容器与值卡片
 自己既不抓屏也不点击，存下来只是上一帧的复制品）。排查坐标和识别问题时设置
 `"debug": {"enabled": true, "annotate_screenshots": true}`，运行器会在
-`artifacts/<run-id>/debug/` 为每个任务节点保存唯一编号的截图，并标出 ROI、
+`artifacts/<instance-id>/<run-id>/debug/` 为每个任务节点保存唯一编号的截图，并标出 ROI、
 模板匹配度、原点击位置和随机偏移后的实际位置。桌面端可在“设置 > 运行 >
 调试截图”里用一个总开关切换，它同时写下面两个配置键 —— **关掉就一张截图都不写**：
 
 | 配置键 | 写出来的东西 |
 |---|---|
-| `save_screenshots` | `artifacts/<run-id>/step-<节点id>.png`、`last-frame.png`，以及运行日志里的缩略图 |
-| `debug.enabled` | `artifacts/<run-id>/debug/<序号>-<工作流>-<步骤>-<状态>.png`（带标注，由 `annotate_screenshots` 决定是否画 ROI/匹配度/点击位置） |
+| `save_screenshots` | `artifacts/<instance-id>/<run-id>/step-<节点id>.png`、`last-frame.png`，以及运行日志里的缩略图 |
+| `debug.enabled` | `artifacts/<instance-id>/<run-id>/debug/<序号>-<工作流>-<步骤>-<状态>.png`（带标注，由 `annotate_screenshots` 决定是否画 ROI/匹配度/点击位置） |
 
 只想留其中一份可以手改配置（总开关在读取时任一为真即算开着）。设置从下一次运行开始生效；
 打开设置页时开关按配置文件里的真实值回填，下面那行状态会把真实值写出来，读取或保存失败
 则显示红字，而不是默默留空让人以为开关失效。
 工作流显式使用 `core.save_frame` 时仍会保存指定截图。失败或中断运行写入
-`artifacts/<run-id>/`，包括失败元数据、OCR/模板结果和一张最终现场图；选择器
+`artifacts/<instance-id>/<run-id>/`，包括失败元数据、OCR/模板结果和一张最终现场图；选择器
 正常回退产生的中间失败不会保存截图。
 
 节点一多，「停在哪个节点」不足以定位问题，所以每个步骤事件都带执行路径：
@@ -552,14 +569,7 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 奖励统计截图按游戏实例跨运行滚动保留最近 10 局；OCR 尚未处理的截图不会提前
 删除，结构化奖励统计和运行事件日志不受截图清理影响。
 
-维护脚本默认只显示清理计划，不修改文件：
-
-```powershell
-.\scripts\cleanup-artifacts.ps1 -KeepLatestRuns 10 -ClearCaches
-```
-
-确认预览内容后添加 `-Apply` 执行。脚本保留最新运行、结构化统计、日志和参考
-素材，清理旧工作流图片、重复失败截图、临时验证目录及可再生成的测试缓存。
+运行服务启动时会立即清理一次，运行期间每 24 小时清理一次：运行记录、关联事件日志和失败截图只保留最近 15 次运行；临时运行输入保留 1 天。UI 冒烟测试输出目录每次清理时都会清空。版本历史、训练数据、审批审计、结构化奖励统计和其他参考素材会保留。清理结果会记入运行日志目录 `logs/`。
 
 单元测试：
 

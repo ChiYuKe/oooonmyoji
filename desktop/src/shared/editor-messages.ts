@@ -117,6 +117,7 @@ export interface RunWorkflowMessage {
   type: 'runWorkflow';
   text?: unknown;
   instanceId?: unknown;
+  instanceRunIndex?: unknown;
 }
 
 export interface OpenWorkflowTestMessage {

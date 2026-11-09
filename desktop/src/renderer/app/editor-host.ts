@@ -401,7 +401,12 @@ export function createEditorHost(deps: EditorHostDeps): EditorHost {
         case 'runWorkflow': {
           const text = String(message.text ?? workspace.tab(targetUri)?.text ?? '');
           workspace.setDocumentText(targetUri, text);
-          await api.runWorkflow({ uri: targetUri, instanceId: String(message.instanceId ?? getSelectedInstance()), text });
+          await api.runWorkflow({
+            uri: targetUri,
+            instanceId: String(message.instanceId ?? getSelectedInstance()),
+            text,
+            ...(Number.isInteger(message.instanceRunIndex) ? { instanceRunIndex: Number(message.instanceRunIndex) } : {}),
+          });
           showRuntimePanel();
           return;
         }

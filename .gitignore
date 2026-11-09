@@ -44,6 +44,13 @@ desktop/%SystemDrive%/
 /%SystemDrive%/
 .workbuddy-ai/
 
+# Local 百鬼夜行 YOLO material: captured frames / labeled datasets, training runs,
+# downloaded wheels and pretrained weights stay on disk only. See docs/hyakki-yolo.md.
+/datasets/
+/runs/
+/*.pt
+/*.whl
+
 # Credentials stay local, including encrypted AI settings and temporary/backup copies.
 ai-settings.json*
 .env

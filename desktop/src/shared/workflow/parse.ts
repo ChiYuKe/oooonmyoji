@@ -80,6 +80,8 @@ export function parseWorkflow(input: unknown): WorkflowInfo {
             instance: typeof run.instance === 'string' ? run.instance : '',
             workflow: typeof run.workflow === 'string' ? run.workflow : '',
             inputs: isObject(run.inputs) ? run.inputs : {},
+            attempts: typeof run.attempts === 'number' ? run.attempts : undefined,
+            delaySeconds: typeof run.delay_seconds === 'number' ? run.delay_seconds : undefined,
           }];
         }) : [],
         waitFor: object.wait_for === 'any' ? 'any' : 'all',

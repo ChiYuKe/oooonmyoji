@@ -44,6 +44,8 @@ class GroupWaiter:
         cancel_group_runs: Callable[[_Group], None],
         mark_group_timeout: Callable[[_Group], None],
         finish_group: Callable[[_Group], None],
+        retry_failed_run: Callable[[_Group, str, dict[str, Any]], bool] | None = None,
+        record_terminal_run: Callable[[_Group, str, dict[str, Any]], None] | None = None,
         check_workers: Callable[[], None],
         poll_interval: float = 0.1,
     ) -> None:
@@ -53,6 +55,8 @@ class GroupWaiter:
         self.cancel_group_runs = cancel_group_runs
         self.mark_group_timeout = mark_group_timeout
         self.finish_group = finish_group
+        self.retry_failed_run = retry_failed_run or (lambda _group, _run_id, _record: False)
+        self.record_terminal_run = record_terminal_run or (lambda _group, _run_id, _record: None)
         self.check_workers = check_workers
         self._poll_interval = poll_interval
 
@@ -73,17 +77,21 @@ class GroupWaiter:
                     continue
                 record = self.read_run_record(run_id)
                 if isinstance(record, dict) and record.get("status") in TERMINAL_STATUSES:
+                    if record.get("status") in {RunStatus.FAILED.value, RunStatus.INTERRUPTED.value} and self.retry_failed_run(group, run_id, record):
+                        continue
+                    self.record_terminal_run(group, run_id, record)
                     with self._locked():
                         group.records.setdefault(run_id, record)
             with self._locked():
-                records_count = len(group.records)
-                statuses = [record.get("status") for record in group.records.values() if isinstance(record, dict)]
+                current_records = [group.records.get(run_id) for run_id in group.run_ids]
+                all_current_recorded = all(isinstance(record, dict) for record in current_records)
+                statuses = [record.get("status") for record in current_records if isinstance(record, dict)]
             if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
                 if group.node.cancel_on_failure:
                     self.cancel_group_runs(group)
                 self.finish_group(group)
                 return
-            if records_count == len(run_ids):
+            if all_current_recorded:
                 if group.node.cancel_on_failure and not failure_requested and any(status != RunStatus.SUCCEEDED.value for status in statuses):
                     failure_requested = True
                 self.finish_group(group)

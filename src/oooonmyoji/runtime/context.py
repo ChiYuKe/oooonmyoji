@@ -73,6 +73,26 @@ class TaskContextImpl:
             "awarded_since_confirmation": 0,
         }
         self._deadline: float | None = None
+        # YOLO is loaded only by detector actions, scoped to this task context.
+        self._detectors: dict[Path, Any] = {}
+        self._detector_lock = threading.RLock()
+
+    def detect_objects(self, model: str, *, frame: DeviceFrame | None = None, **options: Any) -> Any:
+        from ..vision.yolo import YoloDetector, resolve_model
+
+        self.check_cancelled()
+        path = resolve_model(self.template_root, model)
+        with self._detector_lock:
+            detector = self._detectors.get(path)
+            if detector is None:
+                if len(self._detectors) >= 2:
+                    # Bounded task-local cache; in-flight calls retain their own reference.
+                    self._detectors.pop(next(iter(self._detectors)))
+                detector = YoloDetector(path)
+                self._detectors[path] = detector
+        result = detector.detect(frame if frame is not None else self.capture(), self.mapper, **options)
+        self.check_cancelled()
+        return result
 
     @property
     def last_frame(self) -> DeviceFrame | None:

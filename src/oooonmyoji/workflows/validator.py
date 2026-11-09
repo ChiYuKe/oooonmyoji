@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +126,12 @@ def validate_workflow(
                 run_inputs = run_value.get("inputs", {})
                 if not isinstance(run_inputs, dict):
                     raise ConfigError(f"{node_label(index, item)}.runs[{run_index}].inputs must be an object")
+                attempts = run_value.get("attempts", 1)
+                if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+                    raise ConfigError(f"{node_label(index, item)}.runs[{run_index}].attempts must be a positive integer")
+                delay_seconds = run_value.get("delay_seconds", 0.0)
+                if isinstance(delay_seconds, bool) or not isinstance(delay_seconds, (int, float)) or not isfinite(delay_seconds) or delay_seconds < 0:
+                    raise ConfigError(f"{node_label(index, item)}.runs[{run_index}].delay_seconds must be a non-negative number")
                 validate_instance_parallel_inputs(run_inputs, reference_schema=reference_schema, path=f"{node_label(index, item)}.runs[{run_index}].inputs")
                 validate_child_inputs(
                     base_workflow_dir,
@@ -374,6 +381,8 @@ def validate_workflow(
                 instance=str(run_value["instance"]),
                 workflow=str(run_value["workflow"]),
                 inputs=deepcopy(run_value.get("inputs", {})),
+                attempts=run_value.get("attempts", 1),
+                delay_seconds=float(run_value.get("delay_seconds", 0.0)),
             )
             for run_value in item.get("runs", [])
         ) if node_type == "instance_parallel" else ()

@@ -18,7 +18,7 @@
   <div id="app" class="vision-app live-app">
     <div class="custom-titlebar">
       <img class="titlebar-icon" src="./assets/onmyoji-icon.png" alt="AutoFlow Studio" draggable="false" />
-      <span class="vision-title-text">实时视觉监视</span>
+      <span id="live-title" class="vision-title-text">实时视觉监视</span>
       <span id="live-instance-label" class="vision-instance-label"></span>
       <span class="vision-connection">
         <span id="live-connection-dot" class="vision-dot"></span>
@@ -67,6 +67,7 @@
             <span class="live-legend-item match">模板匹配</span>
             <span class="live-legend-item ocr">OCR</span>
             <span class="live-legend-item click">点击</span>
+            <span class="live-legend-item yolo hidden">YOLO</span>
           </div>
         </section>
 
@@ -79,6 +80,27 @@
             <button id="live-freeze" class="vision-command" type="button" title="冻结画面，便于截图或核对"><i data-lucide="pause"></i><span>冻结画面</span></button>
             <button id="live-save" class="vision-command" type="button" title="把带标注的当前画面导出为 PNG"><i data-lucide="image-down"></i><span>保存画面</span></button>
             <pre id="live-summary" class="vision-pre"></pre>
+          </section>
+
+          <section id="live-yolo-card" class="vision-card hidden">
+            <div class="vision-card-head">
+              <h3>YOLO 命中</h3>
+              <span id="live-yolo-count" class="live-count">0</span>
+            </div>
+            <div class="live-yolo-model-row">
+              <span id="live-yolo-model">训练权重 best.pt</span>
+              <button id="live-yolo-choose" class="vision-btn small" type="button">选择模型</button>
+            </div>
+            <label class="live-yolo-confidence">置信度阈值
+              <select id="live-yolo-confidence" aria-label="YOLO 置信度阈值">
+                <option value="0.15">15%</option><option value="0.25" selected>25%</option>
+                <option value="0.35">35%</option><option value="0.5">50%</option>
+                <option value="0.65">65%</option><option value="0.8">80%</option>
+              </select>
+            </label>
+            <div id="live-yolo-status" class="vision-muted">等待实时画面</div>
+            <ul id="live-yolo-list" class="vision-match-list"></ul>
+            <div id="live-yolo-empty" class="vision-muted">当前画面没有命中目标</div>
           </section>
 
           <section class="vision-card">

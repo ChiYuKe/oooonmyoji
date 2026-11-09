@@ -15,6 +15,7 @@ from typing import Any, Callable
 from ..devices.protocol import DeviceFrame
 from ..naming import safe_name
 from ..vision.template import TemplateMatcher
+from .artifact_paths import instance_artifact_dir, run_artifact_dir
 
 
 REWARD_SCREENSHOT_RETENTION_BATTLES = 10
@@ -221,12 +222,13 @@ class RewardStatsProcessor:
 
         artifact_root = self.artifact_dir.resolve()
         screenshot = Path(screenshot_value).resolve()
-        expected_directory = (artifact_root / run_id / "rewards").resolve()
+        expected_directory = (run_artifact_dir(artifact_root, instance_id, run_id) / "rewards").resolve()
+        legacy_directory = (artifact_root / run_id / "rewards").resolve()
         try:
             expected_directory.relative_to(artifact_root)
         except ValueError:
             return
-        if screenshot.parent != expected_directory:
+        if screenshot.parent not in {expected_directory, legacy_directory}:
             return
         try:
             processed_through = screenshot.stat().st_mtime_ns
@@ -296,6 +298,9 @@ class RewardStatsProcessor:
         artifact_root = self.artifact_dir.resolve()
         try:
             run_directories = tuple(path for path in artifact_root.iterdir() if path.is_dir())
+            instance_directory = instance_artifact_dir(artifact_root, instance_id)
+            if instance_directory.is_dir():
+                run_directories += tuple(path for path in instance_directory.iterdir() if path.is_dir())
         except OSError as exc:
             self._emit("reward_stats.screenshot_prune_failed", instance_id=instance_id, error=str(exc))
             self._indexed_instances.add(instance_id)

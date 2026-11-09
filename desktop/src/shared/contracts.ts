@@ -174,6 +174,10 @@ export interface McpApprovalRequest {
 }
 
 export interface RuntimeStateEvent {
+  /** Existing concurrent logs must be preserved when the source list changes. */
+  continuing?: boolean;
+  /** State of the launch that changed, while state describes all active launches. */
+  sessionState?: RuntimeStateEvent['state'];
   state: 'idle' | 'running' | 'stopping' | 'succeeded' | 'failed';
   label: string;
   workflow?: string;
@@ -269,6 +273,7 @@ export interface RunWorkflowRequest {
   instanceId: string;
   text: string;
   inputs?: Record<string, unknown>;
+  instanceRunIndex?: number;
 }
 
 /** 模拟器画面测试工具：后端推流事件（JSON 行协议透传，附带 type 字段）。 */
@@ -379,6 +384,24 @@ export interface LiveViewFrame {
   reference_height: number;
   /** 预览帧的 JPEG base64。 */
   image: string;
+  /** YOLO 独立采集通道可能使用 PNG 帧。 */
+  image_mime?: 'image/jpeg' | 'image/png';
+  /** YOLO 实时检测结果；仅在「YOLO 实时检测」工具中附加。 */
+  yolo?: LiveViewYoloResult;
+}
+
+export interface LiveViewYoloResult {
+  model?: string;
+  device?: string;
+  inferenceMs?: number;
+  detections?: Array<{
+    classId: number;
+    label: string;
+    confidence: number;
+    /** 预览帧像素坐标：x1, y1, x2, y2。 */
+    box: [number, number, number, number];
+  }>;
+  error?: string;
 }
 
 export type LiveViewPollResult =
@@ -575,13 +598,15 @@ export interface OnmyojiDesktopApi {
   /** 打开（或聚焦）独立的模拟器画面测试工具窗口。 */
   openVisionTest(instanceId: string): Promise<void>;
   /** 打开（或聚焦）独立的实时视觉监视窗口。 */
-  openLiveView(instanceId: string): Promise<void>;
+  openLiveView(instanceId: string, yoloMode?: boolean): Promise<void>;
   /** 实时视觉窗口内调用：开启/关闭对运行时预览帧的轮询。 */
   liveViewWatch(watching: boolean): Promise<void>;
   /** 实时视觉窗口内调用：设置刷新间隔（毫秒），会下发给正在运行的预览通道。 */
   liveViewSetInterval(intervalMs: number): Promise<number>;
   /** 实时视觉窗口内调用：取一帧最新画面（无新帧时返回 unchanged）。 */
-  liveViewPoll(): Promise<LiveViewPollResult>;
+  liveViewPoll(confidence?: number): Promise<LiveViewPollResult>;
+  /** 打开模型选择器，返回所选 YOLO 权重路径；取消时返回 null。 */
+  liveViewChooseYoloModel(): Promise<string | null>;
   /** 用系统默认程序打开项目 README 使用说明。 */
   openReadme(): Promise<void>;
   /** 工具窗口页面内调用：开始画面推流并订阅事件。 */

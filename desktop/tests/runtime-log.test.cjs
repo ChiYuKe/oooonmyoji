@@ -98,6 +98,26 @@ test('compact rows keep full detail data and show failures without expansion',()
   assert.equal(h.$('completed-count').textContent,'1'); assert.equal(h.$('failed-count').textContent,'1');
 });
 
+test('adding a concurrent source preserves existing rows, selection and reading position',()=>{
+  const h=harness();
+  const a={id:'a',instance:'mumu-1',label:'A',status:'running'};
+  const b={id:'b',instance:'mumu-2',label:'B',status:'running'};
+  init(h,[step('one')],[a]);
+  h.$('auto-scroll').checked=false;
+  h.$('step-list').children[0].open=true;
+  h.$('step-list').scrollTop=42;
+  h.send({type:'descriptorUpdated',descriptor:{workflow:'并发运行',sources:[a,b]}});
+  assert.equal(h.api.state.activeSource,'a');
+  assert.equal(h.api.state.runs.get('a').rows.length,1);
+  assert.equal(h.$('step-list').children[0].open,true);
+  assert.equal(h.$('step-list').scrollTop,42);
+  h.send({type:'runEvent',event:step('two','succeeded','b')});
+  assert.equal(h.api.state.runs.get('b').rows.length,1);
+  h.$('source-tabs').children[1].click();
+  assert.match(h.$('step-list').textContent,/节点 two/);
+  assert.doesNotMatch(h.$('step-list').textContent,/节点 one/);
+});
+
 test('expanded rows and reading position survive live refresh and source switching',()=>{
   const h=harness(); init(h,[step('one'),step('two','failed','b')],[{id:'a',label:'A',status:'succeeded'},{id:'b',label:'B',status:'failed'}]);
   h.$('auto-scroll').checked=false;

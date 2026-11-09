@@ -25,14 +25,20 @@ test('replacement button forwards current input path through asset browser to sc
     requestTemplateReplacement: browser.requestTemplateReplacement,
   });
   const node = { id: 'wait_floor_from_map', params: { template: 'assets/old.png' } };
-  for (const control of [
-    controls.literalControl(node, 'template', { type: 'asset' }, 'assets/old.png'),
-    controls.scalarValueControl({ type: 'asset' }, 'assets/old.png', () => {}, { node, key: 'template' }),
-  ]) {
-    control.children[0].value = 'assets/templates/souls/party/floor-team-button.png';
-    control.children.find(child => child.textContent === '替换').events.click();
+  // 详情栏两个入口：顶层参数走 literalControl，嵌套字段走 scalarValueControl；后者的
+  // 「浏览／截取／替换」收在 asset-control-actions 一行里（见 46ee19e），点击后还要把
+  // 截取结果回填到输入框，所以两边的返回值都要检查。
+  const cases = [
+    { control: controls.literalControl(node, 'template', { type: 'asset' }, 'assets/old.png'), nested: false },
+    { control: controls.scalarValueControl({ type: 'asset' }, 'assets/old.png', () => {}, { node, key: 'template' }), nested: true },
+  ];
+  for (const { control, nested } of cases) {
+    const actions = nested ? control.children.find(child => child.className === 'asset-control-actions') : control;
+    const input = nested ? control.children[0] : control.children[0];
+    input.value = 'assets/templates/souls/party/floor-team-button.png';
+    actions.children.find(child => child.textContent === '替换').events.click();
     assert.equal(messages.at(-1).type, 'pickRoi');
-    assert.equal(messages.at(-1).targetPath, control.children[0].value);
+    assert.equal(messages.at(-1).targetPath, input.value);
     assert.equal(messages.at(-1).nodeId, node.id);
   }
 });

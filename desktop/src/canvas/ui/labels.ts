@@ -1,5 +1,14 @@
 /** User-facing names for action and parameter metadata. */
 const FIELD_LABELS: Record<string, string> = {
+  model: '检测模型', labels: '目标类别', priorities: '目标优先级', dry_run: '只观察',
+  iou: '重叠抑制阈值', image_size: '推理尺寸', device: '推理设备', confidence: '置信度',
+  count: '采集帧数', interval_seconds: '采集间隔（秒）', max_throws: '投豆次数上限',
+  duration_seconds: '最长时长（秒）', idle_timeout_seconds: '无目标停止时间（秒）',
+  frame_interval_seconds: '采样间隔（秒）', throw_interval_seconds: '投豆间隔（秒）',
+  target_interval_seconds: '同目标间隔（秒）', max_per_target: '同目标次数上限', min_hits: '最少观测帧数',
+  flight_seconds: '投豆延迟（秒）', max_frame_age_seconds: '最大画面年龄（秒）', aim_y: '垂直落点比例',
+  max_speed: '最大目标速度', track_distance: '跟踪关联距离', track_ttl_seconds: '遮挡保留时间（秒）',
+  active_template: '活动进行中模板', active_threshold: '活动模板阈值', end_template: '结算模板', end_threshold: '结算模板阈值',
   value: '值', message: '提示信息', fields: '字段列表', name: '名称', seconds: '时长（秒）',
   match: '匹配配置', template: '模板', template_roi: '模板区域', done_texts: '完成文字',
   done_roi: '完成区域', done_states: '完成状态', allow_ocr: '允许 OCR', timeout_seconds: '超时（秒）',
@@ -36,6 +45,7 @@ const ENUM_LABELS: Record<string, string> = {
 };
 
 export const ACTION_LABELS: Record<string, string> = {
+  'vision.detect_objects': 'YOLO 目标检测', 'vision.capture_dataset': '采集训练截图', 'hyakki.play': '百鬼夜行投豆',
   'core.assert': '断言校验', 'core.capture': '截取画面', 'core.log': '输出日志',
   'core.save_frame': '保存现场图', 'core.sleep': '等待',
   'input.dismiss_template_until_text': '点模板关闭至文字出现', 'input.key': '发送按键',
@@ -53,6 +63,8 @@ export const ACTION_LABELS: Record<string, string> = {
  * （参数 `threshold` 是阈值设置，输出里的 `x` 是命中框坐标），合表会互相污染。
  */
 const OUTPUT_LABELS: Record<string, string> = {
+  class_id: '类别编号', label: '类别名称', box: '目标边界框', directory: '采样目录',
+  frames: '检测帧数', throws: '实际投豆次数', planned_throws: '计划投豆次数', dry_run: '只观察', trace: '决策日志',
   state: '状态', source: '来源', confidence: '置信度', match: '匹配详情', matched: '匹配数量',
   elapsed_seconds: '耗时（秒）', index: '序号', count: '数量', center: '中心点',
   reference: '参考帧', width: '宽度', height: '高度', failure_frame: '失败现场图',
@@ -61,6 +73,7 @@ const OUTPUT_LABELS: Record<string, string> = {
   final_state: '结束状态', actions: '执行动作', origin_x: '原始 X', origin_y: '原始 Y',
   offset_x: '偏移 X', offset_y: '偏移 Y', interval_seconds: '等待间隔（秒）',
   revalidated: '是否重新校验', skipped: '是否跳过', verified_gone: '是否确认消失',
+  state_match: '下一状态匹配',
   length: '文字长度', timed_out: '是否超时', status: '状态', output: '输出', error: '错误',
   error_category: '错误类别', attempts: '尝试次数',
   found: '是否等到', matches: '匹配列表',

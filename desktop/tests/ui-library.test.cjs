@@ -445,7 +445,15 @@ test('structured inspector rows share fixed caption tracks and compact first-lin
   assert.equal(caption['grid-template-columns'],'minmax(0, 1fr) 30px');
   assert.equal(caption['padding-top'],'0');
   assert.equal(caption['min-height'],'var(--ui-height)');
-  css.walkDecls('--inspector-structured-label',decl=>assert.equal(decl.value,'82px','narrow panels must not shift the value column'));
+  // 嵌套对象项（消失状态列表等）统一收窄到 72px；其余结构化行必须保持一致，窄栏也不能改动它。
+  const labelWidths=new Set();
+  css.walkDecls('--inspector-structured-label',decl=>{
+    labelWidths.add(`${decl.parent.selector}:${decl.value}`);
+    assert(['82px','72px'].includes(decl.value),`unexpected caption width ${decl.value}`);
+    assert(!/max-width/.test(String(decl.parent.parent && decl.parent.parent.params || '')),'narrow panels must not shift the value column');
+  });
+  assert.equal(labelWidths.size,2,'only the top-level and nested cursor rows may set the caption width');
+  assert.equal(declarations('#inspector-body .object-array-body .structured-field')['--inspector-structured-label'],'72px');
   assert.equal(declarations('#inspector-body .structured-field > .inline-control > .ui-input')['flex-basis'],'100%');
   let rectRule=false;
   css.walkRules('#inspector-body .structured-field > .rect-control',rule=>{

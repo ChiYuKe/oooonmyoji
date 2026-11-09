@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from ..config.model import InstanceConfig
+from .artifact_paths import run_artifact_dir
 from .records import AtomicJsonStore, RunStatus
 from .worker import _Worker, _instance_worker
 
@@ -107,11 +108,14 @@ class WorkerLifecycle:
                 record["error"] = "instance worker exited unexpectedly"
                 record["error_category"] = "internal"
                 artifacts = record.setdefault("artifacts", [])
+                output_dir = run_artifact_dir(self.config.artifact_dir, instance_id, run_id)
                 if self.config.save_screenshots:
-                    last_frame = self.config.artifact_dir / run_id / "last-frame.png"
+                    last_frame = output_dir / "last-frame.png"
+                    if not last_frame.is_file():
+                        last_frame = self.config.artifact_dir / run_id / "last-frame.png"
                     if last_frame.is_file() and str(last_frame) not in artifacts:
                         artifacts.append(str(last_frame))
-                interrupted_metadata = self.config.artifact_dir / run_id / "interrupted.json"
+                interrupted_metadata = output_dir / "interrupted.json"
                 interrupted_metadata.parent.mkdir(parents=True, exist_ok=True)
                 interrupted_metadata.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 if str(interrupted_metadata) not in artifacts:

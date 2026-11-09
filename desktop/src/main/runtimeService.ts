@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,7 +34,7 @@ function readJsonObject(file: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
 }
 
-export class RuntimeService extends EventEmitter<RuntimeEvents> {
+class RuntimeWorker extends EventEmitter<RuntimeEvents> {
   private activeProcess: ChildProcess | undefined;
   private activeDuelTools = 0;
   private stopRequested = false;
@@ -42,7 +43,7 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   private watchFinishTimer: NodeJS.Timeout | undefined;
   private watchedFiles = new Map<string, { offset: number; instanceId: string; pending: string }>();
 
-  constructor(private readonly project: ProjectService) {
+  constructor(protected readonly project: ProjectService) {
     super();
   }
 
@@ -289,18 +290,44 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
     if (this.recognizingDuelScreen) throw new Error('正在识别模拟器画面，请稍后再运行工作流');
     if (this.activeProcess && this.activeProcess.exitCode === null) throw new Error('已有工作流正在运行，请先停止');
     const launchStopGeneration = this.stopGeneration;
-    const workflowPath = this.project.resolveWorkflowPath(request.uri);
-    const workflowReference = this.project.workflowReference(request.uri);
+    let workflowPath = this.project.resolveWorkflowPath(request.uri);
+    let workflowReference = this.project.workflowReference(request.uri);
     await this.project.saveWorkflow(request.uri, request.text);
 
     let runs: Array<{ instance: string }> = [];
+    let selectedRunInputs: Record<string, unknown> | undefined;
+    let configuredRuns: ReturnType<typeof instanceParallelRuns> = [];
     try {
       // 磁盘上是 `.owf` 文本：实例并行项的识别统一走共享解析（它会先转成编辑形态）。
-      runs = instanceParallelRuns(parseDocument(request.text, path.basename(workflowPath)))
-        .filter((run) => typeof run.instance === 'string' && run.instance)
-        .map((run) => ({ instance: run.instance }));
+      configuredRuns = instanceParallelRuns(parseDocument(request.text, path.basename(workflowPath)));
     } catch {
       // The engine will provide the detailed parse failure in stderr.
+    }
+    if (request.instanceRunIndex !== undefined) {
+      const index = request.instanceRunIndex;
+      if (!Number.isInteger(index) || index < 0 || index >= configuredRuns.length) {
+        throw new Error('实例运行项已不存在，请刷新画布后重试');
+      }
+      const selected = configuredRuns[index];
+      if (!selected?.instance || !selected.workflow) throw new Error('请先为该实例配置实例和子工作流');
+      const containsReference = (value: unknown): boolean => {
+        if (Array.isArray(value)) return value.some(containsReference);
+        if (!value || typeof value !== 'object') return false;
+        if (typeof (value as Record<string, unknown>).ref === 'string') return true;
+        return Object.values(value as Record<string, unknown>).some(containsReference);
+      };
+      if (containsReference(selected.inputs)) {
+        throw new Error('该实例的输入引用了父工作流运行时数据，无法单独重跑；请改为固定输入，或运行整个实例并行节点');
+      }
+      const childPath = this.project.resolveWorkflowPath(path.resolve(this.project.workflowRoot, selected.workflow));
+      workflowPath = childPath;
+      workflowReference = this.project.workflowReference(childPath);
+      selectedRunInputs = selected.inputs;
+      request.instanceId = selected.instance;
+    } else {
+      runs = configuredRuns
+        .filter((run) => typeof run.instance === 'string' && run.instance)
+        .map((run) => ({ instance: run.instance }));
     }
     const availableInstances = await this.listInstances();
     const available = new Set(availableInstances.map((item) => item.id));
@@ -318,10 +345,11 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
 
     const runDirectory = path.join(this.artifactDir, 'runs');
     await fs.promises.mkdir(runDirectory, { recursive: true });
-    const stamp = Date.now();
+    const stamp = `${Date.now()}-${randomUUID()}`;
     const eventsFile = path.join(runDirectory, `desktop-events-${stamp}.jsonl`);
-    const configuredInputs = request.inputs && typeof request.inputs === 'object' && !Array.isArray(request.inputs)
-      ? request.inputs
+    const inputSource = selectedRunInputs ?? request.inputs;
+    const configuredInputs = inputSource && typeof inputSource === 'object' && !Array.isArray(inputSource)
+      ? inputSource
       : undefined;
     const inputsFile = configuredInputs && Object.keys(configuredInputs).length > 0
       ? path.join(runDirectory, `desktop-inputs-${stamp}.json`)
@@ -624,5 +652,101 @@ export class RuntimeService extends EventEmitter<RuntimeEvents> {
   async dispose(): Promise<void> {
     this.stopWatching();
     await this.stopWorkflow();
+  }
+}
+
+/** Each launch owns its process and event watcher; reservations are shared across launches. */
+export class RuntimeService extends RuntimeWorker {
+  private readonly sessions = new Map<RuntimeWorker, {
+    instances: Set<string>;
+    sources: NonNullable<RuntimeStateEvent['sources']>;
+  }>();
+  private readonly logSources = new Map<string, NonNullable<RuntimeStateEvent['sources']>[number]>();
+  private continuing = false;
+
+  override get running(): boolean {
+    return this.sessions.size > 0;
+  }
+
+  override async runWorkflow(request: RunWorkflowRequest): Promise<void> {
+    if (this.recognizingDuelScreen) throw new Error('正在识别模拟器画面，请稍后再运行工作流');
+    const parsed = instanceParallelRuns(parseDocument(request.text, path.basename(request.uri)));
+    const selected = request.instanceRunIndex === undefined ? undefined : parsed[request.instanceRunIndex];
+    if (request.instanceRunIndex !== undefined && (!Number.isInteger(request.instanceRunIndex) || !selected)) {
+      throw new Error('实例运行项已不存在，请刷新画布后重试');
+    }
+    const instances = new Set(selected ? [selected.instance] : parsed.length ? parsed.map(run => run.instance) : [request.instanceId]);
+    for (const session of this.sessions.values()) {
+      const occupied = [...instances].filter(instance => session.instances.has(instance));
+      if (occupied.length) throw new Error(`实例正在运行工作流：${occupied.join('、')}。请选择空闲实例，或先停止当前运行`);
+    }
+    if (!this.running) {
+      this.logSources.clear();
+      this.continuing = false;
+    }
+    const worker = new RuntimeWorker(this.project);
+    worker.liveViewIntervalMs = this.liveViewIntervalMs;
+    const session = { instances, sources: [] as NonNullable<RuntimeStateEvent['sources']> };
+    // Reserve synchronously, before saving/discovering devices can yield to another launch.
+    this.sessions.set(worker, session);
+    const id = randomUUID();
+    worker.on('output', event => this.emit('output', event));
+    worker.on('runEvent', event => {
+      const instance = String(event.instance_id || '');
+      const source = session.sources.find(item => item.instance === instance);
+      if (source && !this.logSources.has(source.id)) return;
+      if (source) event.log_source = source.id;
+      // Successful parallel children will not be retried. Failed children remain
+      // reserved because the supervisor may still retry them.
+      if (source && event.type === 'run_finished') {
+        source.status = String(event.status || 'failed');
+        if (event.status === 'succeeded') session.instances.delete(instance);
+      } else if (source && event.type === 'run_started') {
+        source.status = 'running';
+      }
+      this.emit('runEvent', event);
+    });
+    worker.on('state', event => {
+      if (event.state === 'running') {
+        session.sources = (event.sources ?? [{
+          id: event.instance || '', label: event.label,
+          workflow: path.basename(request.uri), instance: event.instance || '',
+          startedAt: event.startedAt || Date.now(), status: 'running',
+        }]).map(source => ({ ...source, id: `${id}:${source.instance}` }));
+        for (const source of session.sources) this.logSources.set(source.id, source);
+      } else if (event.state !== 'stopping') {
+        this.sessions.delete(worker);
+        for (const source of session.sources) {
+          if (source.status === 'running') source.status = event.state;
+        }
+      }
+      const continuing = this.continuing;
+      if (session.sources.length) this.continuing = true;
+      this.emit('state', {
+        ...event,
+        workflow: request.uri,
+        sessionState: event.state,
+        state: this.running && event.state !== 'stopping' ? 'running' : event.state,
+        label: this.running && event.state !== 'stopping' ? `正在运行 · ${this.sessions.size} 个工作流` : event.label,
+        sources: [...this.logSources.values()],
+        continuing,
+      });
+    });
+    try {
+      await worker.runWorkflow({ ...request });
+    } catch (error) {
+      this.sessions.delete(worker);
+      await worker.dispose();
+      throw error;
+    }
+  }
+
+  override async stopWorkflow(): Promise<void> {
+    await Promise.all([...this.sessions.keys()].map(worker => worker.stopWorkflow()));
+  }
+
+  override async dispose(): Promise<void> {
+    await Promise.all([...this.sessions.keys()].map(worker => worker.dispose()));
+    await super.dispose();
   }
 }

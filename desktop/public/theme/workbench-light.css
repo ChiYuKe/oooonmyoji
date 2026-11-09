@@ -1452,6 +1452,12 @@
 :root[data-theme="light"] .live-legend-item.click::before {
     background: #ffe8e8
 }
+:root[data-theme="light"] .live-legend-item.yolo::before {
+    background: #f3eeff
+}
+:root[data-theme="light"] .live-yolo-hit {
+    color: #232323 !important
+}
 :root[data-theme="light"] .vision-command.active {
     background: #e8e8e8;
     color: #675b48

@@ -764,7 +764,8 @@ function updateRuntimeState(event: RuntimeStateEvent): void {
   runtimeBusy = event.state === 'running' || event.state === 'stopping';
   if (event.state === 'running') {
     const workflow = decodePathLabel(String(event.workflow || workspace.activeUri()).replace(/\\/g, '/').split('/').pop() || '工作流');
-    runtimeLog.beginRun({
+    const updateLog = event.continuing ? runtimeLog.updateRun : runtimeLog.beginRun;
+    updateLog({
       workflow,
       instance: event.sources?.length ? `${event.sources.length} 个实例` : instanceLabelById(event.instance || selectedInstance),
       startedAt: event.startedAt ?? Date.now(),
@@ -778,7 +779,7 @@ function updateRuntimeState(event: RuntimeStateEvent): void {
       stopped: event.state === 'idle',
     });
   }
-  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = runtimeBusy || Boolean(overview.isRunning());
+  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = Boolean(overview.isRunning());
   document.querySelector<HTMLButtonElement>('#stop-button')!.disabled = !runtimeBusy && !overview.isRunning();
   overview.handleRuntimeState(event);
   overview.render();
@@ -866,7 +867,7 @@ async function openVisionTest(): Promise<void> {
  * 打开独立窗口的实时视觉监视：显示正在运行的工作流每一步“眼中的画面”
  * （模板匹配框 / ROI / OCR / 点击轨迹 / 当前节点状态）。
  */
-async function openLiveView(): Promise<void> {
+async function openLiveView(yoloMode = false): Promise<void> {
   if (liveViewOpening) return;
   if (!selectedInstance) {
     showToast('未检测到运行实例，请先启动 MuMu 模拟器', true);
@@ -874,9 +875,9 @@ async function openLiveView(): Promise<void> {
   }
   liveViewOpening = true;
   try {
-    await api.openLiveView(selectedInstance);
+    await api.openLiveView(selectedInstance, yoloMode);
   } catch (error) {
-    showToast(`打开实时视觉监视失败：${errorMessage(error)}`, true);
+    showToast(`打开${yoloMode ? 'YOLO 实时检测' : '实时视觉监视'}失败：${errorMessage(error)}`, true);
   } finally {
     liveViewOpening = false;
   }
@@ -963,6 +964,7 @@ function bindUi(): void {
       if (button.dataset.appCommand === 'settings') settings.openSettingsPanel();
       if (button.dataset.appCommand === 'visionTest') void openVisionTest();
       if (button.dataset.appCommand === 'liveView') void openLiveView();
+      if (button.dataset.appCommand === 'yoloLiveView') void openLiveView(true);
       if (button.dataset.appCommand === 'onmyojiTeamBuilder') {
         workbenchFrame?.show('onmyojiTeamBuilder');
       }

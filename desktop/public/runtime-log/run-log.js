@@ -920,6 +920,22 @@
       renderSourceTabs();
       setStatus(activeRun().status);
       render();
+    } else if (data.type === 'descriptorUpdated') {
+      state.descriptor = data.descriptor;
+      state.sources = data.descriptor.sources;
+      for (const source of state.sources) {
+        const run = state.runs.get(source.id);
+        if (run) {
+          run.source = source;
+          run.status = source.status;
+        } else {
+          state.runs.set(source.id, makeRun(source));
+        }
+      }
+      updateIdentity();
+      renderSourceTabs();
+      setStatus(activeRun().status);
+      render();
     } else if (data.type === 'runEvent') {
       acceptEvent(data.event, false);
     } else if (data.type === 'engineOutput') {

@@ -39,6 +39,7 @@ export interface RuntimeLog {
   appendRunEvent(event: Record<string, unknown>): void;
   /** 开始一次运行：重置并广播新的描述符。 */
   beginRun(descriptor: RuntimeLogDescriptor): void;
+  updateRun(descriptor: RuntimeLogDescriptor): void;
   /** 结束一次运行：广播进程结果。 */
   finishRun(result: RuntimeProcessResult): void;
 }
@@ -105,5 +106,10 @@ export function createRuntimeLog({ frame }: RuntimeLogDeps): RuntimeLog {
     post({ type: 'processFinished', ...processResult });
   }
 
-  return { post, sendInit, clear, markReady, appendOutput, appendRunEvent, beginRun, finishRun };
+  function updateRun(next: RuntimeLogDescriptor): void {
+    descriptor = next;
+    post({ type: 'descriptorUpdated', descriptor });
+  }
+
+  return { post, sendInit, clear, markReady, appendOutput, appendRunEvent, beginRun, updateRun, finishRun };
 }

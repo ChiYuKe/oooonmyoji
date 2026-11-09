@@ -191,6 +191,8 @@ node <id> <type> ["显示名"]      # 显示名即运行时字段 name；可省
   runs:                          # instance_parallel
     - instance: mumu-0
       workflow: activity_loop
+      attempts: 3
+      delay_seconds: 2
       inputs:
         rounds: 3
   wait_for: all

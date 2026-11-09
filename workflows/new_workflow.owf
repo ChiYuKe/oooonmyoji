@@ -1,0 +1,28 @@
+workflow new_workflow
+  version: 5.0.0
+  description: "双账号并跑结界突破_个人（mumu-2 / mumu-3，各 30 张突破符），运行前先点「另存为」改成自己的工作流名。"
+  resolution: [1920, 1080]
+  root: root_1
+  inputs: {}
+  variables: {}
+  node root_1 root 入口
+    at: [480, 0]
+  node instance_parallel_1 instance_parallel 四实例并行活动循环
+    at: [504, 184]
+    runs:
+      - instance: mumu-2
+        workflow: 结界突破_个人.owf
+        attempts: 3
+        delay_seconds: 3
+        inputs:
+          突破轮数: 30
+      - instance: mumu-3
+        workflow: 结界突破_个人.owf
+        attempts: 3
+        delay_seconds: 3
+        inputs:
+          突破轮数: 30
+    wait_for: all
+    cancel_on_failure: false
+  edges:
+    root_1 -> instance_parallel_1

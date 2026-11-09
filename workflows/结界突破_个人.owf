@@ -1,0 +1,194 @@
+workflow 结界突破_个人
+  version: 5.0.0
+  description: "个人结界突破挂机（不点刷新）：每轮用 selector 从卡 1 到卡 9 逐个试——点卡片后调 结界突破_单场，弹窗里 3 秒内出现「进攻」按钮就打完整场（该卡未破），没出现（卡已破）就换下一张；9 张全破时游戏自动刷新，下一轮扫描自然从卡 1 重新开始。轮数默认 30，对应打满 30/30 张突破符。"
+  resolution: [1920, 1080]
+  root: root_1
+  inputs:
+    突破轮数:
+      type: integer
+      default: 30
+      min: 1
+      description: "共进攻多少次；每次进攻消耗 1 张突破符，30 = 一次打满 30/30。突破符耗尽后整轮扫描全部落空，重试耗尽即失败退出（约 3 分钟）。"
+  variables: {}
+  node root_1 root 入口
+    at: [600, -136]
+  node sequence_1 sequence "主循环：repeat 轮数 × 逐卡扫描"
+    at: [600, 240]
+    decorator repeat
+    decorator retry
+      attempts: 2
+      delay_seconds: 2
+  node selector_1 selector "逐卡试打：点卡片 → 弹窗有「进攻」就打完整场；没弹换下一张"
+    at: [600, 560]
+    decorator retry
+      attempts: 3
+      delay_seconds: 2
+  node sequence_2 sequence 卡1
+    at: [168, 856]
+  node task_1 task 点卡片1（行1列1）
+    at: [-96, 1016]
+    action: input.tap
+    params:
+      x: 459
+      y: 308
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_2 task 调单场进攻
+    at: [160, 1016]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+      inputs: {}
+  node sequence_3 sequence 卡2
+    at: [328, 856]
+  node task_3 task 点卡片2（行1列2）
+    at: [220, 1020]
+    action: input.tap
+    params:
+      x: 957
+      y: 308
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_4 task 调单场进攻
+    at: [380, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_4 sequence 卡3
+    at: [440, 856]
+  node task_5 task 点卡片3（行1列3）
+    at: [420, 1020]
+    action: input.tap
+    params:
+      x: 1455
+      y: 308
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_6 task 调单场进攻
+    at: [580, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_5 sequence 卡4
+    at: [640, 860]
+  node task_7 task 点卡片4（行2列1）
+    at: [620, 1020]
+    action: input.tap
+    params:
+      x: 459
+      y: 511
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_8 task 调单场进攻
+    at: [780, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_6 sequence 卡5
+    at: [840, 860]
+  node task_9 task 点卡片5（行2列2）
+    at: [820, 1020]
+    action: input.tap
+    params:
+      x: 957
+      y: 511
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_10 task 调单场进攻
+    at: [980, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_7 sequence 卡6
+    at: [1040, 860]
+  node task_11 task 点卡片6（行2列3）
+    at: [1020, 1020]
+    action: input.tap
+    params:
+      x: 1455
+      y: 511
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_12 task 调单场进攻
+    at: [1180, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_8 sequence 卡7
+    at: [1240, 860]
+  node task_13 task 点卡片7（行3列1）
+    at: [1220, 1020]
+    action: input.tap
+    params:
+      x: 459
+      y: 714
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_14 task 调单场进攻
+    at: [1380, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_9 sequence 卡8
+    at: [1440, 860]
+  node task_15 task 点卡片8（行3列2）
+    at: [1420, 1020]
+    action: input.tap
+    params:
+      x: 957
+      y: 714
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_16 task 调单场进攻
+    at: [1580, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  node sequence_10 sequence 卡9
+    at: [1640, 860]
+  node task_17 task 点卡片9（行3列3）
+    at: [1620, 1020]
+    action: input.tap
+    params:
+      x: 1455
+      y: 714
+      random_interval: [0.3, 0.6]
+      random_offset: 12
+  node task_18 task 调单场进攻
+    at: [1780, 1020]
+    action: workflow.run
+    params:
+      workflow: 结界突破_单场.owf
+  var inputs.突破轮数
+    at: [880, 40]
+  edges:
+    var__inputs__突破轮数:out -> sequence_1:decorators.0.count
+    root_1 -> sequence_1
+    sequence_1 -> selector_1
+    selector_1 -> sequence_2
+    selector_1:then.1 -> sequence_3
+    selector_1:then.2 -> sequence_4
+    selector_1:then.3 -> sequence_5
+    selector_1:then.4 -> sequence_6
+    selector_1:then.5 -> sequence_7
+    selector_1:then.6 -> sequence_8
+    selector_1:then.7 -> sequence_9
+    selector_1:then.8 -> sequence_10
+    sequence_2 -> task_1
+    sequence_2:then.1 -> task_2
+    sequence_3 -> task_3
+    sequence_3:then.1 -> task_4
+    sequence_4 -> task_5
+    sequence_4:then.1 -> task_6
+    sequence_5 -> task_7
+    sequence_5:then.1 -> task_8
+    sequence_6 -> task_9
+    sequence_6:then.1 -> task_10
+    sequence_7 -> task_11
+    sequence_7:then.1 -> task_12
+    sequence_8 -> task_13
+    sequence_8:then.1 -> task_14
+    sequence_9 -> task_15
+    sequence_9:then.1 -> task_16
+    sequence_10 -> task_17
+    sequence_10:then.1 -> task_18

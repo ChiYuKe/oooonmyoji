@@ -1,6 +1,6 @@
 workflow 寮突破
   version: 5.0.0
-  description: ""
+  description: "寮结界突破挂机：按 page_machine 识别结算页与「可突破的结界」（亮标／灰标为同一状态的多个模板），命中就运行对应处理子图；未识别到状态时走兜底收尾子图判定是否打完——没有可突破结界则正常结束，不在结界突破页则失败退出。"
   resolution: [1920, 1080]
   root: root_1
   inputs:

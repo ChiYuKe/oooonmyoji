@@ -1,0 +1,23 @@
+workflow 百鬼夜行_观察
+  version: 6.0.0
+  description: 已进入活动后运行。需先配置模型、实际投豆区域及模型类别名称；默认只观察。
+  resolution: [1920, 1080]
+  root: root_1
+  inputs: {}
+  variables: {}
+  node root_1 root 入口
+    at: [0, 0]
+  node play task 百鬼夜行观察与预判
+    at: [0, 180]
+    action: hyakki.play
+    params:
+      model: models/hyakki/best.pt
+      roi: [0, 0, 1920, 1080]
+      priorities: [target]
+      dry_run: true
+      duration_seconds: 60
+      max_throws: 100
+      min_hits: 2
+      flight_seconds: 0.15
+  edges:
+    root_1 -> play

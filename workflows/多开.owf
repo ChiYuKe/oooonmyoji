@@ -1,0 +1,39 @@
+workflow 多实例活动副本
+  version: 5.0.0
+  description: "四实例并行入口：mumu-0～mumu-2 各跑活动副本（轮数 15 / 13 / 170），mumu-3 跑结界突破_个人；每个实例 attempts 3、延迟 3 秒独立重启。"
+  resolution: [1920, 1080]
+  root: root_1
+  inputs: {}
+  variables: {}
+  node root_1 root 入口
+    at: [504, -32]
+  node sequence_1 instance_parallel 四实例并行活动循环
+    at: [502, 159]
+    runs:
+      - instance: mumu-0
+        workflow: 活动循环.owf
+        attempts: 3
+        delay_seconds: 3
+        inputs:
+          sequence_1_repeat_count: 15
+      - instance: mumu-1
+        workflow: 活动循环.owf
+        attempts: 3
+        delay_seconds: 3
+        inputs:
+          sequence_1_repeat_count: 13
+      - instance: mumu-2
+        workflow: 活动循环.owf
+        attempts: 3
+        delay_seconds: 3
+        inputs:
+          sequence_1_repeat_count: 170
+      - instance: mumu-3
+        workflow: 结界突破_个人.owf
+        attempts: 3
+        delay_seconds: 3
+        inputs: {}
+    wait_for: all
+    cancel_on_failure: false
+  edges:
+    root_1 -> sequence_1

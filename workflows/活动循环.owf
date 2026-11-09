@@ -1,0 +1,68 @@
+workflow 活动副本
+  version: 5.0.0
+  description: "活动副本挂机：等挑战按钮模板 → 点它 → 等活动状态模板（最长 300 秒）→ 点掉并确认挑战按钮消失；外层按 sequence_1_repeat_count 循环（默认 167），循环与单步各带重试。"
+  resolution: [1920, 1080]
+  root: root_1
+  inputs:
+    sequence_1_repeat_count:
+      type: integer
+      default: 167
+      _autoPublished: true
+  variables: {}
+  node root_1 root 入口
+    at: [944, -136]
+  node task_1 task 等待活动目标模板
+    at: [168, 376]
+    action: vision.wait_any
+    params:
+      roi: [1539, 785, 381, 295]
+      timeout_seconds: 8
+      templates: [assets/templates/task_1-template.png]
+  node task_2 task 点击匹配目标
+    at: [584, 368]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      random_offset: 12
+      disappeared_state_timeout_seconds: 1
+  node sequence_1 sequence 活动循环与失败重试
+    at: [920, 144]
+    decorator repeat
+    decorator retry
+      attempts: 3
+      delay_seconds: 2
+  node task_3 task 等待下一活动状态
+    at: [1128, 560]
+    action: vision.wait_any
+    params:
+      roi: [678, 566, 555, 437]
+      templates: [assets/templates/task_3-templates.png]
+      timeout_seconds: 300
+  node task_4 task 点击并确认状态变化
+    at: [1552, 568]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      disappeared_states:
+        - name: 挑战
+          template: assets/templates/task_1-template.png
+          roi: [1597, 778, 323, 302]
+      disappeared_state_timeout_seconds: 1
+      random_offset: 12
+      verify_timeout_seconds: 8
+    decorator retry
+      attempts: 2
+      delay_seconds: 0.5
+  node sequence_2 sequence 单轮活动流程
+    at: [1416, 384]
+  var inputs.sequence_1_repeat_count
+  edges:
+    task_1:out.match -> task_2:match
+    var__inputs__sequence_1_repeat_count:out -> sequence_1:decorators.0.count
+    task_3:out.match -> task_4:match
+    root_1 -> sequence_1
+    sequence_1 -> task_1
+    sequence_1:then.1 -> task_2
+    sequence_1:then.2 -> sequence_2
+    sequence_2 -> task_3
+    sequence_2:then.1 -> task_4

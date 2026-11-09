@@ -5,8 +5,9 @@ workflow souls_party_duo
       扫地工（mumu-0）跑队长侧：建协战队伍 → 邀请好友「鱼不鲤窝」→ 等入队 → 循环开战结算。
       吃鱼（mumu-1）跑队员侧：待机等邀请弹窗 → 绿勾接受入队 → 等开战 → 点掉结算奖励。
 
-    两边都从「御魂选层页 / 庭院」这类正常停靠位置起步即可，队长侧要求当前画面能看到
-    御魂选层页右下角的「组队」按钮（看完一场战斗后队伍面板本来就是常驻的）。
+    两边都从「御魂选层页 / 庭院」这类正常停靠位置起步即可；队长侧的建队段目前是占位，
+    运行前请先手动进入「协战队伍」房间（协战队伍面板可见、好友位为空），首轮邀请由
+    工作流在房间内完成，之后每轮自动检查空位、掉队补邀、开战并结算续邀。
 
     运行：AutoFlow Studio 打开本工作流点播放，或
     `.\.venv\Scripts\python.exe -m src.oooonmyoji.cli --config .\config\config.json run-workflow souls_party_duo`
@@ -34,7 +35,7 @@ workflow souls_party_duo
     wait_for: all
     cancel_on_failure: false
   var inputs.运行轮数
-    at: [-368, 520]
+    at: [-312, 488]
   edges:
     var__inputs__运行轮数:out -> instance_parallel_1:runs.0.inputs.运行轮数
     var__inputs__运行轮数:out -> instance_parallel_1:runs.1.inputs.运行轮数

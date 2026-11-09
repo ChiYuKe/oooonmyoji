@@ -1,0 +1,113 @@
+workflow 结界突破_单场
+  version: 5.0.0
+  description: "结界突破单场进攻：进场先用 selector 清残留（有「点击屏幕继续」波/奖励面板就点掉，没有零成本通过）→ 等确认窗「进攻」按钮（宽 ROI 覆盖 9 个卡位弹窗）→ 点它开打 → 等结算提示（战斗结算/奖励面板两种模板）→ 点提示（retry ×6：每轮点掉一波，确认提示消失且「刷新」出现才通过，波数不限）→ 等「刷新」按钮确认回到九宫格突破页。弹窗没出现（卡片已破/道具说明浮窗/页面动画中）时 3 秒失败，由父工作流的 selector 换下一张卡（下一张的点击会顺带关掉浮窗）。单独运行没有意义，由 结界突破_个人.owf 在点完某张卡片后调用。"
+  resolution: [1920, 1080]
+  root: root_1
+  inputs: {}
+  variables: {}
+  _inputParams: {}
+  node root_1 root 入口
+    at: [1577, 0]
+  node sequence_1 sequence "清残留 → 进攻 → 战斗 → 清结算波 → 等刷新"
+    at: [1577, 208]
+  node selector_1 selector 进场清理：有残留提示就点掉；没有则确认干净直接过
+    at: [498, 416]
+    decorator retry
+      attempts: 4
+      delay_seconds: 0.3
+  node sequence_2 sequence 有残留：点掉
+    at: [830, 916]
+  node task_5 task 等待残留的「点击屏幕继续」
+    at: [664, 1124]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/task_6-templates.png, assets/templates/realm/realm-reward-continue.png]
+      roi: [679, 917, 555, 163]
+      threshold: 0.8
+      timeout_seconds: 2.5
+  node task_6 task 点掉残留提示
+    at: [996, 1124]
+    action: input.tap_match
+    params:
+      random_offset: 20
+  node sequence_3 sequence 没残留：确认干净
+    at: [166, 916]
+  node task_8 task 确认战斗结算提示不在
+    at: [0, 1124]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_6-templates.png
+      present: false
+      roi: [679, 917, 555, 163]
+      threshold: 0.8
+      timeout_seconds: 0.8
+  node task_9 task 确认奖励面板提示不在
+    at: [332, 1124]
+    action: vision.wait_template
+    params:
+      template: assets/templates/realm/realm-reward-continue.png
+      present: false
+      roi: [679, 917, 555, 163]
+      threshold: 0.8
+      timeout_seconds: 0.8
+  node task_1 task 等确认窗出现「进攻」按钮（宽ROI覆盖9个卡位弹窗）
+    at: [1328, 416]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/task_4-template.png]
+      roi: [380, 480, 1480, 600]
+      timeout_seconds: 3
+  node task_2 task 点「进攻」开打并确认按钮消失
+    at: [1660, 416]
+    action: input.tap_match
+    params:
+      verify_gone: true
+      verify_timeout_seconds: 10
+      random_offset: 15
+  node task_3 task 等战斗结束出现「点击屏幕继续」（战斗结算/奖励面板两种画面都要能识别）
+    at: [1992, 416]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/task_6-templates.png, assets/templates/realm/realm-reward-continue.png]
+      roi: [679, 917, 555, 163]
+      threshold: 0.8
+      timeout_seconds: 180
+  node task_4 task 点掉第一波「点击屏幕继续」（下一波长得一样，不校验消失）
+    at: [2324, 416]
+    action: input.tap_match
+    params:
+      random_offset: 20
+      disappeared_states:
+        - name: 刷新
+          template: assets/templates/realm/realm-grid-refresh.png
+          roi: [1392, 829, 350, 149]
+      hold_ms: 0
+      disappeared_state_timeout_seconds: 3
+      verify_gone: true
+    decorator retry
+      attempts: 6
+      delay_seconds: 0.2
+  node task_7 task 等「刷新」按钮出现（确认回到九宫格突破页再开下一轮）
+    at: [2656, 416]
+    action: vision.wait_any
+    params:
+      templates: [assets/templates/realm/realm-grid-refresh.png]
+      roi: [1400, 820, 380, 190]
+      timeout_seconds: 20
+  edges:
+    task_5:out.match -> task_6:match
+    task_1:out.match -> task_2:match
+    task_3:out.match -> task_4:match
+    root_1 -> sequence_1
+    sequence_1 -> selector_1
+    sequence_1:then.1 -> task_1
+    sequence_1:then.2 -> task_2
+    sequence_1:then.3 -> task_3
+    sequence_1:then.4 -> task_4
+    sequence_1:then.5 -> task_7
+    selector_1 -> sequence_3
+    selector_1:then.1 -> sequence_2
+    sequence_2 -> task_5
+    sequence_2:then.1 -> task_6
+    sequence_3 -> task_8
+    sequence_3:then.1 -> task_9

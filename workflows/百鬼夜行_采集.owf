@@ -1,0 +1,17 @@
+workflow 百鬼夜行_采集
+  version: 6.0.0
+  description: 在已进入的百鬼夜行画面中采集完整截图，供标注训练。
+  resolution: [1920, 1080]
+  root: root_1
+  inputs: {}
+  variables: {}
+  node root_1 root 入口
+    at: [0, 0]
+  node sample task 采集训练截图
+    at: [0, 180]
+    action: vision.capture_dataset
+    params:
+      count: 100
+      interval_seconds: 0.2
+  edges:
+    root_1 -> sample

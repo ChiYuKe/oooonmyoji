@@ -325,7 +325,7 @@ test('改名影响范围：确认/取消命令转发到暂存实现', () => {
 test('内容浏览器重命名走行内编辑，不再弹命名对话框', () => {
   const cb = fs.readFileSync(path.join(root, 'src/renderer/features/content-browser/index.ts'), 'utf8');
   assert.match(cb, /function commitContentRenameDraft/);
-  assert.match(cb, /contentRenameDraft = \{ item, name: item\.name, busy: false \};/);
+  assert.match(cb, /contentRenameDraft = \{ item, name: contentBrowserNameParts\(item\)\.name, busy: false \};/);
   // F2 与右键菜单共用 renameItem → renameContentItem：入口里不再打开 requestContentName 弹窗。
   const renameEntry = cb.slice(cb.indexOf('async function renameContentItem'), cb.indexOf('function cancelContentRenameDraft'));
   assert.doesNotMatch(renameEntry, /requestContentName/);

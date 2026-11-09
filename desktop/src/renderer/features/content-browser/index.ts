@@ -19,6 +19,7 @@ import {
   contentBrowserRecursiveItems,
   contentFolderRelocations,
   contentBrowserRenderPlan,
+  contentBrowserNameParts,
   isUnderContentFolder,
   nextContentBrowserZoom,
   CONTENT_BROWSER_ZOOM_MIN,
@@ -538,12 +539,13 @@ function createContentItem(item: ContentBrowserItem, editing = false): HTMLButto
   if (editing) {
     const input = label as HTMLInputElement;
     input.type = 'text';
-    input.value = item.name;
+    input.value = contentRenameDraft?.item.path === item.path
+      ? contentRenameDraft.name : contentBrowserNameParts(item).name;
     input.autocomplete = 'off';
     input.spellcheck = false;
     input.setAttribute('aria-label', item.kind === 'folder' ? '文件夹名称' : '名称');
   } else {
-    label.textContent = item.name;
+    label.textContent = contentBrowserNameParts(item).name;
   }
   const path = document.createElement('span');
   path.className = 'content-item-path';
@@ -1013,7 +1015,7 @@ async function createContentWorkflowAt(parentPath: string): Promise<void> {
       navigateContentBrowser(contentParent(item.path));
       setContentSelection(new Set([item.path]));
       // 新文件原地命名，不切换当前画布；已有画布的未保存修改也不影响新文件命名。
-      contentRenameDraft = { item, name: item.name, busy: false };
+      contentRenameDraft = { item, name: contentBrowserNameParts(item).name, busy: false };
       renderContentBrowser();
     }
   } catch (error) {
@@ -1094,7 +1096,7 @@ async function renameContentItem(item: ContentBrowserItem): Promise<void> {
   const parent = contentParent(item.path);
   if (parent !== contentBrowserFolder) navigateContentBrowser(parent);
   setContentSelection(new Set([item.path]));
-  contentRenameDraft = { item, name: item.name, busy: false };
+  contentRenameDraft = { item, name: contentBrowserNameParts(item).name, busy: false };
   renderContentBrowser();
 }
 
@@ -1113,7 +1115,8 @@ async function commitContentRenameDraft(): Promise<void> {
     input?.focus();
     return;
   }
-  if (name === draft.item.name) {
+  const original = contentBrowserNameParts(draft.item);
+  if (name === original.name) {
     // 名字没变：直接收掉输入框，不做任何磁盘操作。
     contentRenameDraft = undefined;
     renderContentBrowser();
@@ -1124,7 +1127,7 @@ async function commitContentRenameDraft(): Promise<void> {
   input?.setAttribute('aria-busy', 'true');
   if (input) input.disabled = true;
   try {
-    await performContentRename(draft.item, name);
+    await performContentRename(draft.item, `${name}${original.extension}`);
     contentRenameDraft = undefined;
     // performContentRename 内部已刷新过一遍（重命名后要按新路径重定位标签）；
     // 这里再刷一次把残留的编辑态输入框收掉。

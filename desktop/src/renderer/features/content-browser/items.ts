@@ -13,6 +13,18 @@ export interface ContentBrowserItemLike {
   name: string;
 }
 
+/** Keep the disk extension separate from the name the user sees and edits. */
+export function contentBrowserNameParts(item: ContentBrowserItemLike): { name: string; extension: string } {
+  if (item.kind === 'folder') return { name: item.name, extension: '' };
+  const filename = item.path.replace(/\\/g, '/').split('/').pop() || item.name;
+  const dot = filename.lastIndexOf('.');
+  const extension = dot > 0 ? filename.slice(dot) : '';
+  const name = extension && item.name.toLowerCase().endsWith(extension.toLowerCase())
+    ? item.name.slice(0, -extension.length)
+    : item.name;
+  return { name, extension };
+}
+
 export interface ContentBrowserFolderDraftLike {
   parentPath: string;
   name: string;

@@ -228,6 +228,12 @@
 .live-legend-item.match::before { background: #33d17a; }
 .live-legend-item.ocr::before { background: #5cc2ed; }
 .live-legend-item.click::before { background: #ff5c5c; }
+.live-legend-item.yolo::before { background: #a987ff; }
+.live-yolo-model-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.live-yolo-model-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-yolo-confidence { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.live-yolo-confidence select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; font-size: 11px; }
+.live-yolo-hit { color: #e5dcff !important; }
 
 .live-count { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .live-interval { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 11px; color: var(--muted); }

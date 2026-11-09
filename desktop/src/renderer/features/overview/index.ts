@@ -665,7 +665,7 @@ function renderOverview(): void {
   overviewRunButton.disabled = active || isRuntimeBusy() || overviewSelection.length === 0 || getRuntimeInstances().length === 0;
   overviewStopButton.disabled = !active && !isRuntimeBusy();
   overviewStopButton.querySelector('span')!.textContent = overviewRun?.active && overviewRun.cancelling ? '停止中…' : '停止队列';
-  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = isRuntimeBusy() || active;
+  document.querySelector<HTMLButtonElement>('#run-button')!.disabled = active;
   document.querySelector<HTMLButtonElement>('#stop-button')!.disabled = !isRuntimeBusy() && !active;
   document.querySelector<HTMLButtonElement>('#overview-select-all')!.disabled = active || sortedOverviewWorkflows().length === 0;
   document.querySelector<HTMLButtonElement>('#overview-clear')!.disabled = active || overviewSelection.length === 0;
@@ -738,12 +738,14 @@ async function runNextOverviewWorkflow(): Promise<void> {
   }
 }
 
-function handleOverviewRuntimeState(event: RuntimeStateEvent): void {
+function handleOverviewRuntimeState(sessionEvent: RuntimeStateEvent): void {
+  const event = { ...sessionEvent, state: sessionEvent.sessionState ?? sessionEvent.state };
   const state = overviewRun;
   if (!state?.active) return;
   const item = state.items[state.index];
   if (!item) return;
   const workflow = getBootstrap()?.workflows.find((candidate) => candidate.rel === item.rel);
+  if (event.workflow && workflow && event.workflow !== workflow.uri) return;
   const name = workflow ? overviewWorkflowName(workflow) : item.rel;
   if (event.state === 'running') {
     item.status = 'running';

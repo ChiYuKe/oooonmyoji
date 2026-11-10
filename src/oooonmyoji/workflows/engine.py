@@ -1129,7 +1129,12 @@ class WorkflowEngine:
         end = min(self._clock() + seconds, deadline)
         while self._clock() < end:
             self._ensure_running(deadline, branch_cancel)
-            time.sleep(min(0.05, end - self._clock()))
+            # The deadline can pass during the cancellation check or a thread
+            # switch. Never pass that now-negative remainder to time.sleep.
+            remaining = end - self._clock()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.05, remaining))
 
     def _validate_action_input(self, schema: dict[str, Any], arguments: Any, node_id: str) -> None:
         try:

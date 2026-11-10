@@ -37,6 +37,39 @@ const catalog = {
 
 const edgeKey = (edge) => `${edge.from.node}:${edge.from.pin}->${edge.to.node}`;
 
+test('状态机反复打开保存只落盘状态和连线，不泄漏运行时 cases.child', () => {
+  const graph = {
+    schema_version: 6, id: 'state_machine_save', version: '1.0.0',
+    resolution: [1920, 1080], root: 'root', inputs: {}, variables: {},
+    nodes: [
+      { id: 'root', type: 'root', at: { x: 0, y: 0 } },
+      { id: 'machine', type: 'state_machine', at: { x: 0, y: 200 },
+        states: [{ name: 'reward', template: 'reward.png' }, { name: 'room', template: 'room.png' }],
+        terminal_states: ['room'], max_iterations: 48, allow_ocr: false },
+      { id: 'handler', type: 'task', action: 'test.echo', params: {}, at: { x: 0, y: 400 } },
+      { id: 'fallback', type: 'task', action: 'test.echo', params: {}, at: { x: 400, y: 400 } },
+    ],
+    edges: [
+      { from: { node: 'root', pin: 'then.0' }, to: { node: 'machine', pin: 'in' } },
+      { from: { node: 'machine', pin: 'case.0' }, to: { node: 'handler', pin: 'in' } },
+      { from: { node: 'machine', pin: 'default' }, to: { node: 'fallback', pin: 'in' } },
+    ],
+  };
+  let saved = graph;
+  for (let cycle = 0; cycle < 3; cycle++) {
+    const canvas = toCanvasDocument(saved);
+    const runtimeMachine = canvas.nodes.find(node => node.id === 'machine');
+    assert.deepEqual(runtimeMachine.cases, [{ value: 'reward', child: 'handler' }]);
+    saved = parseDocument(emitRuntimeDocument(canvas));
+    const machine = saved.nodes.find(node => node.id === 'machine');
+    assert.equal(Object.hasOwn(machine, 'cases'), false);
+    assert.deepEqual(machine.states, graph.nodes[1].states);
+    assert.deepEqual(machine.terminal_states, ['room']);
+    assert.deepEqual(saved.edges.map(edgeKey).sort(), graph.edges.map(edgeKey).sort());
+    assert.deepEqual(graphDocumentIssues(saved), []);
+  }
+});
+
 test('识别节点图文档', () => {
   assert.equal(isGraphDocument({ schema_version: 6 }), true);
   assert.equal(isGraphDocument({ schema_version: 4 }), false);

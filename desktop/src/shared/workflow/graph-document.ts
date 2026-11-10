@@ -1179,6 +1179,9 @@ export function toGraphDocument(raw: unknown): any {
     for (const [key, value] of Object.entries(node || {})) {
       if (NODE_STRUCTURE_KEYS.includes(key)) continue;
       if (key === CUSTOM_TYPE_MARKER) continue;
+      // State-machine cases are runtime dispatch entries. Their handlers are
+      // serialized below as case.<state index> edges, never as node payload.
+      if (key === 'cases' && node?.type === 'state_machine') continue;
       if (key === 'cases' && Array.isArray(value) && node?.type !== 'state_machine') {
         payload.cases = value.map((entry: any) => (isRecord(entry) ? { value: cloneValue(entry.value) } : { value: cloneValue(entry) }));
         continue;

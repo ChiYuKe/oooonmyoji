@@ -42,6 +42,8 @@ def forbid_service(monkeypatch: pytest.MonkeyPatch) -> None:
         ("press_key", lambda: server_module.press_key("back")),
         ("type_text", lambda: server_module.type_text("hello")),
         ("run_workflow", lambda: server_module.run_workflow("活动副本")),
+        ("get_run_status", lambda: server_module.get_run_status()),
+        ("cancel_run", lambda: server_module.cancel_run("mcp-test")),
         ("read_project_file", lambda: server_module.read_project_file("README.md")),
         ("list_artifacts", lambda: server_module.list_artifacts()),
         ("tail_log", lambda: server_module.tail_log()),

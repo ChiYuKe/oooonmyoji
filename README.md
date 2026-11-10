@@ -488,7 +488,18 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 修改 MCP 服务代码或依赖后，请重启 Codex，让客户端重新加载 STDIO 服务和新增工具。
 
 可用工具与生成流程见 [docs/README.md](docs/README.md)，工具定义在
-`src/oooonmyoji/mcp/service.py`。
+`src/oooonmyoji/mcp/server.py`，实现位于 `src/oooonmyoji/mcp/service.py`。
+
+设备与诊断工具：`list_instances()` 列出配置和自动发现的可用实例（配置项本身不保证设备在线）；
+`doctor()` 检查配置、工作流、Action、OCR 依赖和设备程序路径，不运行工作流或发送输入。
+`server_info()` 返回服务、Python 和 MCP SDK 版本，以及当前审批策略。
+
+长任务可调用 `run_workflow(workflow, instance_id, wait=false)`，立即取得 `mcp_run_id`。
+将该编号作为 `run_id` 传给 `get_run_status` 查看状态、最近事件和最终结果，或传给
+`cancel_run` 停止该任务及子进程。省略查询编号会列出本会话任务；查询需要读取审批，取消需要执行审批。
+默认 `wait=true` 仍等待最终结果。管理编号不同于运行记录里的运行编号，只在当前 MCP 服务会话有效，
+最多同时运行 8 个任务，保留最近约 100 个任务的状态；不能取消其他客户端启动的任务。
+服务正常退出时会停止其管理的活动任务；强制结束服务进程不保证子进程清理完成。
 
 截图模板生成流程为：先调用 `capture_screen(instance_id)` 获取当前画面和临时
 `capture_id`，再调用 `select_roi(capture_id)` 打开项目自带的 ROI 框选窗口；用户确认
@@ -499,8 +510,8 @@ MCP 使用 stdio 启动。将 [docs/mcp-client-config.example.json](docs/mcp-cli
 ### 受审批门控的工具
 
 超出「只读 + 写 generated/」范围的操作需要**用户在本机弹窗中当场批准**：
-执行设备操作（`run_action`、`tap`、`swipe`、`press_key`、`type_text`、`run_workflow`）、
-读取项目文件（`read_project_file`、`list_artifacts`、`tail_log`）、
+执行设备操作及停止任务（`run_action`、`tap`、`swipe`、`press_key`、`type_text`、`run_workflow`、`cancel_run`）、
+读取项目文件与运行状态（`read_project_file`、`list_artifacts`、`tail_log`、`get_run_status`）、
 写入（`write_project_file`）与删除（`delete_project_file`）。
 
 - 弹窗优先复用**桌面端自己的确认弹窗**（`impact-confirm`），不再另画一套界面：正在运行的

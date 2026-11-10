@@ -21,12 +21,13 @@ from ..actions import build_action_registry
 from ..config.loader import load_config
 from ..devices.factory import connect_at_task_boundary
 from ..exceptions import ConfigError
-from ..runtime.instances import ensure_runtime_instance, expand_runtime_instances
+from ..runtime.instances import discover_runtime_instances, ensure_runtime_instance, expand_runtime_instances
 from ..runtime.one_shot import ActionRunResult, run_single_action
 from ..vision.image import frame_to_bgr
 from ..workflows.dsl import WORKFLOW_SUFFIX, emit_runtime_document
 from ..workflows.loader import WorkflowLoader
 from ..workflows.validator import WORKFLOW_SCHEMA, validate_workflow
+from .runs import RunManager, terminate_process_tree
 
 
 PROJECT_GUIDE = """# AutoFlow Studio MCP 模板工厂
@@ -48,8 +49,8 @@ PROJECT_GUIDE = """# AutoFlow Studio MCP 模板工厂
 
 以下工具会先在用户本机弹出确认窗口，窗口只有用户能回答，批准前不会执行任何动作：
 
-- 执行类（execute）：run_action、tap、swipe、press_key、type_text、run_workflow
-- 读取类（read）：read_project_file、list_artifacts、tail_log
+- 执行类（execute）：run_action、tap、swipe、press_key、type_text、run_workflow、cancel_run
+- 读取类（read）：read_project_file、list_artifacts、tail_log、get_run_status
 - 写入类（write）：write_project_file
 - 删除类（delete）：delete_project_file
 
@@ -68,6 +69,11 @@ run_action 只能执行单个 Action，且不支持依赖 OCR 的 Action（visio
 vision.wait_text、vision.wait_any_text）与 workflow.run。要验证整条工作流是否能跑通，
 请用 run_workflow：它走项目自己的 CLI（监督器 + 工作进程 + OCR 池），会写运行记录与
 事件文件，并返回失败节点、失败路径与最后几步事件。
+
+长任务使用 run_workflow(wait=false)，立即返回 mcp_run_id；随后用 get_run_status
+查询进度，或经批准后用 cancel_run 停止该任务及子进程。管理 ID 仅在当前 MCP
+服务会话有效，不能用于取消其他客户端启动的任务。默认 wait=true 保留等待结果的行为。
+list_instances 列出可用实例；doctor 检查环境，不会启动工作流或发送设备输入。
 
 当前可用能力：读取项目说明、Action manifest、工作流 JSON、图片资源清单与项目文件，
 读取指定实例截图，按 ROI 保存图片模板，校验并保存工作流，在用户批准后执行单个 Action、
@@ -122,24 +128,7 @@ def _compact_event(event: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
-def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    """Stop a timed-out run and its worker children."""
-
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                capture_output=True,
-                timeout=30,
-                check=False,
-            )
-            return
-        except (OSError, subprocess.SubprocessError):
-            pass
-    try:
-        process.kill()
-    except OSError:
-        pass
+_terminate_process_tree = terminate_process_tree
 
 
 class ProjectContextService:
@@ -157,6 +146,7 @@ class ProjectContextService:
         self.asset_root = (self.config.root_dir / "assets" / "templates").resolve()
         self._captures: dict[str, dict[str, Any]] = {}
         self._capture_order: list[str] = []
+        self.runs = RunManager()
 
     @property
     def project_root(self) -> Path:
@@ -166,6 +156,15 @@ class ProjectContextService:
         """Return a project-relative POSIX path for an in-project file."""
 
         return path.resolve().relative_to(self.project_root).as_posix()
+
+    def _display_path(self, path: Path) -> str:
+        """Prefer a project-relative path, but keep configured artifact dirs outside the project readable."""
+
+        resolved = path.resolve()
+        try:
+            return resolved.relative_to(self.project_root).as_posix()
+        except ValueError:
+            return resolved.as_posix()
 
     def info(self) -> dict[str, Any]:
         return {
@@ -177,9 +176,44 @@ class ProjectContextService:
             "asset_dir": self._relative(self.asset_root),
             "write_scope": "workflows/generated/ and assets/templates/generated/",
             "device_read_tools_enabled": True,
-            "execution_tools_enabled": False,
+            "execution_tools_enabled": True,
             "phase": "template-capture-and-generation",
         }
+
+    def list_instances(self) -> dict[str, Any]:
+        instances = discover_runtime_instances(self.config)
+        return {"ok": True, "instances": [
+            {"id": item.id, "backend": item.backend, "mumu_index": item.mumu_index,
+             "adb_serial": item.adb_serial, "display_name": item.display_name}
+            for item in instances
+        ], "count": len(instances)}
+
+    def doctor(self) -> dict[str, Any]:
+        return self.diagnose(self.config_path, self.project_root)
+
+    @staticmethod
+    def diagnose(config_path: Path, project_root: Path) -> dict[str, Any]:
+        """Isolate dependency imports and their stdout from the MCP process."""
+        try:
+            process = subprocess.run(
+                [sys.executable, "-m", "src.oooonmyoji.cli", "--config", str(config_path), "doctor"],
+                cwd=str(project_root), capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "code": "doctor_timeout"}
+        checks = _parse_cli_payload(process.stdout)
+        return {"ok": process.returncode == 0 and checks is not None, "checks": checks or {},
+                "exit_code": process.returncode, "stderr_tail": process.stderr[-1500:]}
+
+    def get_run_status(self, run_id: str | None = None) -> dict[str, Any]:
+        result = self.runs.status(run_id)
+        if run_id is not None and result.get("events_file"):
+            result["steps_tail"] = self._tail_events(self.project_root / result["events_file"])
+        return result
+
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        return self.runs.cancel(run_id)
 
     def list_actions(self) -> dict[str, Any]:
         actions: list[dict[str, Any]] = []
@@ -931,6 +965,28 @@ class ProjectContextService:
         instance_id: str = "mumu-0",
         inputs: dict[str, Any] | None = None,
         timeout_seconds: float = RUN_WORKFLOW_DEFAULT_TIMEOUT,
+        wait: bool = True,
+    ) -> dict[str, Any]:
+        if not isinstance(workflow, str) or not workflow.strip():
+            raise ValueError("workflow must be a non-empty string")
+        if not 30.0 <= float(timeout_seconds) <= RUN_WORKFLOW_MAX_TIMEOUT:
+            raise ValueError(f"timeout_seconds must be between 30 and {int(RUN_WORKFLOW_MAX_TIMEOUT)}")
+        return self.runs.run(
+            lambda run_id: self._execute_workflow(
+                workflow, instance_id=instance_id, inputs=inputs,
+                timeout_seconds=timeout_seconds, managed_run_id=run_id,
+            ),
+            workflow=workflow, instance=instance_id, wait=wait,
+        )
+
+    def _execute_workflow(
+        self,
+        workflow: str,
+        *,
+        instance_id: str,
+        inputs: dict[str, Any] | None,
+        timeout_seconds: float,
+        managed_run_id: str,
     ) -> dict[str, Any]:
         """Run an existing workflow through the project CLI and report the record.
 
@@ -950,6 +1006,7 @@ class ProjectContextService:
         run_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         events_file = run_dir / f"events-{stamp}-{secrets.token_hex(4)}.jsonl"
+        events_relative = self._display_path(events_file)
         command = [
             sys.executable,
             "-m",
@@ -984,8 +1041,10 @@ class ProjectContextService:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                start_new_session=os.name != "nt",
             )
             try:
+                self.runs.bind(managed_run_id, process, events_relative)
                 stdout, stderr = process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
                 _terminate_process_tree(process)
@@ -996,10 +1055,14 @@ class ProjectContextService:
                     "workflow": workflow,
                     "instance": instance_id,
                     "timeout_seconds": timeout,
-                    "events_file": self._relative(events_file),
+                    "events_file": self._display_path(events_file),
                     "stdout_tail": (stdout or "")[-1500:],
                     "stderr_tail": (stderr or "")[-1500:],
                 }
+            except Exception:
+                _terminate_process_tree(process)
+                process.communicate()
+                raise
         finally:
             if inputs_path is not None:
                 inputs_path.unlink(missing_ok=True)
@@ -1012,7 +1075,7 @@ class ProjectContextService:
             "instance": instance_id,
             "status": status,
             "exit_code": process.returncode,
-            "events_file": self._relative(events_file),
+            "events_file": self._display_path(events_file),
         }
         if isinstance(payload, dict):
             for key in ("run_id", "group_id", "error", "error_category", "failed_node", "failed_path", "runs"):
@@ -1052,6 +1115,8 @@ class ProjectContextService:
 
     def _run_record(self, run_id: str) -> dict[str, Any] | None:
         path = (self.config.artifact_dir / "runs" / f"{run_id}.json").resolve()
+        if not path.is_relative_to((self.config.artifact_dir / "runs").resolve()):
+            return None
         if not path.is_file():
             return None
         try:

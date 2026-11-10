@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable
 
@@ -51,6 +53,8 @@ def server_info() -> dict[str, Any]:
     config_path = _config_path
     result: dict[str, Any] = {
         "server": SERVER_NAME,
+        "server_version": SERVER_VERSION,
+        "python_version": platform.python_version(),
         "transport": "stdio",
         "project_root": str(_project_root),
         "config": str(config_path) if config_path is not None else None,
@@ -60,9 +64,20 @@ def server_info() -> dict[str, Any]:
         "execution_requires_approval": True,
         "phase": "template-capture-and-generation",
     }
-    result.update(_broker().info())
+    for package in ("mcp", "mcp-types"):
+        try:
+            result[f"{package.replace('-', '_')}_version"] = version(package)
+        except PackageNotFoundError:
+            result[f"{package.replace('-', '_')}_version"] = None
     if _service is not None:
         result.update(_service.info())
+    # Server policy is authoritative; context metadata must not weaken it.
+    result.update(
+        execution_tools_enabled=True,
+        execution_requires_approval=True,
+        write_scope="workflows/generated/, assets/templates/generated/, plus approval-gated project writes",
+    )
+    result.update(_broker().info())
     return result
 
 
@@ -159,6 +174,51 @@ def _image_tool_result(payload: dict[str, Any]) -> CallToolResult:
         structured_content=metadata,
         is_error=metadata.get("ok") is False,
     )
+
+
+@mcp.tool()
+def list_instances() -> CallToolResult:
+    """List configured/discovered available device instances without sending input."""
+    try:
+        return _structured_result(_context().list_instances())
+    except Exception as exc:
+        return _tool_error_result(exc)
+
+
+@mcp.tool()
+def doctor() -> CallToolResult:
+    """Check configuration, workflows, OCR dependencies and device paths without running a workflow."""
+    try:
+        if _config_path is None:
+            return _structured_result({"ok": False, "code": "config_not_found"})
+        return _structured_result(ProjectContextService.diagnose(_config_path, _project_root))
+    except Exception as exc:
+        return _tool_error_result(exc)
+
+
+@mcp.tool()
+def get_run_status(run_id: str | None = None) -> CallToolResult:
+    """Read progress/results for a session-owned mcp_run_id; omit ID to list this session's runs. Requires read approval."""
+    denied = _gate(tool="get_run_status", risk=RISK_READ, summary=f"查询 MCP 运行状态 {run_id or '本会话全部任务'}",
+                   payload={"run_id": run_id})
+    if denied is not None:
+        return denied
+    try:
+        return _structured_result(_context().get_run_status(run_id))
+    except Exception as exc:
+        return _tool_error_result(exc)
+
+
+@mcp.tool()
+def cancel_run(run_id: str) -> CallToolResult:
+    """After approval, stop a session-owned mcp_run_id and its child processes. Does not cancel external runs."""
+    denied = _gate(tool="cancel_run", risk=RISK_EXECUTE, summary=f"停止 MCP 任务及子进程 {run_id}", payload={"run_id": run_id})
+    if denied is not None:
+        return denied
+    try:
+        return _structured_result(_context().cancel_run(run_id))
+    except Exception as exc:
+        return _tool_error_result(exc)
 
 
 @mcp.tool()
@@ -446,12 +506,15 @@ def run_workflow(
     instance_id: str = "mumu-0",
     inputs: dict[str, Any] | None = None,
     timeout_seconds: int = 1800,
+    wait: bool = True,
 ) -> CallToolResult:
     """Run an existing workflow end to end after the user approves it.
 
     This is the only reliable way to verify a generated workflow: it uses the
     project's own CLI (supervisor + worker + OCR pool), writes run records and an
     events file, and returns the failure node, the breadcrumb and the last steps.
+    Set wait=false for background execution; use the returned mcp_run_id with
+    get_run_status and cancel_run. IDs live only for the current server session.
     """
 
     payload = {
@@ -459,6 +522,7 @@ def run_workflow(
         "instance_id": instance_id,
         "inputs": inputs or {},
         "timeout_seconds": timeout_seconds,
+        "wait": wait,
     }
     denied = _gate(
         tool="run_workflow",
@@ -475,6 +539,7 @@ def run_workflow(
                 instance_id=instance_id,
                 inputs=inputs,
                 timeout_seconds=timeout_seconds,
+                wait=wait,
             )
         )
     except Exception as exc:
@@ -633,7 +698,11 @@ def main(argv: list[str] | None = None) -> None:
         channel=args.approval_channel,
         timeout_seconds=max(5.0, float(args.approval_timeout)),
     )
-    mcp.run()
+    try:
+        mcp.run()
+    finally:
+        if _service is not None:
+            _service.runs.close()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 /**
  * 工作流参数定义：与 Action manifest 共享的 v2 参数模型。
- * 纯计算模块（只依赖 Ajv），主进程与画布共用。
+ * 纯计算模块，主进程与受 CSP 约束的画布共用。
  */
-import Ajv2020 from 'ajv/dist/2020';
+import { compileSchema } from './schema-validation';
 import { CARD_CONTROLS, COLOR_PATTERN, KEY_PATTERN, NUMERIC_TYPES, PARAMETER_TYPES, STRING_TYPES } from '../parameter-types';
 
 export { CARD_CONTROLS, COLOR_PATTERN, KEY_PATTERN, NUMERIC_TYPES, PARAMETER_TYPES, STRING_TYPES };
@@ -25,7 +25,6 @@ export interface ParameterInfo {
   properties?: Record<string, ParameterInfo>;
 }
 
-const parameterAjv = new Ajv2020({ allErrors: true, strict: false });
 
 const SCALAR_TYPES: Record<string, string> = {
   string: 'string',
@@ -188,9 +187,9 @@ function validateParameter(param: ParameterInfo, key: string): void {
   }
 
   const schema = parameterToSchema(param);
-  let validate: ReturnType<typeof parameterAjv.compile>;
+  let validate: ReturnType<typeof compileSchema>;
   try {
-    validate = parameterAjv.compile(schema);
+    validate = compileSchema(schema);
   } catch (error) {
     throw new Error(`parameter ${key} compiles to an invalid schema: ${(error as Error).message}`);
   }

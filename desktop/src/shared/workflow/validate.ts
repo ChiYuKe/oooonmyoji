@@ -2,7 +2,7 @@
  * 工作流语义校验与生成 schema：编辑时诊断。
  * 权威判断在 Python `src/oooonmyoji/workflows/validator.py`；这里保持同样的规则代码与文案。
  */
-import Ajv2020 from 'ajv/dist/2020';
+import { compileSchema } from './schema-validation';
 import {
   allowBinding,
   bindingAwareParameterSchema,
@@ -29,7 +29,6 @@ import {
   type WorkflowInfo,
 } from './types';
 
-const workflowAjv = new Ajv2020({ allErrors: true, strict: false });
 
 /**
  * 诊断严重度：
@@ -76,7 +75,7 @@ function validateDecorator(
   for (const [key,schema] of Object.entries(schemas)) {
     if (!(key in item)) continue;
     validateBindings(item[key],context,[...path,key],issues,false,schema,availableNodeIds);
-    if (!workflowAjv.compile(allowBinding(schema))(item[key])) issues.push(issue([...path,key],`${key} 的值或引用无效`,'invalid-decorator'));
+    if (!compileSchema(allowBinding(schema))(item[key])) issues.push(issue([...path,key],`${key} 的值或引用无效`,'invalid-decorator'));
   }
   if (type === 'repeat') {
     if (isObject(item.count) && typeof item.count.ref === 'string') {
@@ -215,7 +214,7 @@ export function validateWorkflow(raw: unknown, catalog: ActionCatalogLike): Vali
             // 而不是让 ajv 去编译 undefined（那会直接抛）。这是目录的问题，不算文档错误。
           } else {
             validateBindings(params, context, [...path, 'params'], issues, false, spec.inputSchema, availableNodeIds);
-            const validate = workflowAjv.compile(bindingAwareParameterSchema(spec.inputSchema));
+            const validate = compileSchema(bindingAwareParameterSchema(spec.inputSchema));
             const normalized = applyParameterDefaults(spec.parameters, params);
             if (!validate(normalized)) {
               // 每条 ajv 错误单独成一条问题，并把**出错的参数名**放进 path，

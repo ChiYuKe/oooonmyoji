@@ -1,0 +1,826 @@
+workflow souls_party_captain_stable
+  version: 2.1.0
+  description: 御魂队长：从协战房间、庭院或创建队伍页启动。按画面恢复、邀请指定好友、确认队友后开战，逐页结算并续邀。等待与补邀不扣轮数；未知页面超时停止。默认沿用游戏记忆的队伍目标，请先确认御魂悲鸣。
+  resolution: [1920, 1080]
+  root: root_1
+  limits:
+    timeout_seconds: 21600
+    max_steps: 200000
+  inputs:
+    运行轮数:
+      type: integer
+      default: 20
+      min: 1
+      display_name: 运行轮数
+      description: 完整结算轮数；等待邀请、加载与补邀不消耗轮数。
+  variables: {}
+  node task_1 task 确认奖励文字或奖励袋
+    at: [0, 1440]
+    action: vision.wait_any
+    params:
+      roi: [602, 650, 806, 430]
+      threshold: 0.8
+      templates:
+        - assets/templates/wait_for_empty_party_slot_1-templates.png
+        - assets/templates/generated/souls-party-reward-continue-v2.png
+        - assets/templates/generated/souls-party-reward-bag-v2.png
+      timeout_seconds: 2
+  node task_2 task 点击并复核：startup_reward_page_tap
+    at: [340, 1440]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: false
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_1 sequence 识别后点击：reward
+    at: [170, 1200]
+  node task_3 task 等待奖励翻页
+    at: [680, 1200]
+    action: core.sleep
+    params:
+      seconds: 0.4
+  node selector_1 selector 清奖励页；已切页则确认新画面继续
+    at: [425, 960]
+  node task_4 task 确认画面：checkbox
+    at: [1020, 1680]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/reinvite-default-checkbox.png
+      roi: [780, 480, 220, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node task_5 task 点击并复核：startup_reinvite_check_tap
+    at: [1360, 1680]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_2 sequence 识别后点击：checkbox
+    at: [1190, 1440]
+  node task_6 task 已勾选则继续
+    at: [1700, 1440]
+    action: core.log
+    params:
+      message: 默认邀请已开启或没有复选框
+  node selector_2 selector 仅在未勾选时开启默认邀请
+    at: [1445, 1200]
+  node task_7 task 确认画面：reinvite
+    at: [2040, 1440]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_for_empty_party_slot_4-template.png
+      roi: [946, 561, 371, 164]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_8 task 点击并复核：startup_reinvite_confirm_tap
+    at: [2380, 1440]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_3 sequence 识别后点击：reinvite
+    at: [2210, 1200]
+  node selector_3 selector "响应 reinvite；已切页则继续"
+    at: [1828, 960]
+  node task_9 task 确认画面：create_confirm
+    at: [2720, 1200]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/create-confirm-button.png
+      roi: [1050, 700, 500, 350]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_10 task 点击并复核：startup_create_confirm_tap
+    at: [3060, 1200]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node selector_4 selector "响应 create_confirm；已切页则继续"
+    at: [2890, 960]
+  node task_11 task 确认画面：create_team
+    at: [3400, 1200]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/create-team-button.png
+      roi: [1400, 800, 520, 280]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_12 task 点击并复核：startup_create_team_tap
+    at: [3740, 1200]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node selector_5 selector "响应 create_team；已切页则继续"
+    at: [3570, 960]
+  node task_13 task 确认画面：courtyard
+    at: [4080, 1200]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/courtyard-team-button.png
+      roi: [430, 940, 350, 140]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_14 task 点击并复核：startup_courtyard_tap
+    at: [4420, 1200]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node selector_6 selector "响应 courtyard；已切页则继续"
+    at: [4250, 960]
+  node state_machine_1 state_machine 恢复到协战房间
+    at: [2592, 720]
+    states:
+      - name: reward
+        roi: [602, 650, 806, 430]
+        threshold: 0.8
+        templates:
+          - assets/templates/wait_for_empty_party_slot_1-templates.png
+          - assets/templates/generated/souls-party-reward-continue-v2.png
+          - assets/templates/generated/souls-party-reward-bag-v2.png
+      - name: reinvite
+        template: assets/templates/wait_for_empty_party_slot_4-template.png
+        roi: [946, 561, 371, 164]
+        threshold: 0.8
+      - name: create_confirm
+        template: assets/templates/souls/party/create-confirm-button.png
+        roi: [1050, 700, 500, 350]
+        threshold: 0.8
+      - name: create_team
+        template: assets/templates/souls/party/create-team-button.png
+        roi: [1400, 800, 520, 280]
+        threshold: 0.8
+      - name: courtyard
+        template: assets/templates/souls/party/courtyard-team-button.png
+        roi: [430, 940, 350, 140]
+        threshold: 0.8
+      - name: room
+        template: assets/templates/souls/party/floor-team-button.png
+        roi: [0, 0, 500, 120]
+        threshold: 0.8
+    terminal_states: [room]
+    allow_ocr: false
+    state_timeout_seconds: 30
+    decorator timeout
+      seconds: 150
+    max_iterations: 48
+  node task_15 task 确认画面：room
+    at: [4760, 960]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-team-button.png
+      roi: [0, 0, 500, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node selector_7 selector 确认确实到达目标画面
+    at: [4760, 720]
+  node sequence_4 sequence 恢复到协战房间及完成确认
+    at: [3676, 480]
+  node task_16 task 确认画面：member
+    at: [5100, 720]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_for_party_slot_filled-template.png
+      roi: [718, 102, 469, 191]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node task_17 task 确认画面：slot
+    at: [5440, 960]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_1-templates.png
+      roi: [638, 6, 668, 910]
+      threshold: 0.75
+      present: true
+      timeout_seconds: 2
+  node task_18 task 给自动回归留出短窗口
+    at: [5780, 960]
+    action: core.sleep
+    params:
+      seconds: 2
+  node task_19 task 确认画面：slot
+    at: [6120, 1200]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_1-templates.png
+      roi: [638, 6, 668, 910]
+      threshold: 0.75
+      present: true
+      timeout_seconds: 2
+  node task_20 task 点击并复核：open_slot_tap
+    at: [6460, 1200]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_5 sequence 识别后点击：slot
+    at: [6290, 960]
+  node task_21 task 确认画面：friend
+    at: [6800, 1200]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_4-templates.png
+      roi: [476, 121, 962, 817]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_22 task 点击并复核：select_friend_tap
+    at: [7140, 1200]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: false
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_6 sequence 识别后点击：friend
+    at: [6970, 960]
+  node task_23 task 确认画面：invite_button
+    at: [7480, 1200]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_6-template.png
+      roi: [522, 756, 888, 175]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_24 task 点击并复核：send_invite_tap
+    at: [7820, 1200]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_7 sequence 识别后点击：invite_button
+    at: [7650, 960]
+  node task_25 task 确认画面：member
+    at: [8160, 960]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_for_party_slot_filled-template.png
+      roi: [718, 102, 469, 191]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 40
+  node sequence_8 sequence 空位复核后邀请指定好友
+    at: [6715, 720]
+  node selector_8 selector 队友在队立即继续；否则补邀
+    at: [5908, 480]
+    decorator retry
+      attempts: 3
+      delay_seconds: 2
+  node task_26 task 确认画面：challenge
+    at: [8500, 720]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_floor_from_map_1-template.png
+      roi: [1669, 832, 251, 248]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 20
+  node task_27 task 点击并复核：start_challenge_tap
+    at: [8840, 720]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+      disappeared_states:
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      disappeared_state_timeout_seconds: 15
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_9 sequence 识别后点击：challenge
+    at: [8670, 480]
+  node task_28 task 确认奖励文字或奖励袋
+    at: [9180, 1440]
+    action: vision.wait_any
+    params:
+      roi: [602, 650, 806, 430]
+      threshold: 0.8
+      templates:
+        - assets/templates/wait_for_empty_party_slot_1-templates.png
+        - assets/templates/generated/souls-party-reward-continue-v2.png
+        - assets/templates/generated/souls-party-reward-bag-v2.png
+      timeout_seconds: 2
+  node task_29 task 点击并复核：settle_reward_page_tap
+    at: [9520, 1440]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: false
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_10 sequence 识别后点击：reward
+    at: [9350, 1200]
+  node task_30 task 等待奖励翻页
+    at: [9860, 1200]
+    action: core.sleep
+    params:
+      seconds: 0.4
+  node selector_9 selector 清奖励页；已切页则确认新画面继续
+    at: [9605, 960]
+  node task_31 task 确认画面：checkbox
+    at: [10200, 1680]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/reinvite-default-checkbox.png
+      roi: [780, 480, 220, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node task_32 task 点击并复核：settle_reinvite_check_tap
+    at: [10540, 1680]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_11 sequence 识别后点击：checkbox
+    at: [10370, 1440]
+  node task_33 task 已勾选则继续
+    at: [10880, 1440]
+    action: core.log
+    params:
+      message: 默认邀请已开启或没有复选框
+  node selector_10 selector 仅在未勾选时开启默认邀请
+    at: [10625, 1200]
+  node task_34 task 确认画面：reinvite
+    at: [11220, 1440]
+    action: vision.wait_template
+    params:
+      template: assets/templates/wait_for_empty_party_slot_4-template.png
+      roi: [946, 561, 371, 164]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 8
+  node task_35 task 点击并复核：settle_reinvite_confirm_tap
+    at: [11560, 1440]
+    action: input.tap_match
+    params:
+      revalidate: true
+      verify_gone: true
+      verify_timeout_seconds: 3
+      random_offset: 6
+      random_interval: [0.1, 0.2]
+    decorator retry
+      attempts: 3
+      delay_seconds: 0.3
+  node sequence_12 sequence 识别后点击：reinvite
+    at: [11390, 1200]
+  node selector_11 selector "响应 reinvite；已切页则继续"
+    at: [11008, 960]
+  node state_machine_2 state_machine 战斗与结算：奖励、续邀、回房
+    at: [10306, 720]
+    states:
+      - name: reward
+        roi: [602, 650, 806, 430]
+        threshold: 0.8
+        templates:
+          - assets/templates/wait_for_empty_party_slot_1-templates.png
+          - assets/templates/generated/souls-party-reward-continue-v2.png
+          - assets/templates/generated/souls-party-reward-bag-v2.png
+      - name: reinvite
+        template: assets/templates/wait_for_empty_party_slot_4-template.png
+        roi: [946, 561, 371, 164]
+        threshold: 0.8
+      - name: room
+        template: assets/templates/souls/party/floor-team-button.png
+        roi: [0, 0, 500, 120]
+        threshold: 0.8
+    terminal_states: [room]
+    allow_ocr: false
+    state_timeout_seconds: 180
+    decorator timeout
+      seconds: 300
+    max_iterations: 48
+  node task_36 task 确认画面：room
+    at: [11900, 960]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-team-button.png
+      roi: [0, 0, 500, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node selector_12 selector 确认确实到达目标画面
+    at: [11900, 720]
+  node sequence_13 sequence 战斗与结算：奖励、续邀、回房及完成确认
+    at: [11103, 480]
+  node sequence_14 sequence 每轮完整完成才计数
+    at: [7339, 240]
+    decorator repeat
+  node root_1 root 入口
+    at: [7339, 0]
+  node sequence_15 sequence 识别并点击当前奖励页
+    at: [245, 1180]
+  node task_37 task 奖励已消失：确认下一画面
+    at: [605, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: courtyard
+          template: assets/templates/souls/party/courtyard-team-button.png
+          roi: [430, 940, 350, 140]
+          threshold: 0.8
+        - name: reinvite
+          template: assets/templates/wait_for_empty_party_slot_4-template.png
+          roi: [946, 561, 371, 164]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  node sequence_16 sequence 识别并点击当前奖励页
+    at: [9425, 1180]
+  node task_38 task 奖励已消失：确认下一画面
+    at: [9785, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: courtyard
+          template: assets/templates/souls/party/courtyard-team-button.png
+          roi: [430, 940, 350, 140]
+          threshold: 0.8
+        - name: reinvite
+          template: assets/templates/wait_for_empty_party_slot_4-template.png
+          roi: [946, 561, 371, 164]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  node sequence_17 sequence 确认续邀并回房
+    at: [1648, 1180]
+  node task_39 task "reinvite 已消失：确认下一画面"
+    at: [2008, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: reward
+          roi: [602, 650, 806, 430]
+          threshold: 0.8
+          templates:
+            - assets/templates/wait_for_empty_party_slot_1-templates.png
+            - assets/templates/generated/souls-party-reward-continue-v2.png
+            - assets/templates/generated/souls-party-reward-bag-v2.png
+        - name: create_confirm
+          template: assets/templates/souls/party/create-confirm-button.png
+          roi: [1050, 700, 500, 350]
+          threshold: 0.8
+        - name: create_team
+          template: assets/templates/souls/party/create-team-button.png
+          roi: [1400, 800, 520, 280]
+          threshold: 0.8
+        - name: courtyard
+          template: assets/templates/souls/party/courtyard-team-button.png
+          roi: [430, 940, 350, 140]
+          threshold: 0.8
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  node sequence_18 sequence 识别后点击：create_confirm
+    at: [2710, 1180]
+  node task_40 task "create_confirm 已消失：确认下一画面"
+    at: [3070, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: reward
+          roi: [602, 650, 806, 430]
+          threshold: 0.8
+          templates:
+            - assets/templates/wait_for_empty_party_slot_1-templates.png
+            - assets/templates/generated/souls-party-reward-continue-v2.png
+            - assets/templates/generated/souls-party-reward-bag-v2.png
+        - name: reinvite
+          template: assets/templates/wait_for_empty_party_slot_4-template.png
+          roi: [946, 561, 371, 164]
+          threshold: 0.8
+        - name: create_team
+          template: assets/templates/souls/party/create-team-button.png
+          roi: [1400, 800, 520, 280]
+          threshold: 0.8
+        - name: courtyard
+          template: assets/templates/souls/party/courtyard-team-button.png
+          roi: [430, 940, 350, 140]
+          threshold: 0.8
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  node sequence_19 sequence 识别后点击：create_team
+    at: [3390, 1180]
+  node task_41 task "create_team 已消失：确认下一画面"
+    at: [3750, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: reward
+          roi: [602, 650, 806, 430]
+          threshold: 0.8
+          templates:
+            - assets/templates/wait_for_empty_party_slot_1-templates.png
+            - assets/templates/generated/souls-party-reward-continue-v2.png
+            - assets/templates/generated/souls-party-reward-bag-v2.png
+        - name: reinvite
+          template: assets/templates/wait_for_empty_party_slot_4-template.png
+          roi: [946, 561, 371, 164]
+          threshold: 0.8
+        - name: create_confirm
+          template: assets/templates/souls/party/create-confirm-button.png
+          roi: [1050, 700, 500, 350]
+          threshold: 0.8
+        - name: courtyard
+          template: assets/templates/souls/party/courtyard-team-button.png
+          roi: [430, 940, 350, 140]
+          threshold: 0.8
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  node sequence_20 sequence 识别后点击：courtyard
+    at: [4070, 1180]
+  node task_42 task "courtyard 已消失：确认下一画面"
+    at: [4430, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: reward
+          roi: [602, 650, 806, 430]
+          threshold: 0.8
+          templates:
+            - assets/templates/wait_for_empty_party_slot_1-templates.png
+            - assets/templates/generated/souls-party-reward-continue-v2.png
+            - assets/templates/generated/souls-party-reward-bag-v2.png
+        - name: reinvite
+          template: assets/templates/wait_for_empty_party_slot_4-template.png
+          roi: [946, 561, 371, 164]
+          threshold: 0.8
+        - name: create_confirm
+          template: assets/templates/souls/party/create-confirm-button.png
+          roi: [1050, 700, 500, 350]
+          threshold: 0.8
+        - name: create_team
+          template: assets/templates/souls/party/create-team-button.png
+          roi: [1400, 800, 520, 280]
+          threshold: 0.8
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  node sequence_21 sequence 确认续邀并回房
+    at: [10828, 1180]
+  node task_43 task "reinvite 已消失：确认下一画面"
+    at: [11188, 1180]
+    action: vision.detect_state
+    params:
+      states:
+        - name: reward
+          roi: [602, 650, 806, 430]
+          threshold: 0.8
+          templates:
+            - assets/templates/wait_for_empty_party_slot_1-templates.png
+            - assets/templates/generated/souls-party-reward-continue-v2.png
+            - assets/templates/generated/souls-party-reward-bag-v2.png
+        - name: create_confirm
+          template: assets/templates/souls/party/create-confirm-button.png
+          roi: [1050, 700, 500, 350]
+          threshold: 0.8
+        - name: create_team
+          template: assets/templates/souls/party/create-team-button.png
+          roi: [1400, 800, 520, 280]
+          threshold: 0.8
+        - name: courtyard
+          template: assets/templates/souls/party/courtyard-team-button.png
+          roi: [430, 940, 350, 140]
+          threshold: 0.8
+        - name: room
+          template: assets/templates/souls/party/floor-team-button.png
+          roi: [0, 0, 500, 120]
+          threshold: 0.8
+        - name: battle
+          template: assets/templates/tap_challenge_button_1-disappeared_states.png
+          roi: [8, 547, 196, 171]
+          threshold: 0.85
+      allow_ocr: false
+    decorator retry
+      attempts: 60
+      delay_seconds: 0.25
+  var inputs.运行轮数
+    at: [-340, 0]
+  edges:
+    task_1:out.match -> task_2:match
+    task_4:out.matches.0 -> task_5:match
+    task_7:out.matches.0 -> task_8:match
+    task_9:out.matches.0 -> task_10:match
+    task_11:out.matches.0 -> task_12:match
+    task_13:out.matches.0 -> task_14:match
+    task_19:out.matches.0 -> task_20:match
+    task_21:out.matches.0 -> task_22:match
+    task_23:out.matches.0 -> task_24:match
+    task_26:out.matches.0 -> task_27:match
+    task_28:out.match -> task_29:match
+    task_31:out.matches.0 -> task_32:match
+    task_34:out.matches.0 -> task_35:match
+    var__inputs__运行轮数:out -> sequence_14:decorators.0.count
+    sequence_1 -> task_1
+    sequence_1:then.1 -> task_2
+    selector_1 -> sequence_15
+    selector_1:then.1 -> task_37
+    sequence_2 -> task_4
+    sequence_2:then.1 -> task_5
+    selector_2 -> sequence_2
+    selector_2:then.1 -> task_6
+    sequence_3 -> task_7
+    sequence_3:then.1 -> task_8
+    selector_3 -> sequence_17
+    selector_3:then.1 -> task_39
+    selector_4 -> sequence_18
+    selector_4:then.1 -> task_40
+    selector_5 -> sequence_19
+    selector_5:then.1 -> task_41
+    selector_6 -> sequence_20
+    selector_6:then.1 -> task_42
+    state_machine_1:case.0 -> selector_1
+    state_machine_1:case.1 -> selector_3
+    state_machine_1:case.2 -> selector_4
+    state_machine_1:case.3 -> selector_5
+    state_machine_1:case.4 -> selector_6
+    selector_7 -> task_15
+    sequence_4 -> state_machine_1
+    sequence_4:then.1 -> selector_7
+    sequence_5 -> task_19
+    sequence_5:then.1 -> task_20
+    sequence_6 -> task_21
+    sequence_6:then.1 -> task_22
+    sequence_7 -> task_23
+    sequence_7:then.1 -> task_24
+    sequence_8 -> task_17
+    sequence_8:then.1 -> task_18
+    sequence_8:then.2 -> sequence_5
+    sequence_8:then.3 -> sequence_6
+    sequence_8:then.4 -> sequence_7
+    sequence_8:then.5 -> task_25
+    selector_8 -> task_16
+    selector_8:then.1 -> sequence_8
+    sequence_9 -> task_26
+    sequence_9:then.1 -> task_27
+    sequence_10 -> task_28
+    sequence_10:then.1 -> task_29
+    selector_9 -> sequence_16
+    selector_9:then.1 -> task_38
+    sequence_11 -> task_31
+    sequence_11:then.1 -> task_32
+    selector_10 -> sequence_11
+    selector_10:then.1 -> task_33
+    sequence_12 -> task_34
+    sequence_12:then.1 -> task_35
+    selector_11 -> sequence_21
+    selector_11:then.1 -> task_43
+    state_machine_2:case.0 -> selector_9
+    state_machine_2:case.1 -> selector_11
+    selector_12 -> task_36
+    sequence_13 -> state_machine_2
+    sequence_13:then.1 -> selector_12
+    sequence_14 -> sequence_4
+    sequence_14:then.1 -> selector_8
+    sequence_14:then.2 -> sequence_9
+    sequence_14:then.3 -> sequence_13
+    root_1 -> sequence_14
+    sequence_15 -> sequence_1
+    sequence_15:then.1 -> task_3
+    sequence_16 -> sequence_10
+    sequence_16:then.1 -> task_30
+    sequence_17 -> selector_2
+    sequence_17:then.1 -> sequence_3
+    sequence_18 -> task_9
+    sequence_18:then.1 -> task_10
+    sequence_19 -> task_11
+    sequence_19:then.1 -> task_12
+    sequence_20 -> task_13
+    sequence_20:then.1 -> task_14
+    sequence_21 -> selector_10
+    sequence_21:then.1 -> sequence_12

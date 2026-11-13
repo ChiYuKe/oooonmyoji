@@ -174,6 +174,7 @@ let relocateDocument!: (oldUri: string, newUri: string) => void;
 let syncDocumentTabs!: () => void;
 let displayFileUri!: (uri: string) => string;
 let renderWorkflowSelect!: (workflows: WorkflowDescriptor[]) => void;
+let updateEditorAssetInventory!: (assets: AssetImage[]) => void;
 let openWorkflowInNewTab!: (uri: string) => void;
 let openWorkflowTab!: (uri: string) => Promise<void>;
 let loadWorkflow!: (uri: string) => Promise<void>;
@@ -396,6 +397,7 @@ async function moveContentItem(sourcePath: string, targetFolder: string, batch =
 
     const [assets, data, folders] = await Promise.all([api.listAssets(), api.bootstrap(), api.listContentFolders()]);
     contentAssets = assets;
+    updateEditorAssetInventory(assets);
     contentFolderPaths = folders;
     const currentBootstrap = getBootstrap();
     if (currentBootstrap) {
@@ -1516,6 +1518,7 @@ export interface ContentBrowserDeps {
   syncDocumentTabs: () => void;
   displayFileUri: (uri: string) => string;
   renderWorkflowSelect: (workflows: WorkflowDescriptor[]) => void;
+  updateEditorAssetInventory: (assets: AssetImage[]) => void;
   openWorkflowInNewTab: (uri: string) => void;
   openWorkflowTab: (uri: string) => Promise<void>;
   loadWorkflow: (uri: string) => Promise<void>;
@@ -1570,6 +1573,7 @@ export function createContentBrowser(deps: ContentBrowserDeps): ContentBrowser {
   syncDocumentTabs = deps.syncDocumentTabs;
   displayFileUri = deps.displayFileUri;
   renderWorkflowSelect = deps.renderWorkflowSelect;
+  updateEditorAssetInventory = deps.updateEditorAssetInventory;
   openWorkflowInNewTab = deps.openWorkflowInNewTab;
   openWorkflowTab = deps.openWorkflowTab;
   loadWorkflow = deps.loadWorkflow;

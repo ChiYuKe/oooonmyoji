@@ -379,6 +379,7 @@ contentBrowser = createContentBrowser({
   syncDocumentTabs: () => lifecycle.syncDocumentTabs(),
   displayFileUri: workspace.displayFileUri,
   renderWorkflowSelect,
+  updateEditorAssetInventory: (images) => workspace.postToAllEditors({ type: 'assetInventoryUpdated', images }),
   openWorkflowInNewTab: (uri) => lifecycle.openWorkflowInNewTab(uri),
   openWorkflowTab: (uri) => lifecycle.openWorkflowTab(uri),
   loadWorkflow: (uri) => lifecycle.loadWorkflow(uri),

@@ -140,6 +140,19 @@ test('变量绑定参数端点：写入 ref、连线映射与提示，不兼容�
   assert.deepEqual(bad.state.raw.nodes[0].params, {});
 });
 
+test('断开嵌套昵称绑定时保留状态和同一列表中的其他绑定', () => {
+  const second = {ref: 'inputs.队友二昵称'};
+  const h = harness({
+    nodes: [{id: 'n', type: 'task', params: {
+      states: [{name: 'teammate', texts: [{ref: 'inputs.队友一昵称'}, second]}],
+    }}],
+    _variableLinks: {'n:states.0.texts.0': 'first', 'n:states.0.texts.1': 'second'},
+  });
+  h.connections.disconnectVariableFromPin('n', 'states.0.texts.0');
+  assert.deepEqual(h.state.raw.nodes[0].params.states, [{name: 'teammate', texts: [null, second]}]);
+  assert.deepEqual(h.state.raw._variableLinks, {'n:states.0.texts.1': 'second'});
+});
+
 test('判断节点 bool 变量端口：写入 expression，断开恢复默认条件', () => {
   const h = harness({
     nodes: [{id: 'judge', type: 'condition', expression: {eq: [1, 1]}}],

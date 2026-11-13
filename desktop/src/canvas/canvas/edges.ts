@@ -14,6 +14,7 @@ import {
 import { dataTone, dataToneColor, parameterDataKey, variableDataKey } from './data-tones';
 import { isGroupBoundaryPin, isGroupCardNode, isGroupInterfaceNode, isGroupMemberNode, isGroupOutputInterfaceNode, isGroupVariablesNode, groupPortOffset } from '../model/node-groups';
 import { aggregateNodeRunStatus } from '../model/node-group-runtime';
+import { iterVariableRefs } from '../../shared/workflow/graph-document';
 
 export interface EdgePoint {
   x: number;
@@ -438,26 +439,34 @@ export function createCanvasEdges(deps: EdgesDeps): CanvasEdges {
           }
         }
 
-        if (!pin.variable) return;
-        const card = cards.get(links[`${targetNodeId}:${targetParam}`]) || byReference.get(`${pin.scope}.${pin.variable}`);
-        if (!card) return;
-        const x1 = card.x + variableCardWidth;
-        const y1 = card.y + variableCardPortY;
-        const path = (): string => {
-          const current = position(node);
-          const inputOffset = expressionInputOffset(node, pin.param);
-          const targetX = current.x + (inputOffset
-            ? inputOffset.x
-            : (isGroupVariablesNode(node) ? nodeWidth - variablePinX : variablePinX));
-          const targetY = current.y + (inputOffset
-            ? inputOffset.y
-            : baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2);
-          const curve = Math.max(32, Math.abs(targetX - x1) * 0.42);
-          return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
-        };
-        const paths = renderDisconnectableEdge(layer, `variable-edge data-tone-${tone}`, 'variable-edge-hit', path(),
-          () => disconnectVariableFromPin(targetNodeId, targetParam), toneKey);
-        registerDataEdge(variableEdgeRegistry, [node.id], paths, path);
+        const bindings: ReturnType<typeof iterVariableRefs> = pin.variable
+          ? [[[], `${pin.scope}.${pin.variable}`]]
+          : iterVariableRefs(pin.value).filter(([path]) => path.length);
+        for (const [segments, ref] of bindings) {
+          const param = segments.length ? `${targetParam}.${segments.join('.')}` : targetParam;
+          const card = cards.get(links[`${targetNodeId}:${param}`])
+            || byReference.get(ref) || byReference.get(ref.split('.').slice(0, 2).join('.'));
+          if (!card) continue;
+          const x1 = card.x + variableCardWidth;
+          const y1 = card.y + variableCardPortY;
+          const path = (): string => {
+            const current = position(node);
+            const inputOffset = expressionInputOffset(node, pin.param);
+            const targetX = current.x + (inputOffset
+              ? inputOffset.x
+              : (isGroupVariablesNode(node) ? nodeWidth - variablePinX : variablePinX));
+            const targetY = current.y + (inputOffset
+              ? inputOffset.y
+              : baseHeight + index * rowHeightOf(node) + rowHeightOf(node) / 2);
+            const curve = Math.max(32, Math.abs(targetX - x1) * 0.42);
+            return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
+          };
+          const bindingToneKey = segments.length ? variableDataKey(card.scope, card.name) : toneKey;
+          const paths = renderDisconnectableEdge(layer, `variable-edge data-tone-${dataTone(bindingToneKey)}`, 'variable-edge-hit', path(),
+            () => disconnectVariableFromPin(targetNodeId, param), bindingToneKey);
+          if (segments.length) svgEl('title', {}, paths[0]).textContent = `${ref} → ${param}`;
+          registerDataEdge(variableEdgeRegistry, [node.id], paths, path);
+        }
       });
     }
     for (const runCard of instanceRunCards()) {

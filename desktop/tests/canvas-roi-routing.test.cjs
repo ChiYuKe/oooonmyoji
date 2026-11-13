@@ -44,6 +44,18 @@ function harness(options = {}) {
   return { state, messages, applied, toasts, dirties };
 }
 
+test('picker and content refresh update the inspector asset inventory', () => {
+  const { state, messages } = harness({ assetBrowser: { requestId: 'picker' } });
+  state.assetInventoryRequestId = 'initial';
+  const images = [{ path: 'assets/templates/new.png', uri: 'image-url' }];
+  messages.handleMessage({ type: 'assetImages', requestId: 'picker', images });
+  messages.handleMessage({ type: 'assetImages', requestId: 'initial', images: [] });
+  assert.deepEqual(state.assetBrowser.images, images);
+  assert.deepEqual([...state.assetPaths], [images[0].path]);
+  messages.handleMessage({ type: 'assetInventoryUpdated', images: [] });
+  assert.equal(state.assetPaths.size, 0);
+});
+
 test('templateSaved 没有本地 ROI 请求时按 nodeId/key 落值（详情栏镜像里点的截取）', () => {
   const { state, messages, toasts } = harness();
   messages.handleMessage({ type: 'templateSaved', requestId: 'r1', nodeId: 't', key: 'template', path: 'assets/templates/t.png' });

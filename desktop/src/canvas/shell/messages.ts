@@ -254,16 +254,23 @@ export function createCanvasMessages(deps: CanvasMessagesDeps) {
     }
     toast(request && request.targetPath ? '模板已重新截取' : '模板已保存');
   }
-  else if (message.type === 'assetImages' && state.assetInventoryRequestId === message.requestId) {
+  else if (message.type === 'assetInventoryUpdated' || message.type === 'assetImages') {
+    const browser = state.assetBrowser?.requestId === message.requestId && message.requestId
+      ? state.assetBrowser : null;
+    const inventory = message.type === 'assetInventoryUpdated' ||
+      (state.assetInventoryRequestId && state.assetInventoryRequestId === message.requestId);
+    if (!inventory && !browser) return;
+    const images = Array.isArray(message.images) ? message.images : [];
     state.assetInventoryRequestId = '';
-    state.assetPaths = new Set((Array.isArray(message.images) ? message.images : [])
-    .map((item: any) => normalizedAssetPath(item && item.path))
-    .filter(Boolean));
+    state.assetPaths = new Set(images.map((item: any) => normalizedAssetPath(item?.path)).filter(Boolean));
     renderInspector();
+    if (browser) {
+      browser.images = images.filter((item: any) => item && typeof item.path === 'string' && typeof item.uri === 'string');
+      renderAssetBrowser();
+    }
   }
-  else if (message.type === 'assetImages' && state.assetBrowser && state.assetBrowser.requestId === message.requestId) {
-    state.assetBrowser.images = Array.isArray(message.images) ? message.images.filter((item: any) => item && typeof item.path === 'string' && typeof item.uri === 'string') : [];
-    renderAssetBrowser();
+  else if (message.type === 'assetImagesError' && state.assetInventoryRequestId === message.requestId) {
+    state.assetInventoryRequestId = '';
   }
   else if (message.type === 'assetImagesError' && state.assetBrowser && state.assetBrowser.requestId === message.requestId) { closeAssetBrowser(); toast(message.message || '读取 assets 图片失败', true); }
   else if (message.type === 'templateCheckResult' && state.templateCheck && state.templateCheck.requestId === message.requestId) {

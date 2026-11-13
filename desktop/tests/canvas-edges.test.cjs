@@ -381,6 +381,23 @@ test('renderVariableEdges 按 _variableLinks 连到卡片并支持 Alt 断开', 
   assert.deepEqual(h.calls.disconnectedPins, [], '拖拽不算点击');
 });
 
+test('嵌套昵称绑定连到可见参数行，断开时使用具体字段路径', () => {
+  const node = {id: 'n', type: 'task', pins: [{
+    param: 'states', value: [{name: 'teammate', texts: [{ref: 'inputs.队友一昵称'}]}],
+  }]};
+  const h = harness([node], {
+    positions: {n: {x: 100, y: 50}},
+    cards: [{id: 'nickname', name: '队友一昵称', scope: 'inputs', x: 0, y: 0}],
+  });
+  h.edges.renderVariableEdges(h.layer);
+  const [hit, line] = h.layer.children;
+  assert.equal(line.attrs.d, 'M 168 29 C 200 29, 78 158, 110 158');
+  assert.equal(hit.children[0].textContent, 'inputs.队友一昵称 → states.0.texts.0');
+  hit.fire('pointerdown', {altKey: true, clientX: 100, clientY: 100});
+  hit.fire('pointerup', {altKey: true, clientX: 100, clientY: 100});
+  assert.deepEqual(h.calls.disconnectedPins, [['n', 'states.0.texts.0']]);
+});
+
 test('节点组接口端点代理真实成员参数，不重复直连成员卡', () => {
   const member = {
     id: 'inside', type: 'task', _nodeGroupMember: true,

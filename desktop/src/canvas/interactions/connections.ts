@@ -8,6 +8,7 @@
 import type { CanvasState } from '../state/canvas-state';
 import type { ConditionPort } from '../model/exec-ports';
 import { boolJudgeShape, isBoolJudgeBoolPin, isBoolJudgeOperandPin, isBooleanInputPin, isBreakRefPin } from '../model/exec-ports';
+import { deleteAtPath, iterVariableRefs } from '../../shared/workflow/graph-document';
 
 export interface ConnectionPoint {
   x: number;
@@ -265,6 +266,19 @@ export function createCanvasConnections(deps: ConnectionsDeps): CanvasConnection
   function disconnectVariableFromPin(nodeId: string, param: string): void {
     const node = nodeById(nodeId);
     if (!node) return;
+
+    if (node.type === 'task' && param.includes('.')) {
+      const binding = iterVariableRefs(node.params).find(([path]) =>
+        path.join('.') === param && (path.length > 2 || (path.length === 2 && path[0] !== 'inputs')));
+      if (binding) {
+        mutate(() => {
+          deleteAtPath(node.params, binding[0]);
+          delete variableLinks()[`${nodeId}:${param}`];
+        });
+        toast(`已断开参数 ${param}`);
+        return;
+      }
+    }
 
     // bool_judge 的变量分别写在比较表达式的两个 operand 中，不能像普通参数一样
     // 直接读取整个 expression；否则永远看不到当前一侧的 `{ ref: ... }`，断开会被提前返回。

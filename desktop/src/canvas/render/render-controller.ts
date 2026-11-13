@@ -19,6 +19,7 @@ import { VIEWPORT_PADDING_CSS, showsDataEdges } from './zoom-level';
 import { createSpatialIndex, rectsIntersect, type CanvasSpatialIndex, type SpatialRect } from './spatial-index';
 import { createRenderScheduler, type CanvasRenderScheduler, type RenderFlags } from './render-scheduler';
 import { isGroupBoundaryPin } from '../model/node-groups';
+import { iterVariableRefs } from '../../shared/workflow/graph-document';
 
 export interface GraphEdgeGeometry {
   id: string;
@@ -658,6 +659,7 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
     for (const node of nodeList) {
       collectRefs(node.decorators, decoratorRefs);
       for (const pin of context.nodeVariablePins(node)) {
+        collectRefs(pin?.value, canvasPinRefs);
         if (pin && pin.variable && (pin.scope === 'inputs' || pin.scope === 'variables')) {
           canvasPinRefs.add(`${pin.scope}.${pin.variable}`);
         }
@@ -750,6 +752,13 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
       for (const node of nodeList) {
         if (!keepNodes.has(node.id)) continue;
         context.nodeVariablePins(node).forEach((pin) => {
+          for (const [path, ref] of iterVariableRefs(pin.value)) {
+            if (!path.length) continue;
+            const nodeId = isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id;
+            const param = isGroupBoundaryPin(pin) ? pin.targetParam : pin.param;
+            keepCardRef(links[`${nodeId}:${param}.${path.join('.')}`]);
+            keepCardRef(ref.split('.').slice(0, 2).join('.'));
+          }
           if (!pin.variable) return;
           // 卡片优先按显式链接解析，退化到「作用域.变量名」的唯一卡片。
           keepCardRef(links[`${isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id}:${isGroupBoundaryPin(pin) ? pin.targetParam : pin.param}`]);
@@ -860,7 +869,8 @@ export function createCanvasRenderController(options: CanvasRenderControllerOpti
           parts.push(`n:${node.id}@${pos.x},${pos.y},${context.nodeHeight(node)}`);
           for (const pin of pins) {
             const value = pin?.value;
-            const reference = value && typeof value === 'object' && !Array.isArray(value) && typeof value.ref === 'string' ? value.ref : '';
+            const reference = value && typeof value === 'object' && typeof value.ref === 'string'
+              ? value.ref : JSON.stringify(iterVariableRefs(value));
             parts.push(`p:${isGroupBoundaryPin(pin) ? pin.targetNodeId : node.id}:${isGroupBoundaryPin(pin) ? pin.targetParam : pin.param}:${pin.scope || ''}:${pin.variable || ''}:${reference}`);
           }
         }

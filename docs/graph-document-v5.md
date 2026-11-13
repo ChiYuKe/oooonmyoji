@@ -368,7 +368,7 @@ Python 与桌面端各自实现一份，用同一份 **`tests/fixtures/graph-rul
   迁移必须是语义零变化。仓库里的两份工作流已用它迁移（643 行 JSON → **190 行** `.owf`、
   1197 行 JSON → **327 行** `.owf`，旧 `.json` 已删除）。
 - 配置与 CLI 按工作流 id 或路径反查：`config/loader.py` 的 `_workflow_path` 会把非 `.owf`
-  后缀替换成 `.owf`，所以旧习惯写的 `活动副本.json` 仍能解析到 `活动副本.owf`，
+  后缀替换成 `.owf`，所以旧习惯写的 `活动循环.json` 仍能解析到 `entrypoints/活动循环.owf`，
   但文件本身必须真的叫 `.owf`（推荐一律写 `.owf` 或工作流 ID）。
 - 桌面端**已接线 `.owf` 读写**：读入走 `parseDocument`（8 处旁路 `JSON.parse` 全部收敛），
   落盘唯一出口是 `canvas/state/document-text.ts` 的 `emitRuntimeDocument`，新建工作流由

@@ -60,7 +60,7 @@ y = 框顶部 + 框高度 × aim_y + vy × lead
 
 默认 `device: cpu`；确认 PyTorch 和本机显卡适配后可设为 `"0"`。ONNX 默认使用 CPU runtime；GPU ONNX 需要另外配置对应 runtime。基础应用不在启动时导入 Ultralytics；未安装依赖不影响已有 OpenCV/OCR 节点。安装前检查现有 Paddle/PyTorch/OpenCV 环境兼容性，架构实现没有修改当前已安装的依赖。
 
-运行 `workflows/百鬼夜行_采集.owf`，在真实活动画面采集多场截图。结果位于任务产物目录的 `datasets/hyakki/<session>/`，包括完整 PNG 和 `frames.jsonl`。采样可能持续到结算，结算及空画面可作为负样本。
+运行 `workflows/samples/百鬼夜行_采集.owf`，在真实活动画面采集多场截图。结果位于任务产物目录的 `datasets/hyakki/<session>/`，包括完整 PNG 和 `frames.jsonl`。采样可能持续到结算，结算及空画面可作为负样本。
 
 使用支持 YOLO 检测格式的标注工具，框住可投掷的式神主体。类别可以按具体式神区分，也可以按策略类别区分；`priorities` 必须和模型中的类别名精确一致。不要把 `SSR` 等稀有度当成已有模型自动知道的类别。不同皮肤、朝向、遮挡、特效、缩放和空画面需要在素材中覆盖。
 
@@ -131,7 +131,7 @@ names:
 
 ## 工作流接入与校准
 
-先使用 `workflows/百鬼夜行_观察.owf`，修改：
+先使用 `workflows/samples/百鬼夜行_观察.owf`，修改：
 
 1. `resolution`：制作工作流时的参考分辨率。
 2. `model`：模型路径。

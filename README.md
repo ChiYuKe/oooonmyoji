@@ -15,9 +15,11 @@
   图语义见 [节点图文档 v5](docs/graph-document-v5.md)。
   桌面端读写 `.owf` 已接线完成：编辑器直接打开、编辑、保存 `.owf`（落盘唯一出口是
   `emitRuntimeDocument`，语法错误会带行号列号标出来）。
-  - `entrypoints/`：可直接运行的入口工作流（不随仓库提交，编辑器新建时按需生成）。
+  - `entrypoints/`：可直接运行的入口工作流（活动循环、多开、御魂双开、觉醒三开、个人 / 寮结界突破）。
+  - `subflows/`：只被入口引用的子流程（御魂与觉醒的队长 / 队员、结界突破单场）。
+  - `samples/`：示例与起步模板（百鬼夜行采集 / 观察、`new_workflow`）。
+  - `functions/`：桌面端「封装为功能」写出的可复用功能，按需创建。
   - `generated/`：编辑器与工具生成的临时工作流。
-  - 根目录：当前活动副本循环 `活动副本.owf`（工作流 ID `activity_loop`）。
 - `desktop/`：独立的 Electron 桌面端（AutoFlow Studio）——工作流编辑器、脚本概览、运行日志
   与画面工具，见 [desktop/README.md](desktop/README.md)。
 - `assets/templates/`：按功能和实例分组的游戏模板图。
@@ -124,7 +126,7 @@ code --install-extension owf-workflow-0.1.0.vsix
 `run-workflow` 会直接按 `workflows/` 下指定 `.owf` 的节点图运行，不需要先在
 `config.json` 的 `tasks` 中注册。工作流 `inputs` 定义中的默认值会自动生效；
 参数可以是工作流 ID、`.owf` 文件名或 `workflows/` 下的相对路径（包含子目录）——
-沿用旧习惯写 `活动副本.json` 也能解析到 `活动副本.owf`（非 `.owf` 后缀会被替换成 `.owf`），
+沿用旧习惯写 `活动循环.json` 也能解析到 `entrypoints/活动循环.owf`（非 `.owf` 后缀会被替换成 `.owf`），
 但推荐一律写 `.owf` 或直接写工作流 ID；需要覆盖输入时可传入 JSON 文件：
 
 ```powershell

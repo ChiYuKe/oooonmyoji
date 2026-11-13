@@ -1,0 +1,39 @@
+workflow awakening_party_trio
+  version: 2.1.0
+  description: 觉醒三开。先手动选好觉醒层数并组成三人队，再运行。并行节点中分别选择队长和两位队友所在的三个实例。
+  resolution: [1920, 1080]
+  root: root_1
+  limits:
+    timeout_seconds: 21600
+    max_steps: 200000
+  inputs:
+    运行轮数:
+      type: integer
+      default: 60
+      min: 1
+      display_name: 运行轮数
+      description: 完整结算轮数；等待邀请、加载与补邀不消耗轮数。
+  variables: {}
+  node root_1 root 双开入口
+    at: [0, 0]
+  node instance_parallel_1 instance_parallel 同时启动队长与两位队友
+    at: [-8, 240]
+    runs:
+      - instance: mumu-4
+        workflow: 觉醒组队_队长.owf
+        inputs: {}
+      - instance: mumu-3
+        workflow: 觉醒组队_队员.owf
+        inputs: {}
+      - instance: mumu-2
+        workflow: 觉醒组队_队员.owf
+        inputs: {}
+    wait_for: all
+    cancel_on_failure: true
+  var inputs.运行轮数
+    at: [-192, 648]
+  edges:
+    var__inputs__运行轮数:out -> instance_parallel_1:runs.0.inputs.运行轮数
+    var__inputs__运行轮数:out -> instance_parallel_1:runs.1.inputs.运行轮数
+    var__inputs__运行轮数:out -> instance_parallel_1:runs.2.inputs.运行轮数
+    root_1 -> instance_parallel_1

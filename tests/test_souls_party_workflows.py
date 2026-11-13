@@ -113,6 +113,34 @@ def test_captain_can_wait_for_manual_teammate_without_opening_invites():
                    for name, args in calls)
 
 
+def test_awakening_captain_stops_before_challenge_if_a_slot_is_empty():
+    result, calls, _ = run('awakening_party_captain', ['room'], stale_state='empty-slot-plus.png')
+    assert result.status.value == 'failed'
+    assert not any(name == 'input.tap_match' for name, _ in calls)
+    slot_wait = next(args for name, args in calls if name == 'vision.wait_template'
+                     and args['template'].endswith('empty-slot-plus.png'))
+    x, y, width, height = slot_wait['roi']
+    assert not slot_wait['present']
+    assert x < 970 < 1596 < x + width and y < 380 < y + height
+
+
+def test_awakening_captain_challenges_and_settles_when_both_slots_are_filled():
+    result, calls, queue = run('awakening_party_captain', ['room', 'reward', 'room'])
+    assert result.status.value == 'succeeded'
+    assert not queue
+    assert any(name == 'input.tap_match' and 'wait_floor_from_map' in args['match']['template']
+               for name, args in calls)
+
+
+def test_awakening_member_hands_victory_directly_to_settlement():
+    result, calls, queue = run('awakening_party_member', ['room', 'ready', 'reward', 'reward', 'room'])
+    assert result.status.value == 'succeeded'
+    assert not queue
+    reward_lookups = [args for name, args in calls if name == 'vision.wait_any']
+    assert len(reward_lookups) == 1
+    assert any(path.endswith('awakening-victory.png') for path in reward_lookups[0]['templates'])
+
+
 def test_member_clears_leftover_rewards_before_counting_new_battles():
     result, calls, queue = run('member', [
         'reward', 'reward', 'courtyard',

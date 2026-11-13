@@ -30,6 +30,12 @@ interface RuntimeEvents {
   runEvent: [Record<string, unknown>];
 }
 
+interface RuntimeEventFile {
+  file: string;
+  instanceId: string;
+  attempts?: number;
+}
+
 function readJsonObject(file: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
 }
@@ -39,9 +45,15 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
   private activeDuelTools = 0;
   private stopRequested = false;
   private stopGeneration = 0;
+  private cancelFile?: string;
   private watchTimer: NodeJS.Timeout | undefined;
   private watchFinishTimer: NodeJS.Timeout | undefined;
-  private watchedFiles = new Map<string, { offset: number; instanceId: string; pending: string }>();
+  private watchedFiles = new Map<string, {
+    offset: number;
+    instanceId: string;
+    pending: string;
+    retry?: { base: string; next: number; max: number };
+  }>();
 
   constructor(protected readonly project: ProjectService) {
     super();
@@ -294,7 +306,7 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
     let workflowReference = this.project.workflowReference(request.uri);
     await this.project.saveWorkflow(request.uri, request.text);
 
-    let runs: Array<{ instance: string }> = [];
+    let runs: ReturnType<typeof instanceParallelRuns> = [];
     let selectedRunInputs: Record<string, unknown> | undefined;
     let configuredRuns: ReturnType<typeof instanceParallelRuns> = [];
     try {
@@ -325,9 +337,7 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
       selectedRunInputs = selected.inputs;
       request.instanceId = selected.instance;
     } else {
-      runs = configuredRuns
-        .filter((run) => typeof run.instance === 'string' && run.instance)
-        .map((run) => ({ instance: run.instance }));
+      runs = configuredRuns.filter((run) => typeof run.instance === 'string' && run.instance);
     }
     const availableInstances = await this.listInstances();
     const available = new Set(availableInstances.map((item) => item.id));
@@ -347,6 +357,7 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
     await fs.promises.mkdir(runDirectory, { recursive: true });
     const stamp = `${Date.now()}-${randomUUID()}`;
     const eventsFile = path.join(runDirectory, `desktop-events-${stamp}.jsonl`);
+    const cancelFile = path.join(runDirectory, `desktop-cancel-${stamp}.jsonl`);
     const inputSource = selectedRunInputs ?? request.inputs;
     const configuredInputs = inputSource && typeof inputSource === 'object' && !Array.isArray(inputSource)
       ? inputSource
@@ -368,6 +379,7 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
       ? runs.map((item) => ({
         file: path.join(runDirectory, `desktop-events-${stamp}-${item.instance}.jsonl`),
         instanceId: item.instance,
+        attempts: item.attempts,
       }))
       : [{ file: eventsFile, instanceId: instance }]);
     const args = [
@@ -375,6 +387,7 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
       'run-workflow', workflowReference,
       '--instance', instance,
       '--events-file', eventsFile,
+      '--cancel-file', cancelFile,
     ];
     if (inputsFile) args.push('--inputs', inputsFile);
     // 预览通道默认关闭：只有 artifacts/live/request.json 存在且新鲜时运行时才写帧，
@@ -389,6 +402,7 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.activeProcess = child;
+    this.cancelFile = cancelFile;
     this.stopRequested = false;
     const startedAt = Date.now();
     const label = `${path.basename(workflowPath)} · ${runs.length > 0 ? `${runs.length} 个实例` : instanceLabel(instance)}`;
@@ -407,19 +421,21 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
     child.stdout?.on('data', (chunk: Buffer | string) => this.emitOutput('stdout', String(chunk)));
     child.stderr?.on('data', (chunk: Buffer | string) => this.emitOutput('stderr', String(chunk)));
     let launchFailed = false;
-    const cleanupInputsFile = (): void => {
+    const cleanupRunFiles = (): void => {
       if (inputsFile) void fs.promises.rm(inputsFile, { force: true }).catch(() => undefined);
+      if (this.cancelFile === cancelFile) this.cancelFile = undefined;
+      void fs.promises.rm(cancelFile, { force: true }).catch(() => undefined);
     };
     child.once('error', (error) => {
       launchFailed = true;
-      cleanupInputsFile();
+      cleanupRunFiles();
       this.emitOutput('stderr', `启动失败：${error.message}\n`);
       this.finishWatching();
       if (this.activeProcess === child) this.activeProcess = undefined;
       this.emitState({ state: 'failed', label: '启动失败', workflow: request.uri, instance, exitCode: -1 });
     });
     child.once('close', (code) => {
-      cleanupInputsFile();
+      cleanupRunFiles();
       if (launchFailed) return;
       const stopped = this.stopRequested;
       this.emitOutput('system', `进程结束：${stopped ? '已停止' : `退出代码 ${code ?? '未知'}`}\n`);
@@ -444,6 +460,12 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
     this.emitState({ state: 'stopping', label: '正在停止...' });
     this.emitOutput('system', '正在停止工作流...\n');
     await this.terminateProcessTree(child);
+  }
+
+  cancelInstance(instanceId: string): void {
+    if (this.cancelFile && !this.stopRequested && this.activeProcess?.exitCode === null) {
+      fs.appendFileSync(this.cancelFile, `${JSON.stringify(instanceId)}\n`, 'utf8');
+    }
   }
 
   private async terminateProcessTree(child: ChildProcess): Promise<void> {
@@ -472,9 +494,12 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
     });
   }
 
-  private startWatching(files: Array<{ file: string; instanceId: string }>): void {
+  private startWatching(files: RuntimeEventFile[]): void {
     this.stopWatching();
-    this.watchedFiles = new Map(files.map(({ file, instanceId }) => [file, { offset: 0, instanceId, pending: '' }]));
+    this.watchedFiles = new Map(files.map(({ file, instanceId, attempts = 1 }) => [file, {
+      offset: 0, instanceId, pending: '',
+      retry: attempts > 1 ? { base: file.slice(0, -'.jsonl'.length), next: 2, max: attempts } : undefined,
+    }]));
     // Keep canvas run markers responsive; at 350ms short steps could finish
     // before their `running` event reached the renderer.
     this.watchTimer = setInterval(() => this.tickWatcher(), 100);
@@ -502,6 +527,17 @@ class RuntimeWorker extends EventEmitter<RuntimeEvents> {
 
   private tickWatcher(): void {
     for (const [file, watch] of this.watchedFiles) {
+      const retry = watch.retry;
+      if (retry) {
+        const nextFile = `${retry.base}-attempt-${retry.next}.jsonl`;
+        if (fs.existsSync(nextFile)) {
+          watch.retry = undefined;
+          this.watchedFiles.set(nextFile, {
+            offset: 0, instanceId: watch.instanceId, pending: '',
+            retry: retry.next < retry.max ? { ...retry, next: retry.next + 1 } : undefined,
+          });
+        }
+      }
       let size = 0;
       try {
         size = fs.statSync(file).size;
@@ -700,7 +736,7 @@ export class RuntimeService extends RuntimeWorker {
       // reserved because the supervisor may still retry them.
       if (source && event.type === 'run_finished') {
         source.status = String(event.status || 'failed');
-        if (event.status === 'succeeded') session.instances.delete(instance);
+        if (event.status === 'succeeded' || event.status === 'cancelled') session.instances.delete(instance);
       } else if (source && event.type === 'run_started') {
         source.status = 'running';
       }
@@ -743,6 +779,16 @@ export class RuntimeService extends RuntimeWorker {
 
   override async stopWorkflow(): Promise<void> {
     await Promise.all([...this.sessions.keys()].map(worker => worker.stopWorkflow()));
+  }
+
+  async stopWorkflowInstance(sourceId: string): Promise<void> {
+    for (const [worker, session] of this.sessions) {
+      const source = session.sources.find(item => item.id === sourceId);
+      if (source && session.instances.has(source.instance)) {
+        worker.cancelInstance(source.instance);
+        return;
+      }
+    }
   }
 
   override async dispose(): Promise<void> {

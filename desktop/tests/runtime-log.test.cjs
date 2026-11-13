@@ -151,12 +151,20 @@ test('display cap retains complete statistics; pending duration is not zero',()=
 });
 
 test('running states enable stop and expose current task; completed disables stop',()=>{
-  const h=harness(); init(h,[step('live','running')],[{id:'a',status:'running',startedAt:start*1000}]);
+  const h=harness(); init(h,[step('live','running')],[
+    {id:'a',status:'running',startedAt:start*1000}, {id:'b',status:'running'},
+  ]);
   assert.equal(h.$('btn-stop').disabled,false); assert.equal(h.$('current-step').textContent,'节点 live');
-  h.$('btn-stop').click(); assert.equal(h.sent.at(-1).message.type,'stopWorkflow');
+  h.$('btn-stop').click();
+  assert.equal(h.sent.at(-1).message.type,'stopWorkflowInstance');
+  assert.equal(h.sent.at(-1).message.sourceId,'a');
   h.send({type:'runEvent',event:step('live')});
   h.send({type:'runEvent',event:{type:'run_finished',log_source:'a',ts:start+15,status:'succeeded'}});
   assert.equal(h.$('btn-stop').disabled,true); assert.equal(h.$('current-step').parentElement.classList.contains('hidden'),true);
+  h.$('source-tabs').children[1].click();
+  assert.equal(h.$('btn-stop').disabled,false);
+  h.$('btn-stop').click();
+  assert.equal(h.sent.at(-1).message.sourceId,'b');
 });
 
 test('screenshots are keyboard buttons; Escape restores focus',()=>{

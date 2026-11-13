@@ -20,6 +20,7 @@ const parallel = `${text}  node group instance_parallel 并行
         workflow: child.owf
       - instance: b
         workflow: child.owf
+        attempts: 2
     wait_for: all
   edges:
     root -> group
@@ -114,6 +115,30 @@ test('finished parallel child can run independently while its sibling keeps runn
   fs.appendFileSync(aFile, '{"type":"step","step_id":"tail"}\n');
   worker.tickWatcher();
   assert.equal(h.events.at(-1).log_source, ids[0]);
+});
+
+test('stopping one parallel source only sends its instance to the owning process', async t => {
+  const h = harness(t);
+  await h.run('a', {text: parallel});
+  await h.run('c');
+  const source = h.states.at(-1).sources.find(item => item.instance === 'b');
+  const cancelFiles = h.processes.map(child => child.args[child.args.indexOf('--cancel-file') + 1]);
+  const [file] = [...h.workers[0].watchedFiles.entries()].find(([, watch]) => watch.instanceId === 'b');
+  const retryFile = file.replace(/\.jsonl$/, '-attempt-2.jsonl');
+  fs.writeFileSync(file, '{"type":"run_finished","status":"failed"}\n');
+  fs.writeFileSync(retryFile, '{"type":"run_started","status":"running"}\n');
+  h.workers[0].tickWatcher();
+  assert.equal(h.events.at(-1).log_source, source.id);
+  assert.equal(h.events.at(-1).type, 'run_started');
+  await h.runtime.stopWorkflowInstance(source.id);
+  assert.equal(fs.readFileSync(cancelFiles[0], 'utf8'), '"b"\n');
+  assert.equal(fs.existsSync(cancelFiles[1]), false);
+  assert.ok(h.processes.every(child => child.exitCode === null));
+  fs.appendFileSync(retryFile, '{"type":"run_finished","status":"cancelled"}\n');
+  h.workers[0].tickWatcher();
+  await h.run('b');
+  await h.runtime.stopWorkflowInstance(source.id);
+  assert.equal(fs.readFileSync(cancelFiles[0], 'utf8'), '"b"\n');
 });
 
 test('stop cancels every active process and also pending starts', async t => {

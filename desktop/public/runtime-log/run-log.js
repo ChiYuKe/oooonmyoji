@@ -656,7 +656,7 @@
     $('current-step').textContent = current ? (current.name || '未命名任务') : '-';
     $('current-step').parentElement.classList.toggle('hidden', !current);
     $('current-step').title = current ? (current.name || '未命名任务') : '';
-    $('btn-stop').disabled = ![...state.runs.values()].some((item) => ['running', 'starting', 'queued', 'retrying'].includes(item.status));
+    $('btn-stop').disabled = !['running', 'starting', 'queued', 'retrying'].includes(run.status);
     const end = run.runFinishedAt || Date.now();
     $('elapsed').textContent = run.runStartedAt ? formatElapsed(end - run.runStartedAt) : '00:00.0';
   }
@@ -880,7 +880,11 @@
     try { window.localStorage.setItem('onmyoji-studio.runtime-log-view', 'engine'); } catch { /* ignore */ }
     render();
   });
-  $('btn-stop').addEventListener('click', () => desktopHost.postMessage({ type: 'stopWorkflow' }));
+  $('btn-stop').addEventListener('click', () => {
+    if (!$('btn-stop').disabled) {
+      desktopHost.postMessage({ type: 'stopWorkflowInstance', sourceId: state.activeSource });
+    }
+  });
   $('btn-clear').addEventListener('click', () => desktopHost.postMessage({ type: 'clear' }));
   $('lightbox-close').addEventListener('click', closeLightbox);
   $('lightbox').addEventListener('click', (event) => { if (event.target === $('lightbox')) closeLightbox(); });

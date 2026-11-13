@@ -561,6 +561,7 @@ export interface OnmyojiDesktopApi {
   workflowTestNodeAdded(result: TestNodeAdded): Promise<void>;
   onWorkflowTestEvent(listener: (event: WorkflowTestEvent) => void): () => void;
   stopWorkflow(): Promise<void>;
+  stopWorkflowInstance(sourceId: string): Promise<void>;
   getDebugSettings(): Promise<RuntimeDebugSettings>;
   updateDebugSettings(settings: RuntimeDebugSettings): Promise<RuntimeDebugSettings>;
   listInstances(): Promise<RuntimeInstance[]>;

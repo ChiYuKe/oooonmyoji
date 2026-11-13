@@ -135,7 +135,7 @@ interface EditorEnvelope {
 
 interface RuntimeLogEnvelope {
   source?: string;
-  message?: { type?: string };
+  message?: { type?: string; sourceId?: string };
 }
 
 
@@ -1095,8 +1095,9 @@ window.addEventListener('message', (event: MessageEvent<EditorEnvelope>) => {
     const type = runtimeEnvelope.message?.type;
     if (type === 'ready') {
       runtimeLog.markReady();
-    } else if (type === 'stopWorkflow') {
-      void api.stopWorkflow();
+    } else if (type === 'stopWorkflowInstance' && typeof runtimeEnvelope.message?.sourceId === 'string') {
+      void api.stopWorkflowInstance(runtimeEnvelope.message.sourceId)
+        .catch(error => showToast(errorMessage(error), true));
     } else if (type === 'clear') {
       runtimeLog.clear();
     }

@@ -98,6 +98,7 @@ const api: OnmyojiDesktopApi = {
   readContentPreview: (path) => ipcRenderer.invoke('project:read-content-preview', path),
   runWorkflow: (request: RunWorkflowRequest) => ipcRenderer.invoke('runtime:run-workflow', request),
   stopWorkflow: () => ipcRenderer.invoke('runtime:stop-workflow'),
+  stopWorkflowInstance: (sourceId) => ipcRenderer.invoke('runtime:stop-workflow-instance', sourceId),
   getDebugSettings: () => ipcRenderer.invoke('runtime:get-debug-settings'),
   updateDebugSettings: (settings: RuntimeDebugSettings) => ipcRenderer.invoke('runtime:update-debug-settings', settings),
   listInstances: () => ipcRenderer.invoke('runtime:list-instances'),

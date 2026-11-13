@@ -607,6 +607,8 @@ function registerIpc(): void {
     liveViewRequest?.stop();
     await runtime.stopWorkflow();
   });
+  ipcMain.handle('runtime:stop-workflow-instance', (_event, sourceId: string) =>
+    runtime.stopWorkflowInstance(sourceId));
   ipcMain.handle('runtime:get-debug-settings', () => runtime.getDebugSettings());
   ipcMain.handle('runtime:update-debug-settings', (_event, settings: RuntimeDebugSettings) => runtime.updateDebugSettings(settings));
   ipcMain.handle('runtime:capture-roi', (_event, request: RoiCaptureRequest) => runtime.captureRoi(request));

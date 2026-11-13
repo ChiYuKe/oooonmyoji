@@ -71,7 +71,7 @@
     const type=event.data.message?.type;
     if (type==='ready') { ready=true; load(); }
     else if (type==='clear') { frame.contentWindow.postMessage({type:'cleared'},window.location.origin); feedback.textContent='只清空本页示例；切换场景可恢复。'; }
-    else if (type==='stopWorkflow') { feedback.textContent='停止按钮示例，不执行真实停止操作。'; }
+    else if (type==='stopWorkflowInstance') { feedback.textContent='停止实例按钮示例，不执行真实停止操作。'; }
   });
   frame.addEventListener('load',()=>{ ready=Boolean(frame.contentWindow.__runLog); load(); });
   if (frame.contentWindow.__runLog) { ready=true; load(); }

@@ -7,7 +7,7 @@ workflow 百鬼夜行_观察
   variables: {}
   node root_1 root 入口
     at: [0, 0]
-  node play task 百鬼夜行观察与预判
+  node task_1 task 百鬼夜行观察与预判
     at: [0, 180]
     action: hyakki.play
     params:
@@ -20,4 +20,4 @@ workflow 百鬼夜行_观察
       min_hits: 2
       flight_seconds: 0.15
   edges:
-    root_1 -> play
+    root_1 -> task_1

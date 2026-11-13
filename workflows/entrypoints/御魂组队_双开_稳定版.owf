@@ -9,7 +9,7 @@ workflow souls_party_duo_stable
   inputs:
     运行轮数:
       type: integer
-      default: 120
+      default: 500
       min: 1
       display_name: 运行轮数
       description: 完整结算轮数；等待邀请、加载与补邀不消耗轮数。
@@ -17,7 +17,7 @@ workflow souls_party_duo_stable
   node root_1 root 双开入口
     at: [0, 0]
   node instance_parallel_1 instance_parallel 同时启动队长和队员
-    at: [0, 240]
+    at: [-8, 240]
     runs:
       - instance: mumu-0
         workflow: 御魂组队_队长_稳定版.owf
@@ -28,7 +28,7 @@ workflow souls_party_duo_stable
     wait_for: all
     cancel_on_failure: true
   var inputs.运行轮数
-    at: [-312, 552]
+    at: [-184, 640]
   edges:
     var__inputs__运行轮数:out -> instance_parallel_1:runs.0.inputs.运行轮数
     var__inputs__运行轮数:out -> instance_parallel_1:runs.1.inputs.运行轮数

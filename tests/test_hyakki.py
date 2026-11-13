@@ -310,5 +310,5 @@ def test_manifest_registration_defaults_output_and_workflow_examples(session):
     result = spec.action.execute(session, options)
     validate(result.output, spec.output_schema)
     loader = WorkflowLoader(root / "workflows", registry, project_root=root)
-    assert loader.load("百鬼夜行_观察.owf")
-    assert loader.load("百鬼夜行_采集.owf")
+    assert loader.load("samples/百鬼夜行_观察.owf")
+    assert loader.load("samples/百鬼夜行_采集.owf")

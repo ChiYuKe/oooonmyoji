@@ -57,7 +57,7 @@ def run(role, screens, rounds=1, stuck=False, reward_transition=False, stale_sta
     for spec in build_action_registry(ROOT / 'plugins/actions').specs():
         action = ScriptAction(spec.name, queue, calls, stuck, reward_transition, stale_state)
         registry.register(ActionSpec(spec.definition, action))
-    spec = WorkflowLoader(ROOT / 'workflows', registry, project_root=ROOT).load('souls_party_'+role)
+    spec = WorkflowLoader(ROOT / 'workflows', registry, project_root=ROOT).load('souls_party_'+role+'_stable')
     result = WorkflowEngine(spec, registry, Context(), {'运行轮数': rounds}).run()
     return result, calls, queue
 

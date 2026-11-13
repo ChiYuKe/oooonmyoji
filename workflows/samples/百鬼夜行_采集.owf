@@ -7,11 +7,11 @@ workflow 百鬼夜行_采集
   variables: {}
   node root_1 root 入口
     at: [0, 0]
-  node sample task 采集训练截图
+  node task_1 task 采集训练截图
     at: [0, 180]
     action: vision.capture_dataset
     params:
       count: 100
       interval_seconds: 0.2
   edges:
-    root_1 -> sample
+    root_1 -> task_1

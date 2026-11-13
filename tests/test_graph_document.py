@@ -18,7 +18,7 @@ import pytest
 from src.oooonmyoji.actions import Action, ActionResult, ActionRegistry, ActionSpec, ActionStatus
 from src.oooonmyoji.actions.manifest import ActionDefinition
 from src.oooonmyoji.exceptions import ConfigError
-from src.oooonmyoji.workflows.dsl import parse_document
+from src.oooonmyoji.workflows.dsl import WORKFLOW_SUFFIX, parse_document
 from src.oooonmyoji.workflows.engine import WorkflowEngine
 from src.oooonmyoji.workflows.graph_compile import compile_graph, decompile_workflow
 from src.oooonmyoji.workflows.graph_schema import is_graph_document
@@ -28,7 +28,11 @@ from src.oooonmyoji.workflows.validator import validate_workflow
 from tests.workflow_files import write_workflow
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_FILES = ("御魂组队_队长.owf", "御魂组队_队员.owf", "御魂组队_双开.owf")
+WORKFLOW_FILES = (
+    "entrypoints/御魂组队_双开_稳定版.owf",
+    "subflows/御魂组队_队长_稳定版.owf",
+    "subflows/御魂组队_队员_稳定版.owf",
+)
 GRAPH_RULES_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "graph-rules" / "cases.json"
 
 
@@ -833,6 +837,18 @@ def _referenced_workflow_files(document: dict[str, Any]) -> list[str]:
     return references
 
 
+def _repo_workflow(reference: str) -> Path:
+    """按引用（`workflows/` 下路径或唯一文件名）找到仓库里的工作流文件。"""
+
+    root = PROJECT_ROOT / "workflows"
+    direct = root / reference
+    if direct.is_file():
+        return direct
+    matches = [path for path in root.rglob(f"*{WORKFLOW_SUFFIX}") if path.name == Path(reference).name]
+    assert len(matches) == 1, f"{reference} 在 workflows/ 下不存在或不唯一"
+    return matches[0]
+
+
 @pytest.mark.parametrize("name", WORKFLOW_FILES)
 def test_migrated_workflow_loads_with_real_action_manifests(name: str, tmp_path: Path) -> None:
     """迁移成 `.owf`（v6）之后，两份真实工作流仍能用真实 Action 清单加载并通过运行时校验。"""
@@ -846,7 +862,7 @@ def test_migrated_workflow_loads_with_real_action_manifests(name: str, tmp_path:
     # 入口工作流用 instance_parallel / workflow.run 引用别的 `.owf`：校验期要在同一目录里
     # 解析得到被引用的子流程，所以把「这份文档直接引用的子流程」一起复制过去。
     for reference in _referenced_workflow_files(document):
-        source = PROJECT_ROOT / "workflows" / reference
+        source = _repo_workflow(reference)
         if source.is_file():
             write_workflow(workflow_dir / reference, parse_document(source.read_text(encoding="utf-8")))
 

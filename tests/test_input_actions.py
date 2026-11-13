@@ -473,6 +473,26 @@ def test_detect_state_ocr_fallback_reuses_the_captured_frame() -> None:
     assert context.ocr_calls == 1
 
 
+def test_detect_state_exact_text_requires_one_complete_match() -> None:
+    from types import SimpleNamespace
+
+    class NicknameContext(StateContext):
+        names = ["新队友甲", "新队友"]
+
+        def ocr_current(self, *, roi: object = None) -> list[object]:
+            return [SimpleNamespace(text=name, confidence=.95, x=10 + index, y=20)
+                    for index, name in enumerate(self.names)]
+
+    context = NicknameContext("room")
+    args = {"states": [{"name": "friend", "texts": ["新队友"], "exact_text": True}]}
+    result = DetectStateAction().execute(context, args)
+    assert result.output["match"]["text"] == "新队友"
+    context.names = ["新队友甲"]
+    assert DetectStateAction().execute(context, args).status.value == "failed"
+    context.names = ["新队友", "新队友"]
+    assert DetectStateAction().execute(context, args).status.value == "failed"
+
+
 def test_recover_state_bounds_overlays_and_returns_and_confirms_every_transition() -> None:
     context = StateContext("settlement")
     transitions = [

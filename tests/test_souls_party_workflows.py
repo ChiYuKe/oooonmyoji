@@ -37,6 +37,8 @@ class ScriptAction(Action):
             return ActionResult.succeeded(dict(template=template, match=match(template), elapsed_seconds=0))
         if self.name == 'vision.wait_template':
             template = arguments['template']
+            if self.stale_state == 'empty_slot' and template.endswith('task_1-templates.png') and arguments['timeout_seconds'] < 1:
+                return ActionResult.failed('slot is still empty', category='not_matched')
             if self.stale_state and self.stale_state in template:
                 return ActionResult.failed('screen advanced before the handler could run', category='not_matched')
             if ('reinvite-default-checkbox' in template or
@@ -52,13 +54,19 @@ def match(template):
                 center=[10,10], template=template, threshold=.8)
 
 
-def run(role, screens, rounds=1, stuck=False, reward_transition=False, stale_state=None):
+def run(role, screens, rounds=1, stuck=False, reward_transition=False, stale_state=None, nickname=''):
     registry, calls, queue = ActionRegistry(), [], deque(screens)
     for spec in build_action_registry(ROOT / 'plugins/actions').specs():
         action = ScriptAction(spec.name, queue, calls, stuck, reward_transition, stale_state)
         registry.register(ActionSpec(spec.definition, action))
-    spec = WorkflowLoader(ROOT / 'workflows', registry, project_root=ROOT).load('souls_party_'+role+'_stable')
-    result = WorkflowEngine(spec, registry, Context(), {'运行轮数': rounds}).run()
+    workflow_id = role if role.startswith('awakening_party_') else 'souls_party_'+role+'_stable'
+    spec = WorkflowLoader(ROOT / 'workflows', registry, project_root=ROOT).load(workflow_id)
+    inputs = {'运行轮数': rounds}
+    if role == 'captain':
+        inputs['队友昵称'] = nickname
+    if role == 'awakening_party_captain':
+        inputs.update({'队友一昵称': '', '队友二昵称': ''})
+    result = WorkflowEngine(spec, registry, Context(), inputs).run()
     return result, calls, queue
 
 
@@ -90,6 +98,18 @@ def test_stuck_reward_page_does_not_count_as_a_completed_round():
     result, calls, _ = run('captain', [], stuck=True)
     assert result.status.value == 'failed'
     assert not any(name == 'input.tap_match' and 'wait_floor_from_map' in args['match']['template']
+                   for name, args in calls)
+
+
+def test_captain_can_wait_for_manual_teammate_without_opening_invites():
+    result, calls, queue = run('captain', ['room', 'reward', 'room'], stale_state='empty_slot')
+    assert result.status.value == 'succeeded'
+    assert not queue
+    waits = [args for name, args in calls if name == 'vision.wait_template']
+    assert any(args['template'].endswith('task_1-templates.png') and not args['present']
+               and args['timeout_seconds'] == 40 for args in waits)
+    assert all('wait_for_party_slot_filled' not in args['template'] for args in waits)
+    assert not any(name == 'input.tap_match' and 'task_1-templates' in args['match']['template']
                    for name, args in calls)
 
 

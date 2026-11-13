@@ -1,6 +1,6 @@
 workflow souls_party_captain_stable
   version: 2.1.0
-  description: 御魂队长：从协战房间、庭院或创建队伍页启动。按画面恢复、邀请指定好友、确认队友后开战，逐页结算并续邀。等待与补邀不扣轮数；未知页面超时停止。默认沿用游戏记忆的队伍目标，请先确认御魂悲鸣。
+  description: "御魂队长通用流程。通过房间空位判断是否已有队友。队友昵称留空时，手动组队后启动；填写完整昵称可自动补邀，需要启用 OCR。"
   resolution: [1920, 1080]
   root: root_1
   limits:
@@ -13,6 +13,10 @@ workflow souls_party_captain_stable
       min: 1
       display_name: 运行轮数
       description: 完整结算轮数；等待邀请、加载与补邀不消耗轮数。
+    队友昵称:
+      type: string
+      default: ""
+      description: 填写邀请列表中的完整昵称以自动补邀。留空时手动组队，流程等待队友入队。
   variables: {}
   node task_1 task 确认奖励文字或奖励袋
     at: [0, 1440]
@@ -219,15 +223,8 @@ workflow souls_party_captain_stable
     at: [4760, 720]
   node sequence_4 sequence 恢复到协战房间及完成确认
     at: [3676, 480]
-  node task_16 task 确认画面：member
+  node task_16 sequence 确认队友位已占用且仍在房间
     at: [5100, 720]
-    action: vision.wait_template
-    params:
-      template: assets/templates/wait_for_party_slot_filled-template.png
-      roi: [718, 102, 469, 191]
-      threshold: 0.8
-      present: true
-      timeout_seconds: 0.2
   node task_17 task 确认画面：slot
     at: [5440, 960]
     action: vision.wait_template
@@ -265,27 +262,29 @@ workflow souls_party_captain_stable
       delay_seconds: 0.3
   node sequence_5 sequence 识别后点击：slot
     at: [6290, 960]
-  node task_21 task 确认画面：friend
+  node task_21 task 识别完整队友昵称
     at: [6800, 1200]
-    action: vision.wait_template
+    action: vision.detect_state
     params:
-      template: assets/templates/task_4-templates.png
-      roi: [476, 121, 962, 817]
-      threshold: 0.8
-      present: true
-      timeout_seconds: 8
-  node task_22 task 点击并复核：select_friend_tap
+      states:
+        - name: friend
+          texts: [null]
+          exact_text: true
+          text_roi: [476, 121, 962, 817]
+          min_confidence: 0.8
+      allow_ocr: true
+    decorator retry
+      attempts: 8
+      delay_seconds: 0.4
+  node task_22 task "点击本次 OCR 命中的好友"
     at: [7140, 1200]
     action: input.tap_match
     params:
-      revalidate: true
+      revalidate: false
       verify_gone: false
       verify_timeout_seconds: 3
       random_offset: 6
       random_interval: [0.1, 0.2]
-    decorator retry
-      attempts: 3
-      delay_seconds: 0.3
   node sequence_6 sequence 识别后点击：friend
     at: [6970, 960]
   node task_23 task 确认画面：invite_button
@@ -311,18 +310,11 @@ workflow souls_party_captain_stable
       delay_seconds: 0.3
   node sequence_7 sequence 识别后点击：invite_button
     at: [7650, 960]
-  node task_25 task 确认画面：member
+  node task_25 sequence 确认队友位已占用且仍在房间
     at: [8160, 960]
-    action: vision.wait_template
-    params:
-      template: assets/templates/wait_for_party_slot_filled-template.png
-      roi: [718, 102, 469, 191]
-      threshold: 0.8
-      present: true
-      timeout_seconds: 40
-  node sequence_8 sequence 空位复核后邀请指定好友
+  node sequence_8 sequence 复核空位并邀请填写的昵称
     at: [6715, 720]
-  node selector_8 selector 队友在队立即继续；否则补邀
+  node selector_8 selector 已有队友则继续，否则等入队或按昵称补邀
     at: [5908, 480]
     decorator retry
       attempts: 3
@@ -729,8 +721,68 @@ workflow souls_party_captain_stable
     decorator retry
       attempts: 60
       delay_seconds: 0.25
+  node task_44 task 等待队友位空位消失
+    at: [4960, 930]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_1-templates.png
+      roi: [638, 6, 668, 910]
+      threshold: 0.75
+      present: false
+      timeout_seconds: 0.2
+  node task_45 task 复核仍在协战房间
+    at: [5280, 930]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-team-button.png
+      roi: [0, 0, 500, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node task_46 task 等待队友位空位消失
+    at: [8020, 1170]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_1-templates.png
+      roi: [638, 6, 668, 910]
+      threshold: 0.75
+      present: false
+      timeout_seconds: 40
+  node task_47 task 复核仍在协战房间
+    at: [8340, 1170]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-team-button.png
+      roi: [0, 0, 500, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node condition_1 condition 是否填写了队友昵称
+    at: [6200, 720]
+    expression: inputs.队友昵称 != ""
+  node task_48 task 等待手动组队
+    at: [6280, 960]
+    action: vision.wait_template
+    params:
+      template: assets/templates/task_1-templates.png
+      roi: [638, 6, 668, 910]
+      threshold: 0.75
+      present: false
+      timeout_seconds: 40
+  node task_49 task 复核仍在协战房间
+    at: [6600, 960]
+    action: vision.wait_template
+    params:
+      template: assets/templates/souls/party/floor-team-button.png
+      roi: [0, 0, 500, 120]
+      threshold: 0.8
+      present: true
+      timeout_seconds: 0.2
+  node sequence_22 sequence 等待队友入队并确认房间
+    at: [6200, 900]
   var inputs.运行轮数
     at: [-340, 0]
+  var inputs.队友昵称
   edges:
     task_1:out.match -> task_2:match
     task_4:out.matches.0 -> task_5:match
@@ -739,7 +791,8 @@ workflow souls_party_captain_stable
     task_11:out.matches.0 -> task_12:match
     task_13:out.matches.0 -> task_14:match
     task_19:out.matches.0 -> task_20:match
-    task_21:out.matches.0 -> task_22:match
+    var__inputs__队友昵称:out -> task_21:states.0.texts.0
+    task_21:out.match -> task_22:match
     task_23:out.matches.0 -> task_24:match
     task_26:out.matches.0 -> task_27:match
     task_28:out.match -> task_29:match
@@ -772,12 +825,16 @@ workflow souls_party_captain_stable
     selector_7 -> task_15
     sequence_4 -> state_machine_1
     sequence_4:then.1 -> selector_7
+    task_16 -> task_44
+    task_16:then.1 -> task_45
     sequence_5 -> task_19
     sequence_5:then.1 -> task_20
     sequence_6 -> task_21
     sequence_6:then.1 -> task_22
     sequence_7 -> task_23
     sequence_7:then.1 -> task_24
+    task_25 -> task_46
+    task_25:then.1 -> task_47
     sequence_8 -> task_17
     sequence_8:then.1 -> task_18
     sequence_8:then.2 -> sequence_5
@@ -785,7 +842,7 @@ workflow souls_party_captain_stable
     sequence_8:then.4 -> sequence_7
     sequence_8:then.5 -> task_25
     selector_8 -> task_16
-    selector_8:then.1 -> sequence_8
+    selector_8:then.1 -> condition_1
     sequence_9 -> task_26
     sequence_9:then.1 -> task_27
     sequence_10 -> task_28
@@ -824,3 +881,7 @@ workflow souls_party_captain_stable
     sequence_20:then.1 -> task_14
     sequence_21 -> selector_10
     sequence_21:then.1 -> sequence_12
+    condition_1:true -> sequence_8
+    condition_1:false -> sequence_22
+    sequence_22 -> task_48
+    sequence_22:then.1 -> task_49

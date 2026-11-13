@@ -173,6 +173,29 @@ def _detect_state_current(context: Any, candidates: list[dict[str, Any]], *, all
         if roi_key not in ocr_cache:
             ocr_cache[roi_key] = _ocr_current(context, roi_value)
         minimum = float(candidate.get("min_confidence", 0.0))
+        if candidate.get("exact_text"):
+            matches = [
+                item for item in ocr_cache[roi_key]
+                if float(getattr(item, "confidence", 0.0)) >= minimum
+                and str(getattr(item, "text", "")).strip() in texts
+            ]
+            if len(matches) == 1:
+                item = matches[0]
+                match = _ocr_match(item)
+                mapper = getattr(context, "mapper", None)
+                if mapper is not None and "reference" in match:
+                    x, y, width, height = match["reference"]
+                    match["reference"] = [
+                        x / mapper.scale_x, y / mapper.scale_y,
+                        width / mapper.scale_x, height / mapper.scale_y,
+                    ]
+                return {
+                    "state": candidate["name"],
+                    "source": "ocr",
+                    "confidence": float(item.confidence),
+                    "match": match,
+                }
+            continue
         for item in ocr_cache[roi_key]:
             confidence = float(getattr(item, "confidence", 0.0))
             text = str(getattr(item, "text", ""))

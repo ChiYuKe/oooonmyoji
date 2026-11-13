@@ -20,6 +20,7 @@
           "scale_search": { "type": "boolean", "default": false },
           "texts": { "type": "array", "items": { "type": "string", "min_length": 1 }, "default": [] },
           "text_roi": { "type": "rect" },
+          "exact_text": { "type": "boolean", "default": false, "description": "仅接受唯一的完整文字匹配" },
           "min_confidence": { "type": "number", "default": 0, "min": 0, "max": 1 }
         }
       }

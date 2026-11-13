@@ -265,7 +265,7 @@ class Supervisor:
             self.check_workers()
         with self._group_lock:
             entry = next((item for item in group.entries if item.get("run_id") == run_id), None)
-            if entry is None or group.finished or group.cancel_requested:
+            if entry is None or group.finished or group.cancel_requested or run_id in group.manually_cancelled:
                 return False
             attempt = int(entry.get("attempt", 1))
             max_attempts = int(entry.get("max_attempts", 1))
@@ -281,7 +281,7 @@ class Supervisor:
             time.sleep(delay_seconds)
 
         with self._group_lock:
-            if group.finished or group.cancel_requested or entry.get("run_id") != run_id:
+            if group.finished or group.cancel_requested or run_id in group.manually_cancelled or entry.get("run_id") != run_id:
                 return False
             try:
                 worker = self.workers.get(instance_id)
@@ -663,6 +663,29 @@ class Supervisor:
         """同步识别（奖励统计复用）；池的创建与关闭在 OcrDispatcher 内。"""
 
         return self._ocr.recognize(image)
+
+    def cancel_workflow_instance(self, instance_id: str) -> bool:
+        """Cancel an instance in a supervisor dedicated to one local workflow launch."""
+
+        with self._group_lock:
+            run_id = next((key for key, value in self._runs.items() if value == instance_id), None)
+            for group in self._groups.values():
+                entry = next((item for item in group.entries if item["instance"] == instance_id), None)
+                if entry is None:
+                    continue
+                run_id = entry["run_id"]
+                if run_id in group.records:
+                    return True
+                group.manually_cancelled.add(run_id)
+                break
+            if run_id is None:
+                return False
+            try:
+                self.cancel(run_id)
+            except KeyError:
+                # A terminal attempt may already be waiting for the retry check.
+                pass
+            return True
 
     def cancel(self, run_id: str) -> None:
         with self._group_lock:

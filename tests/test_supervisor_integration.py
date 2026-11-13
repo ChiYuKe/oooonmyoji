@@ -100,6 +100,36 @@ def test_wait_for_all_cancels_peer_after_failure(monkeypatch: pytest.MonkeyPatch
     assert cancelled == ["member-run"]
 
 
+def test_stopping_one_parallel_instance_does_not_cancel_peer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    supervisor = Supervisor(load_config(_write_config(tmp_path)))
+    first, second = queue.Queue(), queue.Queue()
+    supervisor.workers = {
+        "a": SimpleNamespace(control_queue=first),
+        "b": SimpleNamespace(control_queue=second),
+    }
+    supervisor._runs = {"run-a": "a", "run-b": "b"}
+    group = _Group(
+        "group-test", SimpleNamespace(), SimpleNamespace(wait_for="all", cancel_on_failure=True),
+        ["run-a", "run-b"], [{"run_id": "run-a", "instance": "a"}, {"run_id": "run-b", "instance": "b"}],
+        {}, threading.Event(),
+    )
+    supervisor._groups[group.group_id] = group
+    assert supervisor.cancel_workflow_instance("a")
+    assert first.get_nowait() == {"type": "cancel", "run_id": "run-a"}
+    assert second.empty()
+    assert not supervisor._retry_failed_group_run(group, "run-a", {"status": "failed"})
+
+    supervisor._group_store("run-a").write({"status": "cancelled"})
+    # Let the peer complete only after the waiter has seen the cancellation.
+    monkeypatch.setattr(supervisor, "check_workers", lambda: supervisor._group_store("run-b").write({"status": "succeeded"}))
+    monkeypatch.setattr(supervisor, "_finish_group", lambda current: current.done.set())
+    supervisor._wait_group_poll(group, timeout_seconds=1)
+    assert group.done.is_set()
+    assert group.records["run-b"] == {"status": "succeeded"}
+    assert second.empty()
+    assert not group.cancel_requested
+
+
 def test_concurrent_submission_reserves_instance_once(monkeypatch: pytest.MonkeyPatch) -> None:
     instance = SimpleNamespace(id="mumu-0", enabled=True)
     worker = SimpleNamespace(command_queue=queue.Queue())

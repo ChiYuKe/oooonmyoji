@@ -283,6 +283,7 @@ def _run_workflow_local(
     instance: str,
     inputs: dict[str, Any],
     events_file: Path | None = None,
+    cancel_file: Path | None = None,
 ) -> int:
     """在本地监督器中运行单个工作流，并在结束后打印运行记录。"""
 
@@ -295,7 +296,28 @@ def _run_workflow_local(
         config = ensure_runtime_instance(config, instance)
         config = replace(config, instances=(config.instance(instance),))
     supervisor = Supervisor(config)
+    stop_monitor = threading.Event()
+    monitor = None
     try:
+        if cancel_file is not None:
+            def monitor_cancellations() -> None:
+                handled: set[str] = set()
+                while not stop_monitor.is_set():
+                    try:
+                        requests = cancel_file.read_bytes().split(b"\n")[:-1]
+                    except OSError:
+                        requests = []
+                    for request in requests:
+                        try:
+                            instance_id = json.loads(request)
+                        except (ValueError, UnicodeError):
+                            continue
+                        if isinstance(instance_id, str) and instance_id not in handled and supervisor.cancel_workflow_instance(instance_id):
+                            handled.add(instance_id)
+                    stop_monitor.wait(0.1)
+
+            monitor = threading.Thread(target=monitor_cancellations, daemon=True)
+            monitor.start()
         run_id = supervisor.run_workflow(workflow, instance, inputs, wait=True, events_file=str(events_file) if events_file else None)
         record = AtomicJsonStore(config.artifact_dir / "runs" / f"{run_id}.json").read(default={})
         if isinstance(record, dict) and isinstance(record.get("runs"), list):
@@ -314,6 +336,9 @@ def _run_workflow_local(
             _print({"run_id": run_id, "status": record.get("status") if isinstance(record, dict) else None, **(_failure_summary(record) if isinstance(record, dict) else {})})
         return 0 if isinstance(record, dict) and record.get("status") == "succeeded" else 1
     finally:
+        stop_monitor.set()
+        if monitor is not None:
+            monitor.join()
         supervisor.stop()
 
 
@@ -334,6 +359,8 @@ def command_run_workflow(args: argparse.Namespace) -> int:
 
     path = _config_path(args.config)
     workflow, inputs = _prepare_workflow_run(path, args.workflow, args.instance, args.inputs)
+    if args.cancel_file is not None:
+        return _run_workflow_local(path, workflow, args.instance, inputs, args.events_file, args.cancel_file)
     event_file_value = str(args.events_file) if args.events_file is not None else None
     try:
         response = send_control({
@@ -499,6 +526,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_workflow.add_argument("workflow", help="工作流 ID、JSON 文件名或 workflows/ 下的路径")
     run_workflow.add_argument("--instance", default="mumu-0", help="实例 ID，默认 mumu-0")
     run_workflow.add_argument("--inputs", type=Path, help="可选的工作流输入 JSON 文件")
+    run_workflow.add_argument("--cancel-file", type=Path, help="Run locally and monitor this file for instance cancellation requests")
     run_workflow.add_argument("--events-file", type=Path, help="可选的运行事件 JSONL 输出文件（编辑器用它显示步骤缩略图）")
     run_workflow.set_defaults(function=command_run_workflow)
     run_action = subparsers.add_parser(

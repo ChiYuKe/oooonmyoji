@@ -86,6 +86,10 @@ class GroupWaiter:
                 current_records = [group.records.get(run_id) for run_id in group.run_ids]
                 all_current_recorded = all(isinstance(record, dict) for record in current_records)
                 statuses = [record.get("status") for record in current_records if isinstance(record, dict)]
+                failures = [
+                    record.get("status") for run_id, record in zip(group.run_ids, current_records)
+                    if isinstance(record, dict) and run_id not in group.manually_cancelled
+                ]
             if group.node.wait_for == "any" and RunStatus.SUCCEEDED.value in statuses:
                 if group.node.cancel_on_failure:
                     self.cancel_group_runs(group)
@@ -96,7 +100,7 @@ class GroupWaiter:
                     failure_requested = True
                 self.finish_group(group)
                 return
-            if group.node.cancel_on_failure and not failure_requested and any(status not in PENDING_OK_STATUSES for status in statuses):
+            if group.node.cancel_on_failure and not failure_requested and any(status not in PENDING_OK_STATUSES for status in failures):
                 failure_requested = True
                 self.cancel_group_runs(group)
             if deadline is not None and time.monotonic() >= deadline:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..workflows.model import WorkflowNode, WorkflowSpec
@@ -22,6 +22,7 @@ class _Group:
     cancel_requested: bool = False
     terminal_status: str | None = None
     finished: bool = False
+    manually_cancelled: set[str] = field(default_factory=set)
 
 
 def group_status(group: _Group) -> str:
